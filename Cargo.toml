@@ -5,6 +5,8 @@
 resolver = "2"
 members = [
     "src/ephapax-syntax",
+    "src/ephapax-lexer",
+    "src/ephapax-parser",
     "src/ephapax-typing",
     "src/ephapax-wasm",
     "src/ephapax-runtime",
@@ -23,6 +25,8 @@ categories = ["compilers", "wasm", "memory-management"]
 [workspace.dependencies]
 # Internal crates
 ephapax-syntax = { path = "src/ephapax-syntax" }
+ephapax-lexer = { path = "src/ephapax-lexer" }
+ephapax-parser = { path = "src/ephapax-parser" }
 ephapax-typing = { path = "src/ephapax-typing" }
 ephapax-wasm = { path = "src/ephapax-wasm" }
 ephapax-runtime = { path = "src/ephapax-runtime" }
@@ -31,3 +35,6 @@ ephapax-runtime = { path = "src/ephapax-runtime" }
 smol_str = "0.3"
 thiserror = "2"
 wasm-encoder = "0.221"
+logos = "0.15"
+chumsky = "0.10"
+ariadne = "0.5"

@@ -1,0 +1,17 @@
+# SPDX-License-Identifier: EUPL-1.2
+# SPDX-FileCopyrightText: 2025 Jonathan D.A. Jewell
+
+[package]
+name = "ephapax-interp"
+description = "Tree-walking interpreter for Ephapax"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+[dependencies]
+ephapax-syntax.workspace = true
+ephapax-typing.workspace = true
+smol_str.workspace = true
+thiserror.workspace = true

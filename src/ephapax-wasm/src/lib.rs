@@ -43,9 +43,11 @@ pub const MAX_PAGES: u64 = 256; // 16MB max
 
 /// Code generator state
 pub struct Codegen {
-    /// Current bump pointer for allocations
+    /// Current bump pointer for allocations (reserved for future interpreter use)
+    #[allow(dead_code)]
     bump_ptr: u32,
-    /// Region stack for tracking active regions
+    /// Region stack for tracking active regions (reserved for future interpreter use)
+    #[allow(dead_code)]
     region_stack: Vec<RegionInfo>,
     /// Generated WASM module
     module: Module,

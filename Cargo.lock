@@ -154,16 +154,7 @@ dependencies = [
 
 [[package]]
 name = "thiserror-impl"
-version = "2.0.17" Check warning
-
-Code scanning / Semgrep OSS
-
-Semgrep Finding: ocaml.lang.portability.crlf-support.prefer-read-in-binary-mode
-
-Warning
-'open_in' behaves differently on Windows and on Unix-like systems with respect to line endings. To get the same behavior everywhere, use 'open_in_bin' or 'open_in_gen [Open_binary]'. If you really want CRLF-to-LF translations to take place when running on Windows, use 'open_in_gen [Open_text]'.
-Show more details
-
+version = "2.0.17"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3ff15c8ecd7de3849db632e14d18d2571fa09dfc5ed93479bc4485c7a517c913"
 dependencies = [

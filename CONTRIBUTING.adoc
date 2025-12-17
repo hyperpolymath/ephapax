@@ -1,0 +1,112 @@
+// SPDX-License-Identifier: EUPL-1.2
+// SPDX-FileCopyrightText: 2025 Jonathan D.A. Jewell
+
+= Contributing to Ephapax
+
+Thank you for your interest in contributing to Ephapax!
+
+== Getting Started
+
+=== Prerequisites
+
+* Rust 1.83+
+* Coq 8.18+ (for formal proofs)
+* wasm32-unknown-unknown target
+
+=== Development Setup
+
+[source,bash]
+----
+# Clone the repository
+git clone https://github.com/hyperpolymath/ephapax.git
+cd ephapax
+
+# Install WASM target
+rustup target add wasm32-unknown-unknown
+
+# Build
+cargo build
+
+# Run tests
+cargo test --all-features
+
+# Build Coq proofs
+cd formal && make
+----
+
+== Code Style
+
+=== Rust
+
+* Follow standard Rust conventions
+* Use `cargo fmt` before committing
+* Run `cargo clippy` and address warnings
+* Add tests for new functionality
+
+=== Coq
+
+* Document lemmas and theorems
+* Use meaningful names
+* Minimize `Admitted` proofs
+
+== Pull Request Process
+
+1. Fork the repository
+2. Create a feature branch: `git checkout -b feature/my-feature`
+3. Make your changes
+4. Run tests: `cargo test && cd formal && make`
+5. Commit with clear messages
+6. Push and open a PR
+
+== Commit Messages
+
+Use conventional commits:
+
+* `feat:` New feature
+* `fix:` Bug fix
+* `docs:` Documentation
+* `refactor:` Code refactoring
+* `test:` Adding tests
+* `chore:` Maintenance
+
+Example:
+
+----
+feat(typing): add region escape checking
+
+Implements the T-Region typing rule to prevent
+region-scoped types from escaping their region.
+
+Closes #42
+----
+
+== Areas for Contribution
+
+=== High Priority
+
+* Lexer implementation
+* Parser implementation
+* Type checker completion
+* WASM codegen improvements
+
+=== Medium Priority
+
+* REPL implementation
+* Standard library
+* Documentation improvements
+* Error message improvements
+
+=== Research
+
+* Typestate extensions
+* Fractional permissions
+* Concurrency support
+
+== Questions?
+
+* Open an issue for questions
+* Check existing issues for similar topics
+
+== Licence
+
+Contributions are licensed under EUPL-1.2.

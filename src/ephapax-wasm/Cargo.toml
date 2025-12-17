@@ -1,0 +1,18 @@
+# SPDX-License-Identifier: EUPL-1.2
+# SPDX-FileCopyrightText: 2025 Jonathan D.A. Jewell
+
+[package]
+name = "ephapax-wasm"
+description = "WebAssembly code generator for the Ephapax language"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+[dependencies]
+ephapax-syntax = { workspace = true }
+wasm-encoder = { workspace = true }

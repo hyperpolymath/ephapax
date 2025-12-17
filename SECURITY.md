@@ -1,23 +1,5 @@
 # Security Policy
 
-<!-- 
-============================================================================
-TEMPLATE INSTRUCTIONS (delete this block before publishing)
-============================================================================
-Replace all {{PLACEHOLDER}} values with your information:
-  {{PROJECT_NAME}}     - Your project name
-  {{OWNER}}            - GitHub username or org (e.g., hyperpolymath)
-  {{REPO}}             - Repository name
-  {{SECURITY_EMAIL}}   - Security contact email
-  {{PGP_FINGERPRINT}}  - Your PGP key fingerprint (40 chars, no spaces)
-  {{PGP_KEY_URL}}      - URL to your public PGP key
-  {{WEBSITE}}          - Your website/domain
-  {{CURRENT_YEAR}}     - Current year for copyright
-
-Optional: Remove sections that don't apply (e.g., PGP if you don't use it)
-============================================================================
--->
-
 We take security seriously. We appreciate your efforts to responsibly disclose vulnerabilities and will make every effort to acknowledge your contributions.
 
 ## Table of Contents
@@ -40,7 +22,7 @@ We take security seriously. We appreciate your efforts to responsibly disclose v
 
 The preferred method for reporting security vulnerabilities is through GitHub's Security Advisory feature:
 
-1. Navigate to [Report a Vulnerability](https://github.com/{{OWNER}}/{{REPO}}/security/advisories/new)
+1. Navigate to [Report a Vulnerability](https://github.com/hyperpolymath/ephapax/security/advisories/new)
 2. Click **"Report a vulnerability"**
 3. Complete the form with as much detail as possible
 4. Submit — we'll receive a private notification
@@ -52,28 +34,14 @@ This method ensures:
 - Coordinated disclosure tooling
 - Automatic credit when the advisory is published
 
-### Alternative: Encrypted Email
+### Alternative: GitHub Issues (Non-Sensitive)
 
-If you cannot use GitHub Security Advisories, you may email us directly:
+For non-sensitive security concerns (e.g., dependency updates, security best practices):
 
-| | |
-|---|---|
-| **Email** | {{SECURITY_EMAIL}} |
-| **PGP Key** | [Download Public Key]({{PGP_KEY_URL}}) |
-| **Fingerprint** | `{{PGP_FINGERPRINT}}` |
+- Open an issue at [GitHub Issues](https://github.com/hyperpolymath/ephapax/issues)
+- Use the "security" label
 
-```bash
-# Import our PGP key
-curl -sSL {{PGP_KEY_URL}} | gpg --import
-
-# Verify fingerprint
-gpg --fingerprint {{SECURITY_EMAIL}}
-
-# Encrypt your report
-gpg --armor --encrypt --recipient {{SECURITY_EMAIL}} report.txt
-```
-
-> **⚠️ Important:** Do not report security vulnerabilities through public GitHub issues, pull requests, discussions, or social media.
+> **⚠️ Important:** Do not report sensitive security vulnerabilities through public GitHub issues, pull requests, discussions, or social media.
 
 ---
 
@@ -203,7 +171,7 @@ If we cannot reach agreement on disclosure timing, we default to 90 days from yo
 
 The following are within scope for security research:
 
-- This repository (`{{OWNER}}/{{REPO}}`) and all its code
+- This repository (`hyperpolymath/ephapax`) and all its code
 - Official releases and packages published from this repository
 - Documentation that could lead to security issues
 - Build and deployment configurations in this repository
@@ -226,31 +194,24 @@ The following are **not** in scope:
 We're particularly interested in:
 
 - Remote code execution
-- SQL injection, command injection, code injection
-- Authentication/authorisation bypass
-- Cross-site scripting (XSS) and cross-site request forgery (CSRF)
-- Server-side request forgery (SSRF)
-- Path traversal / local file inclusion
-- Information disclosure (credentials, PII, secrets)
-- Cryptographic weaknesses
-- Deserialisation vulnerabilities
+- Command injection, code injection
 - Memory safety issues (buffer overflows, use-after-free, etc.)
+- Type system soundness bugs (violations of linear type guarantees)
+- WASM sandbox escapes
+- Cryptographic weaknesses
+- Information disclosure (credentials, PII, secrets)
 - Supply chain vulnerabilities (dependency confusion, etc.)
-- Significant logic flaws
+- Significant logic flaws in the type checker
 
 ### Non-Qualifying Issues
 
 The following generally do not qualify as security vulnerabilities:
 
 - Missing security headers on non-sensitive pages
-- Clickjacking on pages without sensitive actions
-- Self-XSS (requires victim to paste code)
-- Missing rate limiting (unless it enables a specific attack)
-- Username/email enumeration (unless high-risk context)
-- Missing cookie flags on non-sensitive cookies
 - Software version disclosure
 - Verbose error messages (unless exposing secrets)
 - Best practice deviations without demonstrable impact
+- Performance issues (unless enabling DoS)
 
 ---
 
@@ -322,7 +283,7 @@ Recognition includes:
 To stay informed about security updates:
 
 - **Watch this repository**: Click "Watch" → "Custom" → Select "Security alerts"
-- **GitHub Security Advisories**: Published at [Security Advisories](https://github.com/{{OWNER}}/{{REPO}}/security/advisories)
+- **GitHub Security Advisories**: Published at [Security Advisories](https://github.com/hyperpolymath/ephapax/security/advisories)
 - **Release notes**: Security fixes noted in [CHANGELOG](CHANGELOG.md)
 
 ### Update Policy
@@ -335,8 +296,6 @@ To stay informed about security updates:
 
 ### Supported Versions
 
-<!-- Adjust this table to match your actual version support policy -->
-
 | Version | Supported | Notes |
 |---------|-----------|-------|
 | `main` branch | ✅ Yes | Latest development |
@@ -348,7 +307,7 @@ To stay informed about security updates:
 
 ## Security Best Practices
 
-When using {{PROJECT_NAME}}, we recommend:
+When using Ephapax, we recommend:
 
 ### General
 
@@ -370,8 +329,7 @@ When using {{PROJECT_NAME}}, we recommend:
 
 ## Additional Resources
 
-- [Our PGP Public Key]({{PGP_KEY_URL}})
-- [Security Advisories](https://github.com/{{OWNER}}/{{REPO}}/security/advisories)
+- [Security Advisories](https://github.com/hyperpolymath/ephapax/security/advisories)
 - [Changelog](CHANGELOG.md)
 - [Contributing Guidelines](CONTRIBUTING.md)
 - [CVE Database](https://cve.mitre.org/)
@@ -383,9 +341,9 @@ When using {{PROJECT_NAME}}, we recommend:
 
 | Purpose | Contact |
 |---------|---------|
-| **Security issues** | [Report via GitHub](https://github.com/{{OWNER}}/{{REPO}}/security/advisories/new) or {{SECURITY_EMAIL}} |
-| **General questions** | [GitHub Discussions](https://github.com/{{OWNER}}/{{REPO}}/discussions) |
-| **Other enquiries** | See [README](README.md) for contact information |
+| **Security issues** | [Report via GitHub](https://github.com/hyperpolymath/ephapax/security/advisories/new) |
+| **General questions** | [GitHub Discussions](https://github.com/hyperpolymath/ephapax/discussions) |
+| **Other enquiries** | See [README](README.adoc) for contact information |
 
 ---
 
@@ -399,8 +357,8 @@ This security policy may be updated from time to time. Significant changes will 
 
 ---
 
-*Thank you for helping keep {{PROJECT_NAME}} and its users safe.* 🛡️
+*Thank you for helping keep Ephapax and its users safe.*
 
 ---
 
-<sub>Last updated: {{CURRENT_YEAR}} · Policy version: 1.0.0</sub>
+<sub>Last updated: 2025 · Policy version: 1.0.0</sub>

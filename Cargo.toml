@@ -1,0 +1,33 @@
+# SPDX-License-Identifier: EUPL-1.2
+# SPDX-FileCopyrightText: 2025 Jonathan D.A. Jewell
+
+[workspace]
+resolver = "2"
+members = [
+    "src/ephapax-syntax",
+    "src/ephapax-typing",
+    "src/ephapax-wasm",
+    "src/ephapax-runtime",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.83"
+license = "EUPL-1.2"
+authors = ["Jonathan D.A. Jewell"]
+repository = "https://github.com/hyperpolymath/ephapax"
+keywords = ["linear-types", "memory-safety", "wasm", "compiler"]
+categories = ["compilers", "wasm", "memory-management"]
+
+[workspace.dependencies]
+# Internal crates
+ephapax-syntax = { path = "src/ephapax-syntax" }
+ephapax-typing = { path = "src/ephapax-typing" }
+ephapax-wasm = { path = "src/ephapax-wasm" }
+ephapax-runtime = { path = "src/ephapax-runtime" }
+
+# External dependencies
+smol_str = "0.3"
+thiserror = "2"
+wasm-encoder = "0.221"

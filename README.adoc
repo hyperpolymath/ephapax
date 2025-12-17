@@ -1,1 +1,221 @@
+// SPDX-License-Identifier: EUPL-1.2
+// SPDX-FileCopyrightText: 2025 Jonathan D.A. Jewell
+:toc: macro
+:toclevels: 3
+:icons: font
+:source-highlighter: rouge
+:experimental:
 
+= Ephapax
+_ἐφάπαξ — once for all_
+
+image:https://img.shields.io/badge/license-EUPL--1.2-blue.svg[License: EUPL-1.2]
+image:https://img.shields.io/badge/rust-1.83+-orange.svg[Rust 1.83+]
+image:https://img.shields.io/badge/coq-8.18+-red.svg[Coq 8.18+]
+image:https://img.shields.io/badge/target-wasm32-purple.svg[WASM]
+
+A linear type system for safe memory management targeting WebAssembly.
+
+toc::[]
+
+== Overview
+
+Ephapax is a programming language with a linear type system that guarantees:
+
+[cols="1,3"]
+|===
+| Guarantee | Mechanism
+
+| **No use-after-free**
+| Linear resources cannot be accessed after consumption
+
+| **No memory leaks**
+| Linear resources must be consumed exactly once
+
+| **Region-based deallocation**
+| Bulk memory management without garbage collection
+
+| **Zero-cost abstractions**
+| Safety guarantees enforced at compile time
+|===
+
+== Design Principles
+
+[cols="1,3"]
+|===
+| Principle | Mechanism
+
+| **Linearity**
+| Every linear value used exactly once
+
+| **Regions**
+| Scoped allocation with bulk deallocation
+
+| **Second-class borrows**
+| Temporary access without ownership transfer
+
+| **Explicit copies**
+| Duplication requires explicit syntax
+|===
+
+== Example
+
+[source,ephapax]
+----
+region r:
+    let s1 = String.new@r("hello, ")
+    let s2 = String.new@r("world")
+
+    -- Borrow s1 to get length (does not consume)
+    let len = String.len(&s1)
+
+    -- Concatenation consumes both strings
+    let result = String.concat(s1, s2)
+
+    -- result is consumed by returning
+    result
+-- Region exits: any remaining allocations freed
+----
+
+== Project Structure
+
+[source]
+----
+ephapax/
+├── formal/              # Coq formalisation of type system
+│   ├── Syntax.v         # AST and types
+│   ├── Typing.v         # Linear typing rules
+│   └── Semantics.v      # Operational semantics & soundness
+├── src/                 # Implementation
+│   ├── ephapax-syntax/  # AST definitions
+│   ├── ephapax-typing/  # Linear type checker
+│   ├── ephapax-wasm/    # WASM code generation
+│   └── ephapax-runtime/ # Runtime support
+├── spec/                # Language specification
+├── docs/                # Documentation
+│   └── wiki/            # Comprehensive wiki
+└── .github/             # CI/CD workflows
+----
+
+== Build Targets
+
+[cols="1,2,1"]
+|===
+| Target | Description | Status
+
+| **WebAssembly**
+| `wasm32-unknown-unknown`
+| Primary
+
+| **Native**
+| Via Cranelift
+| Secondary
+|===
+
+== Formal Foundations
+
+The type system is grounded in:
+
+* **Intuitionistic linear logic** — Resource-sensitive reasoning
+* **Separation logic** — Memory ownership and framing
+* **Region calculus (Tofte-Talpin)** — Scoped allocation
+
+See `formal/` for Coq mechanisation.
+
+== Quick Start
+
+=== Prerequisites
+
+* Rust 1.83+ with `wasm32-unknown-unknown` target
+* Coq 8.18+ (for proofs)
+
+=== Build
+
+[source,bash]
+----
+# Build all crates
+cargo build --release
+
+# Build for WASM
+rustup target add wasm32-unknown-unknown
+cargo build --release --target wasm32-unknown-unknown
+
+# Build and check Coq proofs
+cd formal && make
+----
+
+=== Test
+
+[source,bash]
+----
+# Run all tests
+cargo test --all-features
+
+# Run Coq proofs
+cd formal && make
+----
+
+== Documentation
+
+* link:spec/SPEC.md[Language Specification]
+* link:docs/wiki/[Wiki Documentation]
+* link:docs/coqdoc/[Coq Documentation] (generated)
+
+== Status
+
+🚧 **Early Development**
+
+[cols="1,1"]
+|===
+| Component | Status
+
+| Core type system design
+| ✅ Complete
+
+| Formal semantics (Coq)
+| ✅ Complete
+
+| Lexer
+| 🔲 Planned
+
+| Parser
+| 🔲 Planned
+
+| Type checker
+| 🚧 In Progress
+
+| WASM code generation
+| 🚧 In Progress
+
+| Standard library
+| 🔲 Planned
+
+| REPL
+| 🔲 Planned
+|===
+
+== Related Work
+
+* https://www.rust-lang.org/[Rust] — Ownership and borrowing
+* https://ghc.gitlab.haskell.org/ghc/doc/users_guide/exts/linear_types.html[Linear Haskell] — Linear types in GHC
+* https://www.cl.cam.ac.uk/research/mvg/tom/mlkit/[MLKit] — Region-based memory management
+* https://cyclone.thelanguage.org/[Cyclone] — Safe C dialect with regions
+
+== Contributing
+
+Contributions are welcome! Please see:
+
+* link:CONTRIBUTING.adoc[Contributing Guide]
+* link:CODE_OF_CONDUCT.md[Code of Conduct]
+
+== Licence
+
+EUPL-1.2 — See link:LICENSE.txt[LICENSE.txt]
+
+== Author
+
+**Jonathan D.A. Jewell**
+
+---
+
+_"Once for all" — every resource used exactly once._

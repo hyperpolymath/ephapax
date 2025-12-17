@@ -1,0 +1,24 @@
+# SPDX-License-Identifier: EUPL-1.2
+# SPDX-FileCopyrightText: 2025 Jonathan D.A. Jewell
+
+[package]
+name = "ephapax-parser"
+description = "Parser for the Ephapax programming language"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+[dependencies]
+ephapax-syntax = { workspace = true }
+ephapax-lexer = { workspace = true }
+chumsky = { workspace = true }
+ariadne = { workspace = true }
+smol_str = { workspace = true }
+thiserror = { workspace = true }
+
+[dev-dependencies]

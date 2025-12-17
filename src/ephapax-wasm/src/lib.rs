@@ -24,34 +24,10 @@
 //! +------------------+
 //! ```
 
-use ephapax_syntax::Module as EphapaxModule;
-use thiserror::Error;
 use wasm_encoder::{
     CodeSection, ExportKind, ExportSection, Function, FunctionSection, Instruction, MemorySection,
     MemoryType, Module, TypeSection, ValType,
 };
-
-/// Compilation errors
-#[derive(Error, Debug)]
-pub enum CompileError {
-    #[error("Unsupported expression: {0}")]
-    UnsupportedExpression(String),
-
-    #[error("Unbound variable: {0}")]
-    UnboundVariable(String),
-
-    #[error("Internal error: {0}")]
-    Internal(String),
-}
-
-/// Compile an Ephapax module to WebAssembly bytes
-pub fn compile_module(module: &EphapaxModule) -> Result<Vec<u8>, CompileError> {
-    let mut codegen = Codegen::new();
-    // For now, just generate the runtime functions
-    // TODO: Compile actual expressions from the module
-    let _ = module; // Acknowledge the module parameter
-    Ok(codegen.generate())
-}
 
 /// WASM representation of a string: (pointer, length)
 pub const STRING_SIZE: u32 = 8; // 2 x i32

@@ -16,4 +16,3 @@ categories.workspace = true
 [dependencies]
 ephapax-syntax = { workspace = true }
 wasm-encoder = { workspace = true }
-thiserror = { workspace = true }

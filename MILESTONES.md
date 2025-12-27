@@ -56,16 +56,18 @@ cargo test -p ephapax-lexer --all-features
 
 | Task | Status | Verification |
 |------|--------|--------------|
-| Parse let bindings | 🚧 | `cargo test -p ephapax-parser -- let_binding` |
-| Parse function definitions | 🚧 | `cargo test -p ephapax-parser -- functions` |
-| Parse function application | 🚧 | `cargo test -p ephapax-parser -- application` |
-| Parse product types (pairs) | 🚧 | `cargo test -p ephapax-parser -- products` |
-| Parse sum types | 🚧 | `cargo test -p ephapax-parser -- sums` |
-| Parse region expressions | 🚧 | `cargo test -p ephapax-parser -- regions` |
-| Parse borrow expressions | 🚧 | `cargo test -p ephapax-parser -- borrows` |
-| Parse conditionals | 🚧 | `cargo test -p ephapax-parser -- conditionals` |
+| Parse let bindings | ✅ | `cargo test -p ephapax-parser -- let_binding` |
+| Parse function definitions | ✅ | `cargo test -p ephapax-parser -- functions` |
+| Parse function application | ✅ | `cargo test -p ephapax-parser -- application` |
+| Parse product types (pairs) | ✅ | `cargo test -p ephapax-parser -- products` |
+| Parse sum types | ✅ | `cargo test -p ephapax-parser -- sums` |
+| Parse region expressions | ✅ | `cargo test -p ephapax-parser -- regions` |
+| Parse borrow expressions | ✅ | `cargo test -p ephapax-parser -- borrows` |
+| Parse conditionals | ✅ | `cargo test -p ephapax-parser -- conditionals` |
+| Parse binary operators | ✅ | Proper AST nodes for +,-,*,/,%,<,>,==,!=,&&,\|\| |
+| Parse unary operators | ✅ | Proper AST nodes for !, - (negation) |
+| Operator precedence | ✅ | Correct: unary > mul/div > add/sub > cmp > eq > and > or |
 | Error recovery with ariadne | 🔲 | Parse invalid input, emit ≥1 diagnostic |
-| Operator precedence | 🔲 | `cargo test -p ephapax-parser -- precedence` |
 
 **Exit Criteria**:
 ```bash

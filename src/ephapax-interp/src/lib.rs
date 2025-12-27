@@ -6,7 +6,7 @@
 //! A simple interpreter for debugging and rapid development.
 //! Useful for testing before compiling to WASM.
 
-use ephapax_syntax::{BaseTy, Decl, Expr, ExprKind, Literal, Module, RegionName, Ty, Var};
+use ephapax_syntax::{BaseTy, BinOp, Decl, Expr, ExprKind, Literal, Module, RegionName, Ty, UnaryOp, Var};
 use smol_str::SmolStr;
 use std::collections::HashMap;
 use thiserror::Error;
@@ -236,6 +236,140 @@ impl Interpreter {
             ExprKind::Drop(inner) => self.eval_drop(inner),
             ExprKind::Copy(inner) => self.eval_copy(inner),
             ExprKind::Block(exprs) => self.eval_block(exprs),
+            ExprKind::BinOp { op, left, right } => self.eval_binop(*op, left, right),
+            ExprKind::UnaryOp { op, operand } => self.eval_unaryop(*op, operand),
+        }
+    }
+
+    fn eval_binop(&mut self, op: BinOp, left: &Expr, right: &Expr) -> Result<Value, RuntimeError> {
+        let left_val = self.eval(left)?;
+        let right_val = self.eval(right)?;
+
+        match op {
+            BinOp::Add => self.numeric_binop(left_val, right_val, |a, b| a + b, |a, b| a + b),
+            BinOp::Sub => self.numeric_binop(left_val, right_val, |a, b| a - b, |a, b| a - b),
+            BinOp::Mul => self.numeric_binop(left_val, right_val, |a, b| a * b, |a, b| a * b),
+            BinOp::Div => {
+                // Check for division by zero for integers
+                match (&left_val, &right_val) {
+                    (Value::I32(_), Value::I32(0)) | (Value::I64(_), Value::I64(0)) => {
+                        return Err(RuntimeError::DivisionByZero);
+                    }
+                    _ => {}
+                }
+                self.numeric_binop(left_val, right_val, |a, b| a / b, |a, b| a / b)
+            }
+            BinOp::Mod => {
+                match (&left_val, &right_val) {
+                    (Value::I32(_), Value::I32(0)) | (Value::I64(_), Value::I64(0)) => {
+                        return Err(RuntimeError::DivisionByZero);
+                    }
+                    _ => {}
+                }
+                self.numeric_binop(left_val, right_val, |a, b| a % b, |a, b| a % b)
+            }
+            BinOp::Lt => self.compare_op(left_val, right_val, |a, b| a < b, |a, b| a < b),
+            BinOp::Le => self.compare_op(left_val, right_val, |a, b| a <= b, |a, b| a <= b),
+            BinOp::Gt => self.compare_op(left_val, right_val, |a, b| a > b, |a, b| a > b),
+            BinOp::Ge => self.compare_op(left_val, right_val, |a, b| a >= b, |a, b| a >= b),
+            BinOp::Eq => Ok(Value::Bool(self.values_equal(&left_val, &right_val))),
+            BinOp::Ne => Ok(Value::Bool(!self.values_equal(&left_val, &right_val))),
+            BinOp::And => match (left_val, right_val) {
+                (Value::Bool(a), Value::Bool(b)) => Ok(Value::Bool(a && b)),
+                (l, r) => Err(RuntimeError::TypeError {
+                    expected: "Bool".to_string(),
+                    found: format!("{}, {}", l.type_name(), r.type_name()),
+                }),
+            },
+            BinOp::Or => match (left_val, right_val) {
+                (Value::Bool(a), Value::Bool(b)) => Ok(Value::Bool(a || b)),
+                (l, r) => Err(RuntimeError::TypeError {
+                    expected: "Bool".to_string(),
+                    found: format!("{}, {}", l.type_name(), r.type_name()),
+                }),
+            },
+        }
+    }
+
+    fn numeric_binop<I, F>(
+        &self,
+        left: Value,
+        right: Value,
+        int_op: I,
+        float_op: F,
+    ) -> Result<Value, RuntimeError>
+    where
+        I: Fn(i64, i64) -> i64,
+        F: Fn(f64, f64) -> f64,
+    {
+        match (left, right) {
+            (Value::I32(a), Value::I32(b)) => Ok(Value::I32(int_op(a as i64, b as i64) as i32)),
+            (Value::I64(a), Value::I64(b)) => Ok(Value::I64(int_op(a, b))),
+            (Value::F32(a), Value::F32(b)) => Ok(Value::F32(float_op(a as f64, b as f64) as f32)),
+            (Value::F64(a), Value::F64(b)) => Ok(Value::F64(float_op(a, b))),
+            (l, r) => Err(RuntimeError::TypeError {
+                expected: "numeric type".to_string(),
+                found: format!("{}, {}", l.type_name(), r.type_name()),
+            }),
+        }
+    }
+
+    fn compare_op<I, F>(
+        &self,
+        left: Value,
+        right: Value,
+        int_op: I,
+        float_op: F,
+    ) -> Result<Value, RuntimeError>
+    where
+        I: Fn(i64, i64) -> bool,
+        F: Fn(f64, f64) -> bool,
+    {
+        match (left, right) {
+            (Value::I32(a), Value::I32(b)) => Ok(Value::Bool(int_op(a as i64, b as i64))),
+            (Value::I64(a), Value::I64(b)) => Ok(Value::Bool(int_op(a, b))),
+            (Value::F32(a), Value::F32(b)) => Ok(Value::Bool(float_op(a as f64, b as f64))),
+            (Value::F64(a), Value::F64(b)) => Ok(Value::Bool(float_op(a, b))),
+            (l, r) => Err(RuntimeError::TypeError {
+                expected: "numeric type".to_string(),
+                found: format!("{}, {}", l.type_name(), r.type_name()),
+            }),
+        }
+    }
+
+    fn values_equal(&self, left: &Value, right: &Value) -> bool {
+        match (left, right) {
+            (Value::Unit, Value::Unit) => true,
+            (Value::Bool(a), Value::Bool(b)) => a == b,
+            (Value::I32(a), Value::I32(b)) => a == b,
+            (Value::I64(a), Value::I64(b)) => a == b,
+            (Value::F32(a), Value::F32(b)) => a == b,
+            (Value::F64(a), Value::F64(b)) => a == b,
+            (Value::String { data: d1, .. }, Value::String { data: d2, .. }) => d1 == d2,
+            _ => false,
+        }
+    }
+
+    fn eval_unaryop(&mut self, op: UnaryOp, operand: &Expr) -> Result<Value, RuntimeError> {
+        let val = self.eval(operand)?;
+        match op {
+            UnaryOp::Not => match val {
+                Value::Bool(b) => Ok(Value::Bool(!b)),
+                v => Err(RuntimeError::TypeError {
+                    expected: "Bool".to_string(),
+                    found: v.type_name().to_string(),
+                }),
+            },
+            UnaryOp::Neg => match val {
+                Value::I32(n) => Ok(Value::I32(-n)),
+                Value::I64(n) => Ok(Value::I64(-n)),
+                Value::F32(n) => Ok(Value::F32(-n)),
+                Value::F64(n) => Ok(Value::F64(-n)),
+                v => Err(RuntimeError::TypeError {
+                    expected: "numeric type".to_string(),
+                    found: v.type_name().to_string(),
+                }),
+            },
         }
     }
 

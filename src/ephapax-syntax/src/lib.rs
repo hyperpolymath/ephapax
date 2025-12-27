@@ -111,6 +111,36 @@ pub enum Literal {
     String(String),
 }
 
+/// Binary operators
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BinOp {
+    // Arithmetic
+    Add,
+    Sub,
+    Mul,
+    Div,
+    Mod,
+    // Comparison
+    Lt,
+    Le,
+    Gt,
+    Ge,
+    Eq,
+    Ne,
+    // Logical
+    And,
+    Or,
+}
+
+/// Unary operators
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum UnaryOp {
+    /// Logical negation
+    Not,
+    /// Arithmetic negation
+    Neg,
+}
+
 /// Pattern for destructuring
 #[derive(Debug, Clone, PartialEq)]
 pub enum Pattern {
@@ -232,6 +262,17 @@ pub enum ExprKind {
     // ===== Blocks =====
     /// Sequence of expressions
     Block(Vec<Expr>),
+
+    // ===== Operators =====
+    /// Binary operation: e1 op e2
+    BinOp {
+        op: BinOp,
+        left: Box<Expr>,
+        right: Box<Expr>,
+    },
+
+    /// Unary operation: op e
+    UnaryOp { op: UnaryOp, operand: Box<Expr> },
 }
 
 impl Expr {

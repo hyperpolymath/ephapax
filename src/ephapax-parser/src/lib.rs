@@ -16,7 +16,7 @@
 
 use chumsky::prelude::*;
 use ephapax_lexer::{Lexer, Span as LexerSpan, TokenKind};
-use ephapax_syntax::{BaseTy, Decl, Expr, ExprKind, Literal, Module, Span as SyntaxSpan, Ty};
+use ephapax_syntax::{BaseTy, BinOp, Decl, Expr, ExprKind, Literal, Module, Span as SyntaxSpan, Ty, UnaryOp};
 use smol_str::SmolStr;
 
 pub mod error;
@@ -650,75 +650,157 @@ fn expr_parser<'a>() -> impl Parser<'a, &'a [SpannedToken], Expr, extra::Err<Ric
             },
         );
 
-        // Binary operators with precedence (simplified - returns placeholder for now)
-        let unary = call_or_member;
+        // Unary operators: ! and -
+        let unary = choice((
+            tok(TokenKind::Not)
+                .ignore_then(call_or_member.clone())
+                .map(|operand| {
+                    let span = operand.span;
+                    Expr::new(
+                        ExprKind::UnaryOp {
+                            op: UnaryOp::Not,
+                            operand: Box::new(operand),
+                        },
+                        span,
+                    )
+                }),
+            tok(TokenKind::Minus)
+                .ignore_then(call_or_member.clone())
+                .map(|operand| {
+                    let span = operand.span;
+                    Expr::new(
+                        ExprKind::UnaryOp {
+                            op: UnaryOp::Neg,
+                            operand: Box::new(operand),
+                        },
+                        span,
+                    )
+                }),
+            call_or_member,
+        ));
 
+        // Multiplicative: * / %
         let product = unary.clone().foldl(
             choice((
-                tok(TokenKind::Star),
-                tok(TokenKind::Slash),
-                tok(TokenKind::Percent),
+                token(TokenKind::Star).map(|_| BinOp::Mul),
+                token(TokenKind::Slash).map(|_| BinOp::Div),
+                token(TokenKind::Percent).map(|_| BinOp::Mod),
             ))
             .then(unary.clone())
             .repeated(),
-            |left, (_, right)| {
+            |left, (op, right)| {
                 let span = merge_spans(left.span, right.span);
-                Expr::new(ExprKind::Lit(Literal::I32(0)), span)
+                Expr::new(
+                    ExprKind::BinOp {
+                        op,
+                        left: Box::new(left),
+                        right: Box::new(right),
+                    },
+                    span,
+                )
             },
         );
 
+        // Additive: + -
         let sum = product.clone().foldl(
-            choice((tok(TokenKind::Plus), tok(TokenKind::Minus)))
-                .then(product.clone())
-                .repeated(),
-            |left, (_, right)| {
+            choice((
+                token(TokenKind::Plus).map(|_| BinOp::Add),
+                token(TokenKind::Minus).map(|_| BinOp::Sub),
+            ))
+            .then(product.clone())
+            .repeated(),
+            |left, (op, right)| {
                 let span = merge_spans(left.span, right.span);
-                Expr::new(ExprKind::Lit(Literal::I32(0)), span)
+                Expr::new(
+                    ExprKind::BinOp {
+                        op,
+                        left: Box::new(left),
+                        right: Box::new(right),
+                    },
+                    span,
+                )
             },
         );
 
+        // Comparison: < > <= >=
         let comparison = sum.clone().foldl(
             choice((
-                tok(TokenKind::Lt),
-                tok(TokenKind::Gt),
-                tok(TokenKind::LtEq),
-                tok(TokenKind::GtEq),
+                token(TokenKind::Lt).map(|_| BinOp::Lt),
+                token(TokenKind::Gt).map(|_| BinOp::Gt),
+                token(TokenKind::LtEq).map(|_| BinOp::Le),
+                token(TokenKind::GtEq).map(|_| BinOp::Ge),
             ))
             .then(sum.clone())
             .repeated(),
-            |left, (_, right)| {
+            |left, (op, right)| {
                 let span = merge_spans(left.span, right.span);
-                Expr::new(ExprKind::Lit(Literal::Bool(false)), span)
+                Expr::new(
+                    ExprKind::BinOp {
+                        op,
+                        left: Box::new(left),
+                        right: Box::new(right),
+                    },
+                    span,
+                )
             },
         );
 
+        // Equality: == !=
         let equality = comparison.clone().foldl(
-            choice((tok(TokenKind::EqEq), tok(TokenKind::NotEq)))
-                .then(comparison.clone())
-                .repeated(),
-            |left, (_, right)| {
+            choice((
+                token(TokenKind::EqEq).map(|_| BinOp::Eq),
+                token(TokenKind::NotEq).map(|_| BinOp::Ne),
+            ))
+            .then(comparison.clone())
+            .repeated(),
+            |left, (op, right)| {
                 let span = merge_spans(left.span, right.span);
-                Expr::new(ExprKind::Lit(Literal::Bool(false)), span)
+                Expr::new(
+                    ExprKind::BinOp {
+                        op,
+                        left: Box::new(left),
+                        right: Box::new(right),
+                    },
+                    span,
+                )
             },
         );
 
+        // Logical AND: &&
         let and = equality.clone().foldl(
-            tok(TokenKind::AndAnd)
+            token(TokenKind::AndAnd)
+                .map(|_| BinOp::And)
                 .then(equality.clone())
                 .repeated(),
-            |left, (_, right)| {
+            |left, (op, right)| {
                 let span = merge_spans(left.span, right.span);
-                Expr::new(ExprKind::Lit(Literal::Bool(false)), span)
+                Expr::new(
+                    ExprKind::BinOp {
+                        op,
+                        left: Box::new(left),
+                        right: Box::new(right),
+                    },
+                    span,
+                )
             },
         );
 
+        // Logical OR: ||
         and.clone().foldl(
-            tok(TokenKind::OrOr)
+            token(TokenKind::OrOr)
+                .map(|_| BinOp::Or)
                 .then(and.clone())
                 .repeated(),
-            |left, (_, right)| {
+            |left, (op, right)| {
                 let span = merge_spans(left.span, right.span);
-                Expr::new(ExprKind::Lit(Literal::Bool(false)), span)
+                Expr::new(
+                    ExprKind::BinOp {
+                        op,
+                        left: Box::new(left),
+                        right: Box::new(right),
+                    },
+                    span,
+                )
             },
         )
     })

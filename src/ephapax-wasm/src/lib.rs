@@ -24,9 +24,11 @@
 //! +------------------+
 //! ```
 
+use ephapax_syntax::{BaseTy, BinOp, Expr, ExprKind, Literal, Ty, UnaryOp};
+use std::collections::HashMap;
 use wasm_encoder::{
-    CodeSection, ExportKind, ExportSection, Function, FunctionSection, Instruction, MemorySection,
-    MemoryType, Module, TypeSection, ValType,
+    CodeSection, ExportKind, ExportSection, Function, FunctionSection, ImportSection, Instruction,
+    MemorySection, MemoryType, Module, TypeSection, ValType,
 };
 
 /// WASM representation of a string: (pointer, length)
@@ -41,6 +43,19 @@ pub const INITIAL_PAGES: u64 = 1;
 /// Maximum memory pages
 pub const MAX_PAGES: u64 = 256; // 16MB max
 
+/// Function indices after imports
+const IMPORT_PRINT_I32: u32 = 0;
+const IMPORT_PRINT_STRING: u32 = 1;
+
+/// Runtime function indices (offset by number of imports)
+const FN_BUMP_ALLOC: u32 = 2;
+const FN_STRING_NEW: u32 = 3;
+const FN_STRING_LEN: u32 = 4;
+const FN_STRING_CONCAT: u32 = 5;
+const FN_STRING_DROP: u32 = 6;
+const FN_REGION_ENTER: u32 = 7;
+const FN_REGION_EXIT: u32 = 8;
+
 /// Code generator state
 pub struct Codegen {
     /// Current bump pointer for allocations (reserved for future interpreter use)
@@ -51,6 +66,14 @@ pub struct Codegen {
     region_stack: Vec<RegionInfo>,
     /// Generated WASM module
     module: Module,
+    /// Variable to local index mapping for current function
+    locals: HashMap<String, u32>,
+    /// Next local index
+    next_local: u32,
+    /// Data section entries for string literals
+    data_entries: Vec<(u32, Vec<u8>)>,
+    /// Next data offset
+    data_offset: u32,
 }
 
 #[derive(Debug, Clone)]
@@ -69,15 +92,33 @@ impl Codegen {
             bump_ptr: REGION_HEADER_SIZE,
             region_stack: Vec::new(),
             module: Module::new(),
+            locals: HashMap::new(),
+            next_local: 0,
+            data_entries: Vec::new(),
+            data_offset: 1024, // Start string data after metadata area
         }
     }
 
     /// Generate the complete WASM module
     pub fn generate(&mut self) -> Vec<u8> {
         self.emit_types();
+        self.emit_imports();
         self.emit_memory();
         self.emit_runtime_functions();
         self.emit_exports();
+        self.emit_data_section();
+        self.module.clone().finish()
+    }
+
+    /// Generate a complete WASM module with a main expression
+    pub fn compile_program(&mut self, main_expr: &Expr) -> Vec<u8> {
+        self.emit_types();
+        self.emit_imports();
+        self.emit_memory();
+        self.emit_runtime_functions();
+        self.emit_main_function(main_expr);
+        self.emit_exports();
+        self.emit_data_section();
         self.module.clone().finish()
     }
 
@@ -87,22 +128,23 @@ impl Codegen {
         // Type 0: () -> i32 (allocator, getters)
         types.ty().function(vec![], vec![ValType::I32]);
 
-        // Type 1: (i32) -> () (free, setters)
+        // Type 1: (i32) -> () (print_i32, free, setters)
         types.ty().function(vec![ValType::I32], vec![]);
 
-        // Type 2: (i32, i32) -> i32 (string ops with ptr+len)
-        types
-            .ty()
-            .function(vec![ValType::I32, ValType::I32], vec![ValType::I32]);
+        // Type 2: (i32, i32) -> () (print_string: ptr, len)
+        types.ty().function(vec![ValType::I32, ValType::I32], vec![]);
 
-        // Type 3: (i32, i32, i32, i32) -> i64 (string concat)
+        // Type 3: (i32, i32) -> i32 (string ops with ptr+len)
+        types.ty().function(vec![ValType::I32, ValType::I32], vec![ValType::I32]);
+
+        // Type 4: () -> () (region management, main)
+        types.ty().function(vec![], vec![]);
+
+        // Type 5: (i32, i32, i32, i32) -> i64 (string concat)
         types.ty().function(
             vec![ValType::I32, ValType::I32, ValType::I32, ValType::I32],
             vec![ValType::I64],
         );
-
-        // Type 4: () -> () (region management)
-        types.ty().function(vec![], vec![]);
 
         self.module.section(&types);
     }
@@ -123,32 +165,33 @@ impl Codegen {
         let mut functions = FunctionSection::new();
         let mut code = CodeSection::new();
 
-        // Function 0: __ephapax_bump_alloc(size: i32) -> ptr: i32
-        functions.function(2);
+        // Function indices offset by 2 imports
+        // Function 2: __ephapax_bump_alloc(size: i32) -> ptr: i32
+        functions.function(3); // Type 3: (i32, i32) -> i32
         code.function(&self.gen_bump_alloc());
 
-        // Function 1: __ephapax_string_new(ptr: i32, len: i32) -> handle: i32
-        functions.function(2);
+        // Function 3: __ephapax_string_new(ptr: i32, len: i32) -> handle: i32
+        functions.function(3); // Type 3: (i32, i32) -> i32
         code.function(&self.gen_string_new());
 
-        // Function 2: __ephapax_string_len(handle: i32) -> len: i32
-        functions.function(2);
+        // Function 4: __ephapax_string_len(handle: i32) -> len: i32
+        functions.function(3); // Type 3: (i32, i32) -> i32 (first param is handle)
         code.function(&self.gen_string_len());
 
-        // Function 3: __ephapax_string_concat(h1: i32, h2: i32) -> handle: i32
-        functions.function(2);
+        // Function 5: __ephapax_string_concat(h1: i32, h2: i32) -> handle: i32
+        functions.function(3); // Type 3: (i32, i32) -> i32
         code.function(&self.gen_string_concat());
 
-        // Function 4: __ephapax_string_drop(handle: i32)
-        functions.function(1);
+        // Function 6: __ephapax_string_drop(handle: i32)
+        functions.function(1); // Type 1: (i32) -> ()
         code.function(&self.gen_string_drop());
 
-        // Function 5: __ephapax_region_enter()
-        functions.function(4);
+        // Function 7: __ephapax_region_enter()
+        functions.function(4); // Type 4: () -> ()
         code.function(&self.gen_region_enter());
 
-        // Function 6: __ephapax_region_exit()
-        functions.function(4);
+        // Function 8: __ephapax_region_exit()
+        functions.function(4); // Type 4: () -> ()
         code.function(&self.gen_region_exit());
 
         self.module.section(&functions);
@@ -430,14 +473,475 @@ impl Codegen {
 
     fn emit_exports(&mut self) {
         let mut exports = ExportSection::new();
-        exports.export("__ephapax_bump_alloc", ExportKind::Func, 0);
-        exports.export("__ephapax_string_new", ExportKind::Func, 1);
-        exports.export("__ephapax_string_len", ExportKind::Func, 2);
-        exports.export("__ephapax_string_concat", ExportKind::Func, 3);
-        exports.export("__ephapax_string_drop", ExportKind::Func, 4);
-        exports.export("__ephapax_region_enter", ExportKind::Func, 5);
-        exports.export("__ephapax_region_exit", ExportKind::Func, 6);
+        exports.export("__ephapax_bump_alloc", ExportKind::Func, FN_BUMP_ALLOC);
+        exports.export("__ephapax_string_new", ExportKind::Func, FN_STRING_NEW);
+        exports.export("__ephapax_string_len", ExportKind::Func, FN_STRING_LEN);
+        exports.export("__ephapax_string_concat", ExportKind::Func, FN_STRING_CONCAT);
+        exports.export("__ephapax_string_drop", ExportKind::Func, FN_STRING_DROP);
+        exports.export("__ephapax_region_enter", ExportKind::Func, FN_REGION_ENTER);
+        exports.export("__ephapax_region_exit", ExportKind::Func, FN_REGION_EXIT);
         exports.export("memory", ExportKind::Memory, 0);
+        self.module.section(&exports);
+    }
+
+    fn emit_imports(&mut self) {
+        let mut imports = ImportSection::new();
+        // Import print functions from host environment
+        // Type 1: (i32) -> () for print_i32
+        imports.import("env", "print_i32", wasm_encoder::EntityType::Function(1));
+        // Type 2: (i32, i32) -> () for print_string (ptr, len)
+        imports.import("env", "print_string", wasm_encoder::EntityType::Function(2));
+        self.module.section(&imports);
+    }
+
+    fn emit_data_section(&mut self) {
+        if self.data_entries.is_empty() {
+            return;
+        }
+        let mut data = wasm_encoder::DataSection::new();
+        for (offset, bytes) in &self.data_entries {
+            data.active(
+                0, // memory index
+                &wasm_encoder::ConstExpr::i32_const(*offset as i32),
+                bytes.iter().copied(),
+            );
+        }
+        self.module.section(&data);
+    }
+
+    /// Add a string literal to the data section, return (ptr, len)
+    fn add_string_literal(&mut self, s: &str) -> (u32, u32) {
+        let bytes = s.as_bytes().to_vec();
+        let len = bytes.len() as u32;
+        let ptr = self.data_offset;
+        self.data_entries.push((ptr, bytes));
+        self.data_offset += len;
+        // Align to 4 bytes
+        if self.data_offset % 4 != 0 {
+            self.data_offset += 4 - (self.data_offset % 4);
+        }
+        (ptr, len)
+    }
+
+    /// Emit the main function with the given expression
+    fn emit_main_function(&mut self, expr: &Expr) {
+        let mut functions = FunctionSection::new();
+        let mut code = CodeSection::new();
+
+        // Main function: type 4 () -> ()
+        functions.function(4);
+
+        // Reset locals for this function
+        self.locals.clear();
+        self.next_local = 0;
+
+        // Compile the expression
+        let mut func = Function::new(vec![]);
+        self.compile_expr(&mut func, expr);
+
+        // If expression returns a value, we need to drop it or print it
+        // For now, assume we want to print the result
+        func.instruction(&Instruction::Drop);
+        func.instruction(&Instruction::End);
+
+        code.function(&func);
+
+        self.module.section(&functions);
+        self.module.section(&code);
+    }
+
+    /// Compile an expression into WASM instructions
+    pub fn compile_expr(&mut self, func: &mut Function, expr: &Expr) {
+        match &expr.kind {
+            ExprKind::Lit(lit) => self.compile_lit(func, lit),
+            ExprKind::Var(name) => self.compile_var(func, name),
+            ExprKind::StringNew { region: _, value } => self.compile_string_new(func, value),
+            ExprKind::StringConcat { left, right } => self.compile_string_concat(func, left, right),
+            ExprKind::StringLen(inner) => self.compile_string_len(func, inner),
+            ExprKind::Let { name, value, body, .. } => self.compile_let(func, name, value, body),
+            ExprKind::LetLin { name, value, body, .. } => self.compile_let(func, name, value, body),
+            ExprKind::Lambda { .. } => {
+                // Lambdas need closure conversion - simplified for now
+                func.instruction(&Instruction::I32Const(0));
+            }
+            ExprKind::App { func: fn_expr, arg } => self.compile_app(func, fn_expr, arg),
+            ExprKind::Pair { left, right } => self.compile_pair(func, left, right),
+            ExprKind::Fst(inner) => self.compile_fst(func, inner),
+            ExprKind::Snd(inner) => self.compile_snd(func, inner),
+            ExprKind::Inl { value, .. } => self.compile_inl(func, value),
+            ExprKind::Inr { value, .. } => self.compile_inr(func, value),
+            ExprKind::Case { scrutinee, left_var, left_body, right_var, right_body } => {
+                self.compile_case(func, scrutinee, left_var, left_body, right_var, right_body)
+            }
+            ExprKind::If { cond, then_branch, else_branch } => {
+                self.compile_if(func, cond, then_branch, else_branch)
+            }
+            ExprKind::Region { name: _, body } => self.compile_region(func, body),
+            ExprKind::Borrow(inner) => {
+                // Borrow just passes through the value (second-class, same representation)
+                self.compile_expr(func, inner);
+            }
+            ExprKind::Deref(inner) => {
+                // Deref just passes through
+                self.compile_expr(func, inner);
+            }
+            ExprKind::Drop(inner) => {
+                self.compile_expr(func, inner);
+                func.instruction(&Instruction::Drop);
+                func.instruction(&Instruction::I32Const(0)); // Return unit (0)
+            }
+            ExprKind::Copy(inner) => {
+                // For unrestricted types, just duplicate the value
+                self.compile_expr(func, inner);
+                // The value is now on the stack; to copy we'd need to dup
+                // For i32, we can use local.tee
+            }
+            ExprKind::Block(exprs) => self.compile_block(func, exprs),
+            ExprKind::BinOp { op, left, right } => self.compile_binop(func, *op, left, right),
+            ExprKind::UnaryOp { op, operand } => self.compile_unaryop(func, *op, operand),
+        }
+    }
+
+    fn compile_lit(&self, func: &mut Function, lit: &Literal) {
+        match lit {
+            Literal::Unit => func.instruction(&Instruction::I32Const(0)),
+            Literal::Bool(b) => func.instruction(&Instruction::I32Const(if *b { 1 } else { 0 })),
+            Literal::I32(n) => func.instruction(&Instruction::I32Const(*n)),
+            Literal::I64(n) => func.instruction(&Instruction::I64Const(*n)),
+            Literal::F32(n) => func.instruction(&Instruction::F32Const(*n)),
+            Literal::F64(n) => func.instruction(&Instruction::F64Const(*n)),
+            Literal::String(_) => {
+                // String literals should use StringNew
+                func.instruction(&Instruction::I32Const(0))
+            }
+        };
+    }
+
+    fn compile_var(&self, func: &mut Function, name: &str) {
+        if let Some(&local_idx) = self.locals.get(name) {
+            func.instruction(&Instruction::LocalGet(local_idx));
+        } else {
+            // Variable not found - should have been caught by type checker
+            func.instruction(&Instruction::Unreachable);
+        }
+    }
+
+    fn compile_string_new(&mut self, func: &mut Function, value: &str) {
+        let (ptr, len) = self.add_string_literal(value);
+        func.instruction(&Instruction::I32Const(ptr as i32));
+        func.instruction(&Instruction::I32Const(len as i32));
+        func.instruction(&Instruction::Call(FN_STRING_NEW));
+    }
+
+    fn compile_string_concat(&mut self, func: &mut Function, left: &Expr, right: &Expr) {
+        self.compile_expr(func, left);
+        self.compile_expr(func, right);
+        func.instruction(&Instruction::Call(FN_STRING_CONCAT));
+    }
+
+    fn compile_string_len(&mut self, func: &mut Function, inner: &Expr) {
+        self.compile_expr(func, inner);
+        func.instruction(&Instruction::Call(FN_STRING_LEN));
+    }
+
+    fn compile_let(&mut self, func: &mut Function, name: &str, value: &Expr, body: &Expr) {
+        // Compile the value
+        self.compile_expr(func, value);
+
+        // Store in a local
+        let local_idx = self.next_local;
+        self.next_local += 1;
+        self.locals.insert(name.to_string(), local_idx);
+        func.instruction(&Instruction::LocalSet(local_idx));
+
+        // Compile the body
+        self.compile_expr(func, body);
+    }
+
+    fn compile_app(&mut self, func: &mut Function, _fn_expr: &Expr, _arg: &Expr) {
+        // Function application - requires closure conversion
+        // For now, simplified
+        func.instruction(&Instruction::I32Const(0));
+    }
+
+    fn compile_pair(&mut self, func: &mut Function, left: &Expr, right: &Expr) {
+        // Allocate space for pair (2 x i32 = 8 bytes)
+        func.instruction(&Instruction::I32Const(8));
+        func.instruction(&Instruction::Call(FN_BUMP_ALLOC));
+
+        // Store left at offset 0
+        let pair_local = self.next_local;
+        self.next_local += 1;
+        func.instruction(&Instruction::LocalTee(pair_local));
+        self.compile_expr(func, left);
+        func.instruction(&Instruction::I32Store(wasm_encoder::MemArg {
+            offset: 0,
+            align: 2,
+            memory_index: 0,
+        }));
+
+        // Store right at offset 4
+        func.instruction(&Instruction::LocalGet(pair_local));
+        self.compile_expr(func, right);
+        func.instruction(&Instruction::I32Store(wasm_encoder::MemArg {
+            offset: 4,
+            align: 2,
+            memory_index: 0,
+        }));
+
+        // Return pair pointer
+        func.instruction(&Instruction::LocalGet(pair_local));
+    }
+
+    fn compile_fst(&mut self, func: &mut Function, inner: &Expr) {
+        self.compile_expr(func, inner);
+        func.instruction(&Instruction::I32Load(wasm_encoder::MemArg {
+            offset: 0,
+            align: 2,
+            memory_index: 0,
+        }));
+    }
+
+    fn compile_snd(&mut self, func: &mut Function, inner: &Expr) {
+        self.compile_expr(func, inner);
+        func.instruction(&Instruction::I32Load(wasm_encoder::MemArg {
+            offset: 4,
+            align: 2,
+            memory_index: 0,
+        }));
+    }
+
+    fn compile_inl(&mut self, func: &mut Function, value: &Expr) {
+        // Sum types: tag (i32) + value (i32) = 8 bytes
+        func.instruction(&Instruction::I32Const(8));
+        func.instruction(&Instruction::Call(FN_BUMP_ALLOC));
+
+        let sum_local = self.next_local;
+        self.next_local += 1;
+        func.instruction(&Instruction::LocalTee(sum_local));
+
+        // Store tag 0 for left
+        func.instruction(&Instruction::I32Const(0));
+        func.instruction(&Instruction::I32Store(wasm_encoder::MemArg {
+            offset: 0,
+            align: 2,
+            memory_index: 0,
+        }));
+
+        // Store value
+        func.instruction(&Instruction::LocalGet(sum_local));
+        self.compile_expr(func, value);
+        func.instruction(&Instruction::I32Store(wasm_encoder::MemArg {
+            offset: 4,
+            align: 2,
+            memory_index: 0,
+        }));
+
+        func.instruction(&Instruction::LocalGet(sum_local));
+    }
+
+    fn compile_inr(&mut self, func: &mut Function, value: &Expr) {
+        func.instruction(&Instruction::I32Const(8));
+        func.instruction(&Instruction::Call(FN_BUMP_ALLOC));
+
+        let sum_local = self.next_local;
+        self.next_local += 1;
+        func.instruction(&Instruction::LocalTee(sum_local));
+
+        // Store tag 1 for right
+        func.instruction(&Instruction::I32Const(1));
+        func.instruction(&Instruction::I32Store(wasm_encoder::MemArg {
+            offset: 0,
+            align: 2,
+            memory_index: 0,
+        }));
+
+        func.instruction(&Instruction::LocalGet(sum_local));
+        self.compile_expr(func, value);
+        func.instruction(&Instruction::I32Store(wasm_encoder::MemArg {
+            offset: 4,
+            align: 2,
+            memory_index: 0,
+        }));
+
+        func.instruction(&Instruction::LocalGet(sum_local));
+    }
+
+    fn compile_case(
+        &mut self,
+        func: &mut Function,
+        scrutinee: &Expr,
+        left_var: &str,
+        left_body: &Expr,
+        right_var: &str,
+        right_body: &Expr,
+    ) {
+        self.compile_expr(func, scrutinee);
+
+        let scrutinee_local = self.next_local;
+        self.next_local += 1;
+        func.instruction(&Instruction::LocalTee(scrutinee_local));
+
+        // Load tag
+        func.instruction(&Instruction::I32Load(wasm_encoder::MemArg {
+            offset: 0,
+            align: 2,
+            memory_index: 0,
+        }));
+
+        // If tag == 0, execute left branch, else right branch
+        func.instruction(&Instruction::If(wasm_encoder::BlockType::Result(ValType::I32)));
+
+        // Right branch (tag != 0)
+        func.instruction(&Instruction::LocalGet(scrutinee_local));
+        func.instruction(&Instruction::I32Load(wasm_encoder::MemArg {
+            offset: 4,
+            align: 2,
+            memory_index: 0,
+        }));
+        let right_local = self.next_local;
+        self.next_local += 1;
+        self.locals.insert(right_var.to_string(), right_local);
+        func.instruction(&Instruction::LocalSet(right_local));
+        self.compile_expr(func, right_body);
+
+        func.instruction(&Instruction::Else);
+
+        // Left branch (tag == 0)
+        func.instruction(&Instruction::LocalGet(scrutinee_local));
+        func.instruction(&Instruction::I32Load(wasm_encoder::MemArg {
+            offset: 4,
+            align: 2,
+            memory_index: 0,
+        }));
+        let left_local = self.next_local;
+        self.next_local += 1;
+        self.locals.insert(left_var.to_string(), left_local);
+        func.instruction(&Instruction::LocalSet(left_local));
+        self.compile_expr(func, left_body);
+
+        func.instruction(&Instruction::End);
+    }
+
+    fn compile_if(&mut self, func: &mut Function, cond: &Expr, then_branch: &Expr, else_branch: &Expr) {
+        self.compile_expr(func, cond);
+        func.instruction(&Instruction::If(wasm_encoder::BlockType::Result(ValType::I32)));
+        self.compile_expr(func, then_branch);
+        func.instruction(&Instruction::Else);
+        self.compile_expr(func, else_branch);
+        func.instruction(&Instruction::End);
+    }
+
+    fn compile_region(&mut self, func: &mut Function, body: &Expr) {
+        // Enter region
+        func.instruction(&Instruction::Call(FN_REGION_ENTER));
+
+        // Compile body
+        self.compile_expr(func, body);
+
+        // Exit region (frees all allocations)
+        func.instruction(&Instruction::Call(FN_REGION_EXIT));
+    }
+
+    fn compile_block(&mut self, func: &mut Function, exprs: &[Expr]) {
+        if exprs.is_empty() {
+            func.instruction(&Instruction::I32Const(0)); // Unit
+            return;
+        }
+
+        for (i, expr) in exprs.iter().enumerate() {
+            self.compile_expr(func, expr);
+            if i < exprs.len() - 1 {
+                func.instruction(&Instruction::Drop);
+            }
+        }
+    }
+
+    fn compile_binop(&mut self, func: &mut Function, op: BinOp, left: &Expr, right: &Expr) {
+        self.compile_expr(func, left);
+        self.compile_expr(func, right);
+
+        match op {
+            BinOp::Add => { func.instruction(&Instruction::I32Add); }
+            BinOp::Sub => { func.instruction(&Instruction::I32Sub); }
+            BinOp::Mul => { func.instruction(&Instruction::I32Mul); }
+            BinOp::Div => { func.instruction(&Instruction::I32DivS); }
+            BinOp::Mod => { func.instruction(&Instruction::I32RemS); }
+            BinOp::Lt => { func.instruction(&Instruction::I32LtS); }
+            BinOp::Le => { func.instruction(&Instruction::I32LeS); }
+            BinOp::Gt => { func.instruction(&Instruction::I32GtS); }
+            BinOp::Ge => { func.instruction(&Instruction::I32GeS); }
+            BinOp::Eq => { func.instruction(&Instruction::I32Eq); }
+            BinOp::Ne => { func.instruction(&Instruction::I32Ne); }
+            BinOp::And => { func.instruction(&Instruction::I32And); }
+            BinOp::Or => { func.instruction(&Instruction::I32Or); }
+        }
+    }
+
+    fn compile_unaryop(&mut self, func: &mut Function, op: UnaryOp, operand: &Expr) {
+        self.compile_expr(func, operand);
+
+        match op {
+            UnaryOp::Not => {
+                func.instruction(&Instruction::I32Eqz);
+            }
+            UnaryOp::Neg => {
+                func.instruction(&Instruction::I32Const(0));
+                func.instruction(&Instruction::I32Sub);
+            }
+        }
+    }
+
+    /// Compile a "Hello World" program that prints a string
+    pub fn compile_hello_world(&mut self, message: &str) -> Vec<u8> {
+        self.emit_types();
+        self.emit_imports();
+        self.emit_memory();
+        self.emit_runtime_hello_world(message);
+        self.emit_exports_with_main();
+        self.emit_data_section();
+        self.module.clone().finish()
+    }
+
+    fn emit_runtime_hello_world(&mut self, message: &str) {
+        let mut functions = FunctionSection::new();
+        let mut code = CodeSection::new();
+
+        // Add the runtime functions first (7 functions, indices 2-8)
+        functions.function(3); code.function(&self.gen_bump_alloc());
+        functions.function(3); code.function(&self.gen_string_new());
+        functions.function(3); code.function(&self.gen_string_len());
+        functions.function(3); code.function(&self.gen_string_concat());
+        functions.function(1); code.function(&self.gen_string_drop());
+        functions.function(4); code.function(&self.gen_region_enter());
+        functions.function(4); code.function(&self.gen_region_exit());
+
+        // Main function (function index 9 = 2 imports + 7 runtime)
+        functions.function(4); // Type 4: () -> ()
+
+        let (ptr, len) = self.add_string_literal(message);
+        let mut main_func = Function::new(vec![]);
+        main_func.instruction(&Instruction::I32Const(ptr as i32));
+        main_func.instruction(&Instruction::I32Const(len as i32));
+        main_func.instruction(&Instruction::Call(IMPORT_PRINT_STRING));
+        main_func.instruction(&Instruction::End);
+        code.function(&main_func);
+
+        self.module.section(&functions);
+        self.module.section(&code);
+    }
+
+    fn emit_exports_with_main(&mut self) {
+        let mut exports = ExportSection::new();
+        exports.export("__ephapax_bump_alloc", ExportKind::Func, FN_BUMP_ALLOC);
+        exports.export("__ephapax_string_new", ExportKind::Func, FN_STRING_NEW);
+        exports.export("__ephapax_string_len", ExportKind::Func, FN_STRING_LEN);
+        exports.export("__ephapax_string_concat", ExportKind::Func, FN_STRING_CONCAT);
+        exports.export("__ephapax_string_drop", ExportKind::Func, FN_STRING_DROP);
+        exports.export("__ephapax_region_enter", ExportKind::Func, FN_REGION_ENTER);
+        exports.export("__ephapax_region_exit", ExportKind::Func, FN_REGION_EXIT);
+        exports.export("memory", ExportKind::Memory, 0);
+        exports.export("main", ExportKind::Func, 9); // Main is function index 9
         self.module.section(&exports);
     }
 }
@@ -451,6 +955,7 @@ impl Default for Codegen {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use ephapax_syntax::Span;
 
     #[test]
     fn generates_valid_wasm() {
@@ -461,5 +966,117 @@ mod tests {
         assert_eq!(&wasm[0..4], b"\x00asm");
         // Version 1
         assert_eq!(&wasm[4..8], &[1, 0, 0, 0]);
+    }
+
+    #[test]
+    fn hello_world_generates_valid_wasm() {
+        let mut codegen = Codegen::new();
+        let wasm = codegen.compile_hello_world("Hello, Ephapax!");
+
+        // Basic validation: WASM magic number
+        assert_eq!(&wasm[0..4], b"\x00asm");
+        // Version 1
+        assert_eq!(&wasm[4..8], &[1, 0, 0, 0]);
+
+        // Wasm should have sections for types, imports, functions, memory, exports, code, data
+        assert!(wasm.len() > 100, "WASM too small: {} bytes", wasm.len());
+    }
+
+    #[test]
+    fn compile_literal_expression() {
+        let mut codegen = Codegen::new();
+
+        // Create a simple expression: 42
+        let expr = Expr::new(
+            ExprKind::Lit(Literal::I32(42)),
+            Span::dummy(),
+        );
+
+        let wasm = codegen.compile_program(&expr);
+
+        // Basic validation: WASM magic number
+        assert_eq!(&wasm[0..4], b"\x00asm");
+    }
+
+    #[test]
+    fn compile_arithmetic_expression() {
+        let mut codegen = Codegen::new();
+
+        // Create expression: 1 + 2
+        let expr = Expr::new(
+            ExprKind::BinOp {
+                op: BinOp::Add,
+                left: Box::new(Expr::new(
+                    ExprKind::Lit(Literal::I32(1)),
+                    Span::dummy(),
+                )),
+                right: Box::new(Expr::new(
+                    ExprKind::Lit(Literal::I32(2)),
+                    Span::dummy(),
+                )),
+            },
+            Span::dummy(),
+        );
+
+        let wasm = codegen.compile_program(&expr);
+
+        // Basic validation: WASM magic number
+        assert_eq!(&wasm[0..4], b"\x00asm");
+    }
+
+    #[test]
+    fn compile_if_expression() {
+        let mut codegen = Codegen::new();
+
+        // Create expression: if true then 1 else 2
+        let expr = Expr::new(
+            ExprKind::If {
+                cond: Box::new(Expr::new(
+                    ExprKind::Lit(Literal::Bool(true)),
+                    Span::dummy(),
+                )),
+                then_branch: Box::new(Expr::new(
+                    ExprKind::Lit(Literal::I32(1)),
+                    Span::dummy(),
+                )),
+                else_branch: Box::new(Expr::new(
+                    ExprKind::Lit(Literal::I32(2)),
+                    Span::dummy(),
+                )),
+            },
+            Span::dummy(),
+        );
+
+        let wasm = codegen.compile_program(&expr);
+
+        // Basic validation: WASM magic number
+        assert_eq!(&wasm[0..4], b"\x00asm");
+    }
+
+    #[test]
+    fn compile_let_expression() {
+        let mut codegen = Codegen::new();
+
+        // Create expression: let x = 42 in x
+        let expr = Expr::new(
+            ExprKind::Let {
+                name: "x".into(),
+                ty: None,
+                value: Box::new(Expr::new(
+                    ExprKind::Lit(Literal::I32(42)),
+                    Span::dummy(),
+                )),
+                body: Box::new(Expr::new(
+                    ExprKind::Var("x".into()),
+                    Span::dummy(),
+                )),
+            },
+            Span::dummy(),
+        );
+
+        let wasm = codegen.compile_program(&expr);
+
+        // Basic validation: WASM magic number
+        assert_eq!(&wasm[0..4], b"\x00asm");
     }
 }

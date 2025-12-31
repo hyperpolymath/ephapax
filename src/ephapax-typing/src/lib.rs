@@ -5,7 +5,7 @@
 //!
 //! Implements the typing rules from formal/Typing.v
 
-use ephapax_syntax::{BaseTy, Expr, ExprKind, Literal, RegionName, Ty, Var};
+use ephapax_syntax::{BaseTy, BinOp, Expr, ExprKind, Literal, RegionName, Ty, UnaryOp, Var};
 use std::collections::HashMap;
 use thiserror::Error;
 
@@ -148,7 +148,29 @@ impl TypeChecker {
             ExprKind::Borrow(inner) => self.check_borrow(inner),
             ExprKind::Drop(inner) => self.check_drop(inner),
             ExprKind::Copy(inner) => self.check_copy(inner),
-            _ => todo!("Type checking for {:?}", expr.kind),
+            ExprKind::StringLen(inner) => self.check_string_len(inner),
+            ExprKind::LetLin {
+                name,
+                ty,
+                value,
+                body,
+            } => self.check_let_lin(name, ty.as_ref(), value, body),
+            ExprKind::Pair { left, right } => self.check_pair(left, right),
+            ExprKind::Fst(inner) => self.check_fst(inner),
+            ExprKind::Snd(inner) => self.check_snd(inner),
+            ExprKind::Inl { ty, value } => self.check_inl(ty, value),
+            ExprKind::Inr { ty, value } => self.check_inr(ty, value),
+            ExprKind::Case {
+                scrutinee,
+                left_var,
+                left_body,
+                right_var,
+                right_body,
+            } => self.check_case(scrutinee, left_var, left_body, right_var, right_body),
+            ExprKind::Deref(inner) => self.check_deref(inner),
+            ExprKind::Block(exprs) => self.check_block(exprs),
+            ExprKind::BinOp { op, left, right } => self.check_binop(*op, left, right),
+            ExprKind::UnaryOp { op, operand } => self.check_unaryop(*op, operand),
         }
     }
 
@@ -336,6 +358,268 @@ impl TypeChecker {
             left: Box::new(inner_ty.clone()),
             right: Box::new(inner_ty),
         })
+    }
+
+    fn check_string_len(&mut self, inner: &Expr) -> Result<Ty, TypeError> {
+        let inner_ty = self.check(inner)?;
+
+        match inner_ty {
+            Ty::String(_) => Ok(Ty::Base(BaseTy::I32)),
+            Ty::Borrow(ref boxed) => match boxed.as_ref() {
+                Ty::String(_) => Ok(Ty::Base(BaseTy::I32)),
+                _ => Err(TypeError::TypeMismatch {
+                    expected: Ty::String("_".into()),
+                    found: inner_ty,
+                }),
+            },
+            _ => Err(TypeError::TypeMismatch {
+                expected: Ty::String("_".into()),
+                found: inner_ty,
+            }),
+        }
+    }
+
+    fn check_let_lin(
+        &mut self,
+        name: &Var,
+        _ty: Option<&Ty>,
+        value: &Expr,
+        body: &Expr,
+    ) -> Result<Ty, TypeError> {
+        // Same as let, but explicitly marked linear
+        let value_ty = self.check(value)?;
+        self.ctx.extend(name.clone(), value_ty);
+        let body_ty = self.check(body)?;
+
+        // Ensure linear variable was consumed
+        if let Some(entry) = self.ctx.vars.get(name) {
+            if entry.ty.is_linear() && !entry.used {
+                return Err(TypeError::LinearVariableNotConsumed(name.clone()));
+            }
+        }
+
+        Ok(body_ty)
+    }
+
+    fn check_pair(&mut self, left: &Expr, right: &Expr) -> Result<Ty, TypeError> {
+        let left_ty = self.check(left)?;
+        let right_ty = self.check(right)?;
+
+        Ok(Ty::Prod {
+            left: Box::new(left_ty),
+            right: Box::new(right_ty),
+        })
+    }
+
+    fn check_fst(&mut self, inner: &Expr) -> Result<Ty, TypeError> {
+        let inner_ty = self.check(inner)?;
+
+        match inner_ty {
+            Ty::Prod { left, right } => {
+                // In linear, projecting consumes the pair.
+                // The other component must be dropped or the type must be unrestricted.
+                if right.is_linear() {
+                    // Can't just take first and discard linear second
+                    return Err(TypeError::LinearVariableNotConsumed("_pair_snd".into()));
+                }
+                Ok(*left)
+            }
+            _ => Err(TypeError::TypeMismatch {
+                expected: Ty::Prod {
+                    left: Box::new(Ty::Base(BaseTy::Unit)),
+                    right: Box::new(Ty::Base(BaseTy::Unit)),
+                },
+                found: inner_ty,
+            }),
+        }
+    }
+
+    fn check_snd(&mut self, inner: &Expr) -> Result<Ty, TypeError> {
+        let inner_ty = self.check(inner)?;
+
+        match inner_ty {
+            Ty::Prod { left, right } => {
+                // In linear, projecting consumes the pair.
+                if left.is_linear() {
+                    return Err(TypeError::LinearVariableNotConsumed("_pair_fst".into()));
+                }
+                Ok(*right)
+            }
+            _ => Err(TypeError::TypeMismatch {
+                expected: Ty::Prod {
+                    left: Box::new(Ty::Base(BaseTy::Unit)),
+                    right: Box::new(Ty::Base(BaseTy::Unit)),
+                },
+                found: inner_ty,
+            }),
+        }
+    }
+
+    fn check_inl(&mut self, ty: &Ty, value: &Expr) -> Result<Ty, TypeError> {
+        let value_ty = self.check(value)?;
+
+        // ty is the RIGHT type of the sum
+        Ok(Ty::Sum {
+            left: Box::new(value_ty),
+            right: Box::new(ty.clone()),
+        })
+    }
+
+    fn check_inr(&mut self, ty: &Ty, value: &Expr) -> Result<Ty, TypeError> {
+        let value_ty = self.check(value)?;
+
+        // ty is the LEFT type of the sum
+        Ok(Ty::Sum {
+            left: Box::new(ty.clone()),
+            right: Box::new(value_ty),
+        })
+    }
+
+    fn check_case(
+        &mut self,
+        scrutinee: &Expr,
+        left_var: &Var,
+        left_body: &Expr,
+        right_var: &Var,
+        right_body: &Expr,
+    ) -> Result<Ty, TypeError> {
+        let scrutinee_ty = self.check(scrutinee)?;
+
+        match scrutinee_ty {
+            Ty::Sum { left, right } => {
+                // Check left branch
+                self.ctx.extend(left_var.clone(), *left.clone());
+                let left_ty = self.check(left_body)?;
+
+                // Check linear variable was used
+                if let Some(entry) = self.ctx.vars.get(left_var) {
+                    if entry.ty.is_linear() && !entry.used {
+                        return Err(TypeError::LinearVariableNotConsumed(left_var.clone()));
+                    }
+                }
+
+                // Check right branch
+                self.ctx.extend(right_var.clone(), *right.clone());
+                let right_ty = self.check(right_body)?;
+
+                if let Some(entry) = self.ctx.vars.get(right_var) {
+                    if entry.ty.is_linear() && !entry.used {
+                        return Err(TypeError::LinearVariableNotConsumed(right_var.clone()));
+                    }
+                }
+
+                // Both branches must have same type
+                if left_ty != right_ty {
+                    return Err(TypeError::TypeMismatch {
+                        expected: left_ty,
+                        found: right_ty,
+                    });
+                }
+
+                Ok(left_ty)
+            }
+            _ => Err(TypeError::TypeMismatch {
+                expected: Ty::Sum {
+                    left: Box::new(Ty::Base(BaseTy::Unit)),
+                    right: Box::new(Ty::Base(BaseTy::Unit)),
+                },
+                found: scrutinee_ty,
+            }),
+        }
+    }
+
+    fn check_deref(&mut self, inner: &Expr) -> Result<Ty, TypeError> {
+        let inner_ty = self.check(inner)?;
+
+        match inner_ty {
+            Ty::Borrow(boxed) => Ok(*boxed),
+            Ty::Ref { inner, .. } => Ok(*inner),
+            _ => Err(TypeError::TypeMismatch {
+                expected: Ty::Borrow(Box::new(Ty::Base(BaseTy::Unit))),
+                found: inner_ty,
+            }),
+        }
+    }
+
+    fn check_block(&mut self, exprs: &[Expr]) -> Result<Ty, TypeError> {
+        if exprs.is_empty() {
+            return Ok(Ty::Base(BaseTy::Unit));
+        }
+
+        let mut result_ty = Ty::Base(BaseTy::Unit);
+        for expr in exprs {
+            result_ty = self.check(expr)?;
+        }
+        Ok(result_ty)
+    }
+
+    fn check_binop(&mut self, op: BinOp, left: &Expr, right: &Expr) -> Result<Ty, TypeError> {
+        let left_ty = self.check(left)?;
+        let right_ty = self.check(right)?;
+
+        // Both operands must be same numeric type
+        if left_ty != right_ty {
+            return Err(TypeError::TypeMismatch {
+                expected: left_ty,
+                found: right_ty,
+            });
+        }
+
+        match op {
+            // Arithmetic ops return same type
+            BinOp::Add | BinOp::Sub | BinOp::Mul | BinOp::Div | BinOp::Mod => {
+                match &left_ty {
+                    Ty::Base(BaseTy::I32)
+                    | Ty::Base(BaseTy::I64)
+                    | Ty::Base(BaseTy::F32)
+                    | Ty::Base(BaseTy::F64) => Ok(left_ty),
+                    _ => Err(TypeError::TypeMismatch {
+                        expected: Ty::Base(BaseTy::I32),
+                        found: left_ty,
+                    }),
+                }
+            }
+            // Comparison ops return Bool
+            BinOp::Lt | BinOp::Le | BinOp::Gt | BinOp::Ge | BinOp::Eq | BinOp::Ne => {
+                Ok(Ty::Base(BaseTy::Bool))
+            }
+            // Logical ops require Bool and return Bool
+            BinOp::And | BinOp::Or => {
+                if left_ty != Ty::Base(BaseTy::Bool) {
+                    return Err(TypeError::TypeMismatch {
+                        expected: Ty::Base(BaseTy::Bool),
+                        found: left_ty,
+                    });
+                }
+                Ok(Ty::Base(BaseTy::Bool))
+            }
+        }
+    }
+
+    fn check_unaryop(&mut self, op: UnaryOp, operand: &Expr) -> Result<Ty, TypeError> {
+        let operand_ty = self.check(operand)?;
+
+        match op {
+            UnaryOp::Not => {
+                if operand_ty != Ty::Base(BaseTy::Bool) {
+                    return Err(TypeError::TypeMismatch {
+                        expected: Ty::Base(BaseTy::Bool),
+                        found: operand_ty,
+                    });
+                }
+                Ok(Ty::Base(BaseTy::Bool))
+            }
+            UnaryOp::Neg => match &operand_ty {
+                Ty::Base(BaseTy::I32)
+                | Ty::Base(BaseTy::I64)
+                | Ty::Base(BaseTy::F32)
+                | Ty::Base(BaseTy::F64) => Ok(operand_ty),
+                _ => Err(TypeError::TypeMismatch {
+                    expected: Ty::Base(BaseTy::I32),
+                    found: operand_ty,
+                }),
+            },
+        }
     }
 }
 

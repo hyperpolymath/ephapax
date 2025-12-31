@@ -85,6 +85,26 @@ impl Value {
         }
     }
 
+    /// Check if this value is linear (must be used exactly once)
+    pub fn is_linear(&self) -> bool {
+        match self {
+            // Strings are linear resources
+            Value::String { .. } => true,
+            // Pairs are linear if either component is linear
+            Value::Pair(l, r) => l.is_linear() || r.is_linear(),
+            // Sum types are linear if either variant type is linear
+            Value::Left(v) | Value::Right(v) => v.is_linear(),
+            // Closures that capture linear values are linear
+            // (Conservative: treat all closures as potentially linear)
+            Value::Closure { .. } => false, // Could be refined with capture analysis
+            // Base types are unrestricted
+            Value::Unit | Value::Bool(_) | Value::I32(_) | Value::I64(_)
+            | Value::F32(_) | Value::F64(_) => false,
+            // Borrows are second-class (not linear in the sense of consumption)
+            Value::Borrow(_) => false,
+        }
+    }
+
     /// Get the inferred type of this value
     pub fn to_type(&self) -> Ty {
         match self {
@@ -633,6 +653,13 @@ impl Interpreter {
 
     fn eval_copy(&mut self, inner: &Expr) -> Result<Value, RuntimeError> {
         let val = self.eval(inner)?;
+        // Only unrestricted types can be copied - linear types (String, etc.) cannot
+        if val.is_linear() {
+            return Err(RuntimeError::TypeError {
+                expected: "unrestricted (copyable) type".to_string(),
+                found: format!("linear type {}", val.type_name()),
+            });
+        }
         // For unrestricted types, return a pair of copies
         Ok(Value::Pair(Box::new(val.clone()), Box::new(val)))
     }

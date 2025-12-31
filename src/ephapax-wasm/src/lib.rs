@@ -879,14 +879,16 @@ impl Codegen {
     }
 
     fn compile_unaryop(&mut self, func: &mut Function, op: UnaryOp, operand: &Expr) {
-        self.compile_expr(func, operand);
-
         match op {
             UnaryOp::Not => {
+                self.compile_expr(func, operand);
                 func.instruction(&Instruction::I32Eqz);
             }
             UnaryOp::Neg => {
+                // For negation: compute 0 - operand
+                // Push 0 first, then the operand, then subtract
                 func.instruction(&Instruction::I32Const(0));
+                self.compile_expr(func, operand);
                 func.instruction(&Instruction::I32Sub);
             }
         }

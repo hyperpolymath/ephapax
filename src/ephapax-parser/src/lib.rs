@@ -298,7 +298,14 @@ fn literal_parser<'a>() -> impl Parser<'a, &'a [SpannedToken], (Literal, LexerSp
                 TokenKind::Unit => Literal::Unit,
                 TokenKind::True => Literal::Bool(true),
                 TokenKind::False => Literal::Bool(false),
-                TokenKind::Integer(n) => Literal::I32(n as i32),
+                TokenKind::Integer(n) => {
+                    // Check for overflow when converting i64 to i32
+                    if n > i32::MAX as i64 || n < i32::MIN as i64 {
+                        Literal::I64(n)
+                    } else {
+                        Literal::I32(n as i32)
+                    }
+                },
                 TokenKind::Float(n) => Literal::F64(n),
                 TokenKind::String(s) => Literal::String(s),
                 _ => unreachable!(),

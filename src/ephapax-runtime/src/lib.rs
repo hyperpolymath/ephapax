@@ -134,12 +134,22 @@ pub extern "C" fn __ephapax_string_drop(_handle: StringHandle) {
 
 /// Enter a new region: save current bump pointer
 ///
+/// Returns 1 on success, 0 if region stack is full.
+///
 /// # Safety
 ///
 /// Must not exceed maximum region depth.
 #[no_mangle]
-pub unsafe extern "C" fn __ephapax_region_enter() {
+pub unsafe extern "C" fn __ephapax_region_enter() -> u32 {
     let region_sp = core::ptr::read(layout::REGION_SP as *const u32);
+
+    // Bounds check: ensure we don't exceed maximum region depth
+    let max_sp = (layout::REGION_STACK + layout::MAX_REGION_DEPTH * 4) as u32;
+    if region_sp >= max_sp {
+        // Region stack full - cannot nest deeper
+        return 0;
+    }
+
     let bump_ptr = core::ptr::read(layout::BUMP_PTR as *const u32);
 
     // Push bump_ptr onto region stack
@@ -147,16 +157,26 @@ pub unsafe extern "C" fn __ephapax_region_enter() {
 
     // Increment region stack pointer
     core::ptr::write(layout::REGION_SP as *mut u32, region_sp + 4);
+
+    1 // Success
 }
 
 /// Exit region: restore bump pointer, freeing all region allocations
+///
+/// Returns 1 on success, 0 if no region is active (underflow).
 ///
 /// # Safety
 ///
 /// Must have a matching `__ephapax_region_enter` call.
 #[no_mangle]
-pub unsafe extern "C" fn __ephapax_region_exit() {
+pub unsafe extern "C" fn __ephapax_region_exit() -> u32 {
     let region_sp = core::ptr::read(layout::REGION_SP as *const u32);
+
+    // Bounds check: ensure we have a region to exit
+    if region_sp <= layout::REGION_STACK as u32 {
+        // No region to exit - stack underflow
+        return 0;
+    }
 
     // Decrement and read saved bump_ptr
     let new_sp = region_sp - 4;
@@ -165,6 +185,8 @@ pub unsafe extern "C" fn __ephapax_region_exit() {
     // Restore bump pointer (effectively frees all region allocations)
     core::ptr::write(layout::BUMP_PTR as *mut u32, saved_bump);
     core::ptr::write(layout::REGION_SP as *mut u32, new_sp);
+
+    1 // Success
 }
 
 /// Check if we're in any region

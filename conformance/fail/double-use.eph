@@ -1,0 +1,15 @@
+-- SPDX-License-Identifier: EUPL-1.2
+-- Conformance: fail/double-use
+-- Expected error: LinearityError (variable used twice)
+-- Tests: Double use of a linear value is rejected
+
+region r {
+    let s = String.new@r("hello")
+
+    -- First use: consumes s
+    let len1 = String.len(&s)
+    drop(s)
+
+    -- ERROR: s already consumed, cannot use again
+    let len2 = String.len(&s)
+}

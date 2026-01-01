@@ -1,0 +1,11 @@
+-- SPDX-License-Identifier: EUPL-1.2
+-- Conformance: fail/escaping-region
+-- Expected error: RegionEscapeError (value escapes region scope)
+-- Tests: Region-scoped values cannot escape their region
+
+let escaped = region r {
+    let s = String.new@r("trapped")
+    -- ERROR: s has type String@r, cannot be returned
+    -- because r is about to be deallocated
+    s
+}

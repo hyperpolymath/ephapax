@@ -1,0 +1,9 @@
+-- SPDX-License-Identifier: EUPL-1.2
+-- Conformance: pass/borrow-read
+-- Tests: Borrowing a string to read its length
+
+region r {
+    let s = String.new@r("hello world")
+    let len = String.len(&s)
+    drop(s)
+}

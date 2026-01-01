@@ -89,12 +89,19 @@ ephapax/
 ├── src/                 # Implementation
 │   ├── ephapax-syntax/  # AST definitions
 │   ├── ephapax-typing/  # Linear type checker
+│   ├── ephapax-lexer/   # Tokenizer (logos)
+│   ├── ephapax-parser/  # Parser (chumsky)
+│   ├── ephapax-interp/  # Tree-walking interpreter
 │   ├── ephapax-wasm/    # WASM code generation
-│   └── ephapax-runtime/ # Runtime support
+│   ├── ephapax-runtime/ # Runtime support
+│   ├── ephapax-repl/    # Interactive shell
+│   └── ephapax-cli/     # Command-line interface
+├── conformance/         # Type system conformance tests
+│   ├── pass/            # Programs that should type-check
+│   └── fail/            # Programs that should be rejected
 ├── spec/                # Language specification
-├── docs/                # Documentation
-│   └── wiki/            # Comprehensive wiki
-└── .github/             # CI/CD workflows
+├── .machine_read/       # Machine-readable specs for tooling
+└── docs/                # Documentation
 ----
 
 == Build Targets
@@ -127,21 +134,21 @@ See `formal/` for Coq mechanisation.
 === Prerequisites
 
 * Rust 1.83+ with `wasm32-unknown-unknown` target
-* Coq 8.18+ (for proofs)
+* Coq 8.18+ (optional, for proof verification)
+* https://just.systems/[just] (task runner)
 
 === Build
 
 [source,bash]
 ----
 # Build all crates
-cargo build --release
+just build
 
 # Build for WASM
-rustup target add wasm32-unknown-unknown
-cargo build --release --target wasm32-unknown-unknown
+just build-wasm
 
-# Build and check Coq proofs
-cd formal && make
+# Verify Coq proofs (optional, requires Coq 8.18+)
+just proofs
 ----
 
 === Test
@@ -149,10 +156,13 @@ cd formal && make
 [source,bash]
 ----
 # Run all tests
-cargo test --all-features
+just test
 
-# Run Coq proofs
-cd formal && make
+# Run conformance test suite
+just conformance
+
+# Run golden path (test + build + proofs)
+just golden
 ----
 
 == Documentation
@@ -176,10 +186,10 @@ cd formal && make
 | ✅ Complete
 
 | Lexer
-| 🔲 Planned
+| ✅ Complete
 
 | Parser
-| 🔲 Planned
+| ✅ Complete
 
 | Type checker
 | 🚧 In Progress
@@ -187,10 +197,16 @@ cd formal && make
 | WASM code generation
 | 🚧 In Progress
 
-| Standard library
-| 🔲 Planned
+| Interpreter
+| ✅ Complete
 
 | REPL
+| ✅ Complete
+
+| CLI
+| ✅ Complete
+
+| Standard library
 | 🔲 Planned
 |===
 

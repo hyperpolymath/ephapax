@@ -1,0 +1,17 @@
+-- SPDX-License-Identifier: EUPL-1.2
+-- Conformance: fail/use-after-consume
+-- Expected error: LinearityError (use after consumption)
+-- Tests: Using a value after it has been consumed by another operation
+
+region r {
+    let s1 = String.new@r("hello")
+    let s2 = String.new@r("world")
+
+    -- This consumes both s1 and s2
+    let combined = String.concat(s1, s2)
+
+    -- ERROR: s1 was consumed by concat, cannot use it
+    let len = String.len(&s1)
+
+    drop(combined)
+}

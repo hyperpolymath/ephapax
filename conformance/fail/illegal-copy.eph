@@ -1,0 +1,14 @@
+-- SPDX-License-Identifier: EUPL-1.2
+-- Conformance: fail/illegal-copy
+-- Expected error: CopyError (cannot copy linear type)
+-- Tests: Linear types cannot be copied
+
+region r {
+    let s = String.new@r("linear value")
+
+    -- ERROR: String@r is linear, copy not allowed
+    let duplicate = copy(s)
+
+    drop(s)
+    drop(duplicate)
+}

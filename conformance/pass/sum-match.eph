@@ -1,0 +1,9 @@
+-- SPDX-License-Identifier: EUPL-1.2
+-- Conformance: pass/sum-match
+-- Tests: Sum type injection and case analysis
+
+let v = inl[Bool](42)
+case v of
+    inl(x) -> x
+    inr(y) -> 0
+end

@@ -1,3 +1,6 @@
+image:https://img.shields.io/badge/License-MPL_2.0-blue.svg[MPL-2.0,link="https://opensource.org/licenses/MPL-2.0"]
+image:https://img.shields.io/badge/Philosophy-Palimpsest-purple.svg[Palimpsest,link="https://github.com/hyperpolymath/palimpsest-licence"]
+
 // SPDX-License-Identifier: EUPL-1.2
 // SPDX-FileCopyrightText: 2025 Jonathan D.A. Jewell
 :toc: macro
@@ -9,7 +12,6 @@
 = Ephapax
 _ἐφάπαξ — once for all_
 
-image:https://img.shields.io/badge/license-EUPL--1.2-blue.svg[License: EUPL-1.2]
 image:https://img.shields.io/badge/rust-1.83+-orange.svg[Rust 1.83+]
 image:https://img.shields.io/badge/coq-8.18+-red.svg[Coq 8.18+]
 image:https://img.shields.io/badge/target-wasm32-purple.svg[WASM]

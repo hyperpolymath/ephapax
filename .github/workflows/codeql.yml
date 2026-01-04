@@ -21,7 +21,9 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - language: javascript-typescript
+          # Rust and Rocq/Coq are not supported by CodeQL
+          # Scan workflow files for security issues
+          - language: actions
             build-mode: none
 
     steps:

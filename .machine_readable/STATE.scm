@@ -23,7 +23,7 @@
 
   (current-position
     (phase "core-compiler")
-    (overall-completion 35)
+    (overall-completion 40)
     (components
       (formal-semantics
         (status "complete")
@@ -46,13 +46,15 @@
         (tech "chumsky"))
       (type-checker
         (status "in-progress")
-        (completion 40)
+        (completion 60)
         (crate "ephapax-typing")
+        (completed
+          "branch-agreement-verification"
+          "borrow-validity-checking"
+          "context-snapshot-restore")
         (remaining
           "linear-context-threading"
           "region-scope-tracking"
-          "borrow-validity-checking"
-          "branch-agreement-verification"
           "affine-mode-support"))
       (wasm-codegen
         (status "in-progress")
@@ -94,7 +96,10 @@
       "progress-preservation-proofs"
       "interpreter-execution"
       "repl-interaction"
-      "cli-interface"))
+      "cli-interface"
+      "branch-agreement-verification"
+      "borrow-without-consume"
+      "linear-variable-tracking"))
 
   (route-to-mvp
     (milestones
@@ -138,12 +143,13 @@
         (items
           (linearity-check (status "in-progress"))
           (region-scoping (status "in-progress"))
-          (borrow-validity (status "in-progress"))
+          (borrow-validity (status "complete"))
+          (branch-agreement (status "complete"))
           (type-inference (status "planned"))
-          (use-after-move-rejection (status "planned"))
+          (use-after-move-rejection (status "in-progress"))
           (region-escape-rejection (status "planned"))
-          (double-use-rejection (status "planned"))
-          (unused-linear-rejection (status "planned"))))
+          (double-use-rejection (status "complete"))
+          (unused-linear-rejection (status "in-progress"))))
       (m4-wasm-codegen
         (status "in-progress")
         (verification "wasm-validate output.wasm && wasmtime run output.wasm")
@@ -170,12 +176,13 @@
 
   (blockers-and-issues
     (critical)
-    (high
-      (type-checker-linear-context
-        (description "Linear context threading not fully implemented")
-        (affects "m3-type-checker")
-        (assigned "core-team")))
+    (high)
     (medium
+      (type-checker-linear-context
+        (description "Linear context threading partially done; branch agreement now works")
+        (affects "m3-type-checker")
+        (assigned "core-team")
+        (progress "Context snapshot/restore implemented for if/case"))
       (wasm-region-stack
         (description "Region stack management for WASM needs design")
         (affects "m4-wasm-codegen")))
@@ -183,19 +190,26 @@
 
   (critical-next-actions
     (immediate
-      "complete-linearity-checking"
-      "implement-region-scope-tracking"
-      "add-borrow-validity-checks")
+      "complete-region-scope-tracking"
+      "wire-parser-typechecker-codegen-pipeline"
+      "run-conformance-tests-against-typechecker")
     (this-week
       "finish-type-checker-core"
-      "basic-wasm-primitives")
+      "end-to-end-hello-world")
     (this-month
-      "hello-world-compilation"
-      "end-to-end-simple-program"))
+      "hello-world-wasm-compilation"
+      "basic-stdlib-string-ops"))
 
   (session-history
     (session
       (date "2026-01-04")
       (accomplishments
         "fixed-codeql-language-matrix"
-        "populated-scm-files"))))
+        "populated-scm-files"
+        "implemented-branch-agreement-verification"
+        "fixed-check_if-linear-context-threading"
+        "fixed-check_case-linear-context-threading"
+        "fixed-check_borrow-to-not-consume"
+        "added-Context::snapshot-and-check_branch_agreement"
+        "added-BranchLinearityMismatchDetailed-error"
+        "added-6-branch-linearity-tests"))))

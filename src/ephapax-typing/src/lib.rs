@@ -36,6 +36,13 @@ pub enum TypeError {
     #[error("Branch linearity mismatch: both branches must consume same linear variables")]
     BranchLinearityMismatch,
 
+    #[error("Branch linearity mismatch: variable `{var}` is {then_status} in then-branch but {else_status} in else-branch")]
+    BranchLinearityMismatchDetailed {
+        var: Var,
+        then_status: &'static str,
+        else_status: &'static str,
+    },
+
     #[error("String escapes its region `{0}`")]
     RegionEscape(RegionName),
 }
@@ -107,6 +114,62 @@ impl Context {
     /// Check if region is active
     pub fn region_active(&self, name: &RegionName) -> bool {
         self.regions.contains(name)
+    }
+
+    /// Create a snapshot of the current context for branch checking.
+    /// Both branches will start from this same state.
+    pub fn snapshot(&self) -> Self {
+        self.clone()
+    }
+
+    /// Check that two contexts agree on linear variable usage.
+    /// Both branches must consume exactly the same set of linear variables.
+    /// Returns Ok(()) if they agree, or an error indicating which variable differs.
+    pub fn check_branch_agreement(&self, other: &Context) -> Result<(), TypeError> {
+        // Check all variables in self
+        for (name, entry) in &self.vars {
+            if !entry.ty.is_linear() {
+                continue; // Only check linear variables
+            }
+
+            match other.vars.get(name) {
+                Some(other_entry) => {
+                    if entry.used != other_entry.used {
+                        return Err(TypeError::BranchLinearityMismatchDetailed {
+                            var: name.clone(),
+                            then_status: if entry.used { "consumed" } else { "not consumed" },
+                            else_status: if other_entry.used { "consumed" } else { "not consumed" },
+                        });
+                    }
+                }
+                None => {
+                    // Variable exists in self but not in other - shouldn't happen
+                    // if both started from the same snapshot
+                    return Err(TypeError::BranchLinearityMismatch);
+                }
+            }
+        }
+
+        // Check for variables in other that aren't in self (shouldn't happen)
+        for (name, entry) in &other.vars {
+            if !entry.ty.is_linear() {
+                continue;
+            }
+            if !self.vars.contains_key(name) {
+                return Err(TypeError::BranchLinearityMismatch);
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Merge two contexts after branch checking.
+    /// Assumes branch agreement has already been verified.
+    /// Takes the "used" status from either branch (they should be identical).
+    pub fn merge_branches(&mut self, _other: &Context) {
+        // After branch agreement is verified, the usage should be identical.
+        // The current context (self) already has the correct usage from one branch.
+        // We keep it as-is since both branches agree.
     }
 }
 
@@ -302,16 +365,34 @@ impl TypeChecker {
             });
         }
 
-        // Both branches must have same type and consume same linear resources
-        let then_ty = self.check(then_branch)?;
-        let else_ty = self.check(else_branch)?;
+        // Snapshot context after condition - both branches start from here
+        let ctx_after_cond = self.ctx.snapshot();
 
+        // Check then-branch with current context
+        let then_ty = self.check(then_branch)?;
+        let ctx_after_then = self.ctx.snapshot();
+
+        // Restore context to post-condition state for else-branch
+        self.ctx = ctx_after_cond;
+
+        // Check else-branch
+        let else_ty = self.check(else_branch)?;
+        let ctx_after_else = self.ctx.snapshot();
+
+        // Types must match
         if then_ty != else_ty {
             return Err(TypeError::TypeMismatch {
                 expected: then_ty,
                 found: else_ty,
             });
         }
+
+        // Both branches must consume the same linear variables
+        ctx_after_then.check_branch_agreement(&ctx_after_else)?;
+
+        // Merge contexts (they're identical for linear vars after agreement check)
+        // Keep ctx_after_then as the result (could use either)
+        self.ctx = ctx_after_then;
 
         Ok(then_ty)
     }
@@ -332,9 +413,29 @@ impl TypeChecker {
     }
 
     fn check_borrow(&mut self, inner: &Expr) -> Result<Ty, TypeError> {
-        // Borrowing does not consume the resource
-        let inner_ty = self.check(inner)?;
-        Ok(Ty::Borrow(Box::new(inner_ty)))
+        // Borrowing does NOT consume the resource.
+        // Per Coq rule T_Borrow: output context G is same as input.
+        // We look up the type without marking as used.
+        match &inner.kind {
+            ExprKind::Var(name) => {
+                // For variables, look up type without consuming
+                let ty = self
+                    .ctx
+                    .lookup(name)
+                    .ok_or_else(|| TypeError::UnboundVariable(name.clone()))?
+                    .clone();
+                Ok(Ty::Borrow(Box::new(ty)))
+            }
+            _ => {
+                // For complex expressions, we need to evaluate them but borrowing
+                // only makes sense for lvalues (variables, field accesses).
+                // For now, check the expression normally and wrap in Borrow.
+                // This may consume linear resources, which is semantically correct
+                // for temporary borrows of computed values.
+                let inner_ty = self.check(inner)?;
+                Ok(Ty::Borrow(Box::new(inner_ty)))
+            }
+        }
     }
 
     fn check_drop(&mut self, inner: &Expr) -> Result<Ty, TypeError> {
@@ -487,36 +588,57 @@ impl TypeChecker {
 
         match scrutinee_ty {
             Ty::Sum { left, right } => {
+                // Snapshot context after scrutinee - both branches start from here
+                let ctx_after_scrutinee = self.ctx.snapshot();
+
                 // Check left branch
                 self.ctx.extend(left_var.clone(), *left.clone());
-                let left_ty = self.check(left_body)?;
+                let left_result_ty = self.check(left_body)?;
 
-                // Check linear variable was used
+                // Check linear branch variable was consumed
                 if let Some(entry) = self.ctx.vars.get(left_var) {
                     if entry.ty.is_linear() && !entry.used {
                         return Err(TypeError::LinearVariableNotConsumed(left_var.clone()));
                     }
                 }
 
+                // Remove branch-specific variable before comparison
+                let mut ctx_after_left = self.ctx.snapshot();
+                ctx_after_left.vars.remove(left_var);
+
+                // Restore context for right branch
+                self.ctx = ctx_after_scrutinee;
+
                 // Check right branch
                 self.ctx.extend(right_var.clone(), *right.clone());
-                let right_ty = self.check(right_body)?;
+                let right_result_ty = self.check(right_body)?;
 
+                // Check linear branch variable was consumed
                 if let Some(entry) = self.ctx.vars.get(right_var) {
                     if entry.ty.is_linear() && !entry.used {
                         return Err(TypeError::LinearVariableNotConsumed(right_var.clone()));
                     }
                 }
 
+                // Remove branch-specific variable before comparison
+                let mut ctx_after_right = self.ctx.snapshot();
+                ctx_after_right.vars.remove(right_var);
+
                 // Both branches must have same type
-                if left_ty != right_ty {
+                if left_result_ty != right_result_ty {
                     return Err(TypeError::TypeMismatch {
-                        expected: left_ty,
-                        found: right_ty,
+                        expected: left_result_ty,
+                        found: right_result_ty,
                     });
                 }
 
-                Ok(left_ty)
+                // Both branches must consume same linear variables from outer scope
+                ctx_after_left.check_branch_agreement(&ctx_after_right)?;
+
+                // Keep the left context as result (with left_var removed)
+                self.ctx = ctx_after_left;
+
+                Ok(left_result_ty)
             }
             _ => Err(TypeError::TypeMismatch {
                 expected: Ty::Sum {
@@ -659,6 +781,147 @@ mod tests {
         let var2 = dummy_expr(ExprKind::Var("s".into()));
         assert!(matches!(
             tc.check(&var2),
+            Err(TypeError::LinearVariableReused(_))
+        ));
+    }
+
+    #[test]
+    fn test_if_branch_agreement_both_consume() {
+        // if true then drop(s) else drop(s)
+        // Both branches consume s - should pass
+        let mut tc = TypeChecker::new();
+        tc.ctx.enter_region("r".into());
+        tc.ctx.extend("s".into(), Ty::String("r".into()));
+
+        let expr = dummy_expr(ExprKind::If {
+            cond: Box::new(dummy_expr(ExprKind::Lit(Literal::Bool(true)))),
+            then_branch: Box::new(dummy_expr(ExprKind::Drop(Box::new(dummy_expr(
+                ExprKind::Var("s".into()),
+            ))))),
+            else_branch: Box::new(dummy_expr(ExprKind::Drop(Box::new(dummy_expr(
+                ExprKind::Var("s".into()),
+            ))))),
+        });
+
+        assert!(tc.check(&expr).is_ok());
+    }
+
+    #[test]
+    fn test_if_branch_agreement_neither_consume() {
+        // if true then 1 else 2
+        // Neither branch consumes s - should pass (s unconsumed error later)
+        let mut tc = TypeChecker::new();
+        tc.ctx.enter_region("r".into());
+        tc.ctx.extend("s".into(), Ty::String("r".into()));
+
+        let expr = dummy_expr(ExprKind::If {
+            cond: Box::new(dummy_expr(ExprKind::Lit(Literal::Bool(true)))),
+            then_branch: Box::new(dummy_expr(ExprKind::Lit(Literal::I32(1)))),
+            else_branch: Box::new(dummy_expr(ExprKind::Lit(Literal::I32(2)))),
+        });
+
+        // The if itself passes - s is not consumed in either branch (agreement)
+        assert!(tc.check(&expr).is_ok());
+    }
+
+    #[test]
+    fn test_if_branch_disagreement_then_consumes() {
+        // if true then drop(s) else 1
+        // then-branch consumes s, else-branch does not - should FAIL
+        let mut tc = TypeChecker::new();
+        tc.ctx.enter_region("r".into());
+        tc.ctx.extend("s".into(), Ty::String("r".into()));
+
+        let expr = dummy_expr(ExprKind::If {
+            cond: Box::new(dummy_expr(ExprKind::Lit(Literal::Bool(true)))),
+            then_branch: Box::new(dummy_expr(ExprKind::Drop(Box::new(dummy_expr(
+                ExprKind::Var("s".into()),
+            ))))),
+            else_branch: Box::new(dummy_expr(ExprKind::Lit(Literal::Unit))),
+        });
+
+        let result = tc.check(&expr);
+        assert!(
+            matches!(
+                result,
+                Err(TypeError::BranchLinearityMismatchDetailed { .. })
+            ),
+            "Expected BranchLinearityMismatchDetailed, got {:?}",
+            result
+        );
+    }
+
+    #[test]
+    fn test_if_branch_disagreement_else_consumes() {
+        // if true then 1 else drop(s)
+        // then-branch does not consume s, else-branch does - should FAIL
+        let mut tc = TypeChecker::new();
+        tc.ctx.enter_region("r".into());
+        tc.ctx.extend("s".into(), Ty::String("r".into()));
+
+        let expr = dummy_expr(ExprKind::If {
+            cond: Box::new(dummy_expr(ExprKind::Lit(Literal::Bool(true)))),
+            then_branch: Box::new(dummy_expr(ExprKind::Lit(Literal::Unit))),
+            else_branch: Box::new(dummy_expr(ExprKind::Drop(Box::new(dummy_expr(
+                ExprKind::Var("s".into()),
+            ))))),
+        });
+
+        let result = tc.check(&expr);
+        assert!(
+            matches!(
+                result,
+                Err(TypeError::BranchLinearityMismatchDetailed { .. })
+            ),
+            "Expected BranchLinearityMismatchDetailed, got {:?}",
+            result
+        );
+    }
+
+    #[test]
+    fn test_borrow_does_not_consume() {
+        // Borrowing a variable should not consume it
+        let mut tc = TypeChecker::new();
+        tc.ctx.enter_region("r".into());
+        tc.ctx.extend("s".into(), Ty::String("r".into()));
+
+        // &s - borrow s
+        let borrow_expr = dummy_expr(ExprKind::Borrow(Box::new(dummy_expr(
+            ExprKind::Var("s".into()),
+        ))));
+        let result = tc.check(&borrow_expr);
+        assert!(result.is_ok());
+
+        // s should still be available (not consumed)
+        let var = dummy_expr(ExprKind::Var("s".into()));
+        let result2 = tc.check(&var);
+        assert!(result2.is_ok(), "Variable should not be consumed by borrow");
+    }
+
+    #[test]
+    fn test_borrow_then_consume_ok() {
+        // let len = String.len(&s) in drop(s)
+        // Borrow s for len, then consume s - should pass
+        let mut tc = TypeChecker::new();
+        tc.ctx.enter_region("r".into());
+        tc.ctx.extend("s".into(), Ty::String("r".into()));
+
+        // First borrow
+        let borrow_expr = dummy_expr(ExprKind::Borrow(Box::new(dummy_expr(
+            ExprKind::Var("s".into()),
+        ))));
+        assert!(tc.check(&borrow_expr).is_ok());
+
+        // Then consume
+        let drop_expr = dummy_expr(ExprKind::Drop(Box::new(dummy_expr(
+            ExprKind::Var("s".into()),
+        ))));
+        assert!(tc.check(&drop_expr).is_ok());
+
+        // Now s should be consumed
+        let var = dummy_expr(ExprKind::Var("s".into()));
+        assert!(matches!(
+            tc.check(&var),
             Err(TypeError::LinearVariableReused(_))
         ));
     }

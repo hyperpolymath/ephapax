@@ -24,11 +24,11 @@
 //! +------------------+
 //! ```
 
-use ephapax_syntax::{BaseTy, BinOp, Expr, ExprKind, Literal, Ty, UnaryOp};
+use ephapax_syntax::{BaseTy, BinOp, Decl, Expr, ExprKind, Literal, Module as AstModule, Ty, UnaryOp};
 use std::collections::HashMap;
 use wasm_encoder::{
     CodeSection, ExportKind, ExportSection, Function, FunctionSection, ImportSection, Instruction,
-    MemorySection, MemoryType, Module, TypeSection, ValType,
+    MemorySection, MemoryType, Module as WasmModule, TypeSection, ValType,
 };
 
 /// WASM representation of a string: (pointer, length)
@@ -65,7 +65,7 @@ pub struct Codegen {
     #[allow(dead_code)]
     region_stack: Vec<RegionInfo>,
     /// Generated WASM module
-    module: Module,
+    module: WasmModule,
     /// Variable to local index mapping for current function
     locals: HashMap<String, u32>,
     /// Next local index
@@ -91,7 +91,7 @@ impl Codegen {
         Self {
             bump_ptr: REGION_HEADER_SIZE,
             region_stack: Vec::new(),
-            module: Module::new(),
+            module: WasmModule::new(),
             locals: HashMap::new(),
             next_local: 0,
             data_entries: Vec::new(),
@@ -951,6 +951,100 @@ impl Codegen {
 impl Default for Codegen {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+/// Compilation error type
+#[derive(Debug, Clone)]
+pub struct CodegenError(pub String);
+
+impl std::fmt::Display for CodegenError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+impl std::error::Error for CodegenError {}
+
+/// Compile an entire Ephapax module to WebAssembly
+pub fn compile_module(module: &AstModule) -> Result<Vec<u8>, CodegenError> {
+    let mut codegen = Codegen::new();
+
+    // If there's a main function, compile it as the entry point
+    // Otherwise, just generate the runtime
+    let main_fn = module.decls.iter().find(|d| {
+        matches!(d, Decl::Fn { name, .. } if name.as_str() == "main")
+    });
+
+    if let Some(Decl::Fn { body, .. }) = main_fn {
+        Ok(codegen.compile_module_with_main(module, body))
+    } else if !module.decls.is_empty() {
+        // No main, but has declarations - compile first expression-like decl
+        // For now, just generate runtime
+        Ok(codegen.generate())
+    } else {
+        // Empty module
+        Ok(codegen.generate())
+    }
+}
+
+impl Codegen {
+    /// Compile a module with a main function
+    pub fn compile_module_with_main(&mut self, _module: &AstModule, main_body: &Expr) -> Vec<u8> {
+        self.emit_types();
+        self.emit_imports();
+        self.emit_memory();
+
+        // Generate all functions: runtime + user functions + main
+        let mut functions = FunctionSection::new();
+        let mut code = CodeSection::new();
+
+        // Runtime functions (indices 2-8, after 2 imports)
+        functions.function(3); code.function(&self.gen_bump_alloc());
+        functions.function(3); code.function(&self.gen_string_new());
+        functions.function(3); code.function(&self.gen_string_len());
+        functions.function(3); code.function(&self.gen_string_concat());
+        functions.function(1); code.function(&self.gen_string_drop());
+        functions.function(4); code.function(&self.gen_region_enter());
+        functions.function(4); code.function(&self.gen_region_exit());
+
+        // Main function (index 9)
+        functions.function(4); // Type 4: () -> ()
+
+        // Reset locals for main function
+        self.locals.clear();
+        self.next_local = 0;
+
+        // Compile the main body
+        let mut main_func = Function::new(vec![
+            (16, ValType::I32), // Reserve 16 i32 locals for the function
+        ]);
+        self.compile_expr(&mut main_func, main_body);
+
+        // Drop the result (main returns void in WASM)
+        main_func.instruction(&Instruction::Drop);
+        main_func.instruction(&Instruction::End);
+
+        code.function(&main_func);
+
+        self.module.section(&functions);
+        self.module.section(&code);
+
+        // Exports with main
+        let mut exports = ExportSection::new();
+        exports.export("__ephapax_bump_alloc", ExportKind::Func, FN_BUMP_ALLOC);
+        exports.export("__ephapax_string_new", ExportKind::Func, FN_STRING_NEW);
+        exports.export("__ephapax_string_len", ExportKind::Func, FN_STRING_LEN);
+        exports.export("__ephapax_string_concat", ExportKind::Func, FN_STRING_CONCAT);
+        exports.export("__ephapax_string_drop", ExportKind::Func, FN_STRING_DROP);
+        exports.export("__ephapax_region_enter", ExportKind::Func, FN_REGION_ENTER);
+        exports.export("__ephapax_region_exit", ExportKind::Func, FN_REGION_EXIT);
+        exports.export("memory", ExportKind::Memory, 0);
+        exports.export("main", ExportKind::Func, 9);
+        self.module.section(&exports);
+
+        self.emit_data_section();
+        self.module.clone().finish()
     }
 }
 

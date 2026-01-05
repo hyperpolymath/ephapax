@@ -1,0 +1,8 @@
+// Simple hello world example
+// Tests: parsing, type checking, WASM compilation
+
+fn main() -> i32 {
+    let x = 1 + 2
+    let y = x * 3
+    y
+}

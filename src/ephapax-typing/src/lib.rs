@@ -5,7 +5,7 @@
 //!
 //! Implements the typing rules from formal/Typing.v
 
-use ephapax_syntax::{BaseTy, BinOp, Expr, ExprKind, Literal, RegionName, Ty, UnaryOp, Var};
+use ephapax_syntax::{BaseTy, BinOp, Decl, Expr, ExprKind, Literal, Module, RegionName, Ty, UnaryOp, Var};
 use std::collections::HashMap;
 use thiserror::Error;
 
@@ -749,6 +749,75 @@ impl Default for TypeChecker {
     fn default() -> Self {
         Self::new()
     }
+}
+
+/// Type check an entire module
+pub fn type_check_module(module: &Module) -> Result<(), TypeError> {
+    let mut tc = TypeChecker::new();
+
+    // First pass: collect all function signatures
+    for decl in &module.decls {
+        if let Decl::Fn { name, params, ret_ty, .. } = decl {
+            // Build function type from params and return type
+            let fn_ty = params.iter().rev().fold(ret_ty.clone(), |acc, (_, param_ty)| {
+                Ty::Fun {
+                    param: Box::new(param_ty.clone()),
+                    ret: Box::new(acc),
+                }
+            });
+            tc.ctx.extend(name.clone(), fn_ty);
+        }
+    }
+
+    // Second pass: type check each function body
+    for decl in &module.decls {
+        match decl {
+            Decl::Fn { name, params, ret_ty, body } => {
+                // Create a fresh context for function body with params
+                let saved_ctx = tc.ctx.clone();
+
+                for (param_name, param_ty) in params {
+                    tc.ctx.extend(param_name.clone(), param_ty.clone());
+                }
+
+                // Type check the body
+                let body_ty = tc.check(body)?;
+
+                // Verify return type matches
+                if body_ty != *ret_ty {
+                    return Err(TypeError::TypeMismatch {
+                        expected: ret_ty.clone(),
+                        found: body_ty,
+                    });
+                }
+
+                // Check all linear params were consumed
+                for (param_name, param_ty) in params {
+                    if param_ty.is_linear() {
+                        if let Some(entry) = tc.ctx.vars.get(param_name) {
+                            if !entry.used {
+                                return Err(TypeError::LinearVariableNotConsumed(param_name.clone()));
+                            }
+                        }
+                    }
+                }
+
+                // Restore context for next function
+                tc.ctx = saved_ctx;
+            }
+            Decl::Type { .. } => {
+                // Type aliases don't need runtime checking
+            }
+        }
+    }
+
+    Ok(())
+}
+
+/// Type check a single expression (convenience function)
+pub fn type_check_expr(expr: &Expr) -> Result<Ty, TypeError> {
+    let mut tc = TypeChecker::new();
+    tc.check(expr)
 }
 
 #[cfg(test)]

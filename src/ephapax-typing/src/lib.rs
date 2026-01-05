@@ -820,6 +820,11 @@ pub fn type_check_expr(expr: &Expr) -> Result<Ty, TypeError> {
     tc.check(expr)
 }
 
+/// Type check a single expression (alias for type_check_expr)
+pub fn type_check(expr: &Expr) -> Result<Ty, TypeError> {
+    type_check_expr(expr)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -15,10 +15,10 @@ categories.workspace = true
 
 [dependencies]
 ephapax-syntax = { workspace = true }
-ephapax-lexer = { workspace = true }
-chumsky = { workspace = true }
 ariadne = { workspace = true }
 smol_str = { workspace = true }
 thiserror = { workspace = true }
+pest = "2.7"
+pest_derive = "2.7"
 
 [dev-dependencies]

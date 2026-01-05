@@ -3,7 +3,7 @@
 
 //! Ephapax Parser
 //!
-//! Parses Ephapax source code into an AST using the chumsky parser combinator library.
+//! Parses Ephapax source code into an AST using the pest PEG parser.
 //!
 //! # Example
 //!
@@ -14,847 +14,820 @@
 //! let result = parse(source);
 //! ```
 
-use chumsky::prelude::*;
-use ephapax_lexer::{Lexer, Span as LexerSpan, TokenKind};
-use ephapax_syntax::{BaseTy, BinOp, Decl, Expr, ExprKind, Literal, Module, Span as SyntaxSpan, Ty, UnaryOp};
+use ephapax_syntax::{BaseTy, BinOp, Decl, Expr, ExprKind, Literal, Module, Span, Ty, UnaryOp};
+use pest::Parser;
+use pest_derive::Parser;
 use smol_str::SmolStr;
 
 pub mod error;
 
 pub use error::{ParseError, Report};
 
-/// Convert lexer span to syntax span
-fn to_syntax_span(span: LexerSpan) -> SyntaxSpan {
-    SyntaxSpan::new(span.start, span.end)
-}
-
-/// Merge two syntax spans
-fn merge_spans(a: SyntaxSpan, b: SyntaxSpan) -> SyntaxSpan {
-    SyntaxSpan::new(a.start.min(b.start), a.end.max(b.end))
-}
-
-/// Token type that carries span information
-#[derive(Debug, Clone, PartialEq)]
-struct SpannedToken {
-    kind: TokenKind,
-    span: LexerSpan,
-}
-
-impl std::fmt::Display for SpannedToken {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{:?}", self.kind)
-    }
-}
+#[derive(Parser)]
+#[grammar = "ephapax.pest"]
+struct EphapaxParser;
 
 /// Parse source code into an expression
 pub fn parse(source: &str) -> Result<Expr, Vec<ParseError>> {
-    let (tokens, lex_errors) = Lexer::tokenize(source);
+    let pairs = EphapaxParser::parse(Rule::expression_only, source)
+        .map_err(|e| vec![ParseError::Syntax {
+            message: e.to_string(),
+            span: Span::dummy(),
+        }])?;
 
-    if !lex_errors.is_empty() {
-        return Err(lex_errors
-            .into_iter()
-            .map(|e| ParseError::Lexer(e.to_string()))
-            .collect());
-    }
+    let pair = pairs.into_iter().next().unwrap();
+    let inner = pair.into_inner().next().unwrap();
 
-    // Convert tokens to spanned tokens - filter out EOF for expression parsing
-    let spanned_tokens: Vec<SpannedToken> = tokens
-        .into_iter()
-        .filter(|t| t.kind != TokenKind::Eof)
-        .map(|t| SpannedToken { kind: t.kind, span: t.span })
-        .collect();
-
-    let len = source.len();
-    let end_span = LexerSpan::new(len, len);
-
-    // Parse using slice-based input
-    let result = expr_parser()
-        .then_ignore(end())
-        .parse(&spanned_tokens[..])
-        .into_result();
-
-    result.map_err(|errs| {
-        errs.into_iter()
-            .map(|e| {
-                // Get span from the error's location in the token stream
-                let span = if let Some(&ref tok) = e.found() {
-                    to_syntax_span(tok.span)
-                } else {
-                    to_syntax_span(end_span)
-                };
-                ParseError::Syntax {
-                    message: format!("{}", e.reason()),
-                    span,
-                }
-            })
-            .collect()
-    })
+    parse_expression(inner).map_err(|e| vec![e])
 }
 
 /// Parse source code into a module (multiple declarations)
 pub fn parse_module(source: &str, name: &str) -> Result<Module, Vec<ParseError>> {
-    let (tokens, lex_errors) = Lexer::tokenize(source);
+    let pairs = EphapaxParser::parse(Rule::module, source)
+        .map_err(|e| vec![ParseError::Syntax {
+            message: e.to_string(),
+            span: Span::dummy(),
+        }])?;
 
-    if !lex_errors.is_empty() {
-        return Err(lex_errors
-            .into_iter()
-            .map(|e| ParseError::Lexer(e.to_string()))
-            .collect());
+    let pair = pairs.into_iter().next().unwrap();
+    let mut decls = Vec::new();
+
+    for inner in pair.into_inner() {
+        if inner.as_rule() == Rule::declaration {
+            decls.push(parse_declaration(inner).map_err(|e| vec![e])?);
+        }
     }
 
-    let spanned_tokens: Vec<SpannedToken> = tokens
-        .into_iter()
-        .map(|t| SpannedToken { kind: t.kind, span: t.span })
-        .collect();
+    Ok(Module {
+        name: SmolStr::new(name),
+        decls,
+    })
+}
 
-    let len = source.len();
-    let end_span = LexerSpan::new(len, len);
+// ============================================================================
+// Helper Functions
+// ============================================================================
 
-    let result = module_parser()
-        .parse(&spanned_tokens[..])
-        .into_result();
+fn span_from_pair(pair: &pest::iterators::Pair<Rule>) -> Span {
+    let span = pair.as_span();
+    Span::new(span.start(), span.end())
+}
 
-    result
-        .map(|decls| Module {
-            name: SmolStr::new(name),
-            decls,
-        })
-        .map_err(|errs| {
-            errs.into_iter()
-                .map(|e| {
-                    let span = if let Some(&ref tok) = e.found() {
-                        to_syntax_span(tok.span)
-                    } else {
-                        to_syntax_span(end_span)
-                    };
-                    ParseError::Syntax {
-                        message: format!("{}", e.reason()),
-                        span,
+fn parse_identifier(pair: pest::iterators::Pair<Rule>) -> SmolStr {
+    SmolStr::new(pair.as_str())
+}
+
+// ============================================================================
+// Declaration Parsing
+// ============================================================================
+
+fn parse_declaration(pair: pest::iterators::Pair<Rule>) -> Result<Decl, ParseError> {
+    let inner = pair.into_inner().next().unwrap();
+
+    match inner.as_rule() {
+        Rule::fn_decl => parse_fn_decl(inner),
+        Rule::type_decl => parse_type_decl(inner),
+        _ => Err(ParseError::Syntax {
+            message: format!("Unexpected declaration: {:?}", inner.as_rule()),
+            span: span_from_pair(&inner),
+        }),
+    }
+}
+
+fn parse_fn_decl(pair: pest::iterators::Pair<Rule>) -> Result<Decl, ParseError> {
+    let mut inner = pair.into_inner();
+
+    let name = parse_identifier(inner.next().unwrap());
+
+    let mut params = Vec::new();
+    let mut ret_ty = None;
+    let mut body = None;
+
+    for item in inner {
+        match item.as_rule() {
+            Rule::param_list => {
+                for param in item.into_inner() {
+                    if param.as_rule() == Rule::param {
+                        let mut parts = param.into_inner();
+                        let param_name = parse_identifier(parts.next().unwrap());
+                        let param_ty = parse_type(parts.next().unwrap())?;
+                        params.push((param_name, param_ty));
                     }
-                })
-                .collect()
-        })
-}
-
-// ============================================================================
-// Helper Parsers
-// ============================================================================
-
-/// Match a specific token kind and return its span
-fn token<'a>(
-    kind: TokenKind,
-) -> impl Parser<'a, &'a [SpannedToken], LexerSpan, extra::Err<Rich<'a, SpannedToken>>> + Clone {
-    any()
-        .filter(move |t: &SpannedToken| t.kind == kind)
-        .map(|t: SpannedToken| t.span)
-}
-
-/// Match a specific token kind and ignore the result
-fn tok<'a>(
-    kind: TokenKind,
-) -> impl Parser<'a, &'a [SpannedToken], (), extra::Err<Rich<'a, SpannedToken>>> + Clone {
-    token(kind).ignored()
-}
-
-/// Parse an identifier and return its name and span
-fn ident<'a>() -> impl Parser<'a, &'a [SpannedToken], (SmolStr, LexerSpan), extra::Err<Rich<'a, SpannedToken>>> + Clone {
-    any()
-        .filter(|t: &SpannedToken| matches!(t.kind, TokenKind::Ident(_)))
-        .map(|t: SpannedToken| {
-            if let TokenKind::Ident(s) = t.kind {
-                (s, t.span)
-            } else {
-                unreachable!()
-            }
-        })
-}
-
-/// Parse an identifier name only
-fn ident_name<'a>() -> impl Parser<'a, &'a [SpannedToken], SmolStr, extra::Err<Rich<'a, SpannedToken>>> + Clone {
-    ident().map(|(name, _)| name)
-}
-
-// ============================================================================
-// Type Parsers
-// ============================================================================
-
-fn base_type_parser<'a>() -> impl Parser<'a, &'a [SpannedToken], Ty, extra::Err<Rich<'a, SpannedToken>>> + Clone {
-    any()
-        .filter(|t: &SpannedToken| {
-            matches!(
-                t.kind,
-                TokenKind::Unit
-                    | TokenKind::TyBool
-                    | TokenKind::TyI32
-                    | TokenKind::TyI64
-                    | TokenKind::TyF32
-                    | TokenKind::TyF64
-            )
-        })
-        .map(|t: SpannedToken| match t.kind {
-            TokenKind::Unit => Ty::Base(BaseTy::Unit),
-            TokenKind::TyBool => Ty::Base(BaseTy::Bool),
-            TokenKind::TyI32 => Ty::Base(BaseTy::I32),
-            TokenKind::TyI64 => Ty::Base(BaseTy::I64),
-            TokenKind::TyF32 => Ty::Base(BaseTy::F32),
-            TokenKind::TyF64 => Ty::Base(BaseTy::F64),
-            _ => unreachable!(),
-        })
-}
-
-fn type_parser<'a>() -> impl Parser<'a, &'a [SpannedToken], Ty, extra::Err<Rich<'a, SpannedToken>>> + Clone {
-    recursive(|ty| {
-        let base = base_type_parser();
-
-        // String@region
-        let string_ty = tok(TokenKind::TyString)
-            .ignore_then(tok(TokenKind::At))
-            .ignore_then(ident_name())
-            .map(Ty::String);
-
-        // &T (borrow)
-        let borrow_ty = tok(TokenKind::Ampersand)
-            .ignore_then(ty.clone())
-            .map(|t| Ty::Borrow(Box::new(t)));
-
-        // (T1, T2) product or parenthesized type
-        let paren_ty = ty
-            .clone()
-            .separated_by(tok(TokenKind::Comma))
-            .at_least(1)
-            .collect::<Vec<_>>()
-            .delimited_by(tok(TokenKind::LParen), tok(TokenKind::RParen))
-            .map(|types| {
-                if types.len() == 1 {
-                    types.into_iter().next().unwrap()
-                } else if types.len() == 2 {
-                    let mut iter = types.into_iter();
-                    Ty::Prod {
-                        left: Box::new(iter.next().unwrap()),
-                        right: Box::new(iter.next().unwrap()),
-                    }
-                } else {
-                    types
-                        .into_iter()
-                        .reduce(|acc, t| Ty::Prod {
-                            left: Box::new(acc),
-                            right: Box::new(t),
-                        })
-                        .unwrap()
                 }
-            });
+            }
+            Rule::ty => {
+                if ret_ty.is_none() {
+                    ret_ty = Some(parse_type(item)?);
+                }
+            }
+            Rule::expression => {
+                body = Some(parse_expression(item)?);
+            }
+            _ => {}
+        }
+    }
 
-        // Type variable
-        let type_var = ident_name().map(Ty::Var);
+    Ok(Decl::Fn {
+        name,
+        params,
+        ret_ty: ret_ty.unwrap_or(Ty::Base(BaseTy::Unit)),
+        body: body.unwrap_or_else(|| Expr::dummy(ExprKind::Lit(Literal::Unit))),
+    })
+}
 
-        let atom = choice((base, string_ty, borrow_ty, paren_ty, type_var));
+fn parse_type_decl(pair: pest::iterators::Pair<Rule>) -> Result<Decl, ParseError> {
+    let mut inner = pair.into_inner();
+    let name = parse_identifier(inner.next().unwrap());
+    let ty = parse_type(inner.next().unwrap())?;
 
-        // T1 + T2 (sum) - left associative
-        let sum = atom.clone().foldl(
-            tok(TokenKind::Plus).ignore_then(atom.clone()).repeated(),
-            |left, right| Ty::Sum {
-                left: Box::new(left),
+    Ok(Decl::Type { name, ty })
+}
+
+// ============================================================================
+// Type Parsing
+// ============================================================================
+
+fn parse_type(pair: pest::iterators::Pair<Rule>) -> Result<Ty, ParseError> {
+    let mut inner = pair.into_inner().peekable();
+
+    let first = inner.next().unwrap();
+    let left = parse_sum_type(first)?;
+
+    // Check for function type (->)
+    if let Some(rest) = inner.next() {
+        let ret = parse_type(rest)?;
+        Ok(Ty::Fun {
+            param: Box::new(left),
+            ret: Box::new(ret),
+        })
+    } else {
+        Ok(left)
+    }
+}
+
+fn parse_sum_type(pair: pest::iterators::Pair<Rule>) -> Result<Ty, ParseError> {
+    let mut inner = pair.into_inner();
+    let mut result = parse_type_atom(inner.next().unwrap())?;
+
+    for atom in inner {
+        let right = parse_type_atom(atom)?;
+        result = Ty::Sum {
+            left: Box::new(result),
+            right: Box::new(right),
+        };
+    }
+
+    Ok(result)
+}
+
+fn parse_type_atom(pair: pest::iterators::Pair<Rule>) -> Result<Ty, ParseError> {
+    let inner = pair.into_inner().next().unwrap();
+
+    match inner.as_rule() {
+        Rule::base_ty => parse_base_type(inner),
+        Rule::string_ty => {
+            let region = parse_identifier(inner.into_inner().next().unwrap());
+            Ok(Ty::String(region))
+        }
+        Rule::borrow_ty => {
+            let inner_ty = parse_type_atom(inner.into_inner().next().unwrap())?;
+            Ok(Ty::Borrow(Box::new(inner_ty)))
+        }
+        Rule::product_ty => {
+            let mut types: Vec<Ty> = Vec::new();
+            for ty_pair in inner.into_inner() {
+                types.push(parse_type(ty_pair)?);
+            }
+
+            if types.len() == 1 {
+                Ok(types.into_iter().next().unwrap())
+            } else {
+                let result = types.into_iter().reduce(|acc, t| Ty::Prod {
+                    left: Box::new(acc),
+                    right: Box::new(t),
+                });
+                Ok(result.unwrap())
+            }
+        }
+        Rule::type_var => {
+            let name = parse_identifier(inner.into_inner().next().unwrap());
+            Ok(Ty::Var(name))
+        }
+        _ => Err(ParseError::Syntax {
+            message: format!("Unexpected type atom: {:?}", inner.as_rule()),
+            span: span_from_pair(&inner),
+        }),
+    }
+}
+
+fn parse_base_type(pair: pest::iterators::Pair<Rule>) -> Result<Ty, ParseError> {
+    let text = pair.as_str().trim();
+    match text {
+        "()" => Ok(Ty::Base(BaseTy::Unit)),
+        "Bool" => Ok(Ty::Base(BaseTy::Bool)),
+        "I32" => Ok(Ty::Base(BaseTy::I32)),
+        "I64" => Ok(Ty::Base(BaseTy::I64)),
+        "F32" => Ok(Ty::Base(BaseTy::F32)),
+        "F64" => Ok(Ty::Base(BaseTy::F64)),
+        _ => Err(ParseError::Syntax {
+            message: format!("Unknown base type: {}", text),
+            span: span_from_pair(&pair),
+        }),
+    }
+}
+
+// ============================================================================
+// Expression Parsing
+// ============================================================================
+
+fn parse_expression(pair: pest::iterators::Pair<Rule>) -> Result<Expr, ParseError> {
+    let span = span_from_pair(&pair);
+    let inner = pair.into_inner().next().unwrap();
+
+    match inner.as_rule() {
+        Rule::let_expr => parse_let_expr(inner),
+        Rule::let_lin_expr => parse_let_lin_expr(inner),
+        Rule::lambda_expr => parse_lambda_expr(inner),
+        Rule::if_expr => parse_if_expr(inner),
+        Rule::region_expr => parse_region_expr(inner),
+        Rule::case_expr => parse_case_expr(inner),
+        Rule::or_expr => parse_or_expr(inner),
+        _ => Err(ParseError::Syntax {
+            message: format!("Unexpected expression: {:?}", inner.as_rule()),
+            span,
+        }),
+    }
+}
+
+fn parse_let_expr(pair: pest::iterators::Pair<Rule>) -> Result<Expr, ParseError> {
+    let span = span_from_pair(&pair);
+    let mut inner = pair.into_inner();
+
+    let name = parse_identifier(inner.next().unwrap());
+
+    let mut ty = None;
+    let mut value = None;
+    let mut body = None;
+
+    for item in inner {
+        match item.as_rule() {
+            Rule::ty => ty = Some(parse_type(item)?),
+            Rule::expression => {
+                if value.is_none() {
+                    value = Some(parse_expression(item)?);
+                } else {
+                    body = Some(parse_expression(item)?);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    Ok(Expr::new(
+        ExprKind::Let {
+            name,
+            ty,
+            value: Box::new(value.unwrap()),
+            body: Box::new(body.unwrap()),
+        },
+        span,
+    ))
+}
+
+fn parse_let_lin_expr(pair: pest::iterators::Pair<Rule>) -> Result<Expr, ParseError> {
+    let span = span_from_pair(&pair);
+    let mut inner = pair.into_inner();
+
+    let name = parse_identifier(inner.next().unwrap());
+
+    let mut ty = None;
+    let mut value = None;
+    let mut body = None;
+
+    for item in inner {
+        match item.as_rule() {
+            Rule::ty => ty = Some(parse_type(item)?),
+            Rule::expression => {
+                if value.is_none() {
+                    value = Some(parse_expression(item)?);
+                } else {
+                    body = Some(parse_expression(item)?);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    Ok(Expr::new(
+        ExprKind::LetLin {
+            name,
+            ty,
+            value: Box::new(value.unwrap()),
+            body: Box::new(body.unwrap()),
+        },
+        span,
+    ))
+}
+
+fn parse_lambda_expr(pair: pest::iterators::Pair<Rule>) -> Result<Expr, ParseError> {
+    let span = span_from_pair(&pair);
+    let mut inner = pair.into_inner();
+
+    let param = parse_identifier(inner.next().unwrap());
+    let param_ty = parse_type(inner.next().unwrap())?;
+    let body = parse_expression(inner.next().unwrap())?;
+
+    Ok(Expr::new(
+        ExprKind::Lambda {
+            param,
+            param_ty,
+            body: Box::new(body),
+        },
+        span,
+    ))
+}
+
+fn parse_if_expr(pair: pest::iterators::Pair<Rule>) -> Result<Expr, ParseError> {
+    let span = span_from_pair(&pair);
+    let mut inner = pair.into_inner();
+
+    let cond = parse_expression(inner.next().unwrap())?;
+    let then_branch = parse_expression(inner.next().unwrap())?;
+    let else_branch = parse_expression(inner.next().unwrap())?;
+
+    Ok(Expr::new(
+        ExprKind::If {
+            cond: Box::new(cond),
+            then_branch: Box::new(then_branch),
+            else_branch: Box::new(else_branch),
+        },
+        span,
+    ))
+}
+
+fn parse_region_expr(pair: pest::iterators::Pair<Rule>) -> Result<Expr, ParseError> {
+    let span = span_from_pair(&pair);
+    let mut inner = pair.into_inner();
+
+    let name = parse_identifier(inner.next().unwrap());
+    let body = parse_expression(inner.next().unwrap())?;
+
+    Ok(Expr::new(
+        ExprKind::Region {
+            name,
+            body: Box::new(body),
+        },
+        span,
+    ))
+}
+
+fn parse_case_expr(pair: pest::iterators::Pair<Rule>) -> Result<Expr, ParseError> {
+    let span = span_from_pair(&pair);
+    let mut inner = pair.into_inner();
+
+    let scrutinee = parse_expression(inner.next().unwrap())?;
+    let left_var = parse_identifier(inner.next().unwrap());
+    let left_body = parse_expression(inner.next().unwrap())?;
+    let right_var = parse_identifier(inner.next().unwrap());
+    let right_body = parse_expression(inner.next().unwrap())?;
+
+    Ok(Expr::new(
+        ExprKind::Case {
+            scrutinee: Box::new(scrutinee),
+            left_var,
+            left_body: Box::new(left_body),
+            right_var,
+            right_body: Box::new(right_body),
+        },
+        span,
+    ))
+}
+
+// ============================================================================
+// Binary Operator Parsing
+// ============================================================================
+
+fn parse_or_expr(pair: pest::iterators::Pair<Rule>) -> Result<Expr, ParseError> {
+    let span = span_from_pair(&pair);
+    let mut inner = pair.into_inner();
+
+    let mut result = parse_and_expr(inner.next().unwrap())?;
+
+    for and_expr in inner {
+        let right = parse_and_expr(and_expr)?;
+        result = Expr::new(
+            ExprKind::BinOp {
+                op: BinOp::Or,
+                left: Box::new(result),
                 right: Box::new(right),
             },
+            span,
         );
+    }
 
-        // T1 -> T2 (function) - right associative
-        sum.clone()
-            .separated_by(tok(TokenKind::Arrow))
-            .at_least(1)
-            .collect::<Vec<_>>()
-            .map(|types| {
-                types
-                    .into_iter()
-                    .rev()
-                    .reduce(|ret, param| Ty::Fun {
-                        param: Box::new(param),
-                        ret: Box::new(ret),
-                    })
-                    .unwrap()
-            })
-    })
+    Ok(result)
 }
 
-// ============================================================================
-// Expression Parsers
-// ============================================================================
+fn parse_and_expr(pair: pest::iterators::Pair<Rule>) -> Result<Expr, ParseError> {
+    let span = span_from_pair(&pair);
+    let mut inner = pair.into_inner();
 
-fn literal_parser<'a>() -> impl Parser<'a, &'a [SpannedToken], (Literal, LexerSpan), extra::Err<Rich<'a, SpannedToken>>> + Clone {
-    any()
-        .filter(|t: &SpannedToken| {
-            matches!(
-                t.kind,
-                TokenKind::Unit
-                    | TokenKind::True
-                    | TokenKind::False
-                    | TokenKind::Integer(_)
-                    | TokenKind::Float(_)
-                    | TokenKind::String(_)
-            )
-        })
-        .map(|t: SpannedToken| {
-            let lit = match t.kind {
-                TokenKind::Unit => Literal::Unit,
-                TokenKind::True => Literal::Bool(true),
-                TokenKind::False => Literal::Bool(false),
-                TokenKind::Integer(n) => {
-                    // Check for overflow when converting i64 to i32
-                    if n > i32::MAX as i64 || n < i32::MIN as i64 {
-                        Literal::I64(n)
-                    } else {
-                        Literal::I32(n as i32)
-                    }
-                },
-                TokenKind::Float(n) => Literal::F64(n),
-                TokenKind::String(s) => Literal::String(s),
+    let mut result = parse_eq_expr(inner.next().unwrap())?;
+
+    for eq_expr in inner {
+        let right = parse_eq_expr(eq_expr)?;
+        result = Expr::new(
+            ExprKind::BinOp {
+                op: BinOp::And,
+                left: Box::new(result),
+                right: Box::new(right),
+            },
+            span,
+        );
+    }
+
+    Ok(result)
+}
+
+fn parse_eq_expr(pair: pest::iterators::Pair<Rule>) -> Result<Expr, ParseError> {
+    let span = span_from_pair(&pair);
+    let mut inner = pair.into_inner().peekable();
+
+    let mut result = parse_cmp_expr(inner.next().unwrap())?;
+
+    while let Some(next) = inner.next() {
+        let (op, right_pair) = if next.as_rule() == Rule::eq_op {
+            let op = match next.as_str() {
+                "==" => BinOp::Eq,
+                "!=" => BinOp::Ne,
                 _ => unreachable!(),
             };
-            (lit, t.span)
-        })
+            (op, inner.next().unwrap())
+        } else {
+            continue;
+        };
+
+        let right = parse_cmp_expr(right_pair)?;
+        result = Expr::new(
+            ExprKind::BinOp {
+                op,
+                left: Box::new(result),
+                right: Box::new(right),
+            },
+            span,
+        );
+    }
+
+    Ok(result)
 }
 
-fn expr_parser<'a>() -> impl Parser<'a, &'a [SpannedToken], Expr, extra::Err<Rich<'a, SpannedToken>>> + Clone {
-    recursive(|expr: Recursive<dyn Parser<&[SpannedToken], Expr, extra::Err<Rich<SpannedToken>>>>| {
-        // Literals
-        let literal = literal_parser()
-            .map(|(lit, span)| Expr::new(ExprKind::Lit(lit), to_syntax_span(span)));
+fn parse_cmp_expr(pair: pest::iterators::Pair<Rule>) -> Result<Expr, ParseError> {
+    let span = span_from_pair(&pair);
+    let mut inner = pair.into_inner().peekable();
 
-        // Variables
-        let var = ident()
-            .map(|(name, span)| Expr::new(ExprKind::Var(name), to_syntax_span(span)));
+    let mut result = parse_add_expr(inner.next().unwrap())?;
 
-        // String.new@r("...") or String.concat(...) etc.
-        let string_method = token(TokenKind::TyString)
-            .then_ignore(tok(TokenKind::Dot))
-            .then(ident_name())
-            .then(tok(TokenKind::At).ignore_then(ident_name()).or_not())
-            .then(
-                expr.clone()
-                    .separated_by(tok(TokenKind::Comma))
-                    .collect::<Vec<_>>()
-                    .delimited_by(tok(TokenKind::LParen), tok(TokenKind::RParen)),
-            )
-            .map(|(((start_span, method), region), args)| {
-                let span = to_syntax_span(start_span);
-                match method.as_str() {
-                    "new" => {
-                        let region = region.unwrap_or_else(|| SmolStr::new("_"));
-                        if let Some(arg) = args.into_iter().next() {
-                            if let ExprKind::Lit(Literal::String(s)) = arg.kind {
-                                return Expr::new(ExprKind::StringNew { region, value: s }, span);
-                            }
-                        }
-                        Expr::new(ExprKind::Lit(Literal::Unit), span)
-                    }
-                    "concat" => {
-                        let mut iter = args.into_iter();
-                        let left = iter.next().map(Box::new);
-                        let right = iter.next().map(Box::new);
-                        if let (Some(left), Some(right)) = (left, right) {
-                            Expr::new(ExprKind::StringConcat { left, right }, span)
-                        } else {
-                            Expr::new(ExprKind::Lit(Literal::Unit), span)
-                        }
-                    }
-                    "len" => {
-                        if let Some(arg) = args.into_iter().next() {
-                            Expr::new(ExprKind::StringLen(Box::new(arg)), span)
-                        } else {
-                            Expr::new(ExprKind::Lit(Literal::Unit), span)
-                        }
-                    }
-                    _ => Expr::new(ExprKind::Lit(Literal::Unit), span),
-                }
-            });
+    while let Some(next) = inner.next() {
+        let (op, right_pair) = if next.as_rule() == Rule::cmp_op {
+            let op = match next.as_str() {
+                "<" => BinOp::Lt,
+                ">" => BinOp::Gt,
+                "<=" => BinOp::Le,
+                ">=" => BinOp::Ge,
+                _ => unreachable!(),
+            };
+            (op, inner.next().unwrap())
+        } else {
+            continue;
+        };
 
-        // Parenthesized expression or pair
-        let paren_expr = token(TokenKind::LParen)
-            .then(
-                expr.clone()
-                    .separated_by(tok(TokenKind::Comma))
-                    .at_least(1)
-                    .collect::<Vec<_>>(),
-            )
-            .then_ignore(tok(TokenKind::RParen))
-            .map(|(start_span, exprs)| {
-                let span = to_syntax_span(start_span);
-                if exprs.len() == 1 {
-                    exprs.into_iter().next().unwrap()
-                } else if exprs.len() == 2 {
-                    let mut iter = exprs.into_iter();
-                    Expr::new(
-                        ExprKind::Pair {
-                            left: Box::new(iter.next().unwrap()),
-                            right: Box::new(iter.next().unwrap()),
-                        },
-                        span,
-                    )
-                } else {
-                    let result = exprs.into_iter().reduce(|acc, elem| {
-                        Expr::new(
-                            ExprKind::Pair {
-                                left: Box::new(acc),
-                                right: Box::new(elem),
+        let right = parse_add_expr(right_pair)?;
+        result = Expr::new(
+            ExprKind::BinOp {
+                op,
+                left: Box::new(result),
+                right: Box::new(right),
+            },
+            span,
+        );
+    }
+
+    Ok(result)
+}
+
+fn parse_add_expr(pair: pest::iterators::Pair<Rule>) -> Result<Expr, ParseError> {
+    let span = span_from_pair(&pair);
+    let mut inner = pair.into_inner().peekable();
+
+    let mut result = parse_mul_expr(inner.next().unwrap())?;
+
+    while let Some(next) = inner.next() {
+        let (op, right_pair) = if next.as_rule() == Rule::add_op {
+            let op = match next.as_str() {
+                "+" => BinOp::Add,
+                "-" => BinOp::Sub,
+                _ => unreachable!(),
+            };
+            (op, inner.next().unwrap())
+        } else {
+            continue;
+        };
+
+        let right = parse_mul_expr(right_pair)?;
+        result = Expr::new(
+            ExprKind::BinOp {
+                op,
+                left: Box::new(result),
+                right: Box::new(right),
+            },
+            span,
+        );
+    }
+
+    Ok(result)
+}
+
+fn parse_mul_expr(pair: pest::iterators::Pair<Rule>) -> Result<Expr, ParseError> {
+    let span = span_from_pair(&pair);
+    let mut inner = pair.into_inner().peekable();
+
+    let mut result = parse_unary_expr(inner.next().unwrap())?;
+
+    while let Some(next) = inner.next() {
+        let (op, right_pair) = if next.as_rule() == Rule::mul_op {
+            let op = match next.as_str() {
+                "*" => BinOp::Mul,
+                "/" => BinOp::Div,
+                "%" => BinOp::Mod,
+                _ => unreachable!(),
+            };
+            (op, inner.next().unwrap())
+        } else {
+            continue;
+        };
+
+        let right = parse_unary_expr(right_pair)?;
+        result = Expr::new(
+            ExprKind::BinOp {
+                op,
+                left: Box::new(result),
+                right: Box::new(right),
+            },
+            span,
+        );
+    }
+
+    Ok(result)
+}
+
+fn parse_unary_expr(pair: pest::iterators::Pair<Rule>) -> Result<Expr, ParseError> {
+    let span = span_from_pair(&pair);
+    let text = pair.as_str().trim();
+
+    if text.starts_with('!') {
+        let inner = pair.into_inner().next().unwrap();
+        let operand = parse_unary_expr(inner)?;
+        Ok(Expr::new(
+            ExprKind::UnaryOp {
+                op: UnaryOp::Not,
+                operand: Box::new(operand),
+            },
+            span,
+        ))
+    } else if text.starts_with('-') && !text.chars().nth(1).map_or(false, |c| c.is_ascii_digit()) {
+        let inner = pair.into_inner().next().unwrap();
+        let operand = parse_unary_expr(inner)?;
+        Ok(Expr::new(
+            ExprKind::UnaryOp {
+                op: UnaryOp::Neg,
+                operand: Box::new(operand),
+            },
+            span,
+        ))
+    } else {
+        let inner = pair.into_inner().next().unwrap();
+        parse_postfix_expr(inner)
+    }
+}
+
+fn parse_postfix_expr(pair: pest::iterators::Pair<Rule>) -> Result<Expr, ParseError> {
+    let span = span_from_pair(&pair);
+    let mut inner = pair.into_inner();
+
+    let mut result = parse_atom_expr(inner.next().unwrap())?;
+
+    for op in inner {
+        match op.as_rule() {
+            Rule::postfix_op => {
+                let op_inner = op.into_inner().next().unwrap();
+                match op_inner.as_rule() {
+                    Rule::call_op => {
+                        let arg = parse_expression(op_inner.into_inner().next().unwrap())?;
+                        result = Expr::new(
+                            ExprKind::App {
+                                func: Box::new(result),
+                                arg: Box::new(arg),
                             },
                             span,
-                        )
-                    });
-                    result.unwrap()
-                }
-            });
-
-        // let x = e1 in e2
-        let let_expr = token(TokenKind::Let)
-            .then(ident_name())
-            .then(tok(TokenKind::Colon).ignore_then(type_parser()).or_not())
-            .then_ignore(tok(TokenKind::Eq))
-            .then(expr.clone())
-            .then_ignore(tok(TokenKind::In))
-            .then(expr.clone())
-            .map(|((((start_span, name), ty), value), body)| {
-                Expr::new(
-                    ExprKind::Let {
-                        name,
-                        ty,
-                        value: Box::new(value),
-                        body: Box::new(body),
-                    },
-                    to_syntax_span(start_span),
-                )
-            });
-
-        // let! x = e1 in e2
-        let let_lin_expr = token(TokenKind::LetBang)
-            .then(ident_name())
-            .then(tok(TokenKind::Colon).ignore_then(type_parser()).or_not())
-            .then_ignore(tok(TokenKind::Eq))
-            .then(expr.clone())
-            .then_ignore(tok(TokenKind::In))
-            .then(expr.clone())
-            .map(|((((start_span, name), ty), value), body)| {
-                Expr::new(
-                    ExprKind::LetLin {
-                        name,
-                        ty,
-                        value: Box::new(value),
-                        body: Box::new(body),
-                    },
-                    to_syntax_span(start_span),
-                )
-            });
-
-        // fn(x: T) -> e
-        let lambda = token(TokenKind::Fn)
-            .then_ignore(tok(TokenKind::LParen))
-            .then(ident_name())
-            .then_ignore(tok(TokenKind::Colon))
-            .then(type_parser())
-            .then_ignore(tok(TokenKind::RParen))
-            .then_ignore(tok(TokenKind::Arrow))
-            .then(expr.clone())
-            .map(|(((start_span, param), param_ty), body)| {
-                Expr::new(
-                    ExprKind::Lambda {
-                        param,
-                        param_ty,
-                        body: Box::new(body),
-                    },
-                    to_syntax_span(start_span),
-                )
-            });
-
-        // if e1 then e2 else e3
-        let if_expr = token(TokenKind::If)
-            .then(expr.clone())
-            .then_ignore(tok(TokenKind::Then))
-            .then(expr.clone())
-            .then_ignore(tok(TokenKind::Else))
-            .then(expr.clone())
-            .map(|(((start_span, cond), then_branch), else_branch)| {
-                Expr::new(
-                    ExprKind::If {
-                        cond: Box::new(cond),
-                        then_branch: Box::new(then_branch),
-                        else_branch: Box::new(else_branch),
-                    },
-                    to_syntax_span(start_span),
-                )
-            });
-
-        // region r { e }
-        let region_expr = token(TokenKind::Region)
-            .then(ident_name())
-            .then_ignore(tok(TokenKind::LBrace))
-            .then(expr.clone())
-            .then_ignore(tok(TokenKind::RBrace))
-            .map(|((start_span, name), body)| {
-                Expr::new(
-                    ExprKind::Region {
-                        name,
-                        body: Box::new(body),
-                    },
-                    to_syntax_span(start_span),
-                )
-            });
-
-        // inl[T](e)
-        let inl_expr = token(TokenKind::Inl)
-            .then_ignore(tok(TokenKind::LBracket))
-            .then(type_parser())
-            .then_ignore(tok(TokenKind::RBracket))
-            .then_ignore(tok(TokenKind::LParen))
-            .then(expr.clone())
-            .then_ignore(tok(TokenKind::RParen))
-            .map(|((start_span, ty), value)| {
-                Expr::new(
-                    ExprKind::Inl {
-                        ty,
-                        value: Box::new(value),
-                    },
-                    to_syntax_span(start_span),
-                )
-            });
-
-        // inr[T](e)
-        let inr_expr = token(TokenKind::Inr)
-            .then_ignore(tok(TokenKind::LBracket))
-            .then(type_parser())
-            .then_ignore(tok(TokenKind::RBracket))
-            .then_ignore(tok(TokenKind::LParen))
-            .then(expr.clone())
-            .then_ignore(tok(TokenKind::RParen))
-            .map(|((start_span, ty), value)| {
-                Expr::new(
-                    ExprKind::Inr {
-                        ty,
-                        value: Box::new(value),
-                    },
-                    to_syntax_span(start_span),
-                )
-            });
-
-        // case e of inl(x) -> e1 inr(y) -> e2 end
-        let case_expr = token(TokenKind::Case)
-            .then(expr.clone())
-            .then_ignore(tok(TokenKind::Of))
-            .then_ignore(tok(TokenKind::Inl))
-            .then_ignore(tok(TokenKind::LParen))
-            .then(ident_name())
-            .then_ignore(tok(TokenKind::RParen))
-            .then_ignore(tok(TokenKind::Arrow))
-            .then(expr.clone())
-            .then_ignore(tok(TokenKind::Inr))
-            .then_ignore(tok(TokenKind::LParen))
-            .then(ident_name())
-            .then_ignore(tok(TokenKind::RParen))
-            .then_ignore(tok(TokenKind::Arrow))
-            .then(expr.clone())
-            .then_ignore(tok(TokenKind::End))
-            .map(
-                |(((((start_span, scrutinee), left_var), left_body), right_var), right_body)| {
-                    Expr::new(
-                        ExprKind::Case {
-                            scrutinee: Box::new(scrutinee),
-                            left_var,
-                            left_body: Box::new(left_body),
-                            right_var,
-                            right_body: Box::new(right_body),
-                        },
-                        to_syntax_span(start_span),
-                    )
-                },
-            );
-
-        // &e (borrow)
-        let borrow_expr = token(TokenKind::Ampersand)
-            .then(expr.clone())
-            .map(|(start_span, inner)| {
-                Expr::new(ExprKind::Borrow(Box::new(inner)), to_syntax_span(start_span))
-            });
-
-        // drop(e)
-        let drop_expr = token(TokenKind::Drop)
-            .then_ignore(tok(TokenKind::LParen))
-            .then(expr.clone())
-            .then_ignore(tok(TokenKind::RParen))
-            .map(|(start_span, inner)| {
-                Expr::new(ExprKind::Drop(Box::new(inner)), to_syntax_span(start_span))
-            });
-
-        // copy(e)
-        let copy_expr = token(TokenKind::Copy)
-            .then_ignore(tok(TokenKind::LParen))
-            .then(expr.clone())
-            .then_ignore(tok(TokenKind::RParen))
-            .map(|(start_span, inner)| {
-                Expr::new(ExprKind::Copy(Box::new(inner)), to_syntax_span(start_span))
-            });
-
-        // Atom expressions
-        let atom = choice((
-            string_method,
-            let_expr,
-            let_lin_expr,
-            lambda,
-            if_expr,
-            region_expr,
-            inl_expr,
-            inr_expr,
-            case_expr,
-            borrow_expr,
-            drop_expr,
-            copy_expr,
-            literal,
-            paren_expr,
-            var,
-        ));
-
-        // Function application and member access
-        let call_or_member = atom.clone().foldl(
-            choice((
-                // Function application: f(arg)
-                expr.clone()
-                    .delimited_by(tok(TokenKind::LParen), tok(TokenKind::RParen))
-                    .map(|arg| ("call".to_string(), Some(arg))),
-                // Member access: e.0 or e.1 or e.field
-                tok(TokenKind::Dot)
-                    .ignore_then(
-                        any()
-                            .filter(|t: &SpannedToken| {
-                                matches!(t.kind, TokenKind::Integer(_) | TokenKind::Ident(_))
-                            })
-                            .map(|t: SpannedToken| match t.kind {
-                                TokenKind::Integer(0) => "0".to_string(),
-                                TokenKind::Integer(1) => "1".to_string(),
-                                TokenKind::Ident(s) => s.to_string(),
-                                _ => "".to_string(),
-                            }),
-                    )
-                    .map(|member| (member, None)),
-            ))
-            .repeated(),
-            |func, (op, arg): (String, Option<Expr>)| {
-                let span = func.span;
-                match op.as_str() {
-                    "call" => {
-                        if let Some(arg) = arg {
-                            Expr::new(
-                                ExprKind::App {
-                                    func: Box::new(func),
-                                    arg: Box::new(arg),
-                                },
-                                span,
-                            )
-                        } else {
-                            func
-                        }
+                        );
                     }
-                    "0" => Expr::new(ExprKind::Fst(Box::new(func)), span),
-                    "1" => Expr::new(ExprKind::Snd(Box::new(func)), span),
-                    _ => func,
+                    Rule::member_op => {
+                        let member = op_inner.into_inner().next().unwrap();
+                        let member_str = member.as_str();
+
+                        if member_str == "0" {
+                            result = Expr::new(ExprKind::Fst(Box::new(result)), span);
+                        } else if member_str == "1" {
+                            result = Expr::new(ExprKind::Snd(Box::new(result)), span);
+                        }
+                        // Other member access not currently supported
+                    }
+                    _ => {}
                 }
-            },
-        );
+            }
+            _ => {}
+        }
+    }
 
-        // Unary operators: ! and -
-        let unary = choice((
-            tok(TokenKind::Not)
-                .ignore_then(call_or_member.clone())
-                .map(|operand| {
-                    let span = operand.span;
-                    Expr::new(
-                        ExprKind::UnaryOp {
-                            op: UnaryOp::Not,
-                            operand: Box::new(operand),
-                        },
-                        span,
-                    )
-                }),
-            tok(TokenKind::Minus)
-                .ignore_then(call_or_member.clone())
-                .map(|operand| {
-                    let span = operand.span;
-                    Expr::new(
-                        ExprKind::UnaryOp {
-                            op: UnaryOp::Neg,
-                            operand: Box::new(operand),
-                        },
-                        span,
-                    )
-                }),
-            call_or_member,
-        ));
-
-        // Multiplicative: * / %
-        let product = unary.clone().foldl(
-            choice((
-                token(TokenKind::Star).map(|_| BinOp::Mul),
-                token(TokenKind::Slash).map(|_| BinOp::Div),
-                token(TokenKind::Percent).map(|_| BinOp::Mod),
-            ))
-            .then(unary.clone())
-            .repeated(),
-            |left, (op, right)| {
-                let span = merge_spans(left.span, right.span);
-                Expr::new(
-                    ExprKind::BinOp {
-                        op,
-                        left: Box::new(left),
-                        right: Box::new(right),
-                    },
-                    span,
-                )
-            },
-        );
-
-        // Additive: + -
-        let sum = product.clone().foldl(
-            choice((
-                token(TokenKind::Plus).map(|_| BinOp::Add),
-                token(TokenKind::Minus).map(|_| BinOp::Sub),
-            ))
-            .then(product.clone())
-            .repeated(),
-            |left, (op, right)| {
-                let span = merge_spans(left.span, right.span);
-                Expr::new(
-                    ExprKind::BinOp {
-                        op,
-                        left: Box::new(left),
-                        right: Box::new(right),
-                    },
-                    span,
-                )
-            },
-        );
-
-        // Comparison: < > <= >=
-        let comparison = sum.clone().foldl(
-            choice((
-                token(TokenKind::Lt).map(|_| BinOp::Lt),
-                token(TokenKind::Gt).map(|_| BinOp::Gt),
-                token(TokenKind::LtEq).map(|_| BinOp::Le),
-                token(TokenKind::GtEq).map(|_| BinOp::Ge),
-            ))
-            .then(sum.clone())
-            .repeated(),
-            |left, (op, right)| {
-                let span = merge_spans(left.span, right.span);
-                Expr::new(
-                    ExprKind::BinOp {
-                        op,
-                        left: Box::new(left),
-                        right: Box::new(right),
-                    },
-                    span,
-                )
-            },
-        );
-
-        // Equality: == !=
-        let equality = comparison.clone().foldl(
-            choice((
-                token(TokenKind::EqEq).map(|_| BinOp::Eq),
-                token(TokenKind::NotEq).map(|_| BinOp::Ne),
-            ))
-            .then(comparison.clone())
-            .repeated(),
-            |left, (op, right)| {
-                let span = merge_spans(left.span, right.span);
-                Expr::new(
-                    ExprKind::BinOp {
-                        op,
-                        left: Box::new(left),
-                        right: Box::new(right),
-                    },
-                    span,
-                )
-            },
-        );
-
-        // Logical AND: &&
-        let and = equality.clone().foldl(
-            token(TokenKind::AndAnd)
-                .map(|_| BinOp::And)
-                .then(equality.clone())
-                .repeated(),
-            |left, (op, right)| {
-                let span = merge_spans(left.span, right.span);
-                Expr::new(
-                    ExprKind::BinOp {
-                        op,
-                        left: Box::new(left),
-                        right: Box::new(right),
-                    },
-                    span,
-                )
-            },
-        );
-
-        // Logical OR: ||
-        and.clone().foldl(
-            token(TokenKind::OrOr)
-                .map(|_| BinOp::Or)
-                .then(and.clone())
-                .repeated(),
-            |left, (op, right)| {
-                let span = merge_spans(left.span, right.span);
-                Expr::new(
-                    ExprKind::BinOp {
-                        op,
-                        left: Box::new(left),
-                        right: Box::new(right),
-                    },
-                    span,
-                )
-            },
-        )
-    })
+    Ok(result)
 }
 
-// ============================================================================
-// Declaration Parsers
-// ============================================================================
+fn parse_atom_expr(pair: pest::iterators::Pair<Rule>) -> Result<Expr, ParseError> {
+    let span = span_from_pair(&pair);
+    let inner = pair.into_inner().next().unwrap();
 
-fn decl_parser<'a>() -> impl Parser<'a, &'a [SpannedToken], Decl, extra::Err<Rich<'a, SpannedToken>>> + Clone {
-    // fn name(params): RetTy = body
-    let fn_decl = tok(TokenKind::Fn)
-        .ignore_then(ident_name())
-        .then(
-            ident_name()
-                .then_ignore(tok(TokenKind::Colon))
-                .then(type_parser())
-                .separated_by(tok(TokenKind::Comma))
-                .collect::<Vec<_>>()
-                .delimited_by(tok(TokenKind::LParen), tok(TokenKind::RParen)),
-        )
-        .then_ignore(tok(TokenKind::Colon))
-        .then(type_parser())
-        .then_ignore(tok(TokenKind::Eq))
-        .then(expr_parser())
-        .map(|(((name, params), ret_ty), body)| Decl::Fn {
-            name,
-            params,
-            ret_ty,
-            body,
-        });
-
-    // type Name = Type
-    let type_decl = tok(TokenKind::Type)
-        .ignore_then(ident_name())
-        .then_ignore(tok(TokenKind::Eq))
-        .then(type_parser())
-        .map(|(name, ty)| Decl::Type { name, ty });
-
-    choice((fn_decl, type_decl))
+    match inner.as_rule() {
+        Rule::string_method => parse_string_method(inner),
+        Rule::inl_expr => {
+            let mut parts = inner.into_inner();
+            let ty = parse_type(parts.next().unwrap())?;
+            let value = parse_expression(parts.next().unwrap())?;
+            Ok(Expr::new(
+                ExprKind::Inl {
+                    ty,
+                    value: Box::new(value),
+                },
+                span,
+            ))
+        }
+        Rule::inr_expr => {
+            let mut parts = inner.into_inner();
+            let ty = parse_type(parts.next().unwrap())?;
+            let value = parse_expression(parts.next().unwrap())?;
+            Ok(Expr::new(
+                ExprKind::Inr {
+                    ty,
+                    value: Box::new(value),
+                },
+                span,
+            ))
+        }
+        Rule::borrow_expr => {
+            let inner_expr = parse_unary_expr(inner.into_inner().next().unwrap())?;
+            Ok(Expr::new(ExprKind::Borrow(Box::new(inner_expr)), span))
+        }
+        Rule::drop_expr => {
+            let inner_expr = parse_expression(inner.into_inner().next().unwrap())?;
+            Ok(Expr::new(ExprKind::Drop(Box::new(inner_expr)), span))
+        }
+        Rule::copy_expr => {
+            let inner_expr = parse_expression(inner.into_inner().next().unwrap())?;
+            Ok(Expr::new(ExprKind::Copy(Box::new(inner_expr)), span))
+        }
+        Rule::paren_or_pair => parse_paren_or_pair(inner),
+        Rule::literal => parse_literal(inner),
+        Rule::variable => {
+            let name = parse_identifier(inner.into_inner().next().unwrap());
+            Ok(Expr::new(ExprKind::Var(name), span))
+        }
+        _ => Err(ParseError::Syntax {
+            message: format!("Unexpected atom expression: {:?}", inner.as_rule()),
+            span,
+        }),
+    }
 }
 
-fn module_parser<'a>() -> impl Parser<'a, &'a [SpannedToken], Vec<Decl>, extra::Err<Rich<'a, SpannedToken>>> + Clone {
-    decl_parser()
-        .repeated()
-        .collect()
-        .then_ignore(tok(TokenKind::Eof))
+fn parse_string_method(pair: pest::iterators::Pair<Rule>) -> Result<Expr, ParseError> {
+    let span = span_from_pair(&pair);
+    let mut inner = pair.into_inner();
+
+    let method = parse_identifier(inner.next().unwrap());
+
+    let mut region = None;
+    let mut args = Vec::new();
+
+    for item in inner {
+        match item.as_rule() {
+            Rule::identifier => region = Some(parse_identifier(item)),
+            Rule::expr_list => {
+                for expr_pair in item.into_inner() {
+                    args.push(parse_expression(expr_pair)?);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    match method.as_str() {
+        "new" => {
+            let region = region.unwrap_or_else(|| SmolStr::new("_"));
+            if let Some(arg) = args.into_iter().next() {
+                if let ExprKind::Lit(Literal::String(s)) = arg.kind {
+                    return Ok(Expr::new(ExprKind::StringNew { region, value: s }, span));
+                }
+            }
+            Ok(Expr::new(ExprKind::Lit(Literal::Unit), span))
+        }
+        "concat" => {
+            let mut iter = args.into_iter();
+            let left = iter.next().map(Box::new);
+            let right = iter.next().map(Box::new);
+            if let (Some(left), Some(right)) = (left, right) {
+                Ok(Expr::new(ExprKind::StringConcat { left, right }, span))
+            } else {
+                Ok(Expr::new(ExprKind::Lit(Literal::Unit), span))
+            }
+        }
+        "len" => {
+            if let Some(arg) = args.into_iter().next() {
+                Ok(Expr::new(ExprKind::StringLen(Box::new(arg)), span))
+            } else {
+                Ok(Expr::new(ExprKind::Lit(Literal::Unit), span))
+            }
+        }
+        _ => Ok(Expr::new(ExprKind::Lit(Literal::Unit), span)),
+    }
+}
+
+fn parse_paren_or_pair(pair: pest::iterators::Pair<Rule>) -> Result<Expr, ParseError> {
+    let span = span_from_pair(&pair);
+    let mut exprs: Vec<Expr> = Vec::new();
+
+    for item in pair.into_inner() {
+        if item.as_rule() == Rule::expression {
+            exprs.push(parse_expression(item)?);
+        }
+    }
+
+    match exprs.len() {
+        0 => Ok(Expr::new(ExprKind::Lit(Literal::Unit), span)),
+        1 => Ok(exprs.into_iter().next().unwrap()),
+        _ => {
+            let result = exprs.into_iter().reduce(|acc, e| {
+                Expr::new(
+                    ExprKind::Pair {
+                        left: Box::new(acc),
+                        right: Box::new(e),
+                    },
+                    span,
+                )
+            });
+            Ok(result.unwrap())
+        }
+    }
+}
+
+fn parse_literal(pair: pest::iterators::Pair<Rule>) -> Result<Expr, ParseError> {
+    let span = span_from_pair(&pair);
+    let inner = pair.into_inner().next().unwrap();
+
+    let lit = match inner.as_rule() {
+        Rule::unit_literal => Literal::Unit,
+        Rule::boolean => {
+            if inner.as_str() == "true" {
+                Literal::Bool(true)
+            } else {
+                Literal::Bool(false)
+            }
+        }
+        Rule::float => {
+            let n: f64 = inner.as_str().parse().unwrap_or(0.0);
+            Literal::F64(n)
+        }
+        Rule::integer => {
+            let n: i64 = inner.as_str().parse().unwrap_or(0);
+            if n > i32::MAX as i64 || n < i32::MIN as i64 {
+                Literal::I64(n)
+            } else {
+                Literal::I32(n as i32)
+            }
+        }
+        Rule::string => {
+            let s = inner.as_str();
+            // Remove quotes and process escapes
+            let content = &s[1..s.len()-1];
+            let processed = content
+                .replace("\\n", "\n")
+                .replace("\\r", "\r")
+                .replace("\\t", "\t")
+                .replace("\\\"", "\"")
+                .replace("\\\\", "\\");
+            Literal::String(processed)
+        }
+        _ => Literal::Unit,
+    };
+
+    Ok(Expr::new(ExprKind::Lit(lit), span))
 }
 
 #[cfg(test)]

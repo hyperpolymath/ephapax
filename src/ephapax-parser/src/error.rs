@@ -86,7 +86,7 @@ impl Report {
         let location = (self.source_name.clone(), range.clone());
 
         match error {
-            ParseError::Lexer(msg) => AriadneReport::build(ReportKind::Error, location.clone())
+            ParseError::Lexer(msg) => AriadneReport::build(ReportKind::Error, self.source_name.clone(), range.start)
                 .with_message("Lexer error")
                 .with_label(
                     Label::new(location)
@@ -96,7 +96,7 @@ impl Report {
                 .finish(),
 
             ParseError::Syntax { message, .. } => {
-                AriadneReport::build(ReportKind::Error, location.clone())
+                AriadneReport::build(ReportKind::Error, self.source_name.clone(), range.start)
                     .with_message("Syntax error")
                     .with_label(
                         Label::new(location)
@@ -107,7 +107,7 @@ impl Report {
             }
 
             ParseError::UnexpectedEof { .. } => {
-                AriadneReport::build(ReportKind::Error, location.clone())
+                AriadneReport::build(ReportKind::Error, self.source_name.clone(), range.start)
                     .with_message("Unexpected end of file")
                     .with_label(
                         Label::new(location)
@@ -118,7 +118,7 @@ impl Report {
             }
 
             ParseError::Expected { expected, found, .. } => {
-                AriadneReport::build(ReportKind::Error, location.clone())
+                AriadneReport::build(ReportKind::Error, self.source_name.clone(), range.start)
                     .with_message(format!("Expected {}", expected))
                     .with_label(
                         Label::new(location)

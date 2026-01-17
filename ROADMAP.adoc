@@ -3,18 +3,23 @@
 
 == Current Status
 
-Initial development phase.
+Affine compiler stage compiles end-to-end (Idris2 -> S-expr -> WASM) with a
+locked surface syntax and a smoke test in CI.
 
 == Milestones
 
 === v0.1.0 - Foundation
-* [ ] Core functionality
-* [ ] Basic documentation
-* [ ] CI/CD pipeline
+* [x] Locked surface syntax
+* [x] Idris2 affine parser + typechecker
+* [x] End-to-end affine compile to WASM
+* [x] Smoke CI workflow
+* [ ] Parser + typechecker test suite
+* [ ] Error diagnostics with spans
 
 === v1.0.0 - Stable Release
-* [ ] Full feature set
-* [ ] Comprehensive tests
+* [ ] Linear stage parity with affine
+* [ ] Comprehensive test suite + conformance harness
+* [ ] Backend feature coverage (strings, regions, sums/products, borrow)
 * [ ] Production ready
 
 == Future Directions

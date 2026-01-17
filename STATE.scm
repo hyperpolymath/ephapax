@@ -17,11 +17,15 @@
 
   (current-position
     (phase "alpha")
-    (overall-completion 20)
+    (overall-completion 45)
     (working-features
       ("Linear type system design"
+       "Locked surface syntax"
        "Affine parser stage (Idris2)"
+       "Affine typechecker completeness"
        "Zig token buffer FFI"
        "Parser profiling counters"
+       "End-to-end affine compile to WASM"
+       "Smoke CI pipeline"
        "No use-after-free guarantees"
        "No memory leak guarantees"))))

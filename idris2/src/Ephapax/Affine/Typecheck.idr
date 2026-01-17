@@ -27,6 +27,7 @@ data TypeError
   | UnboundVar String
   | InactiveRegion String
   | TypeMismatch Ty Ty
+  | LetLinNonLinear String Ty
   | CannotCopyLinear Ty
   | UnnecessaryDrop
   | BranchMismatch String String String
@@ -39,6 +40,7 @@ Show TypeError where
   show (UnboundVar v) = "unbound variable: " ++ v
   show (InactiveRegion r) = "inactive region: " ++ r
   show (TypeMismatch a b) = "type mismatch: expected " ++ show a ++ ", found " ++ show b
+  show (LetLinNonLinear v t) = "let! requires linear type for " ++ v ++ ", got " ++ show t
   show (CannotCopyLinear t) = "cannot copy linear type: " ++ show t
   show UnnecessaryDrop = "cannot drop unrestricted value"
   show (BranchMismatch v t e) =
@@ -177,8 +179,16 @@ check mode ctx expr =
       checkBoundUsed mode name ctx3.vars
       let ctx4 = setVars ctx3 (removeVar name (vars ctx3))
       Right (tb, ctx4)
-    LetLin name _ val body =>
-      check mode ctx (Let name Nothing val body)
+    LetLin name _ val body => do
+      (tv, ctx1) <- check mode ctx val
+      if not (isLinear tv) then
+        Left (LetLinNonLinear name tv)
+      else do
+        let ctx2 = setVars ctx1 (extendVar (MkEntry name tv False) (vars ctx1))
+        (tb, ctx3) <- check mode ctx2 body
+        checkBoundUsed mode name ctx3.vars
+        let ctx4 = setVars ctx3 (removeVar name (vars ctx3))
+        Right (tb, ctx4)
     Lambda param ty body => do
       let ctx1 = setVars ctx (extendVar (MkEntry param ty False) (vars ctx))
       (tb, ctx2) <- check mode ctx1 body

@@ -1,0 +1,18 @@
+name: smoke
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    container: fedora:43
+    steps:
+      - name: Install deps
+        run: |
+          dnf -y install git make gcc gcc-c++ clang rust cargo zig idris2 idris2-libs just
+      - uses: actions/checkout@v4
+      - name: Run smoke
+        run: just smoke

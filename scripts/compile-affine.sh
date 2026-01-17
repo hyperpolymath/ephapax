@@ -41,7 +41,13 @@ fi
 
 pushd "$ROOT_DIR" >/dev/null
 
-idris2 --build idris2/ephapax-affine.ipkg
+scripts/build-zig-ffi.sh
+IDRIS2_CG=refc \
+  IDRIS2_CFLAGS="-I$ROOT_DIR/idris2/ffi/zig -include tokbuf.h" \
+  IDRIS2_LDFLAGS="-L$ROOT_DIR/idris2/ffi/zig" \
+  IDRIS2_LDLIBS="-lephapax_tokbuf" \
+  IDRIS2_LIBS="$ROOT_DIR/idris2/ffi/shims:/usr/lib64/idris2-0.8.0/support/refc" \
+  idris2 --build idris2/ephapax-affine.ipkg
 
 TMP_SEXPR="$(mktemp)"
 trap 'rm -f "$TMP_SEXPR"' EXIT

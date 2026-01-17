@@ -30,7 +30,12 @@ done
 
 pushd "$ROOT_DIR" >/dev/null
 scripts/build-zig-ffi.sh
-idris2 --build idris2/ephapax-affine.ipkg
+IDRIS2_CG=refc \
+  IDRIS2_CFLAGS="-I$ROOT_DIR/idris2/ffi/zig -include tokbuf.h" \
+  IDRIS2_LDFLAGS="-L$ROOT_DIR/idris2/ffi/zig" \
+  IDRIS2_LDLIBS="-lephapax_tokbuf" \
+  IDRIS2_LIBS="$ROOT_DIR/idris2/ffi/shims:/usr/lib64/idris2-0.8.0/support/refc" \
+  idris2 --build idris2/ephapax-affine.ipkg
 
 START=$(date +%s%N)
 for _ in $(seq 1 "$ITERATIONS"); do

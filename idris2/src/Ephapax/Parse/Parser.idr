@@ -25,6 +25,7 @@ parseIf : Parser Expr
 parseCase : Parser Expr
 parseRegion : Parser Expr
 parseLambda : Parser Expr
+parseBlock : Parser Expr
 parseBinary : Int -> Parser Expr
 parseUnary : Parser Expr
 parsePostfix : Parser Expr
@@ -39,12 +40,35 @@ parseInr : Parser Expr
 parseParenOrPair : Parser Expr
 parseOp : Stream -> Maybe (BinOp, Int, Stream)
 
+skipSemis : Stream -> Stream
+skipSemis stream =
+  case peekTok stream of
+    Just t =>
+      case t.kind of
+        TkSemi =>
+          case popTok stream of
+            Just (_, rest) => skipSemis rest
+            Nothing => stream
+        _ => stream
+    Nothing => stream
+
 parseModule : Stream -> Either ParseError (Module, Stream)
 parseModule stream = do
-  (decls, rest) <- many parseDecl stream
+  (decls, rest) <- parseDecls [] (skipSemis stream)
   case remaining rest of
     [] => Right (MkModule "input" decls, rest)
     _ => Left (PE ("unexpected tokens at end: " ++ show (remaining rest)) (posOf rest))
+  where
+    parseDecls : List Decl -> Stream -> Either ParseError (List Decl, Stream)
+    parseDecls acc stream =
+      case peekTok stream of
+        Nothing => Right (reverse acc, stream)
+        Just t =>
+          case t.kind of
+            TkSemi => parseDecls acc (skipSemis stream)
+            _ => do
+              (d, rest) <- parseDecl stream
+              parseDecls (d :: acc) (skipSemis rest)
 
 public export
 parseModuleTokens : TokBuf -> Either ParseError Module
@@ -74,27 +98,49 @@ parseDecl toks =
       parseTypeDecl rest
 
 parseFnDecl stream = do
-  (name, s1) <- expectIdent stream
+  (fname, s1) <- expectIdent stream
   case peekTok s1 of
     Just t =>
       case t.kind of
         TkUnit => do
           (_, s2) <- expect TkUnit s1
-          (_, s3) <- expect TkColon s2
-          (retTy, s4) <- parseType s3
-          (_, s5) <- expect TkEq s4
-          (body, s6) <- parseExpr s5
-          Right (Fn name [] retTy body, s6)
+          parseFnAfterParams fname [] s2
         _ => do
           (_, s2) <- expect TkLParen s1
           (params, s3) <- parseParams s2
           (_, s4) <- expect TkRParen s3
-          (_, s5) <- expect TkColon s4
-          (retTy, s6) <- parseType s5
-          (_, s7) <- expect TkEq s6
-          (body, s8) <- parseExpr s7
-          Right (Fn name params retTy body, s8)
+          parseFnAfterParams fname params s4
     Nothing => Left (PE "expected function parameters" (posOf s1))
+  where
+    parseFnBody : String -> List (String, Ty) -> Ty -> Stream -> Either ParseError (Decl, Stream)
+    parseFnBody fname params retTy stream =
+      case peekTok stream of
+        Just t =>
+          case t.kind of
+            TkLBrace => do
+              (body, rest) <- parseBlock stream
+              Right (Fn fname params retTy body, rest)
+            _ => do
+              (_, s1) <- expect TkEq stream
+              (body, s2) <- parseExpr s1
+              Right (Fn fname params retTy body, s2)
+        Nothing => Left (PE "expected function body" (posOf stream))
+
+    parseFnAfterParams : String -> List (String, Ty) -> Stream -> Either ParseError (Decl, Stream)
+    parseFnAfterParams fname params stream =
+      case peekTok stream of
+        Just t =>
+          case t.kind of
+            TkArrow => do
+              (_, s1) <- expect TkArrow stream
+              (retTy, s2) <- parseType s1
+              parseFnBody fname params retTy s2
+            TkColon => do
+              (_, s1) <- expect TkColon stream
+              (retTy, s2) <- parseType s1
+              parseFnBody fname params retTy s2
+            _ => Left (PE "expected : or -> after parameters" (Just t.pos))
+        Nothing => Left (PE "expected return type" (posOf stream))
 
 parseTypeDecl stream = do
   (name, s1) <- expectIdent stream
@@ -310,6 +356,53 @@ parseLambda stream = do
   (body, s7) <- parseExpr s6
   Right (Lambda param pty body, s7)
 
+parseBlock stream = do
+  (_, s1) <- expect TkLBrace stream
+  parseBlockExpr (skipSemis s1)
+  where
+    mutual
+      parseBlockExpr : Stream -> Either ParseError (Expr, Stream)
+      parseBlockExpr stream =
+        case peekTok stream of
+          Just t =>
+            case t.kind of
+              TkRBrace => do
+                (_, rest) <- expect TkRBrace stream
+                Right (Block [], rest)
+              TkKw "let" => do
+                (_, s1) <- expectKw "let" stream
+                (name, s2) <- expectIdent s1
+                (_, s3) <- expect TkEq s2
+                (val, s4) <- parseExpr s3
+                let s5 = skipSemis s4
+                (body, s6) <- parseBlockExpr s5
+                Right (Let name Nothing val body, s6)
+              _ => do
+                (first, s1) <- parseExpr stream
+                parseBlockTail [first] (skipSemis s1)
+          Nothing => Left (PE "expected block expression" (posOf stream))
+
+      parseBlockTail : List Expr -> Stream -> Either ParseError (Expr, Stream)
+      parseBlockTail acc stream =
+        case peekTok stream of
+          Just t =>
+            case t.kind of
+              TkRBrace => do
+                (_, rest) <- expect TkRBrace stream
+                Right (Block (reverse acc), rest)
+              TkKw "let" => do
+                (_, s1) <- expectKw "let" stream
+                (name, s2) <- expectIdent s1
+                (_, s3) <- expect TkEq s2
+                (val, s4) <- parseExpr s3
+                let s5 = skipSemis s4
+                (body, s6) <- parseBlockExpr s5
+                Right (Block (reverse acc ++ [Let name Nothing val body]), s6)
+              _ => do
+                (expr, s1) <- parseExpr stream
+                parseBlockTail (expr :: acc) (skipSemis s1)
+          Nothing => Left (PE "expected end of block" (posOf stream))
+
 parseBinary minPrec stream = do
   (lhs, s1) <- parseUnary stream
   parseBinTail lhs minPrec s1
@@ -413,6 +506,7 @@ parsePrimary stream =
           , parseCopy
           , parseInl
           , parseInr
+          , parseBlock
           , parseParenOrPair
           , parseLiteral
           , parseVar
@@ -420,7 +514,7 @@ parsePrimary stream =
       else Left (PE ("expected primary expression (one of: " ++ exprStarts ++ ")") (Just t.pos))
   where
     exprStarts : String
-    exprStarts = "<ident>, literal, (, drop, copy, inl, inr"
+    exprStarts = "<ident>, literal, (, {, drop, copy, inl, inr"
 
     isExprStart : TokKind -> Bool
     isExprStart k =
@@ -432,6 +526,7 @@ parsePrimary stream =
         TkBool _ => True
         TkUnit => True
         TkLParen => True
+        TkLBrace => True
         TkKw "drop" => True
         TkKw "copy" => True
         TkKw "inl" => True

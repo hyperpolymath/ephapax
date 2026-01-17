@@ -22,7 +22,7 @@ data TokKind
   | TkLParen | TkRParen
   | TkLBrace | TkRBrace
   | TkLBracket | TkRBracket
-  | TkComma | TkColon | TkArrow | TkAt | TkDot | TkEq
+  | TkComma | TkColon | TkSemi | TkArrow | TkAt | TkDot | TkEq
   | TkPlus | TkMinus | TkStar | TkSlash | TkPercent
   | TkEqEq | TkNe | TkLt | TkLe | TkGt | TkGe
   | TkAndAnd | TkOrOr | TkBang | TkAmp
@@ -44,6 +44,7 @@ Eq TokKind where
   (==) TkRBracket TkRBracket = True
   (==) TkComma TkComma = True
   (==) TkColon TkColon = True
+  (==) TkSemi TkSemi = True
   (==) TkArrow TkArrow = True
   (==) TkAt TkAt = True
   (==) TkDot TkDot = True
@@ -82,6 +83,7 @@ Show TokKind where
   show TkRBracket = "TkRBracket"
   show TkComma = "TkComma"
   show TkColon = "TkColon"
+  show TkSemi = "TkSemi"
   show TkArrow = "TkArrow"
   show TkAt = "TkAt"
   show TkDot = "TkDot"
@@ -129,7 +131,7 @@ lex : String -> Either LexError (List Token)
 lex input = go (MkPos 1 1) (unpack input) []
   where
     isSpaceChar : Char -> Bool
-    isSpaceChar ch = ch == ' ' || ch == '\n' || ch == '\t' || ch == '\r'
+    isSpaceChar ch = ch == ' ' || ch == '\t' || ch == '\r'
 
     isAlphaChar : Char -> Bool
     isAlphaChar ch =
@@ -184,6 +186,9 @@ lex input = go (MkPos 1 1) (unpack input) []
       in go (advanceN pos ('-' :: '-' :: consumed)) tail acc
     go pos (c :: rest) acc =
       if isSpaceChar c then go (advance pos c) rest acc
+      else if c == '\n' then
+        let nextPos = advance pos c in
+        go nextPos rest (MkToken TkSemi pos :: acc)
       else if isAlphaChar c || c == '_' then
         let (identChars, more) = span isIdentChar (c :: rest) in
         let ident = pack identChars in
@@ -257,6 +262,9 @@ lex input = go (MkPos 1 1) (unpack input) []
         ':' =>
           let nextPos = advance pos ':' in
           go nextPos rest (MkToken TkColon pos :: acc)
+        ';' =>
+          let nextPos = advance pos ';' in
+          go nextPos rest (MkToken TkSemi pos :: acc)
         '@' =>
           let nextPos = advance pos '@' in
           go nextPos rest (MkToken TkAt pos :: acc)

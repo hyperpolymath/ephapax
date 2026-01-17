@@ -18,6 +18,8 @@ Thumbs.db
 /out/
 /idris2/build/
 /idris2/ffi/zig/libephapax_tokbuf.a
+/.zig-cache/
+/.zig-cache-global/
 
 # Dependencies
 /node_modules/

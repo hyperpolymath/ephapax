@@ -101,7 +101,7 @@ where
 {
     match chars.next() {
         Some('"') => {}
-        _ => return Err(SExprError::Invalid("expected '"'".into())),
+        _ => return Err(SExprError::Invalid("expected '\"'".into())),
     }
 
     let mut out = String::new();

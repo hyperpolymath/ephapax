@@ -238,6 +238,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "ephapax-ir"
+version = "0.1.0"
+dependencies = [
+ "ephapax-syntax",
+ "smol_str",
+ "thiserror",
+]
+
+[[package]]
 name = "ephapax-lexer"
 version = "0.1.0"
 dependencies = [
@@ -303,6 +312,7 @@ dependencies = [
 name = "ephapax-wasm"
 version = "0.1.0"
 dependencies = [
+ "ephapax-ir",
  "ephapax-syntax",
  "wasm-encoder",
 ]

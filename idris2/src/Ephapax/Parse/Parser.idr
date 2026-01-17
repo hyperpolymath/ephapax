@@ -201,10 +201,15 @@ parseTypeAtom stream =
     parseBaseType stream =
       choice
         [ \t => do { (_, r) <- expectIdentEq "Bool" t; Right (Base Bool, r) }
+        , \t => do { (_, r) <- expectIdentEq "bool" t; Right (Base Bool, r) }
         , \t => do { (_, r) <- expectIdentEq "I32" t; Right (Base I32, r) }
+        , \t => do { (_, r) <- expectIdentEq "i32" t; Right (Base I32, r) }
         , \t => do { (_, r) <- expectIdentEq "I64" t; Right (Base I64, r) }
+        , \t => do { (_, r) <- expectIdentEq "i64" t; Right (Base I64, r) }
         , \t => do { (_, r) <- expectIdentEq "F32" t; Right (Base F32, r) }
+        , \t => do { (_, r) <- expectIdentEq "f32" t; Right (Base F32, r) }
         , \t => do { (_, r) <- expectIdentEq "F64" t; Right (Base F64, r) }
+        , \t => do { (_, r) <- expectIdentEq "f64" t; Right (Base F64, r) }
         , \t => do { (_, r) <- expect TkUnit t; Right (Base Unit, r) }
         ] stream
 

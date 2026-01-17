@@ -324,8 +324,15 @@ lex input = go (MkPos 1 1) (unpack input) []
           let nextPos = advance pos '*' in
           go nextPos rest (MkToken TkStar pos :: acc)
         '/' =>
-          let nextPos = advance pos '/' in
-          go nextPos rest (MkToken TkSlash pos :: acc)
+          case rest of
+            '/' :: tail =>
+              let (comment, more) = span (\ch => ch /= '\n') tail in
+              let skipped = '/' :: '/' :: comment in
+              let nextPos = advanceN pos skipped in
+              go nextPos more acc
+            _ =>
+              let nextPos = advance pos '/' in
+              go nextPos rest (MkToken TkSlash pos :: acc)
         '%' =>
           let nextPos = advance pos '%' in
           go nextPos rest (MkToken TkPercent pos :: acc)

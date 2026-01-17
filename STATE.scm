@@ -6,19 +6,22 @@
     (version "0.1.0")
     (schema-version "1.0")
     (created "2024-06-01")
-    (updated "2025-01-17")
+    (updated "2026-01-17")
     (project "ephapax")
     (repo "hyperpolymath/ephapax"))
 
   (project-context
     (name "Ephapax")
     (tagline "Linear type system for safe memory management targeting WebAssembly")
-    (tech-stack ("rust" "wasm")))
+    (tech-stack ("idris2" "zig" "rust" "wasm")))
 
   (current-position
     (phase "alpha")
     (overall-completion 20)
     (working-features
       ("Linear type system design"
+       "Affine parser stage (Idris2)"
+       "Zig token buffer FFI"
+       "Parser profiling counters"
        "No use-after-free guarantees"
        "No memory leak guarantees"))))

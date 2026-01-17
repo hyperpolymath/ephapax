@@ -4,6 +4,7 @@
 [workspace]
 resolver = "2"
 members = [
+    "src/ephapax-ir",
     "src/ephapax-syntax",
     "src/ephapax-typing",
     "src/ephapax-wasm",
@@ -29,6 +30,7 @@ categories = ["compilers", "wasm", "memory-management"]
 [workspace.dependencies]
 # Internal crates
 ephapax-syntax = { path = "src/ephapax-syntax" }
+ephapax-ir = { path = "src/ephapax-ir" }
 ephapax-typing = { path = "src/ephapax-typing" }
 ephapax-wasm = { path = "src/ephapax-wasm" }
 ephapax-runtime = { path = "src/ephapax-runtime" }

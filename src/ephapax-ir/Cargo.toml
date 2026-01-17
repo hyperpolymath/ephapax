@@ -1,0 +1,13 @@
+# SPDX-License-Identifier: EUPL-1.2
+# SPDX-FileCopyrightText: 2026 Jonathan D.A. Jewell
+
+[package]
+name = "ephapax-ir"
+version = "0.1.0"
+edition = "2021"
+license = "EUPL-1.2"
+
+[dependencies]
+smol_str = { workspace = true }
+thiserror = { workspace = true }
+ephapax-syntax = { workspace = true }

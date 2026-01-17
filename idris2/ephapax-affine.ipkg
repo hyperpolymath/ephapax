@@ -1,0 +1,19 @@
+package ephapax-affine
+version = 0.1.0
+
+depends = base
+sourcedir = "src"
+modules = Main
+       , Ephapax.IR.SExpr
+       , Ephapax.IR.AST
+       , Ephapax.IR.Decode
+       , Ephapax.Parse.Lexer
+       , Ephapax.Parse.Util
+       , Ephapax.Parse.Stream
+       , Ephapax.Parse.ZigBuffer
+       , Ephapax.Parse.Parser
+       , Ephapax.Affine.Typecheck
+       , Ephapax.Affine.Emit
+
+executable = "ephapax-affine"
+main = Main

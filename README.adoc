@@ -153,6 +153,9 @@ just build
 # Build for WASM
 just build-wasm
 
+# Build Idris2 affine stage
+just idris-build
+
 # Verify Coq proofs (optional, requires Coq 8.18+)
 just proofs
 ----
@@ -176,6 +179,41 @@ just golden
 * link:spec/SPEC.md[Language Specification]
 * link:docs/wiki/[Wiki Documentation]
 * link:docs/coqdoc/[Coq Documentation] (generated)
+
+== Two-Phase Compiler (Idris2 → WASM)
+
+Ephapax includes an experimental two-stage pipeline:
+
+* **Stage 1 (Idris2)**: parse concrete Ephapax syntax (or S-expression IR) and type-check in affine or linear mode.
+* **Stage 2 (Rust)**: compile the checked IR to WebAssembly.
+
+Run:
+
+[source,bash]
+----
+# Compile a module through Idris2 + WASM backend (concrete syntax)
+just compile-affine input.eph affine output.wasm
+
+# Compile an S-expression module through Idris2 + WASM backend
+scripts/compile-affine.sh input.sexpr --mode affine --out output.wasm --sexpr
+
+# Or call the CLI directly for Stage 2
+cargo run -p ephapax-cli -- compile-sexpr input.sexpr -o output.wasm
+----
+
+=== Parser Tests & Bench
+
+[source,bash]
+----
+# Run Idris2 parser tests
+just idris-parse-test
+
+# Benchmark Idris2 parser (parse-only)
+just idris-parse-bench input.eph 10
+
+# Build Zig token buffer (FFI)
+scripts/build-zig-ffi.sh
+----
 
 == Status
 

@@ -16,6 +16,8 @@ Thumbs.db
 /build/
 /dist/
 /out/
+/idris2/build/
+/idris2/ffi/zig/libephapax_tokbuf.a
 
 # Dependencies
 /node_modules/

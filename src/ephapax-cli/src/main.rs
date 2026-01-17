@@ -75,6 +75,16 @@ enum Commands {
         opt_level: u8,
     },
 
+    /// Compile an S-expression IR module to WebAssembly
+    CompileSexpr {
+        /// Input S-expression file
+        file: PathBuf,
+
+        /// Output file (default: input.wasm)
+        #[arg(short, long)]
+        output: Option<PathBuf>,
+    },
+
     /// Show lexer tokens
     Tokens {
         /// Input file or expression
@@ -101,6 +111,9 @@ fn main() -> ExitCode {
         Some(Commands::Check { files }) => check_files(&files, cli.verbose),
         Some(Commands::Compile { file, output, opt_level }) => {
             compile_file(&file, output, opt_level, cli.verbose)
+        }
+        Some(Commands::CompileSexpr { file, output }) => {
+            compile_sexpr_file(&file, output, cli.verbose)
         }
         Some(Commands::Tokens { input }) => show_tokens(&input),
         Some(Commands::Parse { input, pretty }) => show_parse(&input, pretty),
@@ -324,6 +337,28 @@ fn compile_file(
         output_path.display(),
         wasm_bytes.len()
     );
+
+    Ok(())
+}
+
+fn compile_sexpr_file(
+    path: &PathBuf,
+    output: Option<PathBuf>,
+    verbose: bool,
+) -> Result<(), String> {
+    let content =
+        fs::read_to_string(path).map_err(|e| format!("Cannot read {}: {}", path.display(), e))?;
+
+    let wasm = ephapax_wasm::compile_sexpr_module(&content)
+        .map_err(|e| format!("Codegen error: {}", e))?;
+
+    let output_path = output.unwrap_or_else(|| path.with_extension("wasm"));
+    fs::write(&output_path, &wasm)
+        .map_err(|e| format!("Cannot write {}: {}", output_path.display(), e))?;
+
+    if verbose {
+        println!("{} Wrote {}", "✓".green(), output_path.display());
+    }
 
     Ok(())
 }

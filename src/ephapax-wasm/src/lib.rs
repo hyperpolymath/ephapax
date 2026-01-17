@@ -24,6 +24,7 @@
 //! +------------------+
 //! ```
 
+use ephapax_ir::module_from_sexpr;
 use ephapax_syntax::{BaseTy, BinOp, Decl, Expr, ExprKind, Literal, Module as AstModule, Ty, UnaryOp};
 use std::collections::HashMap;
 use wasm_encoder::{
@@ -120,6 +121,12 @@ impl Codegen {
         self.emit_exports();
         self.emit_data_section();
         self.module.clone().finish()
+    }
+
+    /// Compile a module encoded as an S-expression string.
+    pub fn compile_sexpr_module(&mut self, sexpr: &str) -> Result<Vec<u8>, String> {
+        let module = module_from_sexpr(sexpr).map_err(|e| e.to_string())?;
+        compile_module(&module).map_err(|e| e.to_string())
     }
 
     fn emit_types(&mut self) {
@@ -946,6 +953,12 @@ impl Codegen {
         exports.export("main", ExportKind::Func, 9); // Main is function index 9
         self.module.section(&exports);
     }
+}
+
+/// Compile an S-expression encoded module directly to WASM bytes.
+pub fn compile_sexpr_module(sexpr: &str) -> Result<Vec<u8>, String> {
+    let mut codegen = Codegen::new();
+    codegen.compile_sexpr_module(sexpr)
 }
 
 impl Default for Codegen {

@@ -14,6 +14,25 @@ build-wasm:
     rustup target add wasm32-unknown-unknown
     cargo build --release --target wasm32-unknown-unknown
 
+# Build the Idris2 affine compiler stage
+idris-build:
+    scripts/build-zig-ffi.sh
+    IDRIS2_CG=refc IDRIS2_CFLAGS="-I{{justfile_directory()}}/idris2/ffi/zig -include tokbuf.h" IDRIS2_LDFLAGS="-L{{justfile_directory()}}/idris2/ffi/zig" IDRIS2_LDLIBS="-lephapax_tokbuf" IDRIS2_LIBS="{{justfile_directory()}}/idris2/ffi/shims:/usr/lib64/idris2-0.8.0/support/refc" idris2 --build idris2/ephapax-affine.ipkg
+
+# Run Idris2 parser tests
+idris-parse-test:
+    scripts/build-zig-ffi.sh
+    IDRIS2_CG=refc IDRIS2_CFLAGS="-I{{justfile_directory()}}/idris2/ffi/zig -include tokbuf.h" IDRIS2_LDFLAGS="-L{{justfile_directory()}}/idris2/ffi/zig" IDRIS2_LDLIBS="-lephapax_tokbuf" IDRIS2_LIBS="{{justfile_directory()}}/idris2/ffi/shims:/usr/lib64/idris2-0.8.0/support/refc" idris2 --build idris2/ephapax-parse-tests.ipkg
+    idris2/build/exec/ephapax-parse-tests
+
+# Benchmark Idris2 parsing (parse-only)
+idris-parse-bench INPUT ITERATIONS:
+    scripts/parse-bench.sh {{INPUT}} {{ITERATIONS}}
+
+# Compile S-expression IR through Idris2 (affine) then Rust WASM backend
+compile-affine INPUT MODE OUT:
+    scripts/compile-affine.sh {{INPUT}} --mode {{MODE}} --out {{OUT}}
+
 # Run all tests
 test:
     cargo test --all-features
@@ -88,4 +107,3 @@ release VERSION:
 # Golden path smoke test
 golden: test build proofs
     @echo "Golden path complete."
-

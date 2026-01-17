@@ -1,0 +1,16 @@
+package ephapax-parse-tests
+version = 0.1.0
+
+depends = base
+sourcedir = "src"
+modules = Ephapax.Parse.Lexer
+       , Ephapax.Parse.Stream
+       , Ephapax.Parse.Util
+       , Ephapax.Parse.ZigBuffer
+       , Ephapax.Parse.Parser
+       , Ephapax.Parse.Tests
+       , Ephapax.Parse.TestMain
+       , Ephapax.IR.AST
+
+executable = "ephapax-parse-tests"
+main = Ephapax.Parse.TestMain

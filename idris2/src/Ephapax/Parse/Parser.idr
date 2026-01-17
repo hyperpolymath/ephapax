@@ -267,8 +267,8 @@ parseTypeAtom stream =
 
 parseExpr stream =
   choice
-    [ parseLetKw
-    , parseLetLinKw
+    [ parseLetLinKw
+    , parseLetKw
     , parseIfKw
     , parseCaseKw
     , parseRegionKw
@@ -279,12 +279,18 @@ parseExpr stream =
     parseLetKw : Parser Expr
     parseLetKw stream = do
       (_, s1) <- expectKw "let" stream
-      parseLet False s1
+      case peekTok s1 of
+        Just t =>
+          case t.kind of
+            TkBang => Left (PE "expected let, got let!" (Just t.pos))
+            _ => parseLet False s1
+        Nothing => Left (PE "expected let binding" (posOf s1))
 
     parseLetLinKw : Parser Expr
     parseLetLinKw stream = do
-      (_, s1) <- expectKw "let!" stream
-      parseLet True s1
+      (_, s1) <- expectKw "let" stream
+      (_, s2) <- expect TkBang s1
+      parseLet True s2
 
     parseIfKw : Parser Expr
     parseIfKw stream = do
@@ -371,12 +377,13 @@ parseBlock stream = do
                 Right (Block [], rest)
               TkKw "let" => do
                 (_, s1) <- expectKw "let" stream
-                (name, s2) <- expectIdent s1
-                (_, s3) <- expect TkEq s2
-                (val, s4) <- parseExpr s3
-                let s5 = skipSemis s4
-                (body, s6) <- parseBlockExpr s5
-                Right (Let name Nothing val body, s6)
+                let (isLin, s2) = consumeBang s1
+                (name, s3) <- expectIdent s2
+                (_, s4) <- expect TkEq s3
+                (val, s5) <- parseExpr s4
+                let s6 = skipSemis s5
+                (body, s7) <- parseBlockExpr s6
+                Right (if isLin then LetLin name Nothing val body else Let name Nothing val body, s7)
               _ => do
                 (first, s1) <- parseExpr stream
                 parseBlockTail [first] (skipSemis s1)
@@ -392,16 +399,29 @@ parseBlock stream = do
                 Right (Block (reverse acc), rest)
               TkKw "let" => do
                 (_, s1) <- expectKw "let" stream
-                (name, s2) <- expectIdent s1
-                (_, s3) <- expect TkEq s2
-                (val, s4) <- parseExpr s3
-                let s5 = skipSemis s4
-                (body, s6) <- parseBlockExpr s5
-                Right (Block (reverse acc ++ [Let name Nothing val body]), s6)
+                let (isLin, s2) = consumeBang s1
+                (name, s3) <- expectIdent s2
+                (_, s4) <- expect TkEq s3
+                (val, s5) <- parseExpr s4
+                let s6 = skipSemis s5
+                (body, s7) <- parseBlockExpr s6
+                Right (Block (reverse acc ++ [if isLin then LetLin name Nothing val body else Let name Nothing val body]), s7)
               _ => do
                 (expr, s1) <- parseExpr stream
                 parseBlockTail (expr :: acc) (skipSemis s1)
           Nothing => Left (PE "expected end of block" (posOf stream))
+
+      consumeBang : Stream -> (Bool, Stream)
+      consumeBang stream =
+        case peekTok stream of
+          Just t =>
+            case t.kind of
+              TkBang =>
+                case popTok stream of
+                  Just (_, rest) => (True, rest)
+                  Nothing => (True, stream)
+              _ => (False, stream)
+          Nothing => (False, stream)
 
 parseBinary minPrec stream = do
   (lhs, s1) <- parseUnary stream

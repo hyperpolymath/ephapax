@@ -37,6 +37,10 @@ compile-affine INPUT MODE OUT:
 test:
     cargo test --all-features
 
+# End-to-end smoke test (Idris2 -> WASM)
+smoke:
+    scripts/smoke.sh
+
 # Run Coq proofs (optional, requires Coq 8.18+)
 proofs:
     #!/usr/bin/env bash

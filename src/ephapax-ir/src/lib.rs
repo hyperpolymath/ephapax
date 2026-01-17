@@ -5,9 +5,7 @@
 //!
 //! Provides a small, stable S-expression encoding for Ephapax AST nodes.
 
-use ephapax_syntax::{
-    BaseTy, BinOp, Decl, Expr, ExprKind, Literal, Module, RegionName, Ty, UnaryOp, Var,
-};
+use ephapax_syntax::{BaseTy, BinOp, Decl, Expr, ExprKind, Literal, Module, Ty, UnaryOp};
 use smol_str::SmolStr;
 use std::fmt;
 use thiserror::Error;

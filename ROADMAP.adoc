@@ -11,8 +11,10 @@ locked surface syntax and a smoke test in CI.
 === v0.1.0 - Foundation
 * [x] Locked surface syntax
 * [x] Idris2 affine parser + typechecker
+* [x] IR emit + backend alignment (S-expr tags + wasm path)
 * [x] End-to-end affine compile to WASM
 * [x] Smoke CI workflow
+* [x] Usability pass (syntax doc + smoke)
 * [ ] Parser + typechecker test suite
 * [ ] Error diagnostics with spans
 

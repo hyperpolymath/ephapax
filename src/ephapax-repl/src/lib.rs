@@ -9,7 +9,7 @@ use colored::Colorize;
 use ephapax_interp::{Interpreter, RuntimeError, Value};
 use ephapax_lexer::Lexer;
 use ephapax_parser::{parse, parse_module, ParseError};
-use ephapax_syntax::{Module, Ty};
+use ephapax_syntax::Ty;
 use ephapax_typing::{type_check, TypeError};
 use rustyline::error::ReadlineError;
 use rustyline::history::DefaultHistory;

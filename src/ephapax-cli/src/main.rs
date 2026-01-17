@@ -191,7 +191,7 @@ fn run_file(path: &PathBuf, verbose: bool) -> Result<(), String> {
     interp.load_module(&module);
 
     // Look for main function and run it
-    if let Some(main_val) = interp.get_binding("main") {
+    if let Some(_main_val) = interp.get_binding("main") {
         match interp.call_main() {
             Ok(result) => {
                 println!("{}", result);
@@ -432,7 +432,7 @@ fn show_parse(input: &str, pretty: bool) -> Result<(), String> {
 }
 
 fn report_parse_error(
-    filename: &str,
+    _filename: &str,
     _source: &str,
     error: &ephapax_parser::ParseError,
 ) {

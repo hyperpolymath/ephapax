@@ -25,7 +25,7 @@
 //! ```
 
 use ephapax_ir::module_from_sexpr;
-use ephapax_syntax::{BaseTy, BinOp, Decl, Expr, ExprKind, Literal, Module as AstModule, Ty, UnaryOp};
+use ephapax_syntax::{BinOp, Decl, Expr, ExprKind, Literal, Module as AstModule, UnaryOp};
 use std::collections::HashMap;
 use wasm_encoder::{
     CodeSection, ExportKind, ExportSection, Function, FunctionSection, ImportSection, Instruction,
@@ -45,7 +45,6 @@ pub const INITIAL_PAGES: u64 = 1;
 pub const MAX_PAGES: u64 = 256; // 16MB max
 
 /// Function indices after imports
-const IMPORT_PRINT_I32: u32 = 0;
 const IMPORT_PRINT_STRING: u32 = 1;
 
 /// Runtime function indices (offset by number of imports)
@@ -598,10 +597,7 @@ impl Codegen {
                 func.instruction(&Instruction::I32Const(0)); // Return unit (0)
             }
             ExprKind::Copy(inner) => {
-                // For unrestricted types, just duplicate the value
-                self.compile_expr(func, inner);
-                // The value is now on the stack; to copy we'd need to dup
-                // For i32, we can use local.tee
+                self.compile_copy(func, inner);
             }
             ExprKind::Block(exprs) => self.compile_block(func, exprs),
             ExprKind::BinOp { op, left, right } => self.compile_binop(func, *op, left, right),
@@ -697,6 +693,38 @@ impl Codegen {
         }));
 
         // Return pair pointer
+        func.instruction(&Instruction::LocalGet(pair_local));
+    }
+
+    fn compile_copy(&mut self, func: &mut Function, inner: &Expr) {
+        // Copy into a pair by evaluating once and duplicating the value.
+        let tmp = self.next_local;
+        self.next_local += 1;
+        self.compile_expr(func, inner);
+        func.instruction(&Instruction::LocalTee(tmp));
+
+        // Allocate pair and store tmp twice (i32 representation).
+        func.instruction(&Instruction::I32Const(8));
+        func.instruction(&Instruction::Call(FN_BUMP_ALLOC));
+        let pair_local = self.next_local;
+        self.next_local += 1;
+        func.instruction(&Instruction::LocalTee(pair_local));
+
+        func.instruction(&Instruction::LocalGet(tmp));
+        func.instruction(&Instruction::I32Store(wasm_encoder::MemArg {
+            offset: 0,
+            align: 2,
+            memory_index: 0,
+        }));
+
+        func.instruction(&Instruction::LocalGet(pair_local));
+        func.instruction(&Instruction::LocalGet(tmp));
+        func.instruction(&Instruction::I32Store(wasm_encoder::MemArg {
+            offset: 4,
+            align: 2,
+            memory_index: 0,
+        }));
+
         func.instruction(&Instruction::LocalGet(pair_local));
     }
 

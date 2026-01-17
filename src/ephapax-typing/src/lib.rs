@@ -772,7 +772,7 @@ pub fn type_check_module(module: &Module) -> Result<(), TypeError> {
     // Second pass: type check each function body
     for decl in &module.decls {
         match decl {
-            Decl::Fn { name, params, ret_ty, body } => {
+            Decl::Fn { name: _, params, ret_ty, body } => {
                 // Create a fresh context for function body with params
                 let saved_ctx = tc.ctx.clone();
 

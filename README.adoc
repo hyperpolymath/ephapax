@@ -51,6 +51,21 @@ Grammar highlights:
 * Block expressions: `{ expr1; expr2; ...; exprN }` (final expr is the result)
 * Comments: `//` to end-of-line
 
+== Quickstart
+
+[source,bash]
+----
+just idris-build
+just smoke
+----
+
+This compiles `examples/hello.eph` end-to-end and produces a WASM artifact.
+
+== Current Limitations
+
+* The WASM backend currently assumes `i32` representation for pairs/sums.
+* Lambda/app compilation is stubbed (closure conversion not yet implemented).
+
 == Overview
 
 Ephapax is a programming language with a linear type system that guarantees:

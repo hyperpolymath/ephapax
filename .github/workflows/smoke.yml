@@ -8,11 +8,17 @@ on:
 jobs:
   smoke:
     runs-on: ubuntu-latest
-    container: fedora:43
+    container: fedora@sha256:2bdf7178cadc4b998ebc322c5767c09b4fa9b701057e34d748d5958eb21be857
     steps:
       - name: Install deps
         run: |
-          dnf -y install git make gcc gcc-c++ clang rust cargo zig idris2 idris2-libs just
+          dnf -y install git make gcc gcc-c++ clang just
+          dnf -y install \
+            https://fedora.mirrorservice.org/fedora/linux/updates/43/Everything/x86_64/Packages/r/rust-1.92.0-1.fc43.x86_64.rpm \
+            https://fedora.mirrorservice.org/fedora/linux/updates/43/Everything/x86_64/Packages/c/cargo-1.92.0-1.fc43.x86_64.rpm \
+            https://fedora.mirrorservice.org/fedora/linux/updates/43/Everything/x86_64/Packages/z/zig-0.15.2-1.fc43.x86_64.rpm \
+            https://fedora.mirrorservice.org/fedora/linux/updates/43/Everything/x86_64/Packages/i/idris2-0.8.0-1.fc43.x86_64.rpm \
+            https://fedora.mirrorservice.org/fedora/linux/updates/43/Everything/x86_64/Packages/i/idris2-libs-0.8.0-1.fc43.x86_64.rpm
       - uses: actions/checkout@v4
       - name: Cache build
         uses: actions/cache@v4

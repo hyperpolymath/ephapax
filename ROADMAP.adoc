@@ -15,6 +15,7 @@ locked surface syntax and a smoke test in CI.
 * [x] End-to-end affine compile to WASM
 * [x] Smoke CI workflow
 * [x] Usability pass (syntax doc + smoke)
+* [x] Proven library integration scaffolding
 * [ ] Parser + typechecker test suite
 * [ ] Error diagnostics with spans
 

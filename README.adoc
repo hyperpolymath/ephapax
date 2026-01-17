@@ -66,6 +66,17 @@ This compiles `examples/hello.eph` end-to-end and produces a WASM artifact.
 * The WASM backend currently assumes `i32` representation for pairs/sums.
 * Lambda/app compilation is stubbed (closure conversion not yet implemented).
 
+== Seam Analysis
+
+Key interfaces where correctness and stability matter:
+
+* Idris2 -> S-expression IR (`Ephapax.IR.Decode` encoding/decoding).
+* Zig FFI token buffer -> Idris2 parser stream (`Ephapax.Parse.ZigBuffer`).
+* S-expression IR -> Rust/WASM backend (`ephapax-ir` and `ephapax-wasm`).
+
+We now include the `proven` library as a dependency to harden string handling
+paths over time (e.g., JSON-style escaping for IR boundaries).
+
 == Overview
 
 Ephapax is a programming language with a linear type system that guarantees:

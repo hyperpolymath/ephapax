@@ -1,9 +1,10 @@
 package ephapax-affine
 version = 0.1.0
 
-depends = base
+depends = base, proven
 sourcedir = "src"
 modules = Main
+       , Ephapax.Proven
        , Ephapax.IR.SExpr
        , Ephapax.IR.AST
        , Ephapax.IR.Decode

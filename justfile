@@ -16,11 +16,13 @@ build-wasm:
 
 # Build the Idris2 affine compiler stage
 idris-build:
+    scripts/build-proven.sh
     scripts/build-zig-ffi.sh
     IDRIS2_CG=refc IDRIS2_CFLAGS="-I{{justfile_directory()}}/idris2/ffi/zig -include tokbuf.h" IDRIS2_LDFLAGS="-L{{justfile_directory()}}/idris2/ffi/zig" IDRIS2_LDLIBS="-lephapax_tokbuf" IDRIS2_LIBS="{{justfile_directory()}}/idris2/ffi/shims:/usr/lib64/idris2-0.8.0/support/refc" idris2 --build idris2/ephapax-affine.ipkg
 
 # Run Idris2 parser tests
 idris-parse-test:
+    scripts/build-proven.sh
     scripts/build-zig-ffi.sh
     IDRIS2_CG=refc IDRIS2_CFLAGS="-I{{justfile_directory()}}/idris2/ffi/zig -include tokbuf.h" IDRIS2_LDFLAGS="-L{{justfile_directory()}}/idris2/ffi/zig" IDRIS2_LDLIBS="-lephapax_tokbuf" IDRIS2_LIBS="{{justfile_directory()}}/idris2/ffi/shims:/usr/lib64/idris2-0.8.0/support/refc" idris2 --build idris2/ephapax-parse-tests.ipkg
     idris2/build/exec/ephapax-parse-tests

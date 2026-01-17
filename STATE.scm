@@ -17,7 +17,7 @@
 
   (current-position
     (phase "alpha")
-    (overall-completion 55)
+    (overall-completion 60)
     (working-features
       ("Linear type system design"
        "Locked surface syntax"
@@ -29,5 +29,6 @@
        "End-to-end affine compile to WASM"
        "Smoke CI pipeline"
        "Usability pass"
+       "Proven library integration scaffolding"
        "No use-after-free guarantees"
        "No memory leak guarantees"))))

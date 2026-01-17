@@ -41,6 +41,7 @@ fi
 
 pushd "$ROOT_DIR" >/dev/null
 
+scripts/build-proven.sh
 scripts/build-zig-ffi.sh
 IDRIS2_CG=refc \
   IDRIS2_CFLAGS="-I$ROOT_DIR/idris2/ffi/zig -include tokbuf.h" \

@@ -14,5 +14,15 @@ jobs:
         run: |
           dnf -y install git make gcc gcc-c++ clang rust cargo zig idris2 idris2-libs just
       - uses: actions/checkout@v4
+      - name: Cache build
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+            .zig-cache
+            .zig-cache-global
+          key: ${{ runner.os }}-smoke-${{ hashFiles('**/Cargo.lock') }}
       - name: Run smoke
         run: just smoke

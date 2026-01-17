@@ -1,5 +1,6 @@
 image:https://img.shields.io/badge/license-PMPL--1.0-blue.svg[License,link="https://github.com/hyperpolymath/palimpsest-license"]
 image:https://img.shields.io/badge/Philosophy-Palimpsest-purple.svg[Palimpsest,link="https://github.com/hyperpolymath/palimpsest-licence"]
+image:https://github.com/hyperpolymath/ephapax/actions/workflows/smoke.yml/badge.svg?branch=main[Smoke,link="https://github.com/hyperpolymath/ephapax/actions/workflows/smoke.yml"]
 
 
 // SPDX-License-Identifier: PMPL-1.0

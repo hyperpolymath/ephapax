@@ -1,0 +1,46 @@
+// SPDX-License-Identifier: EUPL-1.2
+// Parser State Module
+//
+// Encodes parser state as integers for stateless parsing
+
+fn state_create(pos: i32, tok_type: i32) -> i32 {
+    let pos_shifted = pos * 256;
+    let base = pos_shifted + tok_type;
+    base
+}
+
+fn state_get_pos(state: i32) -> i32 {
+    let shifted = state / 256;
+    let pos = shifted % 65536;
+    pos
+}
+
+fn state_get_token(state: i32) -> i32 {
+    state % 256
+}
+
+fn state_advance(state: i32) -> i32 {
+    let pos = state_get_pos(state);
+    let tok = state_get_token(state);
+    let new_pos = pos + 1;
+    state_create(new_pos, tok)
+}
+
+fn state_set_token(state: i32, new_tok: i32) -> i32 {
+    let pos = state_get_pos(state);
+    state_create(pos, new_tok)
+}
+
+fn main() -> i32 {
+    let state0 = state_create(0, 5);
+    let state1 = state_advance(state0);
+    let state2 = state_advance(state1);
+    let state3 = state_advance(state2);
+
+    let final_pos = state_get_pos(state3);
+    let expected = 3;
+    let diff = final_pos - expected;
+    let validation = diff * diff;
+
+    validation
+}

@@ -1,0 +1,37 @@
+// SPDX-License-Identifier: EUPL-1.2
+// ephapax-linear v1 - Simplified for parser
+// Test what features work in current Ephapax
+
+fn add(x: i32, y: i32) -> i32 {
+    x + y
+}
+
+fn test_arithmetic() -> i32 {
+    let a = 1 + 2;
+    let b = a * 3;
+    let c = b - 1;
+    c
+}
+
+fn test_comparison() -> i32 {
+    let x = 5;
+    let y = 3;
+    let is_greater = x > y;
+    let result = x + y;
+    result
+}
+
+fn test_logic() -> i32 {
+    let a = 10;
+    let b = 20;
+    let c = a < b;
+    let d = a == b;
+    a + b
+}
+
+fn main() -> i32 {
+    let test1 = test_arithmetic();
+    let test2 = test_comparison();
+    let test3 = test_logic();
+    test1 + test2 + test3
+}

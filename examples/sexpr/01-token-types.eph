@@ -1,0 +1,18 @@
+// SPDX-License-Identifier: EUPL-1.2
+// Token Types Module
+//
+// Defines token type constants for S-expression parsing
+
+fn tok_lparen() -> i32 { 1 }
+fn tok_rparen() -> i32 { 2 }
+fn tok_symbol() -> i32 { 3 }
+fn tok_number() -> i32 { 4 }
+fn tok_eof() -> i32 { 5 }
+fn tok_whitespace() -> i32 { 6 }
+
+fn main() -> i32 {
+    let lparen = tok_lparen();
+    let rparen = tok_rparen();
+    let sum = lparen + rparen;
+    sum
+}

@@ -1,0 +1,49 @@
+// SPDX-License-Identifier: EUPL-1.2
+// Character Classification Module
+//
+// Functions to classify characters for lexical analysis
+
+fn is_lparen(c: i32) -> i32 {
+    let diff = c - 40;
+    let check = diff * diff;
+    check
+}
+
+fn is_rparen(c: i32) -> i32 {
+    let diff = c - 41;
+    let check = diff * diff;
+    check
+}
+
+fn is_digit(c: i32) -> i32 {
+    let below_0 = c - 48;
+    let above_9 = 57 - c;
+    let both_positive = below_0 + above_9;
+    both_positive
+}
+
+fn is_whitespace(c: i32) -> i32 {
+    let is_space = c - 32;
+    let is_tab = c - 9;
+    let is_newline = c - 10;
+    let space_sq = is_space * is_space;
+    let tab_sq = is_tab * is_tab;
+    let nl_sq = is_newline * is_newline;
+    let sum = space_sq + tab_sq + nl_sq;
+    sum
+}
+
+fn main() -> i32 {
+    let char_lparen = 40;
+    let char_rparen = 41;
+    let char_digit = 53;
+    let char_space = 32;
+
+    let test1 = is_lparen(char_lparen);
+    let test2 = is_rparen(char_rparen);
+    let test3 = is_digit(char_digit);
+    let test4 = is_whitespace(char_space);
+
+    let result = test1 + test2 + test3 + test4;
+    result
+}

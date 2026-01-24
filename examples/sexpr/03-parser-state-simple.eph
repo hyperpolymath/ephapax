@@ -1,0 +1,36 @@
+// SPDX-License-Identifier: EUPL-1.2
+// Parser State Module - Simplified
+//
+// Simplified state encoding without division
+
+fn state_create(pos: i32, tok_type: i32) -> i32 {
+    let pos_part = pos * 100;
+    let combined = pos_part + tok_type;
+    combined
+}
+
+fn state_get_pos(state: i32) -> i32 {
+    state / 100
+}
+
+fn state_get_token(state: i32) -> i32 {
+    state % 100
+}
+
+fn state_advance(state: i32) -> i32 {
+    let tok = state_get_token(state);
+    let pos = state_get_pos(state);
+    let new_pos = pos + 1;
+    state_create(new_pos, tok)
+}
+
+fn main() -> i32 {
+    let state0 = state_create(0, 5);
+    let state1 = state_advance(state0);
+    let state2 = state_advance(state1);
+
+    let final_pos = state_get_pos(state2);
+    let expected = 2;
+    let diff = final_pos - expected;
+    diff * diff
+}

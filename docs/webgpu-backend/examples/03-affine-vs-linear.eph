@@ -1,0 +1,108 @@
+// SPDX-License-Identifier: EUPL-1.2
+// Example 03: Affine vs Linear GPU Buffers
+//
+// Demonstrates the dyadic design: same code, different guarantees
+
+// Mode: AFFINE (permissive)
+// Compile with: ephapax --mode affine 03-affine-vs-linear.eph
+
+fn affine_mode() -> i32 {
+    region gpu:
+        let buffer = allocate_gpu_affine(1024);
+        // OK in affine mode: implicit drop
+        // Buffer automatically freed at region end
+        0
+}
+
+// Mode: LINEAR (strict)
+// Compile with: ephapax --mode linear 03-affine-vs-linear.eph
+
+fn linear_mode() -> i32 {
+    region gpu:
+        let! buffer = allocate_gpu(1024);
+        // ERROR in linear mode: must explicitly consume
+        // Compiler error: "linear variable `buffer` not consumed"
+        0
+}
+
+fn linear_mode_fixed() -> i32 {
+    region gpu:
+        let! buffer = allocate_gpu(1024);
+        free_gpu(buffer);  // Explicit consumption required
+        0
+}
+
+// GRADUAL MIGRATION EXAMPLE
+//
+// Step 1: Prototype in affine mode (rapid iteration)
+fn prototype() -> i32 {
+    region gpu:
+        let a = allocate_gpu_affine(1024);
+        let b = allocate_gpu_affine(1024);
+        let c = compute(a, b);
+        // Implicit cleanup - OK for prototyping
+        extract_result(c)
+}
+
+// Step 2: Test and refine logic
+// (verify correctness in affine mode)
+
+// Step 3: Switch to linear mode
+fn production() -> i32 {
+    region gpu:
+        let! a = allocate_gpu(1024);
+        let! b = allocate_gpu(1024);
+        let! c = compute_linear(a, b);
+        let result = extract_result_linear(c);
+        result
+    // Compiler verifies all buffers consumed
+}
+
+// Step 4: Ship with safety guarantees!
+//
+// Benefits:
+// - No leaks (compiler enforces cleanup)
+// - No use-after-free (consumed variables unusable)
+// - Zero runtime overhead (all checks at compile time)
+
+@gpu
+fn compute(
+    a: GPUBufferAffine<f32>,
+    b: GPUBufferAffine<f32>
+) -> GPUBufferAffine<f32> {
+    // Affine version - implicit cleanup OK
+    kernel { result[gid] = a[gid] + b[gid]; }
+}
+
+@gpu
+fn compute_linear(
+    a: GPUBuffer<f32>!,
+    b: GPUBuffer<f32>!
+) -> GPUBuffer<f32>! {
+    // Linear version - explicit resource management
+    region gpu:
+        let! result = allocate_gpu@gpu(1024);
+        dispatch {
+            shader: |gid| { result[gid] = a[gid] + b[gid]; }
+        };
+        result
+}
+
+fn main() -> i32 {
+    print("=== Dyadic Design Demo ===\n");
+
+    // Affine mode: fast prototyping
+    print("Affine mode (prototype): ");
+    let result1 = affine_mode();
+    print_i32(result1);
+    print("\n");
+
+    // Linear mode: safety guarantees
+    print("Linear mode (production): ");
+    let result2 = linear_mode_fixed();
+    print_i32(result2);
+    print("\n");
+
+    print("Both modes work! Choose based on context.\n");
+    0
+}

@@ -1,0 +1,42 @@
+// SPDX-License-Identifier: EUPL-1.2
+// S-Expression Tokenizer
+//
+// Step 1 of parsing: Convert character stream to tokens
+// This version focuses on tokenization only
+
+fn tok_lparen() -> i32 { 1 }
+fn tok_rparen() -> i32 { 2 }
+fn tok_symbol() -> i32 { 3 }
+fn tok_number() -> i32 { 4 }
+
+fn is_lparen(c: i32) -> i32 {
+    let diff = c - 40;
+    diff * diff
+}
+
+fn is_rparen(c: i32) -> i32 {
+    let diff = c - 41;
+    diff * diff
+}
+
+fn classify_char(c: i32) -> i32 {
+    let lparen_check = is_lparen(c);
+    let rparen_check = is_rparen(c);
+
+    let is_lparen_result = lparen_check;
+    let is_rparen_result = rparen_check;
+
+    let both_zero = is_lparen_result + is_rparen_result;
+    both_zero
+}
+
+fn main() -> i32 {
+    let char_lparen = 40;
+    let char_rparen = 41;
+
+    let result1 = classify_char(char_lparen);
+    let result2 = classify_char(char_rparen);
+
+    let sum = result1 + result2;
+    sum
+}

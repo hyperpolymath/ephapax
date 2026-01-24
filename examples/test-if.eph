@@ -1,0 +1,12 @@
+// Test if expressions
+
+fn test_if_simple() -> i32 {
+    let x = 5;
+    let y = 3;
+    let cond = x > y;
+    x + y
+}
+
+fn main() -> i32 {
+    test_if_simple()
+}

@@ -1,0 +1,261 @@
+// SPDX-License-Identifier: EUPL-1.2
+// ephapax-linear Bootstrap Compiler
+//
+// Demonstrates linear type checking in Ephapax itself
+// Compiled with ephapax-affine to prove the bootstrap path
+//
+// This version works within current Ephapax constraints:
+// - No if/else (not parsing yet)
+// - All values must be used
+// - Integer-based encoding
+
+// ============================================================================
+// Type System - Integer Encoding
+// ============================================================================
+
+// Type codes: 0=i32, 1=i64, 2=bool, 3=unit
+fn type_i32() -> i32 { 0 }
+fn type_i64() -> i32 { 1 }
+fn type_bool() -> i32 { 2 }
+fn type_unit() -> i32 { 3 }
+
+fn types_equal(t1: i32, t2: i32) -> i32 {
+    let diff = t1 - t2;
+    let check = diff * diff;  // 0 if equal, >0 if different
+    check
+}
+
+// ============================================================================
+// Context Entry Encoding (packed into i32)
+// ============================================================================
+//
+// Bit layout:
+//   bits 0-7:   type tag (0-255)
+//   bit 8:      linear flag (256 = linear)
+//   bit 9:      consumed flag (512 = consumed)
+//
+// Examples:
+//   5     = type=5, affine, not consumed
+//   261   = type=5, linear, not consumed
+//   517   = type=5, affine, consumed
+//   773   = type=5, linear, consumed
+
+fn entry_create(ty: i32, is_linear: i32) -> i32 {
+    let base = ty;
+    let linear_bit = is_linear * 256;
+    base + linear_bit
+}
+
+fn entry_get_type(entry: i32) -> i32 {
+    let remainder = entry % 256;
+    remainder
+}
+
+fn entry_is_linear(entry: i32) -> i32 {
+    let shifted = entry / 256;
+    let linear_bit = shifted % 2;
+    linear_bit
+}
+
+fn entry_is_consumed(entry: i32) -> i32 {
+    let shifted = entry / 512;
+    let consumed_bit = shifted % 2;
+    consumed_bit
+}
+
+fn entry_mark_consumed(entry: i32) -> i32 {
+    let ty = entry_get_type(entry);
+    let is_linear = entry_is_linear(entry);
+    let base = entry_create(ty, is_linear);
+    let with_consumed = base + 512;
+    with_consumed
+}
+
+// ============================================================================
+// Error Codes (negative numbers)
+// ============================================================================
+
+fn error_ok() -> i32 { 0 }
+fn error_unbound() -> i32 { 0 - 1 }
+fn error_reused() -> i32 { 0 - 2 }
+fn error_not_consumed() -> i32 { 0 - 3 }
+fn error_type_mismatch() -> i32 { 0 - 4 }
+
+// ============================================================================
+// Check Functions
+// ============================================================================
+
+fn check_variable_use(entry: i32) -> i32 {
+    // Check if variable can be used
+    // Returns: type if OK, negative error code if failed
+
+    let is_consumed = entry_is_consumed(entry);
+    let error = error_reused();
+    let success = entry_get_type(entry);
+
+    // If consumed, return error; else return type
+    // Using arithmetic since we don't have if/else
+    let factor = is_consumed * 2;  // 0 or 2
+    let neg_factor = 1 - is_consumed;  // 1 or 0
+
+    let result = factor * error + neg_factor * success;
+    result
+}
+
+fn check_linear_consumed(entry: i32, was_used: i32) -> i32 {
+    // Check if linear variable was properly consumed
+    // Returns 0 if OK, negative if error
+
+    let is_linear = entry_is_linear(entry);
+
+    // Linear && !consumed = error
+    let needs_consumption = is_linear;
+    let not_consumed = 1 - was_used;
+    let is_error = needs_consumption * not_consumed;
+
+    let error = error_not_consumed();
+    let result = is_error * error;
+    result
+}
+
+// ============================================================================
+// Test Cases
+// ============================================================================
+
+fn test_affine_binding() -> i32 {
+    // Test: let x = 42 (affine)
+    // Can be dropped without error
+
+    let ty = type_i32();
+    let is_linear = 0;  // affine
+    let entry = entry_create(ty, is_linear);
+
+    // Variable not used
+    let was_used = 0;
+    let result = check_linear_consumed(entry, was_used);
+
+    // Should return 0 (OK)
+    result
+}
+
+fn test_linear_binding_error() -> i32 {
+    // Test: let! x = 42 (linear, not consumed)
+    // Should error
+
+    let ty = type_i32();
+    let is_linear = 1;  // linear
+    let entry = entry_create(ty, is_linear);
+
+    // Variable not used
+    let was_used = 0;
+    let result = check_linear_consumed(entry, was_used);
+
+    // Should return negative (error)
+    // Return abs value for testing
+    let abs_result = 0 - result;
+    abs_result
+}
+
+fn test_linear_binding_ok() -> i32 {
+    // Test: let! x = 42; use(x) (linear, consumed)
+    // Should be OK
+
+    let ty = type_i32();
+    let is_linear = 1;  // linear
+    let entry = entry_create(ty, is_linear);
+
+    // Variable used
+    let was_used = 1;
+    let result = check_linear_consumed(entry, was_used);
+
+    // Should return 0 (OK)
+    result
+}
+
+fn test_double_use_error() -> i32 {
+    // Test: let! x = 42; use(x); use(x)
+    // Second use should error
+
+    let ty = type_i32();
+    let is_linear = 1;
+    let entry = entry_create(ty, is_linear);
+
+    // First use: mark as consumed
+    let entry_consumed = entry_mark_consumed(entry);
+
+    // Second use: should error
+    let result = check_variable_use(entry_consumed);
+
+    // Should be negative
+    let abs_result = 0 - result;
+    abs_result
+}
+
+fn test_type_encoding() -> i32 {
+    // Test: entry encoding/decoding
+
+    let ty = type_i64();
+    let is_linear = 1;
+    let entry = entry_create(ty, is_linear);
+
+    // Extract type
+    let extracted_ty = entry_get_type(entry);
+
+    // Check equality (should be 0)
+    let diff = types_equal(ty, extracted_ty);
+
+    diff
+}
+
+// ============================================================================
+// Test Runner
+// ============================================================================
+
+fn run_all_tests() -> i32 {
+    // Run all tests and sum results
+    // If all pass, sum should have specific value
+
+    let t1 = test_affine_binding();          // Should be 0
+    let t2 = test_linear_binding_error();     // Should be 3 (abs of -3)
+    let t3 = test_linear_binding_ok();        // Should be 0
+    let t4 = test_double_use_error();         // Should be 2 (abs of -2)
+    let t5 = test_type_encoding();            // Should be 0
+
+    // Sum: 0 + 3 + 0 + 2 + 0 = 5 if all correct
+    let sum = t1 + t2 + t3 + t4 + t5;
+
+    sum
+}
+
+// ============================================================================
+// Bootstrap Validation
+// ============================================================================
+
+fn validate_bootstrap() -> i32 {
+    // This function validates the bootstrap path:
+    // 1. Code is written in Ephapax
+    // 2. Compiled with ephapax-affine (permissive)
+    // 3. Implements linear checking (strict)
+    // 4. Returns 0 if validation succeeds
+
+    let test_result = run_all_tests();
+
+    // Expected: 5
+    let expected = 5;
+    let diff = test_result - expected;
+    let validation = diff * diff;  // 0 if correct
+
+    validation
+}
+
+// ============================================================================
+// Main Entry Point
+// ============================================================================
+
+fn main() -> i32 {
+    // Bootstrap validation result:
+    // 0 = Success (all linear type checks work correctly)
+    // >0 = Failure (something wrong with linear checking)
+
+    validate_bootstrap()
+}

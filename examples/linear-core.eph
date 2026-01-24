@@ -1,0 +1,107 @@
+// SPDX-License-Identifier: EUPL-1.2
+// Linear Type Checker Core - Minimal Bootstrap Demo
+//
+// This demonstrates the ESSENCE of linear type checking
+// written in Ephapax and compiled with the affine compiler.
+//
+// Key Insight: Integer arithmetic can encode boolean logic!
+// - 0 = false/OK
+// - 1 = true/Error
+// - negative = error codes
+
+// ============================================================================
+// Entry Encoding: type + flags packed into one i32
+// ============================================================================
+
+fn create_entry(type_code: i32, is_linear: i32, is_consumed: i32) -> i32 {
+    let t = type_code;
+    let l = is_linear * 100;
+    let c = is_consumed * 1000;
+    t + l + c
+}
+
+fn get_type(entry: i32) -> i32 {
+    entry % 100
+}
+
+fn get_is_linear(entry: i32) -> i32 {
+    let temp = entry / 100;
+    temp % 10
+}
+
+fn get_is_consumed(entry: i32) -> i32 {
+    let temp = entry / 1000;
+    temp % 10
+}
+
+// ============================================================================
+// Linear Checking Logic
+// ============================================================================
+
+fn check_can_use(entry: i32) -> i32 {
+    // Returns 0 if can use, 1 if already consumed (error)
+    let consumed = get_is_consumed(entry);
+    consumed
+}
+
+fn check_must_consume(entry: i32, was_used: i32) -> i32 {
+    // Returns 0 if OK, 1 if error (linear but not consumed)
+    let is_linear = get_is_linear(entry);
+    let not_used = 1 - was_used;
+    let error = is_linear * not_used;
+    error
+}
+
+// ============================================================================
+// Test Cases
+// ============================================================================
+
+fn test_affine_can_drop() -> i32 {
+    // Affine variable not consumed: OK
+    let entry = create_entry(0, 0, 0);  // type=0, not linear, not consumed
+    let result = check_must_consume(entry, 0);  // not used
+    result  // Should be 0
+}
+
+fn test_linear_must_consume() -> i32 {
+    // Linear variable not consumed: ERROR
+    let entry = create_entry(0, 1, 0);  // type=0, linear, not consumed
+    let result = check_must_consume(entry, 0);  // not used
+    result  // Should be 1 (error)
+}
+
+fn test_linear_consumed_ok() -> i32 {
+    // Linear variable consumed: OK
+    let entry = create_entry(0, 1, 0);  // type=0, linear, not consumed
+    let result = check_must_consume(entry, 1);  // used
+    result  // Should be 0
+}
+
+fn test_double_use_error() -> i32 {
+    // Using already-consumed variable: ERROR
+    let entry = create_entry(0, 1, 1);  // type=0, linear, consumed
+    let result = check_can_use(entry);
+    result  // Should be 1 (error)
+}
+
+// ============================================================================
+// Validation
+// ============================================================================
+
+fn main() -> i32 {
+    // Run all tests
+    let t1 = test_affine_can_drop();        // expect 0
+    let t2 = test_linear_must_consume();    // expect 1
+    let t3 = test_linear_consumed_ok();     // expect 0
+    let t4 = test_double_use_error();       // expect 1
+
+    // If all correct: 0 + 1 + 0 + 1 = 2
+    let sum = t1 + t2 + t3 + t4;
+
+    // Return 0 if tests pass (sum == 2), non-zero otherwise
+    let expected = 2;
+    let diff = sum - expected;
+    let result = diff * diff;  // 0 if correct, >0 if wrong
+
+    result
+}

@@ -1,0 +1,262 @@
+// SPDX-License-Identifier: EUPL-1.2
+// ephapax-linear: Minimal linear type checker written in Ephapax
+//
+// This is a bootstrap compiler that implements linear type checking
+// and can be compiled with the affine stage to create ephapax-linear.wasm
+//
+// Phase 1 MVP: Just handle let!, drop, and basic expressions
+
+// ============================================================================
+// Data Types
+// ============================================================================
+
+// Base types
+fn is_base_ty(tag: i32) -> bool {
+    let is_i32 = tag == 0;
+    let is_i64 = tag == 1;
+    let is_bool = tag == 2;
+    let is_unit = tag == 3;
+    is_i32 || is_i64 || is_bool || is_unit
+}
+
+// Type representation (simplified - just base types for MVP)
+// 0 = i32, 1 = i64, 2 = bool, 3 = unit
+fn ty_eq(t1: i32, t2: i32) -> bool {
+    t1 == t2
+}
+
+// ============================================================================
+// Context Entry
+// ============================================================================
+
+// Entry: (ty: i32, linear: bool, consumed: bool)
+// Represented as a packed i32:
+//   bits 0-7:   type tag
+//   bit 8:      linear flag
+//   bit 9:      consumed flag
+
+fn mk_entry(ty: i32, linear: bool, consumed: bool) -> i32 {
+    let base = ty;
+    let with_linear = if linear { base + 256 } else { base };
+    if consumed { with_linear + 512 } else { with_linear }
+}
+
+fn entry_ty(entry: i32) -> i32 {
+    entry % 256
+}
+
+fn entry_is_linear(entry: i32) -> bool {
+    let linear_bit = (entry / 256) % 2;
+    linear_bit == 1
+}
+
+fn entry_is_consumed(entry: i32) -> bool {
+    let consumed_bit = (entry / 512) % 2;
+    consumed_bit == 1
+}
+
+fn entry_mark_consumed(entry: i32) -> i32 {
+    let ty = entry_ty(entry);
+    let linear = entry_is_linear(entry);
+    mk_entry(ty, linear, true)
+}
+
+// ============================================================================
+// Context (simplified - fixed size array for MVP)
+// ============================================================================
+
+// Context: array of entries (max 16 variables)
+// Each slot: -1 = empty, >= 0 = entry
+
+fn ctx_new() -> i32 {
+    // For MVP, just return 0 (represents empty context)
+    // In a real implementation, this would allocate an array
+    0
+}
+
+fn ctx_extend(ctx: i32, var_id: i32, entry: i32) -> i32 {
+    // Simplified: pack ctx, var_id, and entry into result
+    // Real impl would use proper data structure
+    let base = ctx * 10000;
+    let with_var = base + (var_id * 100);
+    with_var + entry
+}
+
+fn ctx_lookup(ctx: i32, var_id: i32) -> i32 {
+    // Simplified lookup - in real impl would search context
+    // Returns entry or -1 if not found
+    let entry = ctx % 100;
+    if entry > 0 { entry } else { -1 }
+}
+
+fn ctx_mark_consumed(ctx: i32, var_id: i32) -> i32 {
+    // Mark variable as consumed
+    let entry = ctx_lookup(ctx, var_id);
+    if entry >= 0 {
+        let new_entry = entry_mark_consumed(entry);
+        ctx_extend(ctx, var_id, new_entry)
+    } else {
+        ctx
+    }
+}
+
+// ============================================================================
+// Type Checker - Core Logic
+// ============================================================================
+
+// Error codes
+fn err_ok() -> i32 { 0 }
+fn err_unbound_var() -> i32 { 1 }
+fn err_linear_reused() -> i32 { 2 }
+fn err_linear_not_consumed() -> i32 { 3 }
+fn err_type_mismatch() -> i32 { 4 }
+
+// Check variable usage: mark as consumed, detect reuse
+fn check_var(ctx: i32, var_id: i32) -> i32 {
+    let entry = ctx_lookup(ctx, var_id);
+
+    // Variable not found
+    let unbound = entry < 0;
+    if unbound {
+        let err = err_unbound_var();
+        0 - err  // Return negative error code
+    } else {
+        // Check if already consumed
+        let already_consumed = entry_is_consumed(entry);
+        if already_consumed {
+            let err = err_linear_reused();
+            0 - err
+        } else {
+            // Mark as consumed and return type
+            let new_ctx = ctx_mark_consumed(ctx, var_id);
+            let ty = entry_ty(entry);
+            ty  // Return type (positive = success)
+        }
+    }
+}
+
+// Check let binding: thread context
+fn check_let(ctx: i32, var_id: i32, is_linear: bool, rhs_ty: i32, body_result: i32) -> i32 {
+    // Extend context with new variable
+    let entry = mk_entry(rhs_ty, is_linear, false);
+    let ctx1 = ctx_extend(ctx, var_id, entry);
+
+    // body_result encodes: (ty << 16) | new_ctx
+    // Simplified encoding for MVP
+
+    // Check if linear variable was consumed
+    let final_entry = ctx_lookup(ctx1, var_id);
+    let consumed = entry_is_consumed(final_entry);
+
+    if is_linear {
+        if consumed {
+            body_result  // OK - linear var consumed
+        } else {
+            let err = err_linear_not_consumed();
+            0 - err
+        }
+    } else {
+        body_result  // OK - affine can drop
+    }
+}
+
+// Check drop: explicit consumption
+fn check_drop(ctx: i32, var_id: i32) -> i32 {
+    let entry = ctx_lookup(ctx, var_id);
+
+    if entry < 0 {
+        let err = err_unbound_var();
+        0 - err
+    } else {
+        let is_linear = entry_is_linear(entry);
+        let already_consumed = entry_is_consumed(entry);
+
+        if already_consumed {
+            let err = err_linear_reused();
+            0 - err
+        } else {
+            // Mark as consumed
+            let new_ctx = ctx_mark_consumed(ctx, var_id);
+            let unit_ty = 3;  // Unit type
+            unit_ty  // Success
+        }
+    }
+}
+
+// ============================================================================
+// Example: Type Check a Simple Linear Program
+// ============================================================================
+
+fn example_linear_correct() -> i32 {
+    // Simulates checking:
+    //   let! x = 42;
+    //   drop(x);
+    //   0
+
+    let ctx0 = ctx_new();
+
+    // let! x = 42 (x is var 0, i32 type = 0)
+    let i32_ty = 0;
+    let x_var = 0;
+    let entry_x = mk_entry(i32_ty, true, false);  // linear, not consumed
+    let ctx1 = ctx_extend(ctx0, x_var, entry_x);
+
+    // drop(x)
+    let drop_result = check_drop(ctx1, x_var);
+
+    if drop_result < 0 {
+        drop_result  // Error
+    } else {
+        // Return 0 (success)
+        0
+    }
+}
+
+fn example_linear_error() -> i32 {
+    // Simulates checking:
+    //   let! x = 42;
+    //   0
+    // Should return error: linear not consumed
+
+    let ctx0 = ctx_new();
+
+    // let! x = 42
+    let i32_ty = 0;
+    let x_var = 0;
+    let entry_x = mk_entry(i32_ty, true, false);
+    let ctx1 = ctx_extend(ctx0, x_var, entry_x);
+
+    // Body: just return 0 (doesn't consume x)
+    let body_ty = i32_ty;
+    let body_ctx = ctx1;  // x still not consumed
+
+    // Check let! - should fail
+    let result = check_let(ctx0, x_var, true, i32_ty, body_ty);
+
+    result  // Should be negative (error code)
+}
+
+// ============================================================================
+// Main Entry Point
+// ============================================================================
+
+fn main() -> i32 {
+    // Test 1: Correct linear usage
+    let test1 = example_linear_correct();
+
+    if test1 < 0 {
+        // Test 1 failed - return error code
+        test1
+    } else {
+        // Test 2: Linear not consumed (should error)
+        let test2 = example_linear_error();
+
+        if test2 >= 0 {
+            // Test 2 should have failed but didn't
+            99  // Unexpected success
+        } else {
+            // Both tests passed (test2 correctly errored)
+            0
+        }
+    }
+}

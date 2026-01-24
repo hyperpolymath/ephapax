@@ -15,6 +15,7 @@ members = [
     "src/ephapax-repl",
     "src/ephapax-cli",
     "src/ephapax-stdlib",
+    "src/ephapax-vram-cache",
 ]
 
 [workspace.package]
@@ -39,6 +40,7 @@ ephapax-parser = { path = "src/ephapax-parser" }
 ephapax-interp = { path = "src/ephapax-interp" }
 ephapax-repl = { path = "src/ephapax-repl" }
 ephapax-stdlib = { path = "src/ephapax-stdlib" }
+ephapax-vram-cache = { path = "src/ephapax-vram-cache" }
 
 # External dependencies
 smol_str = "0.3"

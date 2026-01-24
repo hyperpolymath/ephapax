@@ -1,0 +1,102 @@
+// SPDX-License-Identifier: EUPL-1.2
+// Example 02: Linear Type Safety Demonstrations
+//
+// This example shows how linear types prevent common GPU bugs
+
+// ❌ EXAMPLE 1: Memory Leak (Compile Error)
+fn leak_demo() -> i32 {
+    region gpu:
+        let! buffer = allocate_gpu(1024);
+        // ERROR: Linear variable `buffer` not consumed
+        // Compiler prevents memory leak!
+        0
+    // Compilation error:
+    // "linear variable `buffer` must be consumed before region ends"
+}
+
+// ✅ EXAMPLE 1 FIXED: Explicit cleanup
+fn leak_demo_fixed() -> i32 {
+    region gpu:
+        let! buffer = allocate_gpu(1024);
+        free_gpu(buffer);  // Explicit consumption
+        0
+}
+
+// ❌ EXAMPLE 2: Use-After-Free (Compile Error)
+fn use_after_free_demo() -> i32 {
+    region gpu:
+        let! buffer = allocate_gpu(1024);
+        free_gpu(buffer);
+        // ERROR: buffer already consumed
+        write_gpu(buffer, 42)
+    // Compilation error:
+    // "use of consumed linear variable `buffer`"
+}
+
+// ✅ EXAMPLE 2 FIXED: Correct usage order
+fn use_after_free_fixed() -> i32 {
+    region gpu:
+        let! buffer = allocate_gpu(1024);
+        write_gpu(buffer, 42);  // Use before free
+        0
+}
+
+// ❌ EXAMPLE 3: Double Free (Compile Error)
+fn double_free_demo() -> i32 {
+    region gpu:
+        let! buffer = allocate_gpu(1024);
+        free_gpu(buffer);
+        free_gpu(buffer);  // ERROR: already consumed
+        0
+    // Compilation error:
+    // "use of consumed linear variable `buffer`"
+}
+
+// ✅ EXAMPLE 3 FIXED: Single free
+fn double_free_fixed() -> i32 {
+    region gpu:
+        let! buffer = allocate_gpu(1024);
+        free_gpu(buffer);  // Only free once
+        0
+}
+
+// ✅ EXAMPLE 4: Correct pattern - region-based cleanup
+fn correct_pattern() -> i32 {
+    region gpu:
+        let! buffer = allocate_gpu(1024);
+        let! result = process_buffer(buffer);
+        drop(result);
+        0
+    // Region ensures cleanup even if process_buffer fails
+}
+
+@gpu
+fn process_buffer(buffer: GPUBuffer<i32>!) -> Vec<i32>! {
+    region computation:
+        // Process buffer
+        let kernel_result = run_kernel(buffer);
+
+        // Transfer result to host
+        let host_result = d2h(kernel_result);
+
+        host_result
+}
+
+// Main: demonstrate all examples
+fn main() -> i32 {
+    print("Demonstrating linear type safety\n");
+
+    // These would fail to compile:
+    // leak_demo();
+    // use_after_free_demo();
+    // double_free_demo();
+
+    // These compile successfully:
+    leak_demo_fixed();
+    use_after_free_fixed();
+    double_free_fixed();
+    correct_pattern();
+
+    print("All safety checks passed!\n");
+    0
+}

@@ -1,0 +1,43 @@
+// SPDX-License-Identifier: EUPL-1.2
+// HTTP Server - Connection Module
+//
+// Demonstrates linear types for connection lifecycle
+
+fn conn_state_closed() -> i32 { 0 }
+fn conn_state_open() -> i32 { 1 }
+fn conn_state_reading() -> i32 { 2 }
+fn conn_state_writing() -> i32 { 3 }
+
+fn encode_connection(fd: i32, state: i32) -> i32 {
+    let fd_part = fd * 10;
+    let conn = fd_part + state;
+    conn
+}
+
+fn conn_fd(conn: i32) -> i32 {
+    conn / 10
+}
+
+fn conn_state(conn: i32) -> i32 {
+    conn % 10
+}
+
+fn conn_open(fd: i32) -> i32 {
+    encode_connection(fd, conn_state_open())
+}
+
+fn conn_close(conn: i32) -> i32 {
+    let fd = conn_fd(conn);
+    encode_connection(fd, conn_state_closed())
+}
+
+fn main() -> i32 {
+    let fd = 42;
+    let conn = conn_open(fd);
+    let closed = conn_close(conn);
+
+    let final_state = conn_state(closed);
+    let expected = conn_state_closed();
+    let diff = final_state - expected;
+    diff * diff
+}

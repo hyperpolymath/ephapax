@@ -1,0 +1,13 @@
+// SPDX-License-Identifier: PMPL-1.0-or-later
+// Linear: Basic value consumption
+// Demonstrates that a linear value must be used exactly once
+
+fn consume(x: linear i32) -> i32 {
+    x  // Consumes x
+}
+
+fn main() -> i32 {
+    let x: linear i32 = 42;
+    consume(x)  // OK: x used exactly once
+    // consume(x)  // ERROR: x already consumed
+}

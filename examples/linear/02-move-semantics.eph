@@ -1,0 +1,14 @@
+// SPDX-License-Identifier: PMPL-1.0-or-later
+// Linear: Move semantics
+// Shows value ownership transfer
+
+fn take_ownership(x: linear String) -> i32 {
+    // x is consumed here
+    0
+}
+
+fn main() -> i32 {
+    let s: linear String = "hello";
+    take_ownership(s)  // s is moved
+    // Cannot use s here - ownership transferred
+}

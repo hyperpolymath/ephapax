@@ -15,7 +15,7 @@ members = [
     "src/ephapax-repl",
     "src/ephapax-cli",
     "src/ephapax-stdlib",
-    "src/ephapax-vram-cache",
+    # "src/ephapax-vram-cache",  # Disabled: requires ephapax-proven repo
 ]
 
 [workspace.package]

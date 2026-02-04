@@ -1,0 +1,6 @@
+homepage: "https://github.com/hyperpolymath/ephapax"
+language: rust
+main_repo: "https://github.com/hyperpolymath/ephapax"
+sanitizers:
+  - address
+  - undefined

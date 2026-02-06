@@ -17,3 +17,6 @@ categories.workspace = true
 ephapax-syntax = { workspace = true }
 ephapax-ir = { workspace = true }
 wasm-encoder = { workspace = true }
+
+[dev-dependencies]
+wasmparser = "0.221"

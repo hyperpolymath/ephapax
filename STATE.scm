@@ -6,7 +6,7 @@
      (version "1.0")
      (schema-version "1.0")
      (created "2026-02-04")
-     (updated "2026-02-06")
+     (updated "2026-02-06T2")
      (project "ephapax")
      (repo "hyperpolymath/ephapax"))
 
@@ -17,14 +17,14 @@
 
     (current-position
      (phase "type-checker-and-wasm")
-     (overall-completion 55)
+     (overall-completion 60)
      (components
        (("lexer" "Tokenization with logos (736 LOC)" 100)
         ("parser" "Full parser with chumsky (1240 LOC)" 100)
         ("syntax" "AST definitions (328 LOC)" 100)
         ("interpreter" "Tree-walking interpreter (832 LOC)" 100)
         ("typing" "Type checker - in progress (1002 LOC)" 60)
-        ("wasm-backend" "WASM code generation - in progress (1219 LOC)" 40)
+        ("wasm-backend" "WASM code generation with function compilation, linear lowering (2434 LOC)" 65)
         ("ir" "S-expression intermediate representation (758 LOC)" 100)
         ("runtime" "Runtime support (211 LOC)" 80)
         ("stdlib" "Standard library skeleton (290 LOC)" 40)
@@ -86,11 +86,20 @@
       ((milestone-id "m4")
        (name "WASM Backend")
        (status "in-progress")
-       (completion 40)
-       (items ("WASM code generation module (started)"
-               "Linear type lowering to WASM"
-               "Memory management for linear resources"
-               "Browser and server target support")))
+       (completion 65)
+       (items ("WASM code generation module with wasmparser validation (done)"
+               "Top-level function compilation to real WASM functions (done)"
+               "Function calls between named functions (done)"
+               "Proper local variable management with two-pass compilation (done)"
+               "Integer/boolean operations, all BinOp/UnaryOp (done)"
+               "Control flow: if/else, let bindings, blocks (done)"
+               "Pair/sum type lowering to linear memory (done)"
+               "Region-scoped memory management (done)"
+               "String allocation/concat/length in linear memory (done)"
+               "Linear type tracking: drop insertion, consumption marking (done)"
+               "57 validated tests (wasmparser verification) (done)"
+               "Lambda/closure conversion (stub - needs closure conversion)"
+               "Browser and server target support (not started)")))
 
       ((milestone-id "m5")
        (name "Proven Data Structures")
@@ -110,7 +119,7 @@
      (critical
        ("Type checker incomplete - critical path to MVP"))
      (high
-       ("WASM backend in early stages"
+       ("Lambda/closure conversion not yet implemented in WASM backend"
         "Standard library is skeletal (290 LOC)"))
      (medium
        ("Idris2 two-stage compiler is experimental, not production-ready"
@@ -134,4 +143,22 @@
     (session-history
      ((date "2026-02-06")
       (accomplishments
-        ("Updated STATE.scm with accurate project status from code audit"))))))
+        ("Updated STATE.scm with accurate project status from code audit")))
+     ((date "2026-02-06-session2")
+      (accomplishments
+        ("Major WASM backend overhaul: 1219 LOC -> 2434 LOC"
+         "Implemented top-level function compilation (Decl::Fn -> real WASM functions)"
+         "Implemented function calls between named functions (App + Var -> call instruction)"
+         "Added proper local variable management with two-pass compilation"
+         "Fixed WASM section ordering (Type, Import, Function, Memory, Export, Code, Data)"
+         "Fixed region_enter/region_exit stack balance bugs"
+         "Fixed compile_copy stack balance bug"
+         "Added wasmparser validation to all tests (dev-dependency)"
+         "Added ty_to_valtype mapping for Ephapax types to WASM value types"
+         "Added dynamic type registration for arbitrary function signatures"
+         "Expanded test suite: 6 tests -> 57 tests (all wasmparser-validated)"
+         "Tests cover: literals, arithmetic, comparison, logic, if/else, let, nested let,"
+         "  pairs, sums, case analysis, blocks, regions, strings, copy, drop,"
+         "  borrow/deref, negation, module compilation, function calling"
+         "WASM backend completion: 40% -> 65%"
+         "Overall project completion: 55% -> 60%"))))))

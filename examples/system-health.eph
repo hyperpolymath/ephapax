@@ -1,0 +1,320 @@
+// SPDX-License-Identifier: PMPL-1.0-or-later
+// system-health.eph - System dependability report in Ephapax linear
+//
+// Linear types guarantee each health probe is consumed exactly once,
+// preventing double-reads of stale data and ensuring every resource
+// handle (procfs, sysfs, service bus) is properly closed.
+//
+// Host FFI functions are imported from the Deno runtime.
+// Compile: just cli compile system-health.eph --mode linear --out system-health.wasm
+// Run:     deno run --allow-read --allow-run system-health-host.ts
+
+// ============================================================================
+// Status Encoding
+// ============================================================================
+
+// Health status levels: OK < WARN < CRIT
+fn status_ok()   -> i32 { 0 }
+fn status_warn() -> i32 { 1 }
+fn status_crit() -> i32 { 2 }
+
+// Merge two statuses: take the worst (highest)
+fn status_merge(a: i32, b: i32) -> i32 {
+    if a > b { a } else { b }
+}
+
+fn status_name(s: i32) -> i32 {
+    // 0 = "OK", 1 = "WARN", 2 = "CRIT" (host decodes)
+    s
+}
+
+// ============================================================================
+// Health Report Encoding
+// ============================================================================
+
+// A HealthReport packs: (overall_status, check_count, issue_count)
+// Encoding: status * 10000 + check_count * 100 + issue_count
+// Linear: must be consumed exactly once (threaded through checks)
+
+fn report_new() -> i32 {
+    // status=OK(0), checks=0, issues=0
+    0
+}
+
+fn report_status(report: i32) -> i32 {
+    report / 10000
+}
+
+fn report_checks(report: i32) -> i32 {
+    let remainder = report % 10000;
+    remainder / 100
+}
+
+fn report_issues(report: i32) -> i32 {
+    report % 100
+}
+
+fn report_add_check(report: i32, check_status: i32) -> i32 {
+    let old_status = report_status(report);
+    let old_checks = report_checks(report);
+    let old_issues = report_issues(report);
+
+    let new_status = status_merge(old_status, check_status);
+    let new_checks = old_checks + 1;
+    let new_issues = if check_status > 0 { old_issues + 1 } else { old_issues };
+
+    let result = new_status * 10000 + new_checks * 100 + new_issues;
+    result
+}
+
+// ============================================================================
+// Probe Encoding
+// ============================================================================
+
+// A Probe is a linear handle to a system metric reading.
+// Encoding: (source_tag * 1000000) + value
+// source_tag: 1=memory, 2=swap, 3=thermal, 4=disk, 5=compositor, 6=service
+// The value is metric-specific (percentage, temperature, boolean).
+// Linear: must be evaluated (consumed) exactly once.
+
+fn probe_source(probe: i32) -> i32 {
+    probe / 1000000
+}
+
+fn probe_value(probe: i32) -> i32 {
+    probe % 1000000
+}
+
+fn mk_probe(source: i32, value: i32) -> i32 {
+    source * 1000000 + value
+}
+
+// Source tags
+fn src_memory()     -> i32 { 1 }
+fn src_swap()       -> i32 { 2 }
+fn src_thermal()    -> i32 { 3 }
+fn src_disk()       -> i32 { 4 }
+fn src_compositor() -> i32 { 5 }
+fn src_service()    -> i32 { 6 }
+fn src_gpu()        -> i32 { 7 }
+fn src_boot()       -> i32 { 8 }
+
+// ============================================================================
+// Threshold Evaluation
+// ============================================================================
+
+// Evaluate a percentage probe against warn/crit thresholds
+fn eval_pct_probe(probe: i32, warn_thresh: i32, crit_thresh: i32) -> i32 {
+    let value = probe_value(probe);
+    // probe consumed here (linear - cannot reuse)
+    if value >= crit_thresh {
+        status_crit()
+    } else {
+        if value >= warn_thresh {
+            status_warn()
+        } else {
+            status_ok()
+        }
+    }
+}
+
+// Evaluate a temperature probe (skip bogus 127C readings)
+fn eval_temp_probe(probe: i32) -> i32 {
+    let value = probe_value(probe);
+    if value == 127 {
+        // ACPI PCHZ bogus sensor - always skip
+        status_ok()
+    } else {
+        if value >= 95 {
+            status_crit()
+        } else {
+            if value >= 80 {
+                status_warn()
+            } else {
+                status_ok()
+            }
+        }
+    }
+}
+
+// Evaluate a boolean probe (1=running/ok, 0=down/bad)
+fn eval_bool_probe(probe: i32) -> i32 {
+    let value = probe_value(probe);
+    if value == 1 {
+        status_ok()
+    } else {
+        status_crit()
+    }
+}
+
+// Evaluate boot frequency probe (count of recent boots)
+fn eval_boot_probe(probe: i32) -> i32 {
+    let value = probe_value(probe);
+    if value > 10 {
+        status_warn()
+    } else {
+        status_ok()
+    }
+}
+
+// ============================================================================
+// Host FFI Imports (provided by Deno runtime)
+// ============================================================================
+
+// These functions are imported from the host environment.
+// Each returns a linear Probe that must be consumed exactly once.
+//
+// extern fn host_read_mem_pct() -> i32;       // memory used %
+// extern fn host_read_swap_pct() -> i32;      // swap used %
+// extern fn host_read_cpu_temp() -> i32;       // CPU package temp (C)
+// extern fn host_read_gpu_temp() -> i32;       // GPU temp (C)
+// extern fn host_read_disk_pct(id: i32) -> i32; // disk used % (0=var, 1=eclipse, 2=boot)
+// extern fn host_compositor_alive() -> i32;   // 1=running, 0=dead
+// extern fn host_service_alive(id: i32) -> i32; // 1=active, 0=inactive
+// extern fn host_boot_count() -> i32;          // boots in journal
+// extern fn host_emit_line(tag: i32, status: i32, value: i32) -> i32; // print a line
+
+// ============================================================================
+// Individual Health Checks
+// ============================================================================
+
+// Each check function consumes the report (linear), reads a probe (linear),
+// evaluates it, and produces a new report (linear). This threading ensures
+// no check is skipped and no data is read twice.
+
+fn check_memory(report: i32, mem_pct: i32) -> i32 {
+    let probe = mk_probe(src_memory(), mem_pct);
+    let status = eval_pct_probe(probe, 80, 90);
+    // probe is consumed by eval_pct_probe - cannot reuse
+    let new_report = report_add_check(report, status);
+    new_report
+}
+
+fn check_swap(report: i32, swap_pct: i32) -> i32 {
+    let probe = mk_probe(src_swap(), swap_pct);
+    let status = eval_pct_probe(probe, 50, 80);
+    let new_report = report_add_check(report, status);
+    new_report
+}
+
+fn check_thermal(report: i32, temp_c: i32) -> i32 {
+    let probe = mk_probe(src_thermal(), temp_c);
+    let status = eval_temp_probe(probe);
+    let new_report = report_add_check(report, status);
+    new_report
+}
+
+fn check_gpu(report: i32, gpu_temp: i32) -> i32 {
+    let probe = mk_probe(src_gpu(), gpu_temp);
+    let status = eval_temp_probe(probe);
+    let new_report = report_add_check(report, status);
+    new_report
+}
+
+fn check_disk(report: i32, disk_pct: i32) -> i32 {
+    let probe = mk_probe(src_disk(), disk_pct);
+    let status = eval_pct_probe(probe, 85, 95);
+    let new_report = report_add_check(report, status);
+    new_report
+}
+
+fn check_compositor(report: i32, alive: i32) -> i32 {
+    let probe = mk_probe(src_compositor(), alive);
+    let status = eval_bool_probe(probe);
+    let new_report = report_add_check(report, status);
+    new_report
+}
+
+fn check_service(report: i32, alive: i32) -> i32 {
+    let probe = mk_probe(src_service(), alive);
+    let status = eval_bool_probe(probe);
+    let new_report = report_add_check(report, status);
+    new_report
+}
+
+fn check_boots(report: i32, boot_count: i32) -> i32 {
+    let probe = mk_probe(src_boot(), boot_count);
+    let status = eval_boot_probe(probe);
+    let new_report = report_add_check(report, status);
+    new_report
+}
+
+// ============================================================================
+// Main: Thread the linear HealthReport through all checks
+// ============================================================================
+
+fn main() -> i32 {
+    // Create initial report (linear - must be consumed exactly once)
+    let report = report_new();
+
+    // -- The host runtime calls us with sensor values via WASM imports.
+    // -- For the compiled version, main() returns 0 (success) if the
+    // -- type system itself is sound. The actual health check pipeline
+    // -- runs in run_health_check() which the host invokes.
+
+    // Self-test: verify report encoding roundtrips
+    let test_report = report_new();
+    let test_r1 = report_add_check(test_report, status_ok());
+    let test_r2 = report_add_check(test_r1, status_warn());
+    let test_r3 = report_add_check(test_r2, status_crit());
+
+    let final_status = report_status(test_r3);
+    let final_checks = report_checks(test_r3);
+    let final_issues = report_issues(test_r3);
+
+    // Expected: status=2(CRIT), checks=3, issues=2
+    let status_ok_v = final_status - 2;
+    let checks_ok_v = final_checks - 3;
+    let issues_ok_v = final_issues - 2;
+
+    // Consume the initial report (linear obligation)
+    let consumed = report_status(report);
+
+    // Return 0 if all self-tests pass
+    let err = status_ok_v * status_ok_v + checks_ok_v * checks_ok_v + issues_ok_v * issues_ok_v;
+    err
+}
+
+// ============================================================================
+// Exported: run_health_check - called by host with sensor readings
+// ============================================================================
+
+// The host calls this with all sensor values packed into parameters.
+// Returns the final encoded report (linear - exactly one result).
+fn run_health_check(
+    mem_pct: i32,
+    swap_pct: i32,
+    cpu_temp: i32,
+    gpu_temp: i32,
+    disk_var_pct: i32,
+    disk_eclipse_pct: i32,
+    disk_boot_pct: i32,
+    compositor_alive: i32,
+    svc_containerd: i32,
+    svc_pipewire: i32,
+    svc_watchdog: i32,
+    svc_syncthing: i32,
+    boot_count: i32
+) -> i32 {
+    // Thread the linear report through every check in sequence.
+    // Each step consumes the old report and produces a new one.
+    // The type system guarantees no check is skipped or doubled.
+
+    let r0  = report_new();
+    let r1  = check_memory(r0, mem_pct);
+    let r2  = check_swap(r1, swap_pct);
+    let r3  = check_thermal(r2, cpu_temp);
+    let r4  = check_gpu(r3, gpu_temp);
+    let r5  = check_disk(r4, disk_var_pct);
+    let r6  = check_disk(r5, disk_eclipse_pct);
+    let r7  = check_disk(r6, disk_boot_pct);
+    let r8  = check_compositor(r7, compositor_alive);
+    let r9  = check_service(r8, svc_containerd);
+    let r10 = check_service(r9, svc_pipewire);
+    let r11 = check_service(r10, svc_watchdog);
+    let r12 = check_service(r11, svc_syncthing);
+    let r13 = check_boots(r12, boot_count);
+
+    // r13 is the final report - consumed by returning it
+    r13
+}

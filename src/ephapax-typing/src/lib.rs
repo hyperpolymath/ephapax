@@ -45,6 +45,12 @@ pub enum TypeError {
 
     #[error("String escapes its region `{0}`")]
     RegionEscape(RegionName),
+
+    #[error("String literal must be allocated with String.new@region(\"...\")")]
+    UnallocatedStringLiteral,
+
+    #[error("Type annotation mismatch: declared {declared:?}, but value has type {actual:?}")]
+    AnnotationMismatch { declared: Ty, actual: Ty },
 }
 
 /// Typing context entry
@@ -246,8 +252,7 @@ impl TypeChecker {
             Literal::F32(_) => Ty::Base(BaseTy::F32),
             Literal::F64(_) => Ty::Base(BaseTy::F64),
             Literal::String(_) => {
-                // String literals need a region - this is a parse error
-                panic!("String literals must be allocated with String.new@r")
+                return Err(TypeError::UnallocatedStringLiteral);
             }
         })
     }
@@ -290,11 +295,22 @@ impl TypeChecker {
     fn check_let(
         &mut self,
         name: &Var,
-        _ty: Option<&Ty>,
+        ty_ann: Option<&Ty>,
         value: &Expr,
         body: &Expr,
     ) -> Result<Ty, TypeError> {
         let value_ty = self.check(value)?;
+
+        // If a type annotation is present, verify it matches the inferred type
+        if let Some(declared) = ty_ann {
+            if *declared != value_ty {
+                return Err(TypeError::AnnotationMismatch {
+                    declared: declared.clone(),
+                    actual: value_ty,
+                });
+            }
+        }
+
         self.ctx.extend(name.clone(), value_ty);
         let body_ty = self.check(body)?;
 
@@ -483,12 +499,23 @@ impl TypeChecker {
     fn check_let_lin(
         &mut self,
         name: &Var,
-        _ty: Option<&Ty>,
+        ty_ann: Option<&Ty>,
         value: &Expr,
         body: &Expr,
     ) -> Result<Ty, TypeError> {
         // Same as let, but explicitly marked linear
         let value_ty = self.check(value)?;
+
+        // If a type annotation is present, verify it matches the inferred type
+        if let Some(declared) = ty_ann {
+            if *declared != value_ty {
+                return Err(TypeError::AnnotationMismatch {
+                    declared: declared.clone(),
+                    actual: value_ty,
+                });
+            }
+        }
+
         self.ctx.extend(name.clone(), value_ty);
         let body_ty = self.check(body)?;
 
@@ -998,5 +1025,368 @@ mod tests {
             tc.check(&var),
             Err(TypeError::LinearVariableReused(_))
         ));
+    }
+
+    // ===== String literal error (no longer panics) =====
+
+    #[test]
+    fn test_string_literal_error() {
+        let mut tc = TypeChecker::new();
+        let expr = dummy_expr(ExprKind::Lit(Literal::String("hello".to_string())));
+        assert!(matches!(
+            tc.check(&expr),
+            Err(TypeError::UnallocatedStringLiteral)
+        ));
+    }
+
+    // ===== Type annotation mismatch =====
+
+    #[test]
+    fn test_let_annotation_match() {
+        // let x: I32 = 42 in x  — annotation matches, should pass
+        let mut tc = TypeChecker::new();
+        let expr = dummy_expr(ExprKind::Let {
+            name: "x".into(),
+            ty: Some(Ty::Base(BaseTy::I32)),
+            value: Box::new(dummy_expr(ExprKind::Lit(Literal::I32(42)))),
+            body: Box::new(dummy_expr(ExprKind::Var("x".into()))),
+        });
+        assert_eq!(tc.check(&expr).unwrap(), Ty::Base(BaseTy::I32));
+    }
+
+    #[test]
+    fn test_let_annotation_mismatch() {
+        // let x: Bool = 42 in x  — annotation doesn't match, should fail
+        let mut tc = TypeChecker::new();
+        let expr = dummy_expr(ExprKind::Let {
+            name: "x".into(),
+            ty: Some(Ty::Base(BaseTy::Bool)),
+            value: Box::new(dummy_expr(ExprKind::Lit(Literal::I32(42)))),
+            body: Box::new(dummy_expr(ExprKind::Var("x".into()))),
+        });
+        assert!(matches!(
+            tc.check(&expr),
+            Err(TypeError::AnnotationMismatch { .. })
+        ));
+    }
+
+    // ===== Pair tests =====
+
+    #[test]
+    fn test_pair_typing() {
+        let mut tc = TypeChecker::new();
+        let expr = dummy_expr(ExprKind::Pair {
+            left: Box::new(dummy_expr(ExprKind::Lit(Literal::I32(1)))),
+            right: Box::new(dummy_expr(ExprKind::Lit(Literal::Bool(true)))),
+        });
+        assert_eq!(
+            tc.check(&expr).unwrap(),
+            Ty::Prod {
+                left: Box::new(Ty::Base(BaseTy::I32)),
+                right: Box::new(Ty::Base(BaseTy::Bool)),
+            }
+        );
+    }
+
+    #[test]
+    fn test_fst_unrestricted() {
+        // fst (1, true) — both components unrestricted, should pass
+        let mut tc = TypeChecker::new();
+        let expr = dummy_expr(ExprKind::Fst(Box::new(dummy_expr(ExprKind::Pair {
+            left: Box::new(dummy_expr(ExprKind::Lit(Literal::I32(1)))),
+            right: Box::new(dummy_expr(ExprKind::Lit(Literal::Bool(true)))),
+        }))));
+        assert_eq!(tc.check(&expr).unwrap(), Ty::Base(BaseTy::I32));
+    }
+
+    #[test]
+    fn test_fst_linear_snd_rejected() {
+        // fst (1, s) where s is linear — can't discard linear second component
+        let mut tc = TypeChecker::new();
+        tc.ctx.enter_region("r".into());
+        tc.ctx.extend("s".into(), Ty::String("r".into()));
+
+        let expr = dummy_expr(ExprKind::Fst(Box::new(dummy_expr(ExprKind::Pair {
+            left: Box::new(dummy_expr(ExprKind::Lit(Literal::I32(1)))),
+            right: Box::new(dummy_expr(ExprKind::Var("s".into()))),
+        }))));
+        assert!(matches!(
+            tc.check(&expr),
+            Err(TypeError::LinearVariableNotConsumed(_))
+        ));
+    }
+
+    // ===== Sum type tests =====
+
+    #[test]
+    fn test_inl_typing() {
+        let mut tc = TypeChecker::new();
+        // inl[Bool] 42  → Sum(I32, Bool)
+        let expr = dummy_expr(ExprKind::Inl {
+            ty: Ty::Base(BaseTy::Bool),
+            value: Box::new(dummy_expr(ExprKind::Lit(Literal::I32(42)))),
+        });
+        assert_eq!(
+            tc.check(&expr).unwrap(),
+            Ty::Sum {
+                left: Box::new(Ty::Base(BaseTy::I32)),
+                right: Box::new(Ty::Base(BaseTy::Bool)),
+            }
+        );
+    }
+
+    #[test]
+    fn test_case_analysis() {
+        let mut tc = TypeChecker::new();
+        // case (inl[Bool] 42) of { x => x, y => 0 }
+        let expr = dummy_expr(ExprKind::Case {
+            scrutinee: Box::new(dummy_expr(ExprKind::Inl {
+                ty: Ty::Base(BaseTy::Bool),
+                value: Box::new(dummy_expr(ExprKind::Lit(Literal::I32(42)))),
+            })),
+            left_var: "x".into(),
+            left_body: Box::new(dummy_expr(ExprKind::Var("x".into()))),
+            right_var: "y".into(),
+            right_body: Box::new(dummy_expr(ExprKind::Lit(Literal::I32(0)))),
+        });
+        assert_eq!(tc.check(&expr).unwrap(), Ty::Base(BaseTy::I32));
+    }
+
+    // ===== Region tests =====
+
+    #[test]
+    fn test_region_string_allocation() {
+        let mut tc = TypeChecker::new();
+        // region r { String.new@r("hello") } — string escapes region, should fail
+        let expr = dummy_expr(ExprKind::Region {
+            name: "r".into(),
+            body: Box::new(dummy_expr(ExprKind::StringNew {
+                region: "r".into(),
+                value: "hello".to_string(),
+            })),
+        });
+        assert!(matches!(
+            tc.check(&expr),
+            Err(TypeError::RegionEscape(_))
+        ));
+    }
+
+    #[test]
+    fn test_region_non_escaping() {
+        let mut tc = TypeChecker::new();
+        // region r { let! s = String.new@r("hi") in drop(s); () }
+        // String is consumed inside region — should pass
+        let expr = dummy_expr(ExprKind::Region {
+            name: "r".into(),
+            body: Box::new(dummy_expr(ExprKind::Block(vec![
+                dummy_expr(ExprKind::LetLin {
+                    name: "s".into(),
+                    ty: None,
+                    value: Box::new(dummy_expr(ExprKind::StringNew {
+                        region: "r".into(),
+                        value: "hi".to_string(),
+                    })),
+                    body: Box::new(dummy_expr(ExprKind::Drop(Box::new(dummy_expr(
+                        ExprKind::Var("s".into()),
+                    ))))),
+                }),
+                dummy_expr(ExprKind::Lit(Literal::Unit)),
+            ]))),
+        });
+        assert!(tc.check(&expr).is_ok());
+    }
+
+    #[test]
+    fn test_inactive_region_error() {
+        let mut tc = TypeChecker::new();
+        // String.new@r("hello") without entering region r — should fail
+        let expr = dummy_expr(ExprKind::StringNew {
+            region: "r".into(),
+            value: "hello".to_string(),
+        });
+        assert!(matches!(
+            tc.check(&expr),
+            Err(TypeError::InactiveRegion(_))
+        ));
+    }
+
+    // ===== Function/lambda tests =====
+
+    #[test]
+    fn test_lambda_typing() {
+        let mut tc = TypeChecker::new();
+        // fn(x: I32) -> x
+        let expr = dummy_expr(ExprKind::Lambda {
+            param: "x".into(),
+            param_ty: Ty::Base(BaseTy::I32),
+            body: Box::new(dummy_expr(ExprKind::Var("x".into()))),
+        });
+        assert_eq!(
+            tc.check(&expr).unwrap(),
+            Ty::Fun {
+                param: Box::new(Ty::Base(BaseTy::I32)),
+                ret: Box::new(Ty::Base(BaseTy::I32)),
+            }
+        );
+    }
+
+    #[test]
+    fn test_function_application() {
+        let mut tc = TypeChecker::new();
+        // (fn(x: I32) -> x) 42
+        let expr = dummy_expr(ExprKind::App {
+            func: Box::new(dummy_expr(ExprKind::Lambda {
+                param: "x".into(),
+                param_ty: Ty::Base(BaseTy::I32),
+                body: Box::new(dummy_expr(ExprKind::Var("x".into()))),
+            })),
+            arg: Box::new(dummy_expr(ExprKind::Lit(Literal::I32(42)))),
+        });
+        assert_eq!(tc.check(&expr).unwrap(), Ty::Base(BaseTy::I32));
+    }
+
+    #[test]
+    fn test_application_type_mismatch() {
+        let mut tc = TypeChecker::new();
+        // (fn(x: I32) -> x) true  — passing Bool to I32 param
+        let expr = dummy_expr(ExprKind::App {
+            func: Box::new(dummy_expr(ExprKind::Lambda {
+                param: "x".into(),
+                param_ty: Ty::Base(BaseTy::I32),
+                body: Box::new(dummy_expr(ExprKind::Var("x".into()))),
+            })),
+            arg: Box::new(dummy_expr(ExprKind::Lit(Literal::Bool(true)))),
+        });
+        assert!(matches!(
+            tc.check(&expr),
+            Err(TypeError::TypeMismatch { .. })
+        ));
+    }
+
+    // ===== Copy/drop tests =====
+
+    #[test]
+    fn test_copy_unrestricted_ok() {
+        let mut tc = TypeChecker::new();
+        let expr = dummy_expr(ExprKind::Copy(Box::new(dummy_expr(ExprKind::Lit(
+            Literal::I32(42),
+        )))));
+        assert_eq!(
+            tc.check(&expr).unwrap(),
+            Ty::Prod {
+                left: Box::new(Ty::Base(BaseTy::I32)),
+                right: Box::new(Ty::Base(BaseTy::I32)),
+            }
+        );
+    }
+
+    #[test]
+    fn test_copy_linear_rejected() {
+        let mut tc = TypeChecker::new();
+        tc.ctx.enter_region("r".into());
+        tc.ctx.extend("s".into(), Ty::String("r".into()));
+
+        let expr = dummy_expr(ExprKind::Copy(Box::new(dummy_expr(
+            ExprKind::Var("s".into()),
+        ))));
+        assert!(matches!(
+            tc.check(&expr),
+            Err(TypeError::CannotCopyLinear(_))
+        ));
+    }
+
+    #[test]
+    fn test_drop_linear_ok() {
+        let mut tc = TypeChecker::new();
+        tc.ctx.enter_region("r".into());
+        tc.ctx.extend("s".into(), Ty::String("r".into()));
+
+        let expr = dummy_expr(ExprKind::Drop(Box::new(dummy_expr(
+            ExprKind::Var("s".into()),
+        ))));
+        assert_eq!(tc.check(&expr).unwrap(), Ty::Base(BaseTy::Unit));
+    }
+
+    #[test]
+    fn test_drop_unrestricted_rejected() {
+        let mut tc = TypeChecker::new();
+        let expr = dummy_expr(ExprKind::Drop(Box::new(dummy_expr(ExprKind::Lit(
+            Literal::I32(42),
+        )))));
+        assert!(matches!(
+            tc.check(&expr),
+            Err(TypeError::UnnecessaryDrop)
+        ));
+    }
+
+    // ===== Module-level type checking =====
+
+    #[test]
+    fn test_module_basic() {
+        let module = Module {
+            name: "test".into(),
+            decls: vec![Decl::Fn {
+                name: "add".into(),
+                params: vec![("a".into(), Ty::Base(BaseTy::I32)), ("b".into(), Ty::Base(BaseTy::I32))],
+                ret_ty: Ty::Base(BaseTy::I32),
+                body: dummy_expr(ExprKind::BinOp {
+                    op: BinOp::Add,
+                    left: Box::new(dummy_expr(ExprKind::Var("a".into()))),
+                    right: Box::new(dummy_expr(ExprKind::Var("b".into()))),
+                }),
+            }],
+        };
+        assert!(type_check_module(&module).is_ok());
+    }
+
+    #[test]
+    fn test_module_return_type_mismatch() {
+        let module = Module {
+            name: "test".into(),
+            decls: vec![Decl::Fn {
+                name: "bad".into(),
+                params: vec![],
+                ret_ty: Ty::Base(BaseTy::Bool),
+                body: dummy_expr(ExprKind::Lit(Literal::I32(42))),
+            }],
+        };
+        assert!(matches!(
+            type_check_module(&module),
+            Err(TypeError::TypeMismatch { .. })
+        ));
+    }
+
+    // ===== Binop/unaryop tests =====
+
+    #[test]
+    fn test_arithmetic_typing() {
+        let mut tc = TypeChecker::new();
+        let expr = dummy_expr(ExprKind::BinOp {
+            op: BinOp::Add,
+            left: Box::new(dummy_expr(ExprKind::Lit(Literal::I32(1)))),
+            right: Box::new(dummy_expr(ExprKind::Lit(Literal::I32(2)))),
+        });
+        assert_eq!(tc.check(&expr).unwrap(), Ty::Base(BaseTy::I32));
+    }
+
+    #[test]
+    fn test_comparison_returns_bool() {
+        let mut tc = TypeChecker::new();
+        let expr = dummy_expr(ExprKind::BinOp {
+            op: BinOp::Lt,
+            left: Box::new(dummy_expr(ExprKind::Lit(Literal::I32(1)))),
+            right: Box::new(dummy_expr(ExprKind::Lit(Literal::I32(2)))),
+        });
+        assert_eq!(tc.check(&expr).unwrap(), Ty::Base(BaseTy::Bool));
+    }
+
+    #[test]
+    fn test_negation_typing() {
+        let mut tc = TypeChecker::new();
+        let expr = dummy_expr(ExprKind::UnaryOp {
+            op: UnaryOp::Neg,
+            operand: Box::new(dummy_expr(ExprKind::Lit(Literal::I32(42)))),
+        });
+        assert_eq!(tc.check(&expr).unwrap(), Ty::Base(BaseTy::I32));
     }
 }

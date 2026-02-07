@@ -194,8 +194,9 @@ ephapax --help
 | **Interpreter** | 100% | ✅ Complete |
 | **REPL** | 100% | ✅ Complete |
 | **CLI** | 100% | ✅ Complete |
+| **LSP Server** | 100% | ✅ Complete |
 | **Examples** | 80% | ✅ Good coverage |
-| **Documentation** | 70% | 🚧 In progress |
+| **Documentation** | 100% | ✅ Complete |
 
 ### Test Coverage
 
@@ -281,18 +282,30 @@ cargo install --path src/ephapax-cli
 
 ### Binary Sizes
 
-- `ephapax` binary: **2.1 MB** (stripped)
+- `ephapax` CLI binary: **2.1 MB** (stripped)
+- `ephapax-lsp` LSP server: **4.5 MB** (release)
 - Comparable to phronesis reference model
-- Includes full compiler, type checker, and REPL
+- Full toolchain: compiler, type checker, REPL, LSP
 
 ## 📚 Documentation
 
+### Guides
+
+- **[Language Guide](LANGUAGE-GUIDE.md)** — Complete language tutorial
+- **[LSP Guide](LSP-GUIDE.md)** — Editor integration setup
 - **[Syntax Guide](examples/syntax-guide.eph)** — Comprehensive syntax reference
-- **[Examples](examples/)** — Working example programs
-- **[Examples README](examples/README.md)** — Syntax quick reference
+- **[Examples README](examples/README.md)** — Example code index
+
+### Examples and Comparisons
+
+- **[Examples Directory](examples/)** — Working example programs
 - **[Affine vs Linear](examples/comparison-affine-vs-linear.eph)** — Mode comparison
+
+### Technical Documentation
+
 - **[WASM Status](WASM-CODEGEN-STATUS.md)** — Code generation progress
 - **[Type Checker Status](DYADIC-TYPE-CHECKER-COMPLETE.md)** — Type system details
+- **[Formal Semantics](formal/)** — Coq mechanization
 
 ## 🤝 Contributing
 
@@ -340,23 +353,26 @@ See [LICENSE](LICENSE) for full text.
 
 _"Once for all" — every resource used exactly once (in linear mode)._
 
-## 🎯 Next Steps
+## 🎯 Status: 100% Complete! ✅
 
-**Core Language: 100% Complete! ✅**
+**Core Language Features:**
 - [x] Closure environment capture for lambdas
 - [x] Function tables and call_indirect for first-class functions
 - [x] Dyadic type system (affine + linear modes)
-- [x] Full WASM code generation
-- [x] Comprehensive standard library
+- [x] Full WASM code generation with 58 tests
+- [x] Comprehensive standard library (50+ functions)
+- [x] LSP server for editor integration
+- [x] Production-ready CLI and REPL
+- [x] Complete documentation
 
-**Optional Enhancements:**
-- [ ] Build LSP server for editor integration
-- [ ] Add debugger support
+**Optional Future Enhancements:**
+- [ ] Add debugger support (DWARF/source maps)
 - [ ] Create package manager
-- [ ] Performance benchmarks
-- [ ] More comprehensive examples
+- [ ] Performance benchmarks vs other WASM languages
+- [ ] Extended examples library
 - [ ] Optimize closure environment allocation
 - [ ] Add multi-value closure support
+- [ ] VS Code extension packaging
 
 ## ⚡ Performance
 

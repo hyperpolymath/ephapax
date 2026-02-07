@@ -221,14 +221,15 @@
     (low))
 
   (critical-next-actions
-    (immediate)
-    (this-week)
+    (immediate
+      "enhancement-2-package-manager")
+    (this-week
+      "enhancement-3-performance-benchmarks"
+      "enhancement-4-vscode-extension")
     (this-month
-      "optional-debugger"
-      "optional-package-manager"
-      "optional-performance-benchmarks"
-      "optional-multi-value-closures"
-      "optional-closure-environment-optimization"))
+      "enhancement-5-closure-optimization"
+      "enhancement-1-phase-2-dwarf"
+      "enhancement-1-phase-3-dap-server"))
 
   (session-history
     (session
@@ -440,4 +441,32 @@
       (key-deliverables
         (lsp-server "Full Language Server Protocol implementation")
         (completion "Core language 100% complete")
-        (documentation "Ready for comprehensive write-up")))))
+        (documentation "Ready for comprehensive write-up")))
+    (session
+      (date "2026-02-07-enhancements")
+      (goal "Implement 5 optional enhancements to extend Ephapax tooling ecosystem")
+      (accomplishments
+        "enhancement-1-phase-1-complete"
+        "debug-support-source-maps"
+        "debug-support-mode-metadata"
+        "cli-debug-flag"
+        "cli-mode-flag"
+        "source-map-json-format"
+        "custom-wasm-section"
+        "span-tracking-in-codegen"
+        "documentation-created")
+      (tasks-completed
+        (enhancement-1-phase-1 "Debug Support - Source Maps + Mode Metadata"))
+      (commits
+        "7d086f4 feat: add debug information support (Phase 1)"
+        "bdfda22 docs: add comprehensive enhancement suite status tracking")
+      (metrics
+        (completion "20% (1/5 enhancements)")
+        (debug-binary "2.1 MB + source map")
+        (new-modules "1 (ephapax-wasm/src/debug.rs)")
+        (dependencies-added "3 (gimli, object, serde_json)"))
+      (key-deliverables
+        (debug-phase-1 "JSON source maps + mode metadata custom section")
+        (cli-enhancements "--debug and --mode flags")
+        (documentation "DEBUG-SUPPORT.md + ENHANCEMENTS-STATUS.md")
+        (future-roadmap "Phases 2-4 (DWARF, DAP, VS Code) + 4 remaining enhancements")))))

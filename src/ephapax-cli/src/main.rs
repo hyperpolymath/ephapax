@@ -12,7 +12,7 @@ use ephapax_interp::Interpreter;
 use ephapax_lexer::Lexer;
 use ephapax_parser::{parse, parse_module};
 use ephapax_repl::Repl;
-use ephapax_typing::type_check_module;
+use ephapax_typing::{type_check_module, type_check_module_with_mode, Mode};
 use std::fs;
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -59,6 +59,10 @@ enum Commands {
         /// Files to check
         #[arg(required = true)]
         files: Vec<PathBuf>,
+
+        /// Type checking mode (linear or affine)
+        #[arg(short, long, default_value = "linear")]
+        mode: String,
     },
 
     /// Compile to WebAssembly
@@ -108,7 +112,7 @@ fn main() -> ExitCode {
     let result = match cli.command {
         Some(Commands::Repl { preload }) => run_repl(preload, cli.verbose),
         Some(Commands::Run { file, args: _ }) => run_file(&file, cli.verbose),
-        Some(Commands::Check { files }) => check_files(&files, cli.verbose),
+        Some(Commands::Check { files, mode }) => check_files(&files, &mode, cli.verbose),
         Some(Commands::Compile { file, output, opt_level }) => {
             compile_file(&file, output, opt_level, cli.verbose)
         }
@@ -208,7 +212,16 @@ fn run_file(path: &PathBuf, verbose: bool) -> Result<(), String> {
     }
 }
 
-fn check_files(files: &[PathBuf], verbose: bool) -> Result<(), String> {
+fn check_files(files: &[PathBuf], mode_str: &str, verbose: bool) -> Result<(), String> {
+    // Parse mode argument
+    let mode = match mode_str.to_lowercase().as_str() {
+        "linear" => Mode::Linear,
+        "affine" => Mode::Affine,
+        _ => {
+            return Err(format!("Invalid mode '{}'. Must be 'linear' or 'affine'", mode_str));
+        }
+    };
+
     let mut errors = 0;
     let mut checked = 0;
 
@@ -236,8 +249,8 @@ fn check_files(files: &[PathBuf], verbose: bool) -> Result<(), String> {
             }
         };
 
-        // Type check
-        match type_check_module(&module) {
+        // Type check with specified mode
+        match type_check_module_with_mode(&module, mode) {
             Ok(()) => {
                 if verbose {
                     println!(

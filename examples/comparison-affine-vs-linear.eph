@@ -1,0 +1,173 @@
+// SPDX-License-Identifier: PMPL-1.0-or-later
+// Affine vs Linear Mode Comparison
+//
+// This file demonstrates the same problems solved in both modes,
+// highlighting the trade-offs between flexibility and safety.
+
+// ============================================================================
+// SCENARIO 1: Database Connection Cleanup
+// ============================================================================
+
+// AFFINE VERSION: Flexible but potentially unsafe
+// - Allows forgetting to close connections
+// - Good for prototyping
+// - Risk: connection leaks
+fn db_query_affine(should_query: Bool): I32 =
+    region r {
+        let conn = String.new@r("db://localhost") in
+
+        if should_query then
+            // Simulate query
+            let result = String.len(&conn) in
+            let _ = drop(conn) in
+            result
+        else
+            // Oops! Forgot to close connection in this branch
+            // Affine mode allows this (implicit drop)
+            0
+    }
+
+// LINEAR VERSION: Strict and safe
+// - Forces connection cleanup in ALL paths
+// - Production-ready
+// - Guaranteed: no connection leaks
+fn db_query_linear(should_query: Bool): I32 =
+    region r {
+        let conn = String.new@r("db://localhost") in
+
+        let result = if should_query then
+            String.len(&conn)
+        else
+            0
+        in
+
+        // MUST close connection (type checker enforces this)
+        let _ = drop(conn) in
+        result
+    }
+
+// ============================================================================
+// SCENARIO 2: File Processing Pipeline
+// ============================================================================
+
+// AFFINE VERSION: Quick iteration
+// - Allows skipping cleanup steps
+// - Useful for experimentation
+fn process_file_affine(should_process: Bool): I32 =
+    region r {
+        let file = String.new@r("data.txt") in
+        let buffer = String.new@r("buffer") in
+
+        if should_process then
+            let size = String.len(&file) in
+            let _ = drop(file) in
+            let _ = drop(buffer) in
+            size
+        else
+            // Early return, resources auto-dropped
+            0
+    }
+
+// LINEAR VERSION: Resource discipline
+// - All resources accounted for
+// - Clear ownership tracking
+fn process_file_linear(should_process: Bool): I32 =
+    region r {
+        let file = String.new@r("data.txt") in
+        let buffer = String.new@r("buffer") in
+
+        let size = if should_process then
+            String.len(&file)
+        else
+            0
+        in
+
+        // Explicit cleanup of BOTH resources
+        let _ = drop(file) in
+        let _ = drop(buffer) in
+        size
+    }
+
+// ============================================================================
+// SCENARIO 3: Error Handling
+// ============================================================================
+
+// AFFINE VERSION: Relaxed error paths
+// - Can skip cleanup on error
+// - Faster to write
+fn handle_error_affine(has_error: Bool): I32 =
+    region r {
+        let resource = String.new@r("critical") in
+
+        if has_error then
+            // Early error return
+            // Resource implicitly dropped
+            -1
+        else
+            let value = String.len(&resource) in
+            let _ = drop(resource) in
+            value
+    }
+
+// LINEAR VERSION: Guaranteed cleanup
+// - Cleanup happens even on error
+// - Safety first
+fn handle_error_linear(has_error: Bool): I32 =
+    region r {
+        let resource = String.new@r("critical") in
+
+        let result = if has_error then
+            -1
+        else
+            String.len(&resource)
+        in
+
+        // Cleanup ALWAYS happens
+        let _ = drop(resource) in
+        result
+    }
+
+// ============================================================================
+// TRADE-OFFS SUMMARY
+// ============================================================================
+
+// AFFINE MODE:
+// + Flexible - allows implicit drops
+// + Faster prototyping
+// + Less boilerplate
+// - Risk of resource leaks
+// - Potential memory issues
+// - Not production-safe
+
+// LINEAR MODE:
+// + Guaranteed resource safety
+// + No memory leaks
+// + Production-ready
+// + Clear ownership
+// - More verbose
+// - Requires explicit cleanup
+// - Stricter discipline
+
+// ============================================================================
+// RECOMMENDATION
+// ============================================================================
+
+// Use AFFINE for:
+// - Prototyping and exploration
+// - Educational examples
+// - Scripts and utilities
+// - Situations where cleanup is optional
+
+// Use LINEAR for:
+// - Production systems
+// - Critical infrastructure
+// - Financial applications
+// - Systems with limited resources
+// - Long-running services
+
+fn main(_unit: ()): I32 =
+    let affine1 = db_query_affine(true) in
+    let linear1 = db_query_linear(true) in
+    let affine2 = process_file_affine(false) in
+    let linear2 = process_file_linear(false) in
+    affine1 + linear1 + affine2 + linear2

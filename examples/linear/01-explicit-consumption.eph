@@ -1,0 +1,84 @@
+// SPDX-License-Identifier: PMPL-1.0-or-later
+// Linear Mode Example: Explicit Consumption Required
+//
+// In linear mode, ALL linear values must be explicitly consumed.
+// No implicit drops are allowed - this ensures resource safety
+// and prevents memory leaks.
+
+// Example 1: Explicit drop required
+fn create_and_drop(_unit: ()): I32 =
+    region r {
+        let s = String.new@r("hello") in
+        let _ = drop(s) in
+        // Must explicitly drop 's'
+        42
+    }
+
+// Example 2: Conditional consumption (must consume in ALL branches)
+fn conditional_drop(should_process: Bool): I32 =
+    region r {
+        let s = String.new@r("data") in
+        if should_process then
+            let len = String.len(&s) in
+            let _ = drop(s) in
+            len
+        else
+            // Must also consume 's' in else branch
+            let _ = drop(s) in
+            0
+    }
+
+// Example 3: Multiple resources, all must be consumed
+fn complete_cleanup(_unit: ()): I32 =
+    region r {
+        let s1 = String.new@r("first") in
+        let s2 = String.new@r("second") in
+        let s3 = String.new@r("third") in
+
+        // ALL resources must be explicitly dropped
+        let _ = drop(s1) in
+        let _ = drop(s2) in
+        let _ = drop(s3) in
+        100
+    }
+
+// Example 4: Resource must be consumed before return
+fn safe_resource_usage(compute: Bool): I32 =
+    region r {
+        let resource = String.new@r("important") in
+
+        let result = if compute then
+            let len = String.len(&resource) in
+            len
+        else
+            42
+        in
+
+        // Must consume resource before returning
+        let _ = drop(resource) in
+        result
+    }
+
+// Example 5: Borrow before drop
+fn borrow_then_drop(_unit: ()): I32 =
+    region r {
+        let s = String.new@r("test") in
+
+        // Can borrow multiple times
+        let len1 = String.len(&s) in
+        let len2 = String.len(&s) in
+
+        // Finally must drop
+        let _ = drop(s) in
+
+        len1 + len2
+    }
+
+// Main: demonstrate linear strictness
+fn main(_unit: ()): I32 =
+    let r1 = create_and_drop(()) in
+    let r2 = conditional_drop(true) in
+    let r3 = complete_cleanup(()) in
+    let r4 = safe_resource_usage(false) in
+    let r5 = borrow_then_drop(()) in
+    r1 + r2 + r3 + r4 + r5

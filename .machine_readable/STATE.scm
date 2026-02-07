@@ -7,7 +7,7 @@
     (version "0.1.0")
     (schema-version "1.0")
     (created "2025-12-16")
-    (updated "2026-01-04")
+    (updated "2026-02-07")
     (project "ephapax")
     (repo "github.com/hyperpolymath/ephapax"))
 
@@ -202,6 +202,95 @@
 
   (session-history
     (session
+      (date "2026-02-07")
+      (goal "Drive ephapax to completion like phronesis - production ready in both affine and linear modes")
+      (tasks
+        (task-1
+          (name "Complete Type Checker")
+          (status "planned")
+          (target "60% → 100%")
+          (items
+            "complete-region-scope-tracking"
+            "finish-linear-context-threading"
+            "add-affine-mode-support"
+            "implement-region-escape-rejection"
+            "complete-unused-linear-rejection"))
+        (task-2
+          (name "Complete WASM Code Generation")
+          (status "planned")
+          (target "30% → 100%")
+          (items
+            "finish-primitives-codegen"
+            "complete-functions-codegen"
+            "implement-products-codegen"
+            "implement-sums-codegen"
+            "complete-regions-codegen"
+            "implement-linear-memory-mgmt"))
+        (task-3
+          (name "Build Production Binaries")
+          (status "planned")
+          (items
+            "create-unified-ephapax-binary"
+            "support-mode-flag-affine-linear"
+            "optimize-and-strip-release-build"
+            "target-2-5mb-like-phronesis"))
+        (task-4
+          (name "Implement Standard Library")
+          (status "planned")
+          (items
+            "string-operations"
+            "io-primitives"
+            "memory-management-regions"
+            "basic-collections"
+            "math-operations"
+            "ensure-both-modes-supported"))
+        (task-5
+          (name "Create Examples for Both Modes")
+          (status "planned")
+          (items
+            "affine-mode-examples-prototyping"
+            "linear-mode-examples-safety"
+            "side-by-side-comparisons"
+            "when-to-use-decision-guide"))
+        (task-6
+          (name "Write Complete Documentation")
+          (status "planned")
+          (items
+            "update-readme-dyadic-explanation"
+            "language-guide-affine"
+            "language-guide-linear"
+            "migration-path-guide"
+            "api-documentation"
+            "tutorial-series"))
+        (task-7
+          (name "Build LSP Server")
+          (status "planned")
+          (items
+            "syntax-highlighting"
+            "type-checking-on-save"
+            "error-diagnostics"
+            "code-completion"
+            "mode-aware-diagnostics"))
+        (task-8
+          (name "Expand Test Suite")
+          (status "planned")
+          (items
+            "affine-conformance-tests"
+            "linear-conformance-tests"
+            "mode-specific-errors"
+            "cross-mode-tests"
+            "target-100-tests-per-mode"))
+        (task-9
+          (name "Create AI Manifest and Metadata")
+          (status "in-progress")
+          (items
+            "created-0-ai-manifest-a2ml"
+            "update-state-scm-with-roadmap"
+            "update-meta-scm-dyadic-design"
+            "ensure-rsr-compliance")))
+      (reference-model "phronesis - production-ready with binary, CLI, LSP, examples, docs")
+      (key-insight "Ephapax is DYADIC - affine and linear modes are both first-class citizens"))
+    (session
       (date "2026-01-04")
       (accomplishments
         "fixed-codeql-language-matrix"
@@ -212,4 +301,4 @@
         "fixed-check_borrow-to-not-consume"
         "added-Context::snapshot-and-check_branch_agreement"
         "added-BranchLinearityMismatchDetailed-error"
-        "added-6-branch-linearity-tests"))))
+        "added-6-branch-linearity-tests")))))

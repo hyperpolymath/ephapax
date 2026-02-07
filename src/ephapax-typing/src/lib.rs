@@ -1,13 +1,26 @@
-// SPDX-License-Identifier: EUPL-1.2
+// SPDX-License-Identifier: PMPL-1.0-or-later
 // SPDX-FileCopyrightText: 2025 Jonathan D.A. Jewell
 
-//! Ephapax Linear Type Checker
+//! Ephapax Type Checker (Dyadic: Affine + Linear modes)
 //!
-//! Implements the typing rules from formal/Typing.v
+//! Implements typing rules for BOTH affine and linear modes:
+//! - **Affine mode**: Values used ≤1 time (can be dropped implicitly)
+//! - **Linear mode**: Values used exactly 1 time (must be consumed)
+//!
+//! Based on formal/Typing.v
 
 use ephapax_syntax::{BaseTy, BinOp, Decl, Expr, ExprKind, Literal, Module, RegionName, Ty, UnaryOp, Var};
 use std::collections::HashMap;
 use thiserror::Error;
+
+/// Type checking mode (dyadic design)
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Mode {
+    /// Affine mode: values used ≤1 time (permissive, allows implicit drops)
+    Affine,
+    /// Linear mode: values used exactly 1 time (strict, no implicit drops)
+    Linear,
+}
 
 /// Type checking errors
 #[derive(Error, Debug, Clone, PartialEq)]
@@ -97,8 +110,16 @@ impl Context {
         }
     }
 
-    /// Check all linear variables have been used
-    pub fn check_all_linear_used(&self) -> Result<(), TypeError> {
+    /// Check all linear variables have been used (mode-aware)
+    /// - In Linear mode: MUST consume all linear variables
+    /// - In Affine mode: CAN leave linear variables unconsumed (implicit drop)
+    pub fn check_all_linear_used(&self, mode: Mode) -> Result<(), TypeError> {
+        // In affine mode, unconsumed variables are allowed (implicit drop)
+        if mode == Mode::Affine {
+            return Ok(());
+        }
+
+        // In linear mode, all linear variables MUST be consumed
         for (name, entry) in &self.vars {
             if entry.ty.is_linear() && !entry.used {
                 return Err(TypeError::LinearVariableNotConsumed(name.clone()));
@@ -182,11 +203,31 @@ impl Context {
 /// Type checker state
 pub struct TypeChecker {
     ctx: Context,
+    mode: Mode,
 }
 
 impl TypeChecker {
+    /// Create a new type checker in the specified mode
+    pub fn new_with_mode(mode: Mode) -> Self {
+        Self {
+            ctx: Context::new(),
+            mode,
+        }
+    }
+
+    /// Create a new type checker in linear mode (strict, default)
     pub fn new() -> Self {
-        Self { ctx: Context::new() }
+        Self::new_with_mode(Mode::Linear)
+    }
+
+    /// Get the current checking mode
+    pub fn mode(&self) -> Mode {
+        self.mode
+    }
+
+    /// Set the checking mode
+    pub fn set_mode(&mut self, mode: Mode) {
+        self.mode = mode;
     }
 
     /// Type check an expression
@@ -311,13 +352,16 @@ impl TypeChecker {
             }
         }
 
-        self.ctx.extend(name.clone(), value_ty);
+        self.ctx.extend(name.clone(), value_ty.clone());
         let body_ty = self.check(body)?;
 
-        // Ensure linear variable was consumed
-        if let Some(entry) = self.ctx.vars.get(name) {
-            if entry.ty.is_linear() && !entry.used {
-                return Err(TypeError::LinearVariableNotConsumed(name.clone()));
+        // In Linear mode: linear variable MUST be consumed
+        // In Affine mode: linear variable CAN be unconsumed (implicit drop OK)
+        if self.mode == Mode::Linear {
+            if let Some(entry) = self.ctx.vars.get(name) {
+                if entry.ty.is_linear() && !entry.used {
+                    return Err(TypeError::LinearVariableNotConsumed(name.clone()));
+                }
             }
         }
 
@@ -328,10 +372,12 @@ impl TypeChecker {
         self.ctx.extend(param.clone(), param_ty.clone());
         let body_ty = self.check(body)?;
 
-        // Check linear param was consumed
-        if let Some(entry) = self.ctx.vars.get(param) {
-            if entry.ty.is_linear() && !entry.used {
-                return Err(TypeError::LinearVariableNotConsumed(param.clone()));
+        // Check linear param was consumed (mode-aware)
+        if self.mode == Mode::Linear {
+            if let Some(entry) = self.ctx.vars.get(param) {
+                if entry.ty.is_linear() && !entry.used {
+                    return Err(TypeError::LinearVariableNotConsumed(param.clone()));
+                }
             }
         }
 
@@ -516,13 +562,15 @@ impl TypeChecker {
             }
         }
 
-        self.ctx.extend(name.clone(), value_ty);
+        self.ctx.extend(name.clone(), value_ty.clone());
         let body_ty = self.check(body)?;
 
-        // Ensure linear variable was consumed
-        if let Some(entry) = self.ctx.vars.get(name) {
-            if entry.ty.is_linear() && !entry.used {
-                return Err(TypeError::LinearVariableNotConsumed(name.clone()));
+        // Ensure linear variable was consumed (mode-aware)
+        if self.mode == Mode::Linear {
+            if let Some(entry) = self.ctx.vars.get(name) {
+                if entry.ty.is_linear() && !entry.used {
+                    return Err(TypeError::LinearVariableNotConsumed(name.clone()));
+                }
             }
         }
 
@@ -622,10 +670,12 @@ impl TypeChecker {
                 self.ctx.extend(left_var.clone(), *left.clone());
                 let left_result_ty = self.check(left_body)?;
 
-                // Check linear branch variable was consumed
-                if let Some(entry) = self.ctx.vars.get(left_var) {
-                    if entry.ty.is_linear() && !entry.used {
-                        return Err(TypeError::LinearVariableNotConsumed(left_var.clone()));
+                // Check linear branch variable was consumed (mode-aware)
+                if self.mode == Mode::Linear {
+                    if let Some(entry) = self.ctx.vars.get(left_var) {
+                        if entry.ty.is_linear() && !entry.used {
+                            return Err(TypeError::LinearVariableNotConsumed(left_var.clone()));
+                        }
                     }
                 }
 
@@ -640,10 +690,12 @@ impl TypeChecker {
                 self.ctx.extend(right_var.clone(), *right.clone());
                 let right_result_ty = self.check(right_body)?;
 
-                // Check linear branch variable was consumed
-                if let Some(entry) = self.ctx.vars.get(right_var) {
-                    if entry.ty.is_linear() && !entry.used {
-                        return Err(TypeError::LinearVariableNotConsumed(right_var.clone()));
+                // Check linear branch variable was consumed (mode-aware)
+                if self.mode == Mode::Linear {
+                    if let Some(entry) = self.ctx.vars.get(right_var) {
+                        if entry.ty.is_linear() && !entry.used {
+                            return Err(TypeError::LinearVariableNotConsumed(right_var.clone()));
+                        }
                     }
                 }
 
@@ -778,9 +830,9 @@ impl Default for TypeChecker {
     }
 }
 
-/// Type check an entire module
-pub fn type_check_module(module: &Module) -> Result<(), TypeError> {
-    let mut tc = TypeChecker::new();
+/// Type check an entire module (mode-aware)
+pub fn type_check_module_with_mode(module: &Module, mode: Mode) -> Result<(), TypeError> {
+    let mut tc = TypeChecker::new_with_mode(mode);
 
     // First pass: collect all function signatures
     for decl in &module.decls {
@@ -818,12 +870,14 @@ pub fn type_check_module(module: &Module) -> Result<(), TypeError> {
                     });
                 }
 
-                // Check all linear params were consumed
-                for (param_name, param_ty) in params {
-                    if param_ty.is_linear() {
-                        if let Some(entry) = tc.ctx.vars.get(param_name) {
-                            if !entry.used {
-                                return Err(TypeError::LinearVariableNotConsumed(param_name.clone()));
+                // Check all linear params were consumed (mode-aware)
+                if mode == Mode::Linear {
+                    for (param_name, param_ty) in params {
+                        if param_ty.is_linear() {
+                            if let Some(entry) = tc.ctx.vars.get(param_name) {
+                                if !entry.used {
+                                    return Err(TypeError::LinearVariableNotConsumed(param_name.clone()));
+                                }
                             }
                         }
                     }
@@ -841,10 +895,20 @@ pub fn type_check_module(module: &Module) -> Result<(), TypeError> {
     Ok(())
 }
 
-/// Type check a single expression (convenience function)
-pub fn type_check_expr(expr: &Expr) -> Result<Ty, TypeError> {
-    let mut tc = TypeChecker::new();
+/// Type check an entire module (defaults to Linear mode)
+pub fn type_check_module(module: &Module) -> Result<(), TypeError> {
+    type_check_module_with_mode(module, Mode::Linear)
+}
+
+/// Type check a single expression with specified mode
+pub fn type_check_expr_with_mode(expr: &Expr, mode: Mode) -> Result<Ty, TypeError> {
+    let mut tc = TypeChecker::new_with_mode(mode);
     tc.check(expr)
+}
+
+/// Type check a single expression (defaults to Linear mode)
+pub fn type_check_expr(expr: &Expr) -> Result<Ty, TypeError> {
+    type_check_expr_with_mode(expr, Mode::Linear)
 }
 
 /// Type check a single expression (alias for type_check_expr)
@@ -1354,6 +1418,149 @@ mod tests {
             type_check_module(&module),
             Err(TypeError::TypeMismatch { .. })
         ));
+    }
+
+    // ===== DYADIC DESIGN: Affine vs. Linear Mode Tests =====
+
+    #[test]
+    fn test_affine_mode_allows_unconsumed_linear() {
+        // In AFFINE mode: unconsumed linear variables are OK (implicit drop)
+        let mut tc = TypeChecker::new_with_mode(Mode::Affine);
+        tc.ctx.enter_region("r".into());
+
+        let expr = dummy_expr(ExprKind::Let {
+            name: "s".into(),
+            ty: None,
+            value: Box::new(dummy_expr(ExprKind::StringNew {
+                region: "r".into(),
+                value: "hello".to_string(),
+            })),
+            // s is NOT consumed in body - just return unit
+            body: Box::new(dummy_expr(ExprKind::Lit(Literal::Unit))),
+        });
+
+        // In affine mode, this should PASS (implicit drop allowed)
+        assert!(tc.check(&expr).is_ok(), "Affine mode should allow unconsumed linear variables");
+    }
+
+    #[test]
+    fn test_linear_mode_rejects_unconsumed_linear() {
+        // In LINEAR mode: unconsumed linear variables are ERROR
+        let mut tc = TypeChecker::new_with_mode(Mode::Linear);
+        tc.ctx.enter_region("r".into());
+
+        let expr = dummy_expr(ExprKind::Let {
+            name: "s".into(),
+            ty: None,
+            value: Box::new(dummy_expr(ExprKind::StringNew {
+                region: "r".into(),
+                value: "hello".to_string(),
+            })),
+            // s is NOT consumed in body - just return unit
+            body: Box::new(dummy_expr(ExprKind::Lit(Literal::Unit))),
+        });
+
+        // In linear mode, this should FAIL (must consume s)
+        assert!(
+            matches!(tc.check(&expr), Err(TypeError::LinearVariableNotConsumed(_))),
+            "Linear mode should reject unconsumed linear variables"
+        );
+    }
+
+    #[test]
+    fn test_affine_mode_still_rejects_double_use() {
+        // AFFINE mode: can drop, but still can't use twice
+        let mut tc = TypeChecker::new_with_mode(Mode::Affine);
+        tc.ctx.enter_region("r".into());
+        tc.ctx.extend("s".into(), Ty::String("r".into()));
+
+        // First use - OK
+        let var1 = dummy_expr(ExprKind::Var("s".into()));
+        assert!(tc.check(&var1).is_ok());
+
+        // Second use - Error (even in affine mode!)
+        let var2 = dummy_expr(ExprKind::Var("s".into()));
+        assert!(
+            matches!(tc.check(&var2), Err(TypeError::LinearVariableReused(_))),
+            "Affine mode should still reject double use"
+        );
+    }
+
+    #[test]
+    fn test_mode_switching() {
+        // Test that we can switch modes
+        let mut tc = TypeChecker::new_with_mode(Mode::Linear);
+        assert_eq!(tc.mode(), Mode::Linear);
+
+        tc.set_mode(Mode::Affine);
+        assert_eq!(tc.mode(), Mode::Affine);
+    }
+
+    #[test]
+    fn test_module_affine_mode() {
+        // Module with function that doesn't consume linear param
+        let module = Module {
+            name: "test".into(),
+            decls: vec![Decl::Fn {
+                name: "forget".into(),
+                params: vec![("s".into(), Ty::String("r".into()))],
+                ret_ty: Ty::Base(BaseTy::Unit),
+                body: dummy_expr(ExprKind::Lit(Literal::Unit)),  // s not consumed
+            }],
+        };
+
+        // Should FAIL in linear mode
+        assert!(
+            type_check_module_with_mode(&module, Mode::Linear).is_err(),
+            "Linear mode should reject unconsumed param"
+        );
+
+        // Should PASS in affine mode
+        assert!(
+            type_check_module_with_mode(&module, Mode::Affine).is_ok(),
+            "Affine mode should allow unconsumed param"
+        );
+    }
+
+    #[test]
+    fn test_affine_mode_if_branch_can_not_consume() {
+        // In affine mode, branches don't HAVE to consume linear vars
+        let mut tc = TypeChecker::new_with_mode(Mode::Affine);
+        tc.ctx.enter_region("r".into());
+        tc.ctx.extend("s".into(), Ty::String("r".into()));
+
+        let expr = dummy_expr(ExprKind::If {
+            cond: Box::new(dummy_expr(ExprKind::Lit(Literal::Bool(true)))),
+            // Neither branch consumes s
+            then_branch: Box::new(dummy_expr(ExprKind::Lit(Literal::I32(1)))),
+            else_branch: Box::new(dummy_expr(ExprKind::Lit(Literal::I32(2)))),
+        });
+
+        // In affine mode, this should PASS
+        assert!(tc.check(&expr).is_ok(), "Affine mode allows unconsumed vars in branches");
+    }
+
+    #[test]
+    fn test_linear_mode_if_branch_must_agree() {
+        // In linear mode, both branches must agree on consumption
+        let mut tc = TypeChecker::new_with_mode(Mode::Linear);
+        tc.ctx.enter_region("r".into());
+        tc.ctx.extend("s".into(), Ty::String("r".into()));
+
+        let expr = dummy_expr(ExprKind::If {
+            cond: Box::new(dummy_expr(ExprKind::Lit(Literal::Bool(true)))),
+            // then consumes, else doesn't - DISAGREEMENT
+            then_branch: Box::new(dummy_expr(ExprKind::Drop(Box::new(dummy_expr(
+                ExprKind::Var("s".into()),
+            ))))),
+            else_branch: Box::new(dummy_expr(ExprKind::Lit(Literal::Unit))),
+        });
+
+        // In linear mode, this should FAIL (branch disagreement)
+        assert!(
+            matches!(tc.check(&expr), Err(TypeError::BranchLinearityMismatchDetailed { .. })),
+            "Linear mode requires branch agreement"
+        );
     }
 
     // ===== Binop/unaryop tests =====

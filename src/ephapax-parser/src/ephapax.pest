@@ -37,6 +37,7 @@ type_atom = {
     base_ty
     | string_ty
     | borrow_ty
+    | list_ty
     | product_ty
     | type_var
 }
@@ -47,6 +48,8 @@ unit_ty = { "()" }
 string_ty = { "String" ~ "@" ~ identifier }
 
 borrow_ty = { "&" ~ type_atom }
+
+list_ty = { "[" ~ ty ~ "]" }
 
 product_ty = { "(" ~ ty ~ ("," ~ ty)+ ~ ")" }
 
@@ -127,10 +130,12 @@ postfix_expr = { atom_expr ~ postfix_op* }
 
 postfix_op = {
     call_op
+    | index_op
     | member_op
 }
 
 call_op = { "(" ~ expression ~ ")" }
+index_op = { "[" ~ expression ~ "]" }
 member_op = { "." ~ (integer | identifier) }
 
 // ============================================================================
@@ -144,6 +149,7 @@ atom_expr = {
     | borrow_expr
     | drop_expr
     | copy_expr
+    | list_literal
     | paren_or_pair
     | literal
     | variable
@@ -162,6 +168,8 @@ borrow_expr = { "&" ~ unary_expr }
 
 drop_expr = { "drop" ~ "(" ~ expression ~ ")" }
 copy_expr = { "copy" ~ "(" ~ expression ~ ")" }
+
+list_literal = { "[" ~ (expression ~ ("," ~ expression)*)? ~ "]" }
 
 paren_or_pair = { "(" ~ (expression ~ ("," ~ expression)*)? ~ ")" }
 

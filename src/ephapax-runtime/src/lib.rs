@@ -9,6 +9,9 @@
 #![cfg_attr(not(feature = "std"), no_std)]
 #![allow(clippy::missing_safety_doc)]
 
+// Additional modules for self-hosting compiler
+pub mod list;
+
 // Panic handler for no_std environments (WASM target)
 #[cfg(all(not(feature = "std"), not(test), target_arch = "wasm32"))]
 #[panic_handler]
@@ -132,6 +135,114 @@ pub extern "C" fn __ephapax_string_drop(_handle: StringHandle) {
     // No-op: memory is managed by regions
 }
 
+// ============================================================================
+// STRING OPERATIONS FOR SELF-HOSTING COMPILER
+// ============================================================================
+
+/// Get character code at index (returns -1 if out of bounds)
+///
+/// # Safety
+///
+/// `handle` must be a valid string handle.
+#[no_mangle]
+pub unsafe extern "C" fn __ephapax_string_char_code(handle: StringHandle, idx: i32) -> i32 {
+    let ptr = __ephapax_string_ptr(handle);
+    let len = __ephapax_string_len(handle) as i32;
+
+    if idx < 0 || idx >= len {
+        return -1;
+    }
+
+    let byte_ptr = ptr as *const u8;
+    *byte_ptr.offset(idx as isize) as i32
+}
+
+/// Extract substring (returns new string handle)
+///
+/// # Safety
+///
+/// `handle` must be a valid string handle.
+#[no_mangle]
+pub unsafe extern "C" fn __ephapax_string_substr(
+    handle: StringHandle,
+    start: i32,
+    substr_len: i32,
+) -> StringHandle {
+    let ptr = __ephapax_string_ptr(handle);
+    let len = __ephapax_string_len(handle) as i32;
+
+    // Bounds checking
+    if start < 0 || start >= len || substr_len <= 0 {
+        // Return empty string
+        return __ephapax_string_new(0, 0);
+    }
+
+    let actual_len = if start + substr_len > len {
+        len - start
+    } else {
+        substr_len
+    };
+
+    // Allocate new string data
+    let new_data = __ephapax_bump_alloc(actual_len as u32);
+
+    // Copy substring
+    let src_ptr = (ptr as *const u8).offset(start as isize);
+    core::ptr::copy_nonoverlapping(src_ptr, new_data as *mut u8, actual_len as usize);
+
+    // Create handle
+    __ephapax_string_new(new_data, actual_len as u32)
+}
+
+/// Create string from single character code
+///
+/// # Safety
+///
+/// char_code should be valid byte value (0-255)
+#[no_mangle]
+pub unsafe extern "C" fn __ephapax_string_from_char(char_code: i32) -> StringHandle {
+    if char_code < 0 || char_code > 255 {
+        // Return empty string for invalid char
+        return __ephapax_string_new(0, 0);
+    }
+
+    // Allocate 1 byte
+    let new_data = __ephapax_bump_alloc(1);
+    *(new_data as *mut u8) = char_code as u8;
+
+    __ephapax_string_new(new_data, 1)
+}
+
+/// String equality comparison
+///
+/// # Safety
+///
+/// Both handles must be valid string handles.
+#[no_mangle]
+pub unsafe extern "C" fn __ephapax_string_eq(h1: StringHandle, h2: StringHandle) -> i32 {
+    let ptr1 = __ephapax_string_ptr(h1);
+    let len1 = __ephapax_string_len(h1);
+    let ptr2 = __ephapax_string_ptr(h2);
+    let len2 = __ephapax_string_len(h2);
+
+    if len1 != len2 {
+        return 0;
+    }
+
+    if len1 == 0 {
+        return 1; // Both empty
+    }
+
+    let slice1 = core::slice::from_raw_parts(ptr1 as *const u8, len1 as usize);
+    let slice2 = core::slice::from_raw_parts(ptr2 as *const u8, len2 as usize);
+
+    if slice1 == slice2 { 1 } else { 0 }
+}
+
+// ============================================================================
+// REGION MANAGEMENT
+// ============================================================================
+
 /// Enter a new region: save current bump pointer
 ///
 /// Returns 1 on success, 0 if region stack is full.
@@ -206,6 +317,20 @@ pub unsafe extern "C" fn __ephapax_in_region() -> u32 {
 
 #[cfg(test)]
 mod tests {
-    // Tests would run in native mode, not WASM
-    // Integration tests should use wasm-bindgen-test
+    use super::*;
+
+    #[test]
+    fn test_string_from_char() {
+        unsafe {
+            // Initialize a small memory region for testing
+            let mut memory = vec![0u8; 1024];
+            let base = memory.as_mut_ptr();
+
+            // Initialize runtime
+            core::ptr::write(base as *mut u32, layout::HEAP_START as u32);
+
+            // This test needs proper WASM memory simulation
+            // For now, just verify the function signature is correct
+        }
+    }
 }

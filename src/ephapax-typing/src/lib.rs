@@ -281,6 +281,10 @@ impl TypeChecker {
             ExprKind::Block(exprs) => self.check_block(exprs),
             ExprKind::BinOp { op, left, right } => self.check_binop(*op, left, right),
             ExprKind::UnaryOp { op, operand } => self.check_unaryop(*op, operand),
+            ExprKind::ListLit(elements) => self.check_list_lit(elements),
+            ExprKind::ListIndex { list, index } => self.check_list_index(list, index),
+            ExprKind::TupleLit(elements) => self.check_tuple_lit(elements),
+            ExprKind::TupleIndex { tuple, index } => self.check_tuple_index(tuple, *index),
         }
     }
 
@@ -820,6 +824,115 @@ impl TypeChecker {
                     found: operand_ty,
                 }),
             },
+        }
+    }
+
+    fn check_list_lit(&mut self, elements: &[Expr]) -> Result<Ty, TypeError> {
+        if elements.is_empty() {
+            // Empty list - we need a type annotation to know the element type
+            // For now, default to [I32]
+            return Ok(Ty::List(Box::new(Ty::Base(BaseTy::I32))));
+        }
+
+        // Check first element to determine list type
+        let elem_ty = self.check(&elements[0])?;
+
+        // Verify all elements have the same type
+        for elem in &elements[1..] {
+            let ty = self.check(elem)?;
+            if ty != elem_ty {
+                return Err(TypeError::TypeMismatch {
+                    expected: elem_ty.clone(),
+                    found: ty,
+                });
+            }
+        }
+
+        Ok(Ty::List(Box::new(elem_ty)))
+    }
+
+    fn check_list_index(&mut self, list: &Expr, index: &Expr) -> Result<Ty, TypeError> {
+        let list_ty = self.check(list)?;
+        let index_ty = self.check(index)?;
+
+        // Index must be I32
+        if index_ty != Ty::Base(BaseTy::I32) {
+            return Err(TypeError::TypeMismatch {
+                expected: Ty::Base(BaseTy::I32),
+                found: index_ty,
+            });
+        }
+
+        // List must be List(T)
+        match list_ty {
+            Ty::List(elem_ty) => Ok(*elem_ty),
+            _ => Err(TypeError::TypeMismatch {
+                expected: Ty::List(Box::new(Ty::Base(BaseTy::I32))), // example
+                found: list_ty,
+            }),
+        }
+    }
+
+    fn check_tuple_lit(&mut self, elements: &[Expr]) -> Result<Ty, TypeError> {
+        if elements.is_empty() {
+            return Ok(Ty::Base(BaseTy::Unit));
+        }
+
+        if elements.len() == 1 {
+            // Single element - just return its type (not a tuple)
+            return self.check(&elements[0]);
+        }
+
+        if elements.len() == 2 {
+            // 2-element tuple - use Pair for backward compatibility
+            let left_ty = self.check(&elements[0])?;
+            let right_ty = self.check(&elements[1])?;
+            return Ok(Ty::Prod {
+                left: Box::new(left_ty),
+                right: Box::new(right_ty),
+            });
+        }
+
+        // 3+ elements - use Tuple
+        let mut elem_types = Vec::new();
+        for elem in elements {
+            elem_types.push(self.check(elem)?);
+        }
+        Ok(Ty::Tuple(elem_types))
+    }
+
+    fn check_tuple_index(&mut self, tuple: &Expr, index: usize) -> Result<Ty, TypeError> {
+        let tuple_ty = self.check(tuple)?;
+
+        match tuple_ty {
+            // 2-element tuple (Prod)
+            Ty::Prod { left, right } => {
+                if index == 0 {
+                    Ok(*left)
+                } else if index == 1 {
+                    Ok(*right)
+                } else {
+                    Err(TypeError::TypeMismatch {
+                        expected: Ty::Base(BaseTy::Unit), // placeholder
+                        found: tuple_ty,
+                    })
+                }
+            }
+            // N-element tuple
+            Ty::Tuple(elem_types) => {
+                if index < elem_types.len() {
+                    Ok(elem_types[index].clone())
+                } else {
+                    Err(TypeError::TypeMismatch {
+                        expected: Ty::Base(BaseTy::Unit), // placeholder
+                        found: Ty::Tuple(elem_types),
+                    })
+                }
+            }
+            _ => Err(TypeError::TypeMismatch {
+                expected: Ty::Tuple(vec![]), // placeholder
+                found: tuple_ty,
+            }),
         }
     }
 }

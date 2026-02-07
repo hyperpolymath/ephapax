@@ -193,6 +193,10 @@ fn parse_type_atom(pair: pest::iterators::Pair<Rule>) -> Result<Ty, ParseError> 
             let inner_ty = parse_type_atom(inner.into_inner().next().unwrap())?;
             Ok(Ty::Borrow(Box::new(inner_ty)))
         }
+        Rule::list_ty => {
+            let elem_ty = parse_type(inner.into_inner().next().unwrap())?;
+            Ok(Ty::List(Box::new(elem_ty)))
+        }
         Rule::product_ty => {
             let mut types: Vec<Ty> = Vec::new();
             for ty_pair in inner.into_inner() {
@@ -631,16 +635,40 @@ fn parse_postfix_expr(pair: pest::iterators::Pair<Rule>) -> Result<Expr, ParseEr
                             span,
                         );
                     }
+                    Rule::index_op => {
+                        let index = parse_expression(op_inner.into_inner().next().unwrap())?;
+                        result = Expr::new(
+                            ExprKind::ListIndex {
+                                list: Box::new(result),
+                                index: Box::new(index),
+                            },
+                            span,
+                        );
+                    }
                     Rule::member_op => {
                         let member = op_inner.into_inner().next().unwrap();
-                        let member_str = member.as_str();
-
-                        if member_str == "0" {
-                            result = Expr::new(ExprKind::Fst(Box::new(result)), span);
-                        } else if member_str == "1" {
-                            result = Expr::new(ExprKind::Snd(Box::new(result)), span);
+                        match member.as_rule() {
+                            Rule::integer => {
+                                let index = member.as_str().parse::<usize>().unwrap();
+                                if index == 0 {
+                                    result = Expr::new(ExprKind::Fst(Box::new(result)), span);
+                                } else if index == 1 {
+                                    result = Expr::new(ExprKind::Snd(Box::new(result)), span);
+                                } else {
+                                    result = Expr::new(
+                                        ExprKind::TupleIndex {
+                                            tuple: Box::new(result),
+                                            index,
+                                        },
+                                        span,
+                                    );
+                                }
+                            }
+                            Rule::identifier => {
+                                // Field access by name not currently supported
+                            }
+                            _ => {}
                         }
-                        // Other member access not currently supported
                     }
                     _ => {}
                 }
@@ -693,6 +721,15 @@ fn parse_atom_expr(pair: pest::iterators::Pair<Rule>) -> Result<Expr, ParseError
         Rule::copy_expr => {
             let inner_expr = parse_expression(inner.into_inner().next().unwrap())?;
             Ok(Expr::new(ExprKind::Copy(Box::new(inner_expr)), span))
+        }
+        Rule::list_literal => {
+            let mut elements = Vec::new();
+            for item in inner.into_inner() {
+                if item.as_rule() == Rule::expression {
+                    elements.push(parse_expression(item)?);
+                }
+            }
+            Ok(Expr::new(ExprKind::ListLit(elements), span))
         }
         Rule::paren_or_pair => parse_paren_or_pair(inner),
         Rule::literal => parse_literal(inner),
@@ -772,17 +809,22 @@ fn parse_paren_or_pair(pair: pest::iterators::Pair<Rule>) -> Result<Expr, ParseE
     match exprs.len() {
         0 => Ok(Expr::new(ExprKind::Lit(Literal::Unit), span)),
         1 => Ok(exprs.into_iter().next().unwrap()),
+        2 => {
+            // Keep using Pair for 2-element tuples for backward compatibility
+            let mut iter = exprs.into_iter();
+            let left = iter.next().unwrap();
+            let right = iter.next().unwrap();
+            Ok(Expr::new(
+                ExprKind::Pair {
+                    left: Box::new(left),
+                    right: Box::new(right),
+                },
+                span,
+            ))
+        }
         _ => {
-            let result = exprs.into_iter().reduce(|acc, e| {
-                Expr::new(
-                    ExprKind::Pair {
-                        left: Box::new(acc),
-                        right: Box::new(e),
-                    },
-                    span,
-                )
-            });
-            Ok(result.unwrap())
+            // Use TupleLit for 3+ elements
+            Ok(Expr::new(ExprKind::TupleLit(exprs), span))
         }
     }
 }

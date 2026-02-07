@@ -82,6 +82,12 @@ pub enum Ty {
 
     /// Type variable (for polymorphism, future)
     Var(SmolStr),
+
+    /// List type [T]
+    List(Box<Ty>),
+
+    /// Tuple type (T, U, ...)
+    Tuple(Vec<Ty>),
 }
 
 impl Ty {
@@ -152,6 +158,8 @@ pub enum Pattern {
     Pair(Box<Pattern>, Box<Pattern>),
     /// Unit ()
     Unit,
+    /// Tuple pattern (p1, p2, p3, ...)
+    Tuple(Vec<Pattern>),
 }
 
 /// Expressions
@@ -273,6 +281,25 @@ pub enum ExprKind {
 
     /// Unary operation: op e
     UnaryOp { op: UnaryOp, operand: Box<Expr> },
+
+    // ===== Lists and Tuples (for self-hosting compiler) =====
+    /// List literal [e1, e2, ...]
+    ListLit(Vec<Expr>),
+
+    /// List index access list[idx]
+    ListIndex {
+        list: Box<Expr>,
+        index: Box<Expr>,
+    },
+
+    /// Tuple literal (e1, e2, e3, ...)
+    TupleLit(Vec<Expr>),
+
+    /// Tuple field access tuple.N
+    TupleIndex {
+        tuple: Box<Expr>,
+        index: usize,
+    },
 }
 
 impl Expr {

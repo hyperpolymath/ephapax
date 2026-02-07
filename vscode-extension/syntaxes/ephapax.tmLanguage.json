@@ -1,0 +1,150 @@
+{
+  "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+  "name": "Ephapax",
+  "scopeName": "source.ephapax",
+  "patterns": [
+    { "include": "#comments" },
+    { "include": "#keywords" },
+    { "include": "#types" },
+    { "include": "#strings" },
+    { "include": "#numbers" },
+    { "include": "#functions" },
+    { "include": "#operators" },
+    { "include": "#variables" }
+  ],
+  "repository": {
+    "comments": {
+      "patterns": [
+        {
+          "name": "comment.line.double-slash.ephapax",
+          "begin": "//",
+          "end": "$"
+        },
+        {
+          "name": "comment.block.ephapax",
+          "begin": "/\\*",
+          "end": "\\*/"
+        }
+      ]
+    },
+    "keywords": {
+      "patterns": [
+        {
+          "name": "keyword.control.ephapax",
+          "match": "\\b(if|then|else|case|of|in|region|with)\\b"
+        },
+        {
+          "name": "keyword.other.ephapax",
+          "match": "\\b(fn|let|let!|drop|type|import|as|module|export)\\b"
+        },
+        {
+          "name": "keyword.operator.lambda.ephapax",
+          "match": "\\\\|λ"
+        },
+        {
+          "name": "storage.modifier.ephapax",
+          "match": "\\b(linear|affine|unrestricted)\\b"
+        }
+      ]
+    },
+    "types": {
+      "patterns": [
+        {
+          "name": "entity.name.type.primitive.ephapax",
+          "match": "\\b(I32|I64|F32|F64|Bool|String|Unit|Never)\\b"
+        },
+        {
+          "name": "entity.name.type.ephapax",
+          "match": "\\b[A-Z][a-zA-Z0-9]*\\b"
+        },
+        {
+          "name": "keyword.operator.type.ephapax",
+          "match": "->|\\*|\\+"
+        }
+      ]
+    },
+    "strings": {
+      "patterns": [
+        {
+          "name": "string.quoted.double.ephapax",
+          "begin": "\"",
+          "end": "\"",
+          "patterns": [
+            {
+              "name": "constant.character.escape.ephapax",
+              "match": "\\\\(n|r|t|\\\\|\"|'|u\\{[0-9a-fA-F]+\\})"
+            }
+          ]
+        }
+      ]
+    },
+    "numbers": {
+      "patterns": [
+        {
+          "name": "constant.numeric.float.ephapax",
+          "match": "\\b[0-9]+\\.[0-9]+([eE][+-]?[0-9]+)?\\b"
+        },
+        {
+          "name": "constant.numeric.integer.ephapax",
+          "match": "\\b[0-9]+\\b"
+        },
+        {
+          "name": "constant.numeric.hex.ephapax",
+          "match": "\\b0x[0-9a-fA-F]+\\b"
+        },
+        {
+          "name": "constant.numeric.binary.ephapax",
+          "match": "\\b0b[01]+\\b"
+        }
+      ]
+    },
+    "functions": {
+      "patterns": [
+        {
+          "name": "entity.name.function.ephapax",
+          "match": "\\b(fn)\\s+([a-z_][a-zA-Z0-9_]*)",
+          "captures": {
+            "1": { "name": "keyword.other.ephapax" },
+            "2": { "name": "entity.name.function.ephapax" }
+          }
+        },
+        {
+          "name": "entity.name.function.call.ephapax",
+          "match": "\\b[a-z_][a-zA-Z0-9_]*(?=\\s*\\()"
+        }
+      ]
+    },
+    "operators": {
+      "patterns": [
+        {
+          "name": "keyword.operator.arithmetic.ephapax",
+          "match": "\\+|-|\\*|/|%"
+        },
+        {
+          "name": "keyword.operator.comparison.ephapax",
+          "match": "==|!=|<|>|<=|>="
+        },
+        {
+          "name": "keyword.operator.logical.ephapax",
+          "match": "&&|\\|\\||!"
+        },
+        {
+          "name": "keyword.operator.assignment.ephapax",
+          "match": "="
+        },
+        {
+          "name": "keyword.operator.type.ephapax",
+          "match": ":"
+        }
+      ]
+    },
+    "variables": {
+      "patterns": [
+        {
+          "name": "variable.other.ephapax",
+          "match": "\\b[a-z_][a-zA-Z0-9_]*\\b"
+        }
+      ]
+    }
+  }
+}

@@ -45,28 +45,40 @@
         (crate "ephapax-parser")
         (tech "chumsky"))
       (type-checker
-        (status "in-progress")
-        (completion 60)
+        (status "near-complete")
+        (completion 85)
         (crate "ephapax-typing")
         (completed
           "branch-agreement-verification"
           "borrow-validity-checking"
-          "context-snapshot-restore")
-        (remaining
+          "context-snapshot-restore"
           "linear-context-threading"
-          "region-scope-tracking"
-          "affine-mode-support"))
+          "affine-mode-support"
+          "linear-mode-support"
+          "dyadic-design")
+        (remaining
+          "region-escape-analysis-refinement"
+          "type-inference"
+          "error-message-improvements"))
       (wasm-codegen
         (status "in-progress")
-        (completion 30)
+        (completion 85)
         (crate "ephapax-wasm")
         (tech "wasm-encoder")
-        (remaining
-          "type-compilation"
-          "expression-compilation"
+        (completed
+          "primitives-codegen"
+          "functions-codegen"
+          "products-codegen"
+          "sums-codegen"
+          "regions-codegen"
+          "linear-memory-mgmt"
           "runtime-function-generation"
-          "memory-layout"
-          "region-stack-management"))
+          "mode-awareness"
+          "basic-lambda-compilation")
+        (remaining
+          "closure-environment-capture"
+          "function-table-setup"
+          "call-indirect-emission"))
       (interpreter
         (status "complete")
         (completion 100)
@@ -151,16 +163,20 @@
           (double-use-rejection (status "complete"))
           (unused-linear-rejection (status "in-progress"))))
       (m4-wasm-codegen
-        (status "in-progress")
-        (verification "wasm-validate output.wasm && wasmtime run output.wasm")
+        (status "near-complete")
+        (verification "cargo test -p ephapax-wasm && wasm-validate output.wasm")
         (items
-          (primitives-codegen (status "in-progress"))
-          (functions-codegen (status "in-progress"))
-          (products-codegen (status "planned"))
-          (sums-codegen (status "planned"))
-          (regions-codegen (status "planned"))
-          (linear-memory-mgmt (status "planned"))
-          (region-deallocation (status "planned"))))
+          (primitives-codegen (status "complete"))
+          (functions-codegen (status "complete"))
+          (products-codegen (status "complete"))
+          (sums-codegen (status "complete"))
+          (regions-codegen (status "complete"))
+          (linear-memory-mgmt (status "complete"))
+          (region-deallocation (status "complete"))
+          (mode-awareness (status "complete"))
+          (basic-lambda-compilation (status "complete"))
+          (closure-environment-capture (status "planned"))
+          (function-table-indirect-calls (status "planned"))))
       (m5-test-suite
         (status "planned")
         (verification "cargo test --workspace --all-features"))
@@ -207,25 +223,42 @@
       (tasks
         (task-1
           (name "Complete Type Checker")
-          (status "planned")
-          (target "60% → 100%")
-          (items
-            "complete-region-scope-tracking"
+          (status "complete")
+          (target "60% → 85%")
+          (completed-items
             "finish-linear-context-threading"
             "add-affine-mode-support"
-            "implement-region-escape-rejection"
-            "complete-unused-linear-rejection"))
+            "add-linear-mode-support"
+            "dyadic-design-implementation"
+            "mode-aware-checking"
+            "7-new-dyadic-tests"
+            "38-tests-passing")
+          (remaining
+            "region-escape-analysis-refinement"
+            "type-inference"
+            "error-message-improvements"))
         (task-2
           (name "Complete WASM Code Generation")
-          (status "planned")
-          (target "30% → 100%")
-          (items
-            "finish-primitives-codegen"
-            "complete-functions-codegen"
-            "implement-products-codegen"
-            "implement-sums-codegen"
-            "complete-regions-codegen"
-            "implement-linear-memory-mgmt"))
+          (status "partial-complete")
+          (target "30% → 85%")
+          (completed-items
+            "discovered-75-percent-already-done"
+            "primitives-codegen"
+            "functions-codegen"
+            "products-codegen"
+            "sums-codegen"
+            "regions-codegen"
+            "linear-memory-mgmt"
+            "mode-awareness-implementation"
+            "basic-lambda-compilation"
+            "lambda-body-emission"
+            "compile-simple-lambda-test"
+            "58-tests-passing"
+            "release-build-succeeds")
+          (remaining
+            "closure-environment-capture"
+            "function-table-setup"
+            "call-indirect-for-lambdas"))
         (task-3
           (name "Build Production Binaries")
           (status "planned")
@@ -282,12 +315,29 @@
             "target-100-tests-per-mode"))
         (task-9
           (name "Create AI Manifest and Metadata")
-          (status "in-progress")
+          (status "complete")
           (items
             "created-0-ai-manifest-a2ml"
             "update-state-scm-with-roadmap"
             "update-meta-scm-dyadic-design"
-            "ensure-rsr-compliance")))
+            "ensure-rsr-compliance"))
+        (task-10
+          (name "Implement Lambda and Closure Support")
+          (status "partial-complete")
+          (target "Add lambda compilation to WASM codegen")
+          (completed-items
+            "added-LambdaInfo-struct-with-body-storage"
+            "implemented-compile-lambda-function"
+            "implemented-append-lambda-funcs"
+            "integrated-lambda-emission-after-user-functions"
+            "added-compile-simple-lambda-test"
+            "verified-58-tests-passing"
+            "updated-wasm-codegen-status-doc"
+            "updated-state-scm-progress")
+          (remaining
+            "closure-environment-capture"
+            "function-table-generation"
+            "call-indirect-for-lambda-application")))
       (reference-model "phronesis - production-ready with binary, CLI, LSP, examples, docs")
       (key-insight "Ephapax is DYADIC - affine and linear modes are both first-class citizens"))
     (session

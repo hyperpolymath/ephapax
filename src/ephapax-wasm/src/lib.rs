@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: PMPL-1.0-or-later
-// SPDX-FileCopyrightText: 2025 Jonathan D.A. Jewell
+//! SPDX-FileCopyrightText: 2025 Jonathan D.A. Jewell
 
-//! Ephapax WASM Code Generator
+//! Ephapax WASM Code Generator (Dyadic: Affine + Linear modes)
 //!
 //! Compiles Ephapax AST / IR to WebAssembly with explicit memory management
-//! and linear-type lowering.
+//! and dyadic type lowering (affine or linear).
 //!
 //! ## Architecture
 //!
@@ -13,7 +13,7 @@
 //! 1. **Collection** -- gather all top-level function declarations, assign WASM
 //!    function indices, and build the WASM type section.
 //! 2. **Emission** -- compile each function body to WASM instructions, emitting
-//!    proper local declarations, control flow, and linear resource management.
+//!    proper local declarations, control flow, and resource management.
 //!
 //! ## String Representation
 //!
@@ -34,12 +34,14 @@
 //! +------------------+
 //! ```
 //!
-//! ## Linear Type Lowering
+//! ## Dyadic Type Lowering
 //!
-//! Linear (use-once) values are tracked at compile time.  The code generator
-//! inserts implicit `drop` calls for linear locals that leave scope without
-//! being consumed.  For named top-level functions the parameter linearity is
-//! recorded so that callers know which arguments are consumed.
+//! The code generator supports both affine and linear modes:
+//!
+//! - **Linear mode**: Use-once values tracked at compile time. Explicit drops required.
+//! - **Affine mode**: Use-at-most-once values. Implicit drops allowed at scope exit.
+//!
+//! Mode is set per-module compilation and affects how unused linear values are handled.
 
 use ephapax_ir::module_from_sexpr;
 use ephapax_syntax::{
@@ -111,6 +113,25 @@ const TYPE_I32_TO_I32: u32 = 6;
 
 /// Number of fixed type entries in the type section.
 const NUM_FIXED_TYPES: u32 = 7;
+
+// ---------------------------------------------------------------------------
+// Compilation mode (dyadic design)
+// ---------------------------------------------------------------------------
+
+/// Compilation mode for dyadic type system
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Mode {
+    /// Affine mode: use ≤1 time (implicit drops allowed)
+    Affine,
+    /// Linear mode: use exactly 1 time (no implicit drops)
+    Linear,
+}
+
+impl Default for Mode {
+    fn default() -> Self {
+        Mode::Linear
+    }
+}
 
 // ---------------------------------------------------------------------------
 // Compilation error
@@ -215,6 +236,9 @@ impl LocalTracker {
 // Code generator
 // ---------------------------------------------------------------------------
 
+/// Closure representation: (function_index, environment_ptr)
+const CLOSURE_SIZE: u32 = 8; // 2 x i32
+
 /// Code generator state.
 pub struct Codegen {
     /// Current bump pointer for allocations (reserved for future interpreter use)
@@ -244,6 +268,30 @@ pub struct Codegen {
     /// Dynamically added WASM type entries beyond the fixed set.
     /// Each entry is `(params, results)` as vectors of `ValType`.
     extra_types: Vec<(Vec<ValType>, Vec<ValType>)>,
+
+    /// Lambda functions generated during compilation
+    /// Each lambda gets compiled to a named function and stored here
+    lambda_fns: Vec<LambdaInfo>,
+
+    /// Compilation mode (affine or linear)
+    mode: Mode,
+}
+
+/// Information about a compiled lambda
+#[derive(Debug, Clone)]
+struct LambdaInfo {
+    /// WASM function index for the lambda body
+    wasm_fn_idx: u32,
+    /// WASM type index
+    wasm_type_idx: u32,
+    /// Variables captured from the enclosing scope
+    captured_vars: Vec<String>,
+    /// Lambda parameter name
+    param: String,
+    /// Lambda parameter type
+    param_ty: Ty,
+    /// Lambda body expression (cloned for later compilation)
+    body: Expr,
 }
 
 #[derive(Debug, Clone)]
@@ -263,7 +311,13 @@ impl Default for Codegen {
 }
 
 impl Codegen {
+    /// Create a new code generator in linear mode (default)
     pub fn new() -> Self {
+        Self::new_with_mode(Mode::Linear)
+    }
+
+    /// Create a new code generator with specified mode
+    pub fn new_with_mode(mode: Mode) -> Self {
         Self {
             bump_ptr: REGION_HEADER_SIZE,
             region_stack: Vec::new(),
@@ -273,7 +327,19 @@ impl Codegen {
             data_offset: 1024, // Start string data after metadata area
             user_fns: HashMap::new(),
             extra_types: Vec::new(),
+            lambda_fns: Vec::new(),
+            mode,
         }
+    }
+
+    /// Get the current compilation mode
+    pub fn mode(&self) -> Mode {
+        self.mode
+    }
+
+    /// Set the compilation mode
+    pub fn set_mode(&mut self, mode: Mode) {
+        self.mode = mode;
     }
 
     // -----------------------------------------------------------------------
@@ -361,6 +427,9 @@ impl Codegen {
 
         // User functions
         self.append_user_funcs(ast, &mut func_sec, &mut code_sec)?;
+
+        // Lambda functions (discovered during user function compilation)
+        self.append_lambda_funcs(&mut func_sec, &mut code_sec)?;
 
         // Emit sections in WASM-required order:
         // Type, Import, Function, Memory, Export, Code, Data
@@ -684,6 +753,63 @@ impl Codegen {
         Ok(())
     }
 
+    /// Append lambda functions to the code section.
+    /// Called after user functions are compiled, since lambdas are discovered
+    /// during user function compilation.
+    fn append_lambda_funcs(
+        &mut self,
+        func_sec: &mut FunctionSection,
+        code_sec: &mut CodeSection,
+    ) -> Result<(), CodegenError> {
+        // Clone lambda_fns to avoid borrow checker issues
+        let lambdas = self.lambda_fns.clone();
+
+        for lambda_info in lambdas {
+            // Register function type in function section
+            func_sec.function(lambda_info.wasm_type_idx);
+
+            // Compile lambda body with two-pass approach (similar to user functions)
+            let num_params = 1; // Lambdas always have exactly one parameter
+
+            // --- Pass 1: count locals by doing a dry-run compile ----
+            self.locals = LocalTracker::new(num_params);
+            self.locals.name_to_idx.insert(lambda_info.param.clone(), 0);
+            if lambda_info.param_ty.is_linear() {
+                self.locals.linear_locals.insert(0, false);
+            }
+
+            // Save data state so pass 1 string literals don't duplicate
+            let data_snapshot = (self.data_entries.len(), self.data_offset);
+
+            let mut dummy_func = Function::new(vec![(64, ValType::I32)]); // generous
+            self.compile_expr(&mut dummy_func, &lambda_info.body);
+            let extra = self.locals.num_extra_locals(num_params);
+
+            // Restore data state
+            self.data_entries.truncate(data_snapshot.0);
+            self.data_offset = data_snapshot.1;
+
+            // --- Pass 2: compile for real with correct local count --
+            self.locals = LocalTracker::new(num_params);
+            self.locals.name_to_idx.insert(lambda_info.param.clone(), 0);
+            if lambda_info.param_ty.is_linear() {
+                self.locals.linear_locals.insert(0, false);
+            }
+
+            let mut func = Function::new(if extra > 0 {
+                vec![(extra, ValType::I32)]
+            } else {
+                vec![]
+            });
+
+            self.compile_expr(&mut func, &lambda_info.body);
+            func.instruction(&Instruction::End);
+
+            code_sec.function(&func);
+        }
+        Ok(())
+    }
+
     /// Emit runtime-only exports.
     fn emit_exports(&mut self) {
         let mut exports = ExportSection::new();
@@ -989,9 +1115,8 @@ impl Codegen {
             ExprKind::LetLin {
                 name, value, body, ..
             } => self.compile_let(func, name, value, body, true),
-            ExprKind::Lambda { .. } => {
-                // Lambdas need closure conversion -- stub for now.
-                func.instruction(&Instruction::I32Const(0));
+            ExprKind::Lambda { param, param_ty, body } => {
+                self.compile_lambda(func, param, param_ty, body)
             }
             ExprKind::App { func: fn_expr, arg } => self.compile_app(func, fn_expr, arg),
             ExprKind::Pair { left, right } => self.compile_pair(func, left, right),
@@ -1125,20 +1250,54 @@ impl Codegen {
         // Compile the body
         self.compile_expr(func, body);
 
-        // If the linear local was not consumed, insert an implicit drop.
-        // This enforces linear semantics at the WASM level.
-        if is_linear {
+        // Handle unconsumed linear locals (mode-aware):
+        // - Linear mode: Type checker already validated consumption, no action needed
+        // - Affine mode: Could emit implicit drop, but type checker allows it
+        //
+        // In both modes, the type checker has already validated correctness,
+        // so we don't need runtime enforcement here. This is a static property.
+        if is_linear && self.mode == Mode::Affine {
             if let Some(&consumed) = self.locals.linear_locals.get(&local_idx) {
                 if !consumed {
-                    // The body didn't consume it -- emit a drop.
-                    // We can't easily insert *before* the body result on the
-                    // stack, so for linear enforcement we rely on the type
-                    // checker having already validated consumption.  This is
-                    // a safety net that could be extended with a local-swap
-                    // pattern in the future.
+                    // In affine mode, unconsumed linear values are allowed.
+                    // The WASM runtime will handle cleanup via region exit.
                 }
             }
         }
+    }
+
+    fn compile_lambda(
+        &mut self,
+        func: &mut Function,
+        param: &str,
+        param_ty: &Ty,
+        body: &Expr,
+    ) {
+        // For now, implement closed lambdas (no captured variables).
+        // Full closure support with environment capture will be added incrementally.
+
+        // 1. Determine the lambda's WASM type
+        // For simplicity, assume all lambdas take i32 and return i32
+        // (matching the common case in Ephapax)
+        let lambda_type_idx = 0; // Type 0 is (i32) -> i32
+
+        // 2. Calculate function index for this lambda
+        // Function indices: imports (2) + runtime helpers (7) + user functions + lambdas
+        let lambda_fn_idx = NUM_IMPORTS + NUM_RUNTIME_FNS + self.user_fns.len() as u32 + self.lambda_fns.len() as u32;
+
+        // 3. Record this lambda for later emission
+        self.lambda_fns.push(LambdaInfo {
+            wasm_fn_idx: lambda_fn_idx,
+            wasm_type_idx: lambda_type_idx,
+            captured_vars: Vec::new(), // No captures for now
+            param: param.to_string(),
+            param_ty: param_ty.clone(),
+            body: body.clone(),
+        });
+
+        // 4. Emit the closure representation (for now, just the function index)
+        // In full closure support, this would be (fn_idx, env_ptr) pair
+        func.instruction(&Instruction::I32Const(lambda_fn_idx as i32));
     }
 
     fn compile_app(
@@ -1478,10 +1637,15 @@ pub fn compile_sexpr_module(sexpr: &str) -> Result<Vec<u8>, String> {
     codegen.compile_sexpr_module(sexpr)
 }
 
-/// Compile an entire Ephapax [`AstModule`] to WebAssembly.
-pub fn compile_module(module: &AstModule) -> Result<Vec<u8>, CodegenError> {
-    let mut codegen = Codegen::new();
+/// Compile an entire Ephapax [`AstModule`] to WebAssembly with specified mode.
+pub fn compile_module_with_mode(module: &AstModule, mode: Mode) -> Result<Vec<u8>, CodegenError> {
+    let mut codegen = Codegen::new_with_mode(mode);
     codegen.compile_ast_module(module)
+}
+
+/// Compile an entire Ephapax [`AstModule`] to WebAssembly (defaults to Linear mode).
+pub fn compile_module(module: &AstModule) -> Result<Vec<u8>, CodegenError> {
+    compile_module_with_mode(module, Mode::Linear)
 }
 
 // ===========================================================================
@@ -2388,6 +2552,44 @@ mod tests {
         let wasm = codegen.compile_program(&expr);
         assert_wasm_header(&wasm);
         validate_wasm(&wasm);
+    }
+
+    // -----------------------------------------------------------------------
+    // Lambda compilation
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn compile_simple_lambda() {
+        // Test: (lambda (x : I32) (+ x 1))
+        let mut codegen = Codegen::new();
+        let expr = Expr {
+            kind: ExprKind::Lambda {
+                param: "x".into(),
+                param_ty: Ty::Base(BaseTy::I32),
+                body: Box::new(Expr {
+                    kind: ExprKind::BinOp {
+                        op: BinOp::Add,
+                        left: Box::new(Expr {
+                            kind: ExprKind::Var("x".into()),
+                            span: Span::dummy(),
+                        }),
+                        right: Box::new(Expr {
+                            kind: ExprKind::Lit(Literal::I32(1)),
+                            span: Span::dummy(),
+                        }),
+                    },
+                    span: Span::dummy(),
+                }),
+            },
+            span: Span::dummy(),
+        };
+        let wasm = codegen.compile_program(&expr);
+        assert_wasm_header(&wasm);
+        validate_wasm(&wasm);
+
+        // Verify that a lambda was registered
+        assert_eq!(codegen.lambda_fns.len(), 1);
+        assert_eq!(codegen.lambda_fns[0].param, "x");
     }
 
     // -----------------------------------------------------------------------

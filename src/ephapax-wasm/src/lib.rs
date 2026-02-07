@@ -49,8 +49,9 @@ use ephapax_syntax::{
 };
 use std::collections::HashMap;
 use wasm_encoder::{
-    CodeSection, ExportKind, ExportSection, Function, FunctionSection, ImportSection, Instruction,
-    MemorySection, MemoryType, Module as WasmModule, TypeSection, ValType,
+    CodeSection, ConstExpr, ElementSection, Elements, ExportKind, ExportSection, Function,
+    FunctionSection, ImportSection, Instruction, MemorySection, MemoryType, Module as WasmModule,
+    RefType, TableSection, TableType, TypeSection, ValType,
 };
 
 // ---------------------------------------------------------------------------
@@ -432,10 +433,12 @@ impl Codegen {
         self.append_lambda_funcs(&mut func_sec, &mut code_sec)?;
 
         // Emit sections in WASM-required order:
-        // Type, Import, Function, Memory, Export, Code, Data
+        // Type, Import, Function, Table, Memory, Export, Element, Code, Data
         self.module.section(&func_sec);
+        self.emit_table();
         self.emit_memory();
         self.emit_module_exports(ast);
+        self.emit_elements();
         self.module.section(&code_sec);
         self.emit_data_section();
 
@@ -630,6 +633,58 @@ impl Codegen {
             page_size_log2: None,
         });
         self.module.section(&memories);
+    }
+
+    /// Emit the table section for indirect function calls (lambdas).
+    /// Creates a table with funcref elements sized to fit all lambda functions.
+    fn emit_table(&mut self) {
+        if self.lambda_fns.is_empty() {
+            return; // No lambdas, no table needed
+        }
+
+        let mut tables = TableSection::new();
+        // Create a table that can hold all lambda functions plus user functions
+        let table_size = (self.user_fns.len() + self.lambda_fns.len()) as u64;
+        tables.table(TableType {
+            element_type: RefType::FUNCREF,
+            minimum: table_size,
+            maximum: Some(table_size),
+            table64: false,
+            shared: false,
+        });
+        self.module.section(&tables);
+    }
+
+    /// Emit the element section to populate the function table.
+    /// Maps lambda function indices into table slots for call_indirect.
+    fn emit_elements(&mut self) {
+        if self.lambda_fns.is_empty() {
+            return; // No lambdas, no elements needed
+        }
+
+        let mut elements = ElementSection::new();
+
+        // Collect all function indices (user functions + lambdas)
+        let mut func_indices = Vec::new();
+
+        // Add user function indices
+        for info in self.user_fns.values() {
+            func_indices.push(info.wasm_fn_idx);
+        }
+
+        // Add lambda function indices
+        for lambda in &self.lambda_fns {
+            func_indices.push(lambda.wasm_fn_idx);
+        }
+
+        // Populate table starting at offset 0
+        elements.active(
+            Some(0), // table index (we only have one table)
+            &ConstExpr::i32_const(0), // offset in the table
+            Elements::Functions(std::borrow::Cow::Borrowed(&func_indices)),
+        );
+
+        self.module.section(&elements);
     }
 
     /// Append the 7 runtime helper functions to the given sections.
@@ -1266,6 +1321,98 @@ impl Codegen {
         }
     }
 
+    /// Find free variables in an expression.
+    /// A free variable is one that is referenced but not bound in the current scope.
+    fn find_free_vars(&self, expr: &Expr, bound_vars: &std::collections::HashSet<String>) -> Vec<String> {
+        use std::collections::HashSet;
+        let mut free_vars = Vec::new();
+        let mut seen = HashSet::new();
+
+        fn collect(
+            expr: &Expr,
+            bound: &HashSet<String>,
+            free: &mut Vec<String>,
+            seen: &mut HashSet<String>,
+        ) {
+            match &expr.kind {
+                ExprKind::Var(name) => {
+                    if !bound.contains(name.as_str()) && !seen.contains(name.as_str()) {
+                        free.push(name.to_string());
+                        seen.insert(name.to_string());
+                    }
+                }
+                ExprKind::Let { name, value, body, .. } | ExprKind::LetLin { name, value, body, .. } => {
+                    collect(value, bound, free, seen);
+                    let mut new_bound = bound.clone();
+                    new_bound.insert(name.to_string());
+                    collect(body, &new_bound, free, seen);
+                }
+                ExprKind::Lambda { param, body, .. } => {
+                    let mut new_bound = bound.clone();
+                    new_bound.insert(param.to_string());
+                    collect(body, &new_bound, free, seen);
+                }
+                ExprKind::App { func, arg } => {
+                    collect(func, bound, free, seen);
+                    collect(arg, bound, free, seen);
+                }
+                ExprKind::If { cond, then_branch, else_branch } => {
+                    collect(cond, bound, free, seen);
+                    collect(then_branch, bound, free, seen);
+                    collect(else_branch, bound, free, seen);
+                }
+                ExprKind::Pair { left, right } => {
+                    collect(left, bound, free, seen);
+                    collect(right, bound, free, seen);
+                }
+                ExprKind::Fst(inner) | ExprKind::Snd(inner) | ExprKind::Inl { value: inner, .. } | ExprKind::Inr { value: inner, .. } => {
+                    collect(inner, bound, free, seen);
+                }
+                ExprKind::Case { scrutinee, left_var, left_body, right_var, right_body } => {
+                    collect(scrutinee, bound, free, seen);
+                    let mut left_bound = bound.clone();
+                    left_bound.insert(left_var.to_string());
+                    collect(left_body, &left_bound, free, seen);
+                    let mut right_bound = bound.clone();
+                    right_bound.insert(right_var.to_string());
+                    collect(right_body, &right_bound, free, seen);
+                }
+                ExprKind::BinOp { left, right, .. } => {
+                    collect(left, bound, free, seen);
+                    collect(right, bound, free, seen);
+                }
+                ExprKind::UnaryOp { operand, .. } => {
+                    collect(operand, bound, free, seen);
+                }
+                ExprKind::Region { body, .. } => {
+                    collect(body, bound, free, seen);
+                }
+                ExprKind::Borrow(inner) | ExprKind::Deref(inner) | ExprKind::Drop(inner) => {
+                    collect(inner, bound, free, seen);
+                }
+                ExprKind::StringConcat { left, right } => {
+                    collect(left, bound, free, seen);
+                    collect(right, bound, free, seen);
+                }
+                ExprKind::StringLen(inner) => {
+                    collect(inner, bound, free, seen);
+                }
+                ExprKind::Copy(inner) => {
+                    collect(inner, bound, free, seen);
+                }
+                ExprKind::Block(exprs) => {
+                    for expr in exprs {
+                        collect(expr, bound, free, seen);
+                    }
+                }
+                ExprKind::Lit(_) | ExprKind::StringNew { .. } => {}
+            }
+        }
+
+        collect(expr, bound_vars, &mut free_vars, &mut seen);
+        free_vars
+    }
+
     fn compile_lambda(
         &mut self,
         func: &mut Function,
@@ -1273,30 +1420,31 @@ impl Codegen {
         param_ty: &Ty,
         body: &Expr,
     ) {
-        // For now, implement closed lambdas (no captured variables).
-        // Full closure support with environment capture will be added incrementally.
+        // 1. Find free variables in the lambda body
+        let mut bound_vars = std::collections::HashSet::new();
+        bound_vars.insert(param.to_string());
+        let captured_vars = self.find_free_vars(body, &bound_vars);
 
-        // 1. Determine the lambda's WASM type
+        // 2. Determine the lambda's WASM type
         // For simplicity, assume all lambdas take i32 and return i32
-        // (matching the common case in Ephapax)
-        let lambda_type_idx = 0; // Type 0 is (i32) -> i32
+        let lambda_type_idx = TYPE_I32_TO_I32; // Type 6 is (i32) -> i32
 
-        // 2. Calculate function index for this lambda
+        // 3. Calculate function index for this lambda
         // Function indices: imports (2) + runtime helpers (7) + user functions + lambdas
         let lambda_fn_idx = NUM_IMPORTS + NUM_RUNTIME_FNS + self.user_fns.len() as u32 + self.lambda_fns.len() as u32;
 
-        // 3. Record this lambda for later emission
+        // 4. Record this lambda for later emission
         self.lambda_fns.push(LambdaInfo {
             wasm_fn_idx: lambda_fn_idx,
             wasm_type_idx: lambda_type_idx,
-            captured_vars: Vec::new(), // No captures for now
+            captured_vars,
             param: param.to_string(),
             param_ty: param_ty.clone(),
             body: body.clone(),
         });
 
-        // 4. Emit the closure representation (for now, just the function index)
-        // In full closure support, this would be (fn_idx, env_ptr) pair
+        // 5. Emit the closure representation (just the function index for now)
+        // Full closure support would allocate environment and emit (fn_idx, env_ptr) pair
         func.instruction(&Instruction::I32Const(lambda_fn_idx as i32));
     }
 
@@ -1316,13 +1464,17 @@ impl Codegen {
             }
         }
 
-        // Fallback: indirect call / unknown -- not yet supported, emit 0.
-        // A full implementation would use `call_indirect` via a function table.
-        self.compile_expr(func, fn_expr);
-        func.instruction(&Instruction::Drop); // drop the function value
-        self.compile_expr(func, arg);
-        func.instruction(&Instruction::Drop); // drop the argument
-        func.instruction(&Instruction::I32Const(0));
+        // Indirect call via function table (for lambdas and first-class functions)
+        // Stack layout: [fn_index] [arg] -> call_indirect -> [result]
+        self.compile_expr(func, arg);       // Push argument
+        self.compile_expr(func, fn_expr);   // Push function index
+
+        // Use call_indirect with type signature (i32) -> i32
+        // Type 6 is TYPE_I32_TO_I32 defined at the top
+        func.instruction(&Instruction::CallIndirect {
+            type_index: TYPE_I32_TO_I32,
+            table_index: 0, // We only have one table (index 0)
+        });
     }
 
     fn compile_pair(
@@ -2590,6 +2742,38 @@ mod tests {
         // Verify that a lambda was registered
         assert_eq!(codegen.lambda_fns.len(), 1);
         assert_eq!(codegen.lambda_fns[0].param, "x");
+    }
+
+    #[test]
+    fn compile_lambda_application() {
+        // Test: ((lambda (x : I32) (+ x 1)) 5)
+        // Expected result: 6
+        let module = AstModule {
+            name: "test".into(),
+            decls: vec![Decl::Fn {
+                name: "main".into(),
+                params: vec![],
+                ret_ty: Ty::Base(BaseTy::I32),
+                body: e(ExprKind::App {
+                    func: Box::new(e(ExprKind::Lambda {
+                        param: "x".into(),
+                        param_ty: Ty::Base(BaseTy::I32),
+                        body: Box::new(e(ExprKind::BinOp {
+                            op: BinOp::Add,
+                            left: Box::new(e(ExprKind::Var("x".into()))),
+                            right: Box::new(e(ExprKind::Lit(Literal::I32(1)))),
+                        })),
+                    })),
+                    arg: Box::new(e(ExprKind::Lit(Literal::I32(5)))),
+                }),
+            }],
+        };
+        let wasm = compile_module(&module).expect("compilation failed");
+        assert_wasm_header(&wasm);
+        validate_wasm(&wasm);
+
+        // The WASM module should be valid and contain a lambda function
+        // (The validation above checks that the WASM is well-formed)
     }
 
     // -----------------------------------------------------------------------

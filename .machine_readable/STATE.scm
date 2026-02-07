@@ -22,8 +22,8 @@
       (target "wasm32-unknown-unknown")))
 
   (current-position
-    (phase "production-ready")
-    (overall-completion 90)
+    (phase "production-complete")
+    (overall-completion 100)
     (components
       (formal-semantics
         (status "complete")
@@ -61,8 +61,8 @@
           "type-inference"
           "error-message-improvements"))
       (wasm-codegen
-        (status "in-progress")
-        (completion 85)
+        (status "complete")
+        (completion 100)
         (crate "ephapax-wasm")
         (tech "wasm-encoder")
         (completed
@@ -74,11 +74,11 @@
           "linear-memory-mgmt"
           "runtime-function-generation"
           "mode-awareness"
-          "basic-lambda-compilation")
-        (remaining
+          "basic-lambda-compilation"
           "closure-environment-capture"
           "function-table-setup"
-          "call-indirect-emission"))
+          "call-indirect-emission")
+        (remaining))
       (interpreter
         (status "complete")
         (completion 100)

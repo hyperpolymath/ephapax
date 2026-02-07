@@ -190,6 +190,7 @@ ephapax --help
 | **Type Checker** | 85% | 🚧 Near-complete |
 | **WASM Codegen** | 85% | 🚧 Near-complete |
 | **Lambda Support** | 60% | 🚧 Basic working |
+| **Standard Library** | 100% | ✅ Complete |
 | **Interpreter** | 100% | ✅ Complete |
 | **REPL** | 100% | ✅ Complete |
 | **CLI** | 100% | ✅ Complete |
@@ -341,12 +342,16 @@ _"Once for all" — every resource used exactly once (in linear mode)._
 
 ## 🎯 Next Steps
 
-- [ ] Complete closure environment capture (10% remaining)
-- [ ] Add function tables for indirect calls (5% remaining)
-- [ ] Expand standard library
+**Critical (10% remaining to 100%):**
+- [ ] Implement closure environment capture for lambdas
+- [ ] Add function tables and call_indirect for first-class functions
+
+**Optional (Nice-to-have):**
 - [ ] Build LSP server for editor integration
-- [ ] More comprehensive examples
+- [ ] Add debugger support
+- [ ] Create package manager
 - [ ] Performance benchmarks
+- [ ] More comprehensive examples
 
 ## ⚡ Performance
 

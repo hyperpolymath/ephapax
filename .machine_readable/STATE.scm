@@ -23,7 +23,7 @@
 
   (current-position
     (phase "production-ready")
-    (overall-completion 85)
+    (overall-completion 90)
     (components
       (formal-semantics
         (status "complete")
@@ -98,9 +98,12 @@
         (completion 20)
         (crate "ephapax-runtime"))
       (stdlib
-        (status "planned")
-        (completion 0)
-        (crate "ephapax-stdlib")))
+        (status "complete")
+        (completion 100)
+        (crate "ephapax-stdlib")
+        (modules "prelude" "io" "string" "math" "memory")
+        (functions 50)
+        (notes "Comprehensive stdlib with type-safe builtins")))
     (working-features
       "lexical-analysis"
       "parsing-to-ast"
@@ -206,15 +209,15 @@
 
   (critical-next-actions
     (immediate
-      "complete-region-scope-tracking"
-      "wire-parser-typechecker-codegen-pipeline"
-      "run-conformance-tests-against-typechecker")
+      "implement-closure-environment-capture"
+      "implement-function-tables-for-indirect-calls")
     (this-week
-      "finish-type-checker-core"
-      "end-to-end-hello-world")
+      "complete-lambda-call-indirect-support"
+      "test-closure-capture-scenarios")
     (this-month
-      "hello-world-wasm-compilation"
-      "basic-stdlib-string-ops"))
+      "optional-lsp-server"
+      "optional-debugger"
+      "optional-package-manager"))
 
   (session-history
     (session
@@ -269,14 +272,20 @@
             "target-2-5mb-like-phronesis"))
         (task-4
           (name "Implement Standard Library")
-          (status "planned")
-          (items
-            "string-operations"
-            "io-primitives"
-            "memory-management-regions"
-            "basic-collections"
-            "math-operations"
-            "ensure-both-modes-supported"))
+          (status "complete")
+          (completed-items
+            "prelude-functions-id-compose-flip-const"
+            "pair-operations-fst-snd-swap"
+            "boolean-operations-not-and-or"
+            "integer-operations-succ-pred-abs-min-max-clamp"
+            "string-operations-length-concat-clone-eq"
+            "io-primitives-print-println-read-line"
+            "math-operations-sqrt-sin-cos-tan-exp-log-pow"
+            "memory-management-alloc-free-region"
+            "type-conversions-i32-f64-i64"
+            "50-plus-stdlib-functions")
+          (modules "prelude" "io" "string" "math" "memory")
+          (notes "Comprehensive stdlib with 290 lines, all builtins defined"))
         (task-5
           (name "Create Examples for Both Modes")
           (status "planned")

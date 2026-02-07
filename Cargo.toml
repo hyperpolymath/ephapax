@@ -17,6 +17,7 @@ members = [
     "src/ephapax-stdlib",
     "src/ephapax-lsp",
     "src/ephapax-package",
+    "src/ephapax-analysis",
     # "src/ephapax-vram-cache",  # Disabled: requires ephapax-proven repo
 ]
 
@@ -60,24 +61,3 @@ rustyline = "14"
 # Benchmarking dependencies
 criterion = { version = "0.5", features = ["html_reports"] }
 wasmtime = "27"
-
-# Benchmark binaries
-[[bin]]
-name = "binary_size"
-path = "benches/binary_size.rs"
-required-features = []
-
-[dev-dependencies]
-criterion.workspace = true
-wasmtime.workspace = true
-ephapax-syntax.workspace = true
-ephapax-typing.workspace = true
-ephapax-wasm.workspace = true
-
-[[bench]]
-name = "compile_time"
-harness = false
-
-[[bench]]
-name = "runtime_perf"
-harness = false

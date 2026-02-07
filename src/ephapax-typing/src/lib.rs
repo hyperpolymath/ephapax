@@ -904,13 +904,13 @@ impl TypeChecker {
     fn check_tuple_index(&mut self, tuple: &Expr, index: usize) -> Result<Ty, TypeError> {
         let tuple_ty = self.check(tuple)?;
 
-        match tuple_ty {
+        match &tuple_ty {
             // 2-element tuple (Prod)
             Ty::Prod { left, right } => {
                 if index == 0 {
-                    Ok(*left)
+                    Ok((**left).clone())
                 } else if index == 1 {
-                    Ok(*right)
+                    Ok((**right).clone())
                 } else {
                     Err(TypeError::TypeMismatch {
                         expected: Ty::Base(BaseTy::Unit), // placeholder
@@ -925,13 +925,13 @@ impl TypeChecker {
                 } else {
                     Err(TypeError::TypeMismatch {
                         expected: Ty::Base(BaseTy::Unit), // placeholder
-                        found: Ty::Tuple(elem_types),
+                        found: Ty::Tuple(elem_types.clone()),
                     })
                 }
             }
             _ => Err(TypeError::TypeMismatch {
                 expected: Ty::Tuple(vec![]), // placeholder
-                found: tuple_ty,
+                found: tuple_ty.clone(),
             }),
         }
     }

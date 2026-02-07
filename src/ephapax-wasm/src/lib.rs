@@ -1608,6 +1608,23 @@ impl Codegen {
                         collect(expr, bound, free, seen);
                     }
                 }
+                ExprKind::ListLit(elements) => {
+                    for elem in elements {
+                        collect(elem, bound, free, seen);
+                    }
+                }
+                ExprKind::ListIndex { list, index } => {
+                    collect(list, bound, free, seen);
+                    collect(index, bound, free, seen);
+                }
+                ExprKind::TupleLit(elements) => {
+                    for elem in elements {
+                        collect(elem, bound, free, seen);
+                    }
+                }
+                ExprKind::TupleIndex { tuple, .. } => {
+                    collect(tuple, bound, free, seen);
+                }
                 ExprKind::Lit(_) | ExprKind::StringNew { .. } => {}
             }
         }
@@ -1920,7 +1937,7 @@ impl Codegen {
         // For each element: dup handle, append element, drop status, keep new handle
         for elem in elements {
             // Duplicate handle for append call
-            func.instruction(&Instruction::LocalTee(self.locals.add_temp()));
+            func.instruction(&Instruction::LocalTee(self.locals.temp()));
 
             // Compile element
             self.compile_expr(func, elem);

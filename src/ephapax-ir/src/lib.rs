@@ -358,6 +358,26 @@ fn expr_to_sexpr(expr: &Expr) -> SExpr {
             SExpr::Atom(unary_to_atom(*op)),
             expr_to_sexpr(operand),
         ]),
+        ExprKind::ListLit(elements) => {
+            let mut elems = vec![SExpr::Atom("list-lit".into())];
+            elems.extend(elements.iter().map(expr_to_sexpr));
+            SExpr::List(elems)
+        }
+        ExprKind::ListIndex { list, index } => SExpr::List(vec![
+            SExpr::Atom("list-index".into()),
+            expr_to_sexpr(list),
+            expr_to_sexpr(index),
+        ]),
+        ExprKind::TupleLit(elements) => {
+            let mut elems = vec![SExpr::Atom("tuple-lit".into())];
+            elems.extend(elements.iter().map(expr_to_sexpr));
+            SExpr::List(elems)
+        }
+        ExprKind::TupleIndex { tuple, index } => SExpr::List(vec![
+            SExpr::Atom("tuple-index".into()),
+            expr_to_sexpr(tuple),
+            SExpr::Atom(index.to_string()),
+        ]),
     }
 }
 
@@ -538,6 +558,12 @@ fn ty_to_sexpr(ty: &Ty) -> SExpr {
         ]),
         Ty::Borrow(inner) => SExpr::List(vec![SExpr::Atom("borrow".into()), ty_to_sexpr(inner)]),
         Ty::Var(v) => SExpr::List(vec![SExpr::Atom("var".into()), SExpr::Atom(escape_atom(v))]),
+        Ty::List(inner) => SExpr::List(vec![SExpr::Atom("list".into()), ty_to_sexpr(inner)]),
+        Ty::Tuple(elem_types) => {
+            let mut elems = vec![SExpr::Atom("tuple".into())];
+            elems.extend(elem_types.iter().map(ty_to_sexpr));
+            SExpr::List(elems)
+        }
     }
 }
 

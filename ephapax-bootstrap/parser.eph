@@ -1,0 +1,614 @@
+// SPDX-License-Identifier: PMPL-1.0-or-later
+// Ephapax Parser - Self-hosting compiler (written in Ephapax linear mode)
+//
+// This parser is written in Ephapax itself, demonstrating recursive descent
+// parsing with linear resource management.
+
+// ============================================================================
+// AST TYPE DEFINITIONS
+// ============================================================================
+
+// Binary operators
+type BinOp =
+    | OpAdd | OpSub | OpMul | OpDiv | OpMod
+    | OpLt | OpLe | OpGt | OpGe | OpEq | OpNe
+    | OpAnd | OpOr
+
+// Unary operators
+type UnaryOp =
+    | OpNot | OpNeg
+
+// Types
+type Type =
+    | TyUnit                           // ()
+    | TyBool                           // Bool
+    | TyI32                            // I32
+    | TyI64                            // I64
+    | TyF32                            // F32
+    | TyF64                            // F64
+    | TyString                         // String@region
+    | TyFun(Type, Type)                // T1 -> T2
+    | TyProd(Type, Type)               // T1 * T2
+    | TySum(Type, Type)                // T1 + T2
+    | TyList(Type)                     // [T]
+    | TyTuple([Type])                  // (T1, T2, T3, ...)
+    | TyVar(String)                    // type variable
+
+// Literals
+type Literal =
+    | LitUnit
+    | LitBool(Bool)
+    | LitI32(I32)
+    | LitString(String)
+
+// Expressions
+type Expr =
+    | ExLit(Literal)
+    | ExVar(String)
+    | ExLet(String, Expr, Expr)        // let x = e1 in e2
+    | ExLetLin(String, Expr, Expr)     // let! x = e1 in e2
+    | ExLam(String, Type, Expr)        // fn(x: T) -> e
+    | ExApp(Expr, Expr)                // e1 e2
+    | ExIf(Expr, Expr, Expr)           // if e1 then e2 else e3
+    | ExPair(Expr, Expr)               // (e1, e2)
+    | ExFst(Expr)                      // e.0
+    | ExSnd(Expr)                      // e.1
+    | ExInl(Type, Expr)                // inl[T] e
+    | ExInr(Type, Expr)                // inr[T] e
+    | ExCase(Expr, String, Expr, String, Expr)  // case e of inl(x)->e1 inr(y)->e2
+    | ExDrop(Expr)                     // drop(e)
+    | ExCopy(Expr)                     // copy(e)
+    | ExBorrow(Expr)                   // &e
+    | ExDeref(Expr)                    // *e
+    | ExBinOp(BinOp, Expr, Expr)       // e1 op e2
+    | ExUnaryOp(UnaryOp, Expr)         // op e
+    | ExListLit([Expr])                // [e1, e2, e3]
+    | ExListIndex(Expr, Expr)          // e1[e2]
+    | ExTupleLit([Expr])               // (e1, e2, e3)
+    | ExTupleIndex(Expr, I32)          // e.N
+    | ExBlock([Expr])                  // { e1; e2; e3 }
+
+// Declarations
+type Decl =
+    | DeclFn(String, [(String, Type)], Type, Expr)  // fn name(params): ret = body
+    | DeclType(String, Type)                         // type name = T
+
+// Module (top-level)
+type Module = {
+    name: String,
+    decls: [Decl],
+}
+
+// ============================================================================
+// PARSER STATE
+// ============================================================================
+
+// Parser state (linear - single owner)
+type Parser = {
+    tokens: [Token],       // Token list from lexer
+    pos: I32,             // Current position in token list
+}
+
+// Parse result type
+type ParseResult<T> =
+    | ParseOk(T, Parser)              // Success: (result, updated parser)
+    | ParseErr(String, I32, I32)      // Error: (message, line, col)
+
+// ============================================================================
+// HELPER FUNCTIONS
+// ============================================================================
+
+// Get current token
+fn current_token(parser: Parser): Token =
+    let idx = parser.pos in
+    if idx >= list_len(parser.tokens) then
+        { kind: TokEof
+        , lexeme: String.new@default("")
+        , line: 0
+        , col: 0
+        }
+    else
+        list_get(parser.tokens, idx)
+
+// Peek token kind without consuming
+fn peek_kind(parser: Parser): TokenKind =
+    let tok = current_token(parser) in
+    tok.kind
+
+// Advance parser by one token
+fn advance_parser(parser: Parser): Parser =
+    { tokens: parser.tokens
+    , pos: parser.pos + 1
+    }
+
+// Expect a specific token kind
+fn expect(parser: Parser, expected: TokenKind): ParseResult<Token> =
+    let tok = current_token(parser) in
+    if tok.kind == expected then
+        ParseOk(tok, advance_parser(parser))
+    else
+        let msg = String.concat(
+            String.new@default("Expected token but found "),
+            tok.lexeme
+        ) in
+        ParseErr(msg, tok.line, tok.col)
+
+// Check if current token matches (without consuming)
+fn check(parser: Parser, kind: TokenKind): Bool =
+    peek_kind(parser) == kind
+
+// Match and consume a token kind
+fn match_token(parser: Parser, kind: TokenKind): ParseResult<Token> =
+    if check(parser, kind) then
+        let tok = current_token(parser) in
+        ParseOk(tok, advance_parser(parser))
+    else
+        let tok = current_token(parser) in
+        ParseErr(String.new@default("Token mismatch"), tok.line, tok.col)
+
+// ============================================================================
+// TYPE PARSING
+// ============================================================================
+
+// Parse base type (Unit, Bool, I32, etc.)
+fn parse_base_type(parser: Parser): ParseResult<Type> =
+    let tok = current_token(parser) in
+    let p2 = advance_parser(parser) in
+
+    if tok.lexeme == "()" then ParseOk(TyUnit, p2)
+    else if tok.lexeme == "Bool" then ParseOk(TyBool, p2)
+    else if tok.lexeme == "I32" then ParseOk(TyI32, p2)
+    else if tok.lexeme == "I64" then ParseOk(TyI64, p2)
+    else if tok.lexeme == "F32" then ParseOk(TyF32, p2)
+    else if tok.lexeme == "F64" then ParseOk(TyF64, p2)
+    else if tok.kind == TokIdent then
+        ParseOk(TyVar(tok.lexeme), p2)
+    else
+        ParseErr(String.new@default("Expected type"), tok.line, tok.col)
+
+// Parse list type: [T]
+fn parse_list_type(parser: Parser): ParseResult<Type> =
+    case expect(parser, TokPunct) of  // [
+    | ParseOk(_, p2) ->
+        case parse_type(p2) of
+        | ParseOk(elem_ty, p3) ->
+            case expect(p3, TokPunct) of  // ]
+            | ParseOk(_, p4) ->
+                ParseOk(TyList(elem_ty), p4)
+            | ParseErr(msg, line, col) ->
+                ParseErr(msg, line, col)
+            end
+        | ParseErr(msg, line, col) ->
+            ParseErr(msg, line, col)
+        end
+    | ParseErr(msg, line, col) ->
+        ParseErr(msg, line, col)
+    end
+
+// Parse function type: T1 -> T2
+fn parse_type(parser: Parser): ParseResult<Type> =
+    // Start with atom type
+    let tok = current_token(parser) in
+
+    if tok.lexeme == "[" then
+        parse_list_type(parser)
+    else
+        case parse_base_type(parser) of
+        | ParseOk(ty, p2) ->
+            // Check for arrow ->
+            if check(p2, TokArrow) then
+                let p3 = advance_parser(p2) in
+                case parse_type(p3) of
+                | ParseOk(ret_ty, p4) ->
+                    ParseOk(TyFun(ty, ret_ty), p4)
+                | ParseErr(msg, line, col) ->
+                    ParseErr(msg, line, col)
+                end
+            else
+                ParseOk(ty, p2)
+        | ParseErr(msg, line, col) ->
+            ParseErr(msg, line, col)
+        end
+
+// ============================================================================
+// EXPRESSION PARSING (Pratt parsing for operators)
+// ============================================================================
+
+// Parse primary expression (literals, variables, parens)
+fn parse_primary(parser: Parser): ParseResult<Expr> =
+    let tok = current_token(parser) in
+
+    if tok.kind == TokInt then
+        let p2 = advance_parser(parser) in
+        // TODO: Parse integer from string
+        ParseOk(ExLit(LitI32(42)), p2)
+
+    else if tok.kind == TokIdent then
+        let p2 = advance_parser(parser) in
+        ParseOk(ExVar(tok.lexeme), p2)
+
+    else if tok.lexeme == "()" then
+        let p2 = advance_parser(parser) in
+        ParseOk(ExLit(LitUnit), p2)
+
+    else if tok.lexeme == "true" then
+        let p2 = advance_parser(parser) in
+        ParseOk(ExLit(LitBool(true)), p2)
+
+    else if tok.lexeme == "false" then
+        let p2 = advance_parser(parser) in
+        ParseOk(ExLit(LitBool(false)), p2)
+
+    else if tok.lexeme == "(" then
+        // Parenthesized expression or pair/tuple
+        let p2 = advance_parser(parser) in
+        case parse_expr(p2) of
+        | ParseOk(e, p3) ->
+            case expect(p3, TokPunct) of  // )
+            | ParseOk(_, p4) ->
+                ParseOk(e, p4)
+            | ParseErr(msg, line, col) ->
+                ParseErr(msg, line, col)
+            end
+        | ParseErr(msg, line, col) ->
+            ParseErr(msg, line, col)
+        end
+
+    else
+        ParseErr(String.new@default("Expected expression"), tok.line, tok.col)
+
+// Parse postfix (function application, indexing, field access)
+fn parse_postfix(parser: Parser, lhs: Expr): ParseResult<Expr> =
+    let tok = current_token(parser) in
+
+    if tok.lexeme == "(" then
+        // Function application: f(arg)
+        let p2 = advance_parser(parser) in
+        case parse_expr(p2) of
+        | ParseOk(arg, p3) ->
+            case expect(p3, TokPunct) of  // )
+            | ParseOk(_, p4) ->
+                parse_postfix(p4, ExApp(lhs, arg))
+            | ParseErr(msg, line, col) ->
+                ParseErr(msg, line, col)
+            end
+        | ParseErr(msg, line, col) ->
+            ParseErr(msg, line, col)
+        end
+
+    else if tok.lexeme == "[" then
+        // List indexing: list[idx]
+        let p2 = advance_parser(parser) in
+        case parse_expr(p2) of
+        | ParseOk(idx, p3) ->
+            case expect(p3, TokPunct) of  // ]
+            | ParseOk(_, p4) ->
+                parse_postfix(p4, ExListIndex(lhs, idx))
+            | ParseErr(msg, line, col) ->
+                ParseErr(msg, line, col)
+            end
+        | ParseErr(msg, line, col) ->
+            ParseErr(msg, line, col)
+        end
+
+    else if tok.lexeme == "." then
+        // Field access: tuple.N or e.0 / e.1
+        let p2 = advance_parser(parser) in
+        let tok2 = current_token(p2) in
+        if tok2.kind == TokInt then
+            let p3 = advance_parser(p2) in
+            // TODO: Parse field index from string
+            let field_idx = 0 in  // placeholder
+
+            if field_idx == 0 then
+                parse_postfix(p3, ExFst(lhs))
+            else if field_idx == 1 then
+                parse_postfix(p3, ExSnd(lhs))
+            else
+                parse_postfix(p3, ExTupleIndex(lhs, field_idx))
+        else
+            ParseErr(String.new@default("Expected field index"), tok2.line, tok2.col)
+
+    else
+        // No more postfix operators
+        ParseOk(lhs, parser)
+
+// Parse binary operator expression
+fn parse_binop(parser: Parser, lhs: Expr): ParseResult<Expr> =
+    let tok = current_token(parser) in
+
+    if tok.kind == TokOp then
+        let op =
+            if tok.lexeme == "+" then OpAdd
+            else if tok.lexeme == "-" then OpSub
+            else if tok.lexeme == "*" then OpMul
+            else if tok.lexeme == "/" then OpDiv
+            else if tok.lexeme == "==" then OpEq
+            else if tok.lexeme == "!=" then OpNe
+            else if tok.lexeme == "<" then OpLt
+            else if tok.lexeme == ">" then OpGt
+            else OpAdd  // default
+        in
+
+        let p2 = advance_parser(parser) in
+        case parse_primary(p2) of
+        | ParseOk(rhs, p3) ->
+            ParseOk(ExBinOp(op, lhs, rhs), p3)
+        | ParseErr(msg, line, col) ->
+            ParseErr(msg, line, col)
+        end
+    else
+        ParseOk(lhs, parser)
+
+// Parse expression
+fn parse_expr(parser: Parser): ParseResult<Expr> =
+    let tok = current_token(parser) in
+
+    // Keyword expressions
+    if tok.lexeme == "let" then
+        parse_let_expr(parser)
+    else if tok.lexeme == "let!" then
+        parse_let_lin_expr(parser)
+    else if tok.lexeme == "if" then
+        parse_if_expr(parser)
+    else if tok.lexeme == "fn" then
+        parse_lambda_expr(parser)
+    else if tok.lexeme == "drop" then
+        parse_drop_expr(parser)
+    else
+        // Primary expression with postfix and binop
+        case parse_primary(parser) of
+        | ParseOk(e, p2) ->
+            case parse_postfix(p2, e) of
+            | ParseOk(e2, p3) ->
+                parse_binop(p3, e2)
+            | ParseErr(msg, line, col) ->
+                ParseErr(msg, line, col)
+            end
+        | ParseErr(msg, line, col) ->
+            ParseErr(msg, line, col)
+        end
+
+// Parse let expression: let x = e1 in e2
+fn parse_let_expr(parser: Parser): ParseResult<Expr> =
+    case expect(parser, TokKeyword) of  // let
+    | ParseOk(_, p2) ->
+        case expect(p2, TokIdent) of  // variable name
+        | ParseOk(name_tok, p3) ->
+            case expect(p3, TokOp) of  // =
+            | ParseOk(_, p4) ->
+                case parse_expr(p4) of  // value expression
+                | ParseOk(value, p5) ->
+                    case expect(p5, TokKeyword) of  // in
+                    | ParseOk(_, p6) ->
+                        case parse_expr(p6) of  // body expression
+                        | ParseOk(body, p7) ->
+                            ParseOk(ExLet(name_tok.lexeme, value, body), p7)
+                        | ParseErr(msg, line, col) ->
+                            ParseErr(msg, line, col)
+                        end
+                    | ParseErr(msg, line, col) ->
+                        ParseErr(msg, line, col)
+                    end
+                | ParseErr(msg, line, col) ->
+                    ParseErr(msg, line, col)
+                end
+            | ParseErr(msg, line, col) ->
+                ParseErr(msg, line, col)
+            end
+        | ParseErr(msg, line, col) ->
+            ParseErr(msg, line, col)
+        end
+    | ParseErr(msg, line, col) ->
+        ParseErr(msg, line, col)
+    end
+
+// Parse linear let expression: let! x = e1 in e2
+fn parse_let_lin_expr(parser: Parser): ParseResult<Expr> =
+    case expect(parser, TokKeyword) of  // let!
+    | ParseOk(_, p2) ->
+        case expect(p2, TokIdent) of  // variable name
+        | ParseOk(name_tok, p3) ->
+            case expect(p3, TokOp) of  // =
+            | ParseOk(_, p4) ->
+                case parse_expr(p4) of  // value expression
+                | ParseOk(value, p5) ->
+                    case expect(p5, TokKeyword) of  // in
+                    | ParseOk(_, p6) ->
+                        case parse_expr(p6) of  // body expression
+                        | ParseOk(body, p7) ->
+                            ParseOk(ExLetLin(name_tok.lexeme, value, body), p7)
+                        | ParseErr(msg, line, col) ->
+                            ParseErr(msg, line, col)
+                        end
+                    | ParseErr(msg, line, col) ->
+                        ParseErr(msg, line, col)
+                    end
+                | ParseErr(msg, line, col) ->
+                    ParseErr(msg, line, col)
+                end
+            | ParseErr(msg, line, col) ->
+                ParseErr(msg, line, col)
+            end
+        | ParseErr(msg, line, col) ->
+            ParseErr(msg, line, col)
+        end
+    | ParseErr(msg, line, col) ->
+        ParseErr(msg, line, col)
+    end
+
+// Parse if expression: if e1 then e2 else e3
+fn parse_if_expr(parser: Parser): ParseResult<Expr> =
+    case expect(parser, TokKeyword) of  // if
+    | ParseOk(_, p2) ->
+        case parse_expr(p2) of  // condition
+        | ParseOk(cond, p3) ->
+            case expect(p3, TokKeyword) of  // then
+            | ParseOk(_, p4) ->
+                case parse_expr(p4) of  // then branch
+                | ParseOk(then_branch, p5) ->
+                    case expect(p5, TokKeyword) of  // else
+                    | ParseOk(_, p6) ->
+                        case parse_expr(p6) of  // else branch
+                        | ParseOk(else_branch, p7) ->
+                            ParseOk(ExIf(cond, then_branch, else_branch), p7)
+                        | ParseErr(msg, line, col) ->
+                            ParseErr(msg, line, col)
+                        end
+                    | ParseErr(msg, line, col) ->
+                        ParseErr(msg, line, col)
+                    end
+                | ParseErr(msg, line, col) ->
+                    ParseErr(msg, line, col)
+                end
+            | ParseErr(msg, line, col) ->
+                ParseErr(msg, line, col)
+            end
+        | ParseErr(msg, line, col) ->
+            ParseErr(msg, line, col)
+        end
+    | ParseErr(msg, line, col) ->
+        ParseErr(msg, line, col)
+    end
+
+// Parse lambda expression: fn(x: T) -> e
+fn parse_lambda_expr(parser: Parser): ParseResult<Expr> =
+    case expect(parser, TokKeyword) of  // fn
+    | ParseOk(_, p2) ->
+        case expect(p2, TokPunct) of  // (
+        | ParseOk(_, p3) ->
+            case expect(p3, TokIdent) of  // parameter name
+            | ParseOk(param_tok, p4) ->
+                case expect(p4, TokPunct) of  // :
+                | ParseOk(_, p5) ->
+                    case parse_type(p5) of  // parameter type
+                    | ParseOk(param_ty, p6) ->
+                        case expect(p6, TokPunct) of  // )
+                        | ParseOk(_, p7) ->
+                            case expect(p7, TokArrow) of  // ->
+                            | ParseOk(_, p8) ->
+                                case parse_expr(p8) of  // body
+                                | ParseOk(body, p9) ->
+                                    ParseOk(ExLam(param_tok.lexeme, param_ty, body), p9)
+                                | ParseErr(msg, line, col) ->
+                                    ParseErr(msg, line, col)
+                                end
+                            | ParseErr(msg, line, col) ->
+                                ParseErr(msg, line, col)
+                            end
+                        | ParseErr(msg, line, col) ->
+                            ParseErr(msg, line, col)
+                        end
+                    | ParseErr(msg, line, col) ->
+                        ParseErr(msg, line, col)
+                    end
+                | ParseErr(msg, line, col) ->
+                    ParseErr(msg, line, col)
+                end
+            | ParseErr(msg, line, col) ->
+                ParseErr(msg, line, col)
+            end
+        | ParseErr(msg, line, col) ->
+            ParseErr(msg, line, col)
+        end
+    | ParseErr(msg, line, col) ->
+        ParseErr(msg, line, col)
+    end
+
+// Parse drop expression: drop(e)
+fn parse_drop_expr(parser: Parser): ParseResult<Expr> =
+    case expect(parser, TokKeyword) of  // drop
+    | ParseOk(_, p2) ->
+        case expect(p2, TokPunct) of  // (
+        | ParseOk(_, p3) ->
+            case parse_expr(p3) of  // expression to drop
+            | ParseOk(e, p4) ->
+                case expect(p4, TokPunct) of  // )
+                | ParseOk(_, p5) ->
+                    ParseOk(ExDrop(e), p5)
+                | ParseErr(msg, line, col) ->
+                    ParseErr(msg, line, col)
+                end
+            | ParseErr(msg, line, col) ->
+                ParseErr(msg, line, col)
+            end
+        | ParseErr(msg, line, col) ->
+            ParseErr(msg, line, col)
+        end
+    | ParseErr(msg, line, col) ->
+        ParseErr(msg, line, col)
+    end
+
+// ============================================================================
+// DECLARATION PARSING
+// ============================================================================
+
+// Parse function declaration: fn name(params): ret = body
+fn parse_fn_decl(parser: Parser): ParseResult<Decl> =
+    case expect(parser, TokKeyword) of  // fn
+    | ParseOk(_, p2) ->
+        case expect(p2, TokIdent) of  // function name
+        | ParseOk(name_tok, p3) ->
+            // TODO: Parse parameter list
+            // TODO: Parse return type
+            // TODO: Parse body
+            // For now, placeholder
+            let params = list_new(0) in
+            let ret_ty = TyUnit in
+
+            case parse_expr(p3) of
+            | ParseOk(body, p4) ->
+                ParseOk(DeclFn(name_tok.lexeme, params, ret_ty, body), p4)
+            | ParseErr(msg, line, col) ->
+                ParseErr(msg, line, col)
+            end
+        | ParseErr(msg, line, col) ->
+            ParseErr(msg, line, col)
+        end
+    | ParseErr(msg, line, col) ->
+        ParseErr(msg, line, col)
+    end
+
+// Parse declaration (function or type)
+fn parse_decl(parser: Parser): ParseResult<Decl> =
+    let tok = current_token(parser) in
+
+    if tok.lexeme == "fn" then
+        parse_fn_decl(parser)
+    else if tok.lexeme == "type" then
+        // TODO: Parse type declaration
+        let err = String.new@default("Type declarations not yet implemented") in
+        ParseErr(err, tok.line, tok.col)
+    else
+        ParseErr(String.new@default("Expected declaration"), tok.line, tok.col)
+
+// ============================================================================
+// MODULE PARSING
+// ============================================================================
+
+// Parse entire module
+fn parse_module(parser: Parser): ParseResult<Module> =
+    let decls = list_new(8) in
+    parse_module_loop(parser, decls)
+
+// Parse declarations in a loop until EOF
+fn parse_module_loop(parser: Parser, decls: [Decl]): ParseResult<Module> =
+    if check(parser, TokEof) then
+        ParseOk({ name: String.new@default("main"), decls: decls }, parser)
+    else
+        case parse_decl(parser) of
+        | ParseOk(decl, p2) ->
+            let decls2 = list_append(decls, decl) in
+            parse_module_loop(p2, decls2)
+        | ParseErr(msg, line, col) ->
+            ParseErr(msg, line, col)
+        end
+
+// ============================================================================
+// MAIN ENTRY POINT
+// ============================================================================
+
+// Parse a list of tokens into a module
+fn parse(tokens: [Token]): ParseResult<Module> =
+    let parser = { tokens: tokens, pos: 0 } in
+    parse_module(parser)

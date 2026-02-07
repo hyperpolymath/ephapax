@@ -1,0 +1,663 @@
+// SPDX-License-Identifier: PMPL-1.0-or-later
+// Ephapax WASM Code Generator - Self-hosting compiler (written in Ephapax linear mode)
+//
+// This code generator compiles Ephapax AST to WebAssembly instructions,
+// managing locals, stack operations, and runtime function calls.
+
+// ============================================================================
+// WASM INSTRUCTION SET
+// ============================================================================
+
+// WASM value types
+type ValType =
+    | ValI32
+    | ValI64
+    | ValF32
+    | ValF64
+
+// WASM instructions (subset needed for Ephapax)
+type WasmInstr =
+    // Constants
+    | I32Const(I32)
+    | I64Const(I64)
+
+    // Local variables
+    | LocalGet(I32)      // Get local variable
+    | LocalSet(I32)      // Set local variable
+    | LocalTee(I32)      // Set local and keep value on stack
+
+    // Memory operations
+    | I32Load(I32)       // Load i32 from memory (offset)
+    | I32Store(I32)      // Store i32 to memory (offset)
+
+    // Arithmetic (i32)
+    | I32Add
+    | I32Sub
+    | I32Mul
+    | I32DivS            // Signed division
+    | I32RemS            // Signed remainder
+
+    // Comparison (i32)
+    | I32LtS             // Less than (signed)
+    | I32LeS             // Less than or equal (signed)
+    | I32GtS             // Greater than (signed)
+    | I32GeS             // Greater than or equal (signed)
+    | I32Eq              // Equal
+    | I32Ne              // Not equal
+    | I32Eqz             // Equal to zero (for boolean not)
+
+    // Logical (i32)
+    | I32And
+    | I32Or
+
+    // Control flow
+    | Block              // Block start
+    | Loop               // Loop start
+    | If                 // If start
+    | Else               // Else branch
+    | End                // End block/loop/if
+    | Br(I32)            // Branch (break)
+    | BrIf(I32)          // Conditional branch
+
+    // Function calls
+    | Call(I32)          // Call function by index
+
+    // Stack operations
+    | Drop               // Drop value from stack
+    | Select             // Ternary select
+
+// ============================================================================
+// CODE GENERATOR STATE
+// ============================================================================
+
+// Local variable tracker
+type LocalTracker = {
+    num_params: I32,           // Number of function parameters
+    num_locals: I32,           // Number of additional locals
+    name_to_idx: [(String, I32)],  // Variable name -> local index
+}
+
+// Code generator state
+type Codegen = {
+    instructions: [WasmInstr],     // Generated instructions
+    locals: LocalTracker,          // Local variable tracking
+    next_local: I32,               // Next available local index
+}
+
+// Codegen result
+type CodegenResult =
+    | CodeOk(Codegen)
+    | CodeErr(String)
+
+// ============================================================================
+// RUNTIME FUNCTION INDICES
+// ============================================================================
+
+// Fixed indices for runtime functions (must match runtime)
+fn idx_bump_alloc(): I32 = 2
+fn idx_string_new(): I32 = 3
+fn idx_string_len(): I32 = 4
+fn idx_string_concat(): I32 = 5
+fn idx_string_drop(): I32 = 6
+fn idx_region_enter(): I32 = 7
+fn idx_region_exit(): I32 = 8
+fn idx_list_new(): I32 = 9
+fn idx_list_append(): I32 = 10
+fn idx_list_get(): I32 = 11
+
+// ============================================================================
+// LOCAL VARIABLE MANAGEMENT
+// ============================================================================
+
+// Create empty local tracker
+fn empty_locals(num_params: I32): LocalTracker =
+    { num_params: num_params
+    , num_locals: 0
+    , name_to_idx: list_new(8)
+    }
+
+// Look up local variable index by name
+fn lookup_local(locals: LocalTracker, name: String): I32 =
+    lookup_local_loop(locals.name_to_idx, name, 0)
+
+// Helper: loop through local bindings
+fn lookup_local_loop(bindings: [(String, I32)], name: String, idx: I32): I32 =
+    if idx >= list_len(bindings) then
+        -1  // Not found
+    else
+        let binding = list_get(bindings, idx) in
+        let (bind_name, bind_idx) = binding in
+        if string_eq(bind_name, name) then
+            bind_idx
+        else
+            lookup_local_loop(bindings, name, idx + 1)
+
+// Add local variable binding
+fn add_local(locals: LocalTracker, name: String): LocalTracker =
+    let new_idx = locals.num_params + locals.num_locals in
+    let binding = (name, new_idx) in
+    let new_bindings = list_append(locals.name_to_idx, binding) in
+    { num_params: locals.num_params
+    , num_locals: locals.num_locals + 1
+    , name_to_idx: new_bindings
+    }
+
+// ============================================================================
+// INSTRUCTION EMISSION
+// ============================================================================
+
+// Create empty codegen state
+fn empty_codegen(num_params: I32): Codegen =
+    { instructions: list_new(64)
+    , locals: empty_locals(num_params)
+    , next_local: num_params
+    }
+
+// Emit single instruction
+fn emit(gen: Codegen, instr: WasmInstr): Codegen =
+    let new_instrs = list_append(gen.instructions, instr) in
+    { instructions: new_instrs
+    , locals: gen.locals
+    , next_local: gen.next_local
+    }
+
+// Emit multiple instructions
+fn emit_all(gen: Codegen, instrs: [WasmInstr]): Codegen =
+    emit_all_loop(gen, instrs, 0)
+
+fn emit_all_loop(gen: Codegen, instrs: [WasmInstr], idx: I32): Codegen =
+    if idx >= list_len(instrs) then
+        gen
+    else
+        let instr = list_get(instrs, idx) in
+        let gen2 = emit(gen, instr) in
+        emit_all_loop(gen2, instrs, idx + 1)
+
+// ============================================================================
+// EXPRESSION COMPILATION
+// ============================================================================
+
+// Compile literal to WASM
+fn compile_literal(gen: Codegen, lit: Literal): CodegenResult =
+    case lit of
+    | LitUnit ->
+        // Unit = 0
+        CodeOk(emit(gen, I32Const(0)))
+    | LitBool(b) ->
+        // Bool: true=1, false=0
+        let val = if b then 1 else 0 in
+        CodeOk(emit(gen, I32Const(val)))
+    | LitI32(n) ->
+        CodeOk(emit(gen, I32Const(n)))
+    | LitString(_) ->
+        // String literals should use String.new
+        CodeErr(String.new@default("Unallocated string literal"))
+    end
+
+// Compile variable reference
+fn compile_var(gen: Codegen, name: String): CodegenResult =
+    let idx = lookup_local(gen.locals, name) in
+    if idx >= 0 then
+        CodeOk(emit(gen, LocalGet(idx)))
+    else
+        CodeErr(String.new@default("Undefined variable"))
+
+// Compile let binding: let x = e1 in e2
+fn compile_let(gen: Codegen, name: String, value: Expr, body: Expr): CodegenResult =
+    // Compile value
+    case compile_expr(gen, value) of
+    | CodeOk(gen2) ->
+        // Add local variable
+        let locals2 = add_local(gen2.locals, name) in
+        let local_idx = gen2.next_local in
+        let gen3 = {
+            instructions: gen2.instructions,
+            locals: locals2,
+            next_local: gen2.next_local + 1
+        } in
+
+        // Store value in local
+        let gen4 = emit(gen3, LocalSet(local_idx)) in
+
+        // Compile body
+        compile_expr(gen4, body)
+    | CodeErr(msg) ->
+        CodeErr(msg)
+    end
+
+// Compile linear let: let! x = e1 in e2
+fn compile_let_lin(gen: Codegen, name: String, value: Expr, body: Expr): CodegenResult =
+    // Same as regular let (linearity checked by type checker)
+    compile_let(gen, name, value, body)
+
+// Compile lambda: fn(x: T) -> e
+fn compile_lambda(gen: Codegen, param: String, param_ty: Type, body: Expr): CodegenResult =
+    // TODO: Lambdas require closure allocation
+    // For now, emit placeholder
+    CodeErr(String.new@default("Lambdas not yet implemented in codegen"))
+
+// Compile function application: f e
+fn compile_app(gen: Codegen, func: Expr, arg: Expr): CodegenResult =
+    // Compile argument first
+    case compile_expr(gen, arg) of
+    | CodeOk(gen2) ->
+        // Then compile function
+        case compile_expr(gen2, func) of
+        | CodeOk(gen3) ->
+            // For direct function calls, would emit Call instruction
+            // For now, emit error (needs function index)
+            CodeErr(String.new@default("Function application requires closure support"))
+        | CodeErr(msg) ->
+            CodeErr(msg)
+        end
+    | CodeErr(msg) ->
+        CodeErr(msg)
+    end
+
+// Compile if expression: if e1 then e2 else e3
+fn compile_if(gen: Codegen, cond: Expr, then_branch: Expr, else_branch: Expr): CodegenResult =
+    // Compile condition
+    case compile_expr(gen, cond) of
+    | CodeOk(gen2) ->
+        // Emit: if
+        let gen3 = emit(gen2, If) in
+
+        // Compile then branch
+        case compile_expr(gen3, then_branch) of
+        | CodeOk(gen4) ->
+            // Emit: else
+            let gen5 = emit(gen4, Else) in
+
+            // Compile else branch
+            case compile_expr(gen5, else_branch) of
+            | CodeOk(gen6) ->
+                // Emit: end
+                CodeOk(emit(gen6, End))
+            | CodeErr(msg) ->
+                CodeErr(msg)
+            end
+        | CodeErr(msg) ->
+            CodeErr(msg)
+        end
+    | CodeErr(msg) ->
+        CodeErr(msg)
+    end
+
+// Compile pair: (e1, e2)
+fn compile_pair(gen: Codegen, left: Expr, right: Expr): CodegenResult =
+    // Compile left, then right - both on stack
+    case compile_expr(gen, left) of
+    | CodeOk(gen2) ->
+        compile_expr(gen2, right)
+    | CodeErr(msg) ->
+        CodeErr(msg)
+    end
+
+// Compile first projection: e.0
+fn compile_fst(gen: Codegen, expr: Expr): CodegenResult =
+    // Compile pair (leaves 2 values on stack)
+    case compile_expr(gen, expr) of
+    | CodeOk(gen2) ->
+        // Drop second element (top of stack)
+        // First element is now on top
+        CodeOk(emit(gen2, Drop))
+    | CodeErr(msg) ->
+        CodeErr(msg)
+    end
+
+// Compile second projection: e.1
+fn compile_snd(gen: Codegen, expr: Expr): CodegenResult =
+    // Compile pair (leaves 2 values on stack)
+    case compile_expr(gen, expr) of
+    | CodeOk(gen2) ->
+        // Need to swap and drop
+        // For now, simplified: assume values in locals
+        // TODO: Implement proper stack manipulation
+        CodeOk(gen2)
+    | CodeErr(msg) ->
+        CodeErr(msg)
+    end
+
+// Compile drop: drop(e)
+fn compile_drop(gen: Codegen, expr: Expr): CodegenResult =
+    case compile_expr(gen, expr) of
+    | CodeOk(gen2) ->
+        // Drop value from stack
+        let gen3 = emit(gen2, Drop) in
+        // Push unit (0)
+        CodeOk(emit(gen3, I32Const(0)))
+    | CodeErr(msg) ->
+        CodeErr(msg)
+    end
+
+// Compile binary operation: e1 op e2
+fn compile_binop(gen: Codegen, op: BinOp, left: Expr, right: Expr): CodegenResult =
+    // Compile left operand
+    case compile_expr(gen, left) of
+    | CodeOk(gen2) ->
+        // Compile right operand
+        case compile_expr(gen2, right) of
+        | CodeOk(gen3) ->
+            // Emit operation
+            let instr = case op of
+                | OpAdd -> I32Add
+                | OpSub -> I32Sub
+                | OpMul -> I32Mul
+                | OpDiv -> I32DivS
+                | OpMod -> I32RemS
+                | OpLt -> I32LtS
+                | OpLe -> I32LeS
+                | OpGt -> I32GtS
+                | OpGe -> I32GeS
+                | OpEq -> I32Eq
+                | OpNe -> I32Ne
+                | OpAnd -> I32And
+                | OpOr -> I32Or
+                end in
+            CodeOk(emit(gen3, instr))
+        | CodeErr(msg) ->
+            CodeErr(msg)
+        end
+    | CodeErr(msg) ->
+        CodeErr(msg)
+    end
+
+// Compile unary operation: op e
+fn compile_unaryop(gen: Codegen, op: UnaryOp, expr: Expr): CodegenResult =
+    case compile_expr(gen, expr) of
+    | CodeOk(gen2) ->
+        case op of
+        | OpNot ->
+            // Logical not: x == 0
+            CodeOk(emit(gen2, I32Eqz))
+        | OpNeg ->
+            // Arithmetic negation: 0 - x
+            let gen3 = emit(gen2, I32Const(0)) in
+            let gen4 = emit(gen3, LocalTee(gen2.next_local)) in
+            let gen5 = emit(gen4, LocalGet(gen2.next_local)) in
+            CodeOk(emit(gen5, I32Sub))
+        end
+    | CodeErr(msg) ->
+        CodeErr(msg)
+    end
+
+// Compile list literal: [e1, e2, e3]
+fn compile_list_lit(gen: Codegen, elements: [Expr]): CodegenResult =
+    let len = list_len(elements) in
+
+    // Create list with capacity = length
+    let gen2 = emit(gen, I32Const(len)) in
+    let gen3 = emit(gen2, Call(idx_list_new())) in
+
+    // List handle now on stack
+    // For each element: append to list
+    compile_list_elements(gen3, elements, 0)
+
+// Helper: compile and append each list element
+fn compile_list_elements(gen: Codegen, elements: [Expr], idx: I32): CodegenResult =
+    if idx >= list_len(elements) then
+        // All elements appended, handle still on stack
+        CodeOk(gen)
+    else
+        let elem = list_get(elements, idx) in
+
+        // Duplicate handle on stack
+        let gen2 = emit(gen, LocalTee(gen.next_local)) in
+
+        // Compile element
+        case compile_expr(gen2, elem) of
+        | CodeOk(gen3) ->
+            // Call list_append (handle, value) -> new_handle
+            let gen4 = emit(gen3, Call(idx_list_append())) in
+
+            // New handle on stack, continue
+            compile_list_elements(gen4, elements, idx + 1)
+        | CodeErr(msg) ->
+            CodeErr(msg)
+        end
+
+// Compile list index: list[idx]
+fn compile_list_index(gen: Codegen, list: Expr, index: Expr): CodegenResult =
+    // Compile list expression
+    case compile_expr(gen, list) of
+    | CodeOk(gen2) ->
+        // Compile index expression
+        case compile_expr(gen2, index) of
+        | CodeOk(gen3) ->
+            // Call list_get(handle, idx) -> element
+            CodeOk(emit(gen3, Call(idx_list_get())))
+        | CodeErr(msg) ->
+            CodeErr(msg)
+        end
+    | CodeErr(msg) ->
+        CodeErr(msg)
+    end
+
+// Compile tuple literal: (e1, e2, e3)
+fn compile_tuple_lit(gen: Codegen, elements: [Expr]): CodegenResult =
+    // Compile all elements onto stack
+    compile_tuple_elements(gen, elements, 0)
+
+// Helper: compile each tuple element
+fn compile_tuple_elements(gen: Codegen, elements: [Expr], idx: I32): CodegenResult =
+    if idx >= list_len(elements) then
+        CodeOk(gen)
+    else
+        let elem = list_get(elements, idx) in
+        case compile_expr(gen, elem) of
+        | CodeOk(gen2) ->
+            compile_tuple_elements(gen2, elements, idx + 1)
+        | CodeErr(msg) ->
+            CodeErr(msg)
+        end
+
+// Compile tuple index: tuple.N
+fn compile_tuple_index(gen: Codegen, tuple: Expr, index: I32): CodegenResult =
+    // Compile tuple (leaves N values on stack)
+    case compile_expr(gen, tuple) of
+    | CodeOk(gen2) ->
+        // TODO: Need proper stack manipulation to get Nth element
+        // For now, simplified
+        if index == 0 then
+            compile_fst(gen, tuple)
+        else if index == 1 then
+            compile_snd(gen, tuple)
+        else
+            CodeErr(String.new@default("Tuple index > 1 not yet implemented"))
+    | CodeErr(msg) ->
+        CodeErr(msg)
+    end
+
+// Compile block: { e1; e2; e3 }
+fn compile_block(gen: Codegen, exprs: [Expr]): CodegenResult =
+    if list_len(exprs) == 0 then
+        // Empty block = unit
+        CodeOk(emit(gen, I32Const(0)))
+    else
+        compile_block_exprs(gen, exprs, 0)
+
+// Helper: compile block expressions sequentially
+fn compile_block_exprs(gen: Codegen, exprs: [Expr], idx: I32): CodegenResult =
+    if idx >= list_len(exprs) then
+        CodeOk(gen)
+    else
+        let expr = list_get(exprs, idx) in
+        case compile_expr(gen, expr) of
+        | CodeOk(gen2) ->
+            // If not last expression, drop result
+            if idx < list_len(exprs) - 1 then
+                let gen3 = emit(gen2, Drop) in
+                compile_block_exprs(gen3, exprs, idx + 1)
+            else
+                // Last expression - keep result
+                compile_block_exprs(gen2, exprs, idx + 1)
+        | CodeErr(msg) ->
+            CodeErr(msg)
+        end
+
+// Main expression compiler
+fn compile_expr(gen: Codegen, expr: Expr): CodegenResult =
+    case expr of
+    | ExLit(lit) -> compile_literal(gen, lit)
+    | ExVar(name) -> compile_var(gen, name)
+    | ExLet(name, value, body) -> compile_let(gen, name, value, body)
+    | ExLetLin(name, value, body) -> compile_let_lin(gen, name, value, body)
+    | ExLam(param, param_ty, body) -> compile_lambda(gen, param, param_ty, body)
+    | ExApp(func, arg) -> compile_app(gen, func, arg)
+    | ExIf(cond, then_br, else_br) -> compile_if(gen, cond, then_br, else_br)
+    | ExPair(left, right) -> compile_pair(gen, left, right)
+    | ExFst(e) -> compile_fst(gen, e)
+    | ExSnd(e) -> compile_snd(gen, e)
+    | ExDrop(e) -> compile_drop(gen, e)
+    | ExBinOp(op, left, right) -> compile_binop(gen, op, left, right)
+    | ExUnaryOp(op, operand) -> compile_unaryop(gen, op, operand)
+    | ExListLit(elements) -> compile_list_lit(gen, elements)
+    | ExListIndex(list, idx) -> compile_list_index(gen, list, idx)
+    | ExTupleLit(elements) -> compile_tuple_lit(gen, elements)
+    | ExTupleIndex(tuple, idx) -> compile_tuple_index(gen, tuple, idx)
+    | ExBlock(exprs) -> compile_block(gen, exprs)
+    | _ ->
+        CodeErr(String.new@default("Unsupported expression form"))
+    end
+
+// ============================================================================
+// FUNCTION COMPILATION
+// ============================================================================
+
+// Compile function declaration
+fn compile_function(name: String, params: [(String, Type)], ret_ty: Type, body: Expr): CodegenResult =
+    let num_params = list_len(params) in
+    let gen = empty_codegen(num_params) in
+
+    // Add parameters to local tracker
+    let gen2 = add_function_params(gen, params, 0) in
+
+    // Compile body
+    case compile_expr(gen2, body) of
+    | CodeOk(gen3) ->
+        // Add End instruction
+        CodeOk(emit(gen3, End))
+    | CodeErr(msg) ->
+        CodeErr(msg)
+    end
+
+// Helper: add function parameters to local tracker
+fn add_function_params(gen: Codegen, params: [(String, Type)], idx: I32): Codegen =
+    if idx >= list_len(params) then
+        gen
+    else
+        let param = list_get(params, idx) in
+        let (param_name, _) = param in
+
+        // Add parameter binding (parameter index = idx)
+        let binding = (param_name, idx) in
+        let new_bindings = list_append(gen.locals.name_to_idx, binding) in
+        let new_locals = {
+            num_params: gen.locals.num_params,
+            num_locals: gen.locals.num_locals,
+            name_to_idx: new_bindings
+        } in
+        let gen2 = {
+            instructions: gen.instructions,
+            locals: new_locals,
+            next_local: gen.next_local
+        } in
+
+        add_function_params(gen2, params, idx + 1)
+
+// ============================================================================
+// DECLARATION COMPILATION
+// ============================================================================
+
+// Compile declaration
+fn compile_decl(decl: Decl): CodegenResult =
+    case decl of
+    | DeclFn(name, params, ret_ty, body) ->
+        compile_function(name, params, ret_ty, body)
+    | DeclType(_, _) ->
+        // Type declarations don't generate code
+        CodeOk(empty_codegen(0))
+    end
+
+// ============================================================================
+// MODULE COMPILATION
+// ============================================================================
+
+// Module compilation result (list of compiled functions)
+type ModuleResult =
+    | ModuleOk([Codegen])
+    | ModuleErr(String)
+
+// Compile entire module
+fn compile_module(module: Module): ModuleResult =
+    compile_module_decls(module.decls, 0, list_new(8))
+
+// Compile all declarations
+fn compile_module_decls(decls: [Decl], idx: I32, compiled: [Codegen]): ModuleResult =
+    if idx >= list_len(decls) then
+        ModuleOk(compiled)
+    else
+        let decl = list_get(decls, idx) in
+        case compile_decl(decl) of
+        | CodeOk(gen) ->
+            let compiled2 = list_append(compiled, gen) in
+            compile_module_decls(decls, idx + 1, compiled2)
+        | CodeErr(msg) ->
+            ModuleErr(msg)
+        end
+
+// ============================================================================
+// INSTRUCTION SERIALIZATION (for debugging/testing)
+// ============================================================================
+
+// Convert instruction to string representation
+fn instr_to_string(instr: WasmInstr): String =
+    case instr of
+    | I32Const(n) ->
+        String.concat(String.new@default("i32.const "), int_to_string(n))
+    | LocalGet(idx) ->
+        String.concat(String.new@default("local.get "), int_to_string(idx))
+    | LocalSet(idx) ->
+        String.concat(String.new@default("local.set "), int_to_string(idx))
+    | I32Add -> String.new@default("i32.add")
+    | I32Sub -> String.new@default("i32.sub")
+    | I32Mul -> String.new@default("i32.mul")
+    | I32DivS -> String.new@default("i32.div_s")
+    | I32Eq -> String.new@default("i32.eq")
+    | I32Ne -> String.new@default("i32.ne")
+    | I32LtS -> String.new@default("i32.lt_s")
+    | If -> String.new@default("if")
+    | Else -> String.new@default("else")
+    | End -> String.new@default("end")
+    | Drop -> String.new@default("drop")
+    | Call(idx) ->
+        String.concat(String.new@default("call "), int_to_string(idx))
+    | _ -> String.new@default("<instr>")
+    end
+
+// Helper: convert integer to string (placeholder)
+fn int_to_string(n: I32): String =
+    // TODO: Proper integer to string conversion
+    String.new@default("N")
+
+// Print all instructions (for debugging)
+fn print_instructions(instrs: [WasmInstr]): String =
+    print_instructions_loop(instrs, 0, String.new@default(""))
+
+fn print_instructions_loop(instrs: [WasmInstr], idx: I32, acc: String): String =
+    if idx >= list_len(instrs) then
+        acc
+    else
+        let instr = list_get(instrs, idx) in
+        let instr_str = instr_to_string(instr) in
+        let acc2 = String.concat(acc, instr_str) in
+        let acc3 = String.concat(acc2, String.new@default("\n")) in
+        print_instructions_loop(instrs, idx + 1, acc3)
+
+// ============================================================================
+// MAIN ENTRY POINT
+// ============================================================================
+
+// Compile module to WASM instructions
+fn codegen(module: Module): ModuleResult =
+    compile_module(module)

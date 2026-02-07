@@ -1,0 +1,472 @@
+// SPDX-License-Identifier: PMPL-1.0-or-later
+// main.eph - Self-hosting Ephapax compiler entry point
+// Orchestrates the compilation pipeline: source → lexer → parser → typechecker → codegen → WASM
+
+// ============================================================================
+// IMPORTS (conceptual - will work with future module system)
+// ============================================================================
+// import lexer:   { lex, Token, Lexer }
+// import parser:  { parse_module, Expr, Decl, Module }
+// import typechecker: { typecheck_module, Context, Mode }
+// import wasm_codegen: { codegen_module, WasmModule }
+
+// ============================================================================
+// RESULT TYPES FOR PIPELINE STAGES
+// ============================================================================
+
+type CompileResult =
+    | CompileOk(WasmBytes)
+    | CompileErrLex(String, I32, I32)      // Error during lexing
+    | CompileErrParse(String, I32, I32)    // Error during parsing
+    | CompileErrType(String, I32, I32)     // Error during type checking
+    | CompileErrCodegen(String)            // Error during code generation
+
+type WasmBytes = { bytes: [I32], len: I32 }
+
+// ============================================================================
+// FILE I/O (FFI declarations - implemented in runtime)
+// ============================================================================
+
+// Read file contents into a string
+external fn read_file(path: String): String
+
+// Write bytes to file
+external fn write_file(path: String, bytes: [I32], len: I32): Bool
+
+// Print to stdout
+external fn print_string(s: String): Unit
+
+// Print to stderr
+external fn print_error(s: String): Unit
+
+// Exit with code
+external fn exit_process(code: I32): Unit
+
+// ============================================================================
+// COMPILATION PIPELINE
+// ============================================================================
+
+// Main compilation function: source code → WASM bytes
+fn compile(source: String, mode: Mode, filename: String): CompileResult =
+    // Stage 1: Lexing
+    let lex_result = lex(source, filename) in
+    case lex_result of
+        | LexOk(tokens, _) ->
+            // Stage 2: Parsing
+            let parse_result = parse_module(tokens) in
+            case parse_result of
+                | ParseOk(module, _) ->
+                    // Stage 3: Type checking
+                    let typecheck_result = typecheck_module(module, mode) in
+                    case typecheck_result of
+                        | TypeOk(typed_module, _) ->
+                            // Stage 4: Code generation
+                            let codegen_result = codegen_module(typed_module) in
+                            case codegen_result of
+                                | CodeOk(wasm_module) ->
+                                    // Stage 5: Serialize to bytes
+                                    let bytes = serialize_wasm(wasm_module) in
+                                    CompileOk(bytes)
+                                | CodeErr(msg) ->
+                                    CompileErrCodegen(msg)
+                            end
+                        | TypeError(msg, line, col) ->
+                            CompileErrType(msg, line, col)
+                    end
+                | ParseErr(msg, line, col) ->
+                    CompileErrParse(msg, line, col)
+            end
+        | LexErr(msg, line, col) ->
+            CompileErrLex(msg, line, col)
+    end
+
+// Compile with linear mode (default)
+fn compile_linear(source: String, filename: String): CompileResult =
+    compile(source, ModeLinear, filename)
+
+// Compile with affine mode
+fn compile_affine(source: String, filename: String): CompileResult =
+    compile(source, ModeAffine, filename)
+
+// ============================================================================
+// WASM MODULE SERIALIZATION
+// ============================================================================
+
+type WasmModule = {
+    functions: [WasmFunction],
+    exports: [WasmExport],
+    imports: [WasmImport],
+    memory: WasmMemory
+}
+
+type WasmFunction = {
+    name: String,
+    params: [I32],  // WASM types
+    results: [I32],
+    locals: [I32],
+    body: [WasmInstr]
+}
+
+type WasmExport = { name: String, kind: ExportKind, index: I32 }
+type ExportKind = ExportFunc | ExportMemory | ExportGlobal | ExportTable
+
+type WasmImport = { module: String, name: String, kind: ImportKind }
+type ImportKind = ImportFunc([I32], [I32]) | ImportMemory(I32, I32)
+
+type WasmMemory = { initial: I32, maximum: I32 }
+
+// Serialize WASM module to bytes (binary format)
+fn serialize_wasm(module: WasmModule): WasmBytes =
+    let buf = new_byte_buffer(4096) in
+
+    // WASM magic number: 0x00 0x61 0x73 0x6D
+    let buf1 = write_u32(buf, 0x6D736100) in
+
+    // WASM version: 1
+    let buf2 = write_u32(buf1, 0x00000001) in
+
+    // Type section (function signatures)
+    let buf3 = write_type_section(buf2, module) in
+
+    // Import section
+    let buf4 = write_import_section(buf3, module.imports) in
+
+    // Function section (function type indices)
+    let buf5 = write_function_section(buf4, module.functions) in
+
+    // Memory section
+    let buf6 = write_memory_section(buf5, module.memory) in
+
+    // Export section
+    let buf7 = write_export_section(buf6, module.exports) in
+
+    // Code section (function bodies)
+    let buf8 = write_code_section(buf7, module.functions) in
+
+    finalize_buffer(buf8)
+
+// Write WASM type section
+fn write_type_section(buf: ByteBuffer, module: WasmModule): ByteBuffer =
+    let section_id = 0x01 in  // Type section ID
+    let buf1 = write_u8(buf, section_id) in
+
+    // Collect unique function signatures
+    let signatures = collect_signatures(module.functions) in
+    let count = list_len(signatures) in
+
+    // Write section size (placeholder - will be patched)
+    let size_pos = buffer_position(buf1) in
+    let buf2 = write_u32(buf1, 0) in
+
+    // Write signature count
+    let buf3 = write_uleb128(buf2, count) in
+
+    // Write each signature
+    let buf4 = write_signatures_loop(buf3, signatures, 0, count) in
+
+    // Patch section size
+    let section_size = buffer_position(buf4) - size_pos - 4 in
+    patch_u32(buf4, size_pos, section_size)
+
+// Write function signature (0x60 params... results...)
+fn write_signature(buf: ByteBuffer, params: [I32], results: [I32]): ByteBuffer =
+    let buf1 = write_u8(buf, 0x60) in  // func type
+    let buf2 = write_uleb128(buf1, list_len(params)) in
+    let buf3 = write_types_loop(buf2, params, 0) in
+    let buf4 = write_uleb128(buf3, list_len(results)) in
+    write_types_loop(buf4, results, 0)
+
+// Write WASM import section
+fn write_import_section(buf: ByteBuffer, imports: [WasmImport]): ByteBuffer =
+    if list_len(imports) == 0 then
+        buf
+    else
+        let section_id = 0x02 in  // Import section ID
+        let buf1 = write_u8(buf, section_id) in
+        let size_pos = buffer_position(buf1) in
+        let buf2 = write_u32(buf1, 0) in
+        let buf3 = write_uleb128(buf2, list_len(imports)) in
+        let buf4 = write_imports_loop(buf3, imports, 0) in
+        let section_size = buffer_position(buf4) - size_pos - 4 in
+        patch_u32(buf4, size_pos, section_size)
+
+// Write WASM function section
+fn write_function_section(buf: ByteBuffer, functions: [WasmFunction]): ByteBuffer =
+    let section_id = 0x03 in
+    let buf1 = write_u8(buf, section_id) in
+    let size_pos = buffer_position(buf1) in
+    let buf2 = write_u32(buf1, 0) in
+    let buf3 = write_uleb128(buf2, list_len(functions)) in
+    let buf4 = write_function_indices_loop(buf3, functions, 0) in
+    let section_size = buffer_position(buf4) - size_pos - 4 in
+    patch_u32(buf4, size_pos, section_size)
+
+// Write WASM memory section
+fn write_memory_section(buf: ByteBuffer, memory: WasmMemory): ByteBuffer =
+    let section_id = 0x05 in
+    let buf1 = write_u8(buf, section_id) in
+    let size_pos = buffer_position(buf1) in
+    let buf2 = write_u32(buf1, 0) in
+    let buf3 = write_uleb128(buf2, 1) in  // 1 memory
+    let buf4 = write_u8(buf3, 0x01) in    // has max
+    let buf5 = write_uleb128(buf4, memory.initial) in
+    let buf6 = write_uleb128(buf5, memory.maximum) in
+    let section_size = buffer_position(buf6) - size_pos - 4 in
+    patch_u32(buf6, size_pos, section_size)
+
+// Write WASM export section
+fn write_export_section(buf: ByteBuffer, exports: [WasmExport]): ByteBuffer =
+    if list_len(exports) == 0 then
+        buf
+    else
+        let section_id = 0x07 in
+        let buf1 = write_u8(buf, section_id) in
+        let size_pos = buffer_position(buf1) in
+        let buf2 = write_u32(buf1, 0) in
+        let buf3 = write_uleb128(buf2, list_len(exports)) in
+        let buf4 = write_exports_loop(buf3, exports, 0) in
+        let section_size = buffer_position(buf4) - size_pos - 4 in
+        patch_u32(buf4, size_pos, section_size)
+
+// Write WASM code section (function bodies)
+fn write_code_section(buf: ByteBuffer, functions: [WasmFunction]): ByteBuffer =
+    let section_id = 0x0A in
+    let buf1 = write_u8(buf, section_id) in
+    let size_pos = buffer_position(buf1) in
+    let buf2 = write_u32(buf1, 0) in
+    let buf3 = write_uleb128(buf2, list_len(functions)) in
+    let buf4 = write_function_bodies_loop(buf3, functions, 0) in
+    let section_size = buffer_position(buf4) - size_pos - 4 in
+    patch_u32(buf4, size_pos, section_size)
+
+// ============================================================================
+// BYTE BUFFER UTILITIES
+// ============================================================================
+
+type ByteBuffer = { bytes: [I32], position: I32, capacity: I32 }
+
+fn new_byte_buffer(capacity: I32): ByteBuffer =
+    { bytes = list_new(capacity), position = 0, capacity = capacity }
+
+fn write_u8(buf: ByteBuffer, value: I32): ByteBuffer =
+    let bytes2 = list_append(buf.bytes, value & 0xFF) in
+    { bytes = bytes2, position = buf.position + 1, capacity = buf.capacity }
+
+fn write_u32(buf: ByteBuffer, value: I32): ByteBuffer =
+    let buf1 = write_u8(buf, value & 0xFF) in
+    let buf2 = write_u8(buf1, (value >> 8) & 0xFF) in
+    let buf3 = write_u8(buf2, (value >> 16) & 0xFF) in
+    write_u8(buf3, (value >> 24) & 0xFF)
+
+// Write unsigned LEB128 encoded integer
+fn write_uleb128(buf: ByteBuffer, value: I32): ByteBuffer =
+    if value < 128 then
+        write_u8(buf, value)
+    else
+        let low_bits = value & 0x7F in
+        let buf1 = write_u8(buf, low_bits | 0x80) in
+        write_uleb128(buf1, value >> 7)
+
+// Write signed LEB128 encoded integer
+fn write_sleb128(buf: ByteBuffer, value: I32): ByteBuffer =
+    let more = true in
+    write_sleb128_loop(buf, value, more)
+
+fn write_sleb128_loop(buf: ByteBuffer, value: I32, more: Bool): ByteBuffer =
+    if not more then
+        buf
+    else
+        let byte = value & 0x7F in
+        let value2 = value >> 7 in
+        let more2 = not ((value2 == 0 && byte & 0x40 == 0) || (value2 == -1 && byte & 0x40 != 0)) in
+        let byte_with_flag = if more2 then byte | 0x80 else byte in
+        let buf1 = write_u8(buf, byte_with_flag) in
+        write_sleb128_loop(buf1, value2, more2)
+
+fn buffer_position(buf: ByteBuffer): I32 = buf.position
+
+fn patch_u32(buf: ByteBuffer, pos: I32, value: I32): ByteBuffer =
+    let bytes2 = list_set(buf.bytes, pos, value & 0xFF) in
+    let bytes3 = list_set(bytes2, pos + 1, (value >> 8) & 0xFF) in
+    let bytes4 = list_set(bytes3, pos + 2, (value >> 16) & 0xFF) in
+    let bytes5 = list_set(bytes4, pos + 3, (value >> 24) & 0xFF) in
+    { bytes = bytes5, position = buf.position, capacity = buf.capacity }
+
+fn finalize_buffer(buf: ByteBuffer): WasmBytes =
+    { bytes = buf.bytes, len = buf.position }
+
+// ============================================================================
+// ERROR REPORTING
+// ============================================================================
+
+fn format_error(result: CompileResult): String =
+    case result of
+        | CompileOk(_) -> "Success"
+        | CompileErrLex(msg, line, col) ->
+            string_concat(
+                string_concat("Lexer error at ", format_location(line, col)),
+                string_concat(": ", msg)
+            )
+        | CompileErrParse(msg, line, col) ->
+            string_concat(
+                string_concat("Parser error at ", format_location(line, col)),
+                string_concat(": ", msg)
+            )
+        | CompileErrType(msg, line, col) ->
+            string_concat(
+                string_concat("Type error at ", format_location(line, col)),
+                string_concat(": ", msg)
+            )
+        | CompileErrCodegen(msg) ->
+            string_concat("Codegen error: ", msg)
+    end
+
+fn format_location(line: I32, col: I32): String =
+    string_concat(
+        string_concat(int_to_string(line), ":"),
+        int_to_string(col)
+    )
+
+// ============================================================================
+// CLI INTERFACE
+// ============================================================================
+
+type CliArgs = {
+    input_file: String,
+    output_file: String,
+    mode: Mode,
+    verbose: Bool
+}
+
+fn parse_cli_args(args: [String]): CliArgs =
+    // Default values
+    let input = "" in
+    let output = "output.wasm" in
+    let mode = ModeLinear in
+    let verbose = false in
+
+    // Parse command-line arguments
+    parse_args_loop(args, 1, input, output, mode, verbose)
+
+fn parse_args_loop(args: [String], i: I32, input: String, output: String, mode: Mode, verbose: Bool): CliArgs =
+    if i >= list_len(args) then
+        { input_file = input, output_file = output, mode = mode, verbose = verbose }
+    else
+        let arg = list_get(args, i) in
+        if string_eq(arg, "--output") || string_eq(arg, "-o") then
+            let output2 = list_get(args, i + 1) in
+            parse_args_loop(args, i + 2, input, output2, mode, verbose)
+        else if string_eq(arg, "--mode") then
+            let mode_str = list_get(args, i + 1) in
+            let mode2 = if string_eq(mode_str, "affine") then ModeAffine else ModeLinear in
+            parse_args_loop(args, i + 2, input, output, mode2, verbose)
+        else if string_eq(arg, "--verbose") || string_eq(arg, "-v") then
+            parse_args_loop(args, i + 1, input, output, mode, true)
+        else
+            // Assume it's the input file
+            parse_args_loop(args, i + 1, arg, output, mode, verbose)
+
+// Main entry point
+fn main(args: [String]): I32 =
+    let cli_args = parse_cli_args(args) in
+
+    // Check if input file was specified
+    if string_eq(cli_args.input_file, "") then
+        let _ = print_error("Error: No input file specified\n") in
+        let _ = print_error("Usage: ephapax <input.eph> [-o output.wasm] [--mode linear|affine] [-v]\n") in
+        exit_process(1)
+    else
+        let _ = if cli_args.verbose then
+            print_string(string_concat("Compiling ", string_concat(cli_args.input_file, "\n")))
+        else
+            ()
+        in
+
+        // Read source file
+        let source = read_file(cli_args.input_file) in
+
+        // Compile
+        let result = compile(source, cli_args.mode, cli_args.input_file) in
+
+        case result of
+            | CompileOk(wasm_bytes) ->
+                // Write output file
+                let success = write_file(cli_args.output_file, wasm_bytes.bytes, wasm_bytes.len) in
+                if success then
+                    let _ = if cli_args.verbose then
+                        print_string(string_concat("Successfully compiled to ", string_concat(cli_args.output_file, "\n")))
+                    else
+                        ()
+                    in
+                    0
+                else
+                    let _ = print_error(string_concat("Error: Failed to write output file ", string_concat(cli_args.output_file, "\n"))) in
+                    1
+            | _ ->
+                let err_msg = format_error(result) in
+                let _ = print_error(string_concat(err_msg, "\n")) in
+                1
+        end
+
+// ============================================================================
+// HELPER FUNCTIONS (stubs - will be implemented)
+// ============================================================================
+
+fn collect_signatures(functions: [WasmFunction]): [[I32]] =
+    // TODO: Collect unique function signatures
+    list_new(0)
+
+fn write_signatures_loop(buf: ByteBuffer, signatures: [[I32]], i: I32, count: I32): ByteBuffer =
+    if i >= count then
+        buf
+    else
+        let sig = list_get(signatures, i) in
+        let params = list_new(0) in  // TODO: Extract params from sig
+        let results = list_new(0) in // TODO: Extract results from sig
+        let buf1 = write_signature(buf, params, results) in
+        write_signatures_loop(buf1, signatures, i + 1, count)
+
+fn write_types_loop(buf: ByteBuffer, types: [I32], i: I32): ByteBuffer =
+    if i >= list_len(types) then
+        buf
+    else
+        let ty = list_get(types, i) in
+        let buf1 = write_u8(buf, ty) in
+        write_types_loop(buf1, types, i + 1)
+
+fn write_imports_loop(buf: ByteBuffer, imports: [WasmImport], i: I32): ByteBuffer =
+    if i >= list_len(imports) then
+        buf
+    else
+        // TODO: Write import entry
+        write_imports_loop(buf, imports, i + 1)
+
+fn write_function_indices_loop(buf: ByteBuffer, functions: [WasmFunction], i: I32): ByteBuffer =
+    if i >= list_len(functions) then
+        buf
+    else
+        // TODO: Write function type index
+        let buf1 = write_uleb128(buf, 0) in  // Placeholder
+        write_function_indices_loop(buf1, functions, i + 1)
+
+fn write_exports_loop(buf: ByteBuffer, exports: [WasmExport], i: I32): ByteBuffer =
+    if i >= list_len(exports) then
+        buf
+    else
+        // TODO: Write export entry
+        write_exports_loop(buf, exports, i + 1)
+
+fn write_function_bodies_loop(buf: ByteBuffer, functions: [WasmFunction], i: I32): ByteBuffer =
+    if i >= list_len(functions) then
+        buf
+    else
+        // TODO: Write function body
+        write_function_bodies_loop(buf, functions, i + 1)
+
+fn int_to_string(n: I32): String =
+    // TODO: Implement integer to string conversion
+    "0"
+
+fn list_set(list: [I32], index: I32, value: I32): [I32] =
+    // TODO: Implement list element update
+    list

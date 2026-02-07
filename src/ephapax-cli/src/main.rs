@@ -112,6 +112,38 @@ enum Commands {
         #[arg(short, long)]
         pretty: bool,
     },
+
+    /// Package management commands
+    #[command(subcommand)]
+    Package(PackageCommands),
+}
+
+#[derive(Subcommand)]
+enum PackageCommands {
+    /// Initialize a new Ephapax project
+    Init {
+        /// Project name
+        name: String,
+
+        /// Project directory (default: current directory)
+        #[arg(short, long)]
+        path: Option<PathBuf>,
+    },
+
+    /// Install dependencies
+    Install {
+        /// Package names to install (if empty, installs from ephapax.toml)
+        packages: Vec<String>,
+    },
+
+    /// Search for packages
+    Search {
+        /// Search query
+        query: String,
+    },
+
+    /// List installed packages
+    List,
 }
 
 fn main() -> ExitCode {
@@ -129,6 +161,7 @@ fn main() -> ExitCode {
         }
         Some(Commands::Tokens { input }) => show_tokens(&input),
         Some(Commands::Parse { input, pretty }) => show_parse(&input, pretty),
+        Some(Commands::Package(pkg_cmd)) => handle_package_command(pkg_cmd, cli.verbose),
         None => {
             // If a file is given without subcommand, run it
             if let Some(file) = cli.file {
@@ -486,6 +519,97 @@ fn show_parse(input: &str, pretty: bool) -> Result<(), String> {
                 eprintln!("{} {}", "Parse error:".red().bold(), error);
             }
             Err(format!("{} parse error(s)", errors.len()))
+        }
+    }
+}
+
+fn handle_package_command(cmd: PackageCommands, verbose: bool) -> Result<(), String> {
+    match cmd {
+        PackageCommands::Init { name, path } => {
+            let project_path = path.unwrap_or_else(|| PathBuf::from("."));
+
+            ephapax_package::init_project(&project_path, &name)
+                .map_err(|e| format!("Failed to initialize project: {}", e))?;
+
+            if verbose {
+                println!(
+                    "{} Initialized project '{}' in {}",
+                    "✓".green().bold(),
+                    name,
+                    project_path.display()
+                );
+            }
+
+            println!(
+                "{} Created ephapax.toml and src/main.eph",
+                "✓".green().bold()
+            );
+            Ok(())
+        }
+
+        PackageCommands::Install { packages } => {
+            if packages.is_empty() {
+                // Install from ephapax.toml
+                let manifest_path = PathBuf::from("ephapax.toml");
+                if !manifest_path.exists() {
+                    return Err("No ephapax.toml found. Run 'ephapax package init' first.".to_string());
+                }
+
+                if verbose {
+                    println!("{} Resolving dependencies...", "⚙".yellow());
+                }
+
+                let resolved = ephapax_package::install_dependencies(&manifest_path)
+                    .map_err(|e| format!("Failed to install dependencies: {}", e))?;
+
+                println!("{} Resolved {} packages:", "✓".green().bold(), resolved.packages.len());
+                for (name, pkg) in &resolved.packages {
+                    println!("  {} v{}", name, pkg.version);
+                }
+            } else {
+                return Err("Installing individual packages not yet implemented. Install from ephapax.toml for now.".to_string());
+            }
+
+            Ok(())
+        }
+
+        PackageCommands::Search { query } => {
+            let registry = ephapax_package::Registry::open()
+                .map_err(|e| format!("Failed to open registry: {}", e))?;
+
+            let results = registry.search(&query);
+
+            if results.is_empty() {
+                println!("No packages found matching '{}'", query);
+            } else {
+                println!("Found {} package(s):", results.len());
+                for name in results {
+                    let versions = registry.get_versions(&name);
+                    println!("  {} ({})", name, versions.join(", "));
+                }
+            }
+
+            Ok(())
+        }
+
+        PackageCommands::List => {
+            let registry = ephapax_package::Registry::open()
+                .map_err(|e| format!("Failed to open registry: {}", e))?;
+
+            let packages = registry.list_packages();
+
+            if packages.is_empty() {
+                println!("No packages installed.");
+                println!("Install packages with: ephapax package install");
+            } else {
+                println!("Installed packages:");
+                for name in packages {
+                    let versions = registry.get_versions(&name);
+                    println!("  {} ({})", name, versions.join(", "));
+                }
+            }
+
+            Ok(())
         }
     }
 }

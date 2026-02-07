@@ -22,6 +22,7 @@ ephapax-typing.workspace = true
 ephapax-wasm.workspace = true
 ephapax-interp.workspace = true
 ephapax-repl.workspace = true
+ephapax-package.workspace = true
 smol_str.workspace = true
 clap.workspace = true
 colored.workspace = true

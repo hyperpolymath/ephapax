@@ -16,6 +16,7 @@ members = [
     "src/ephapax-cli",
     "src/ephapax-stdlib",
     "src/ephapax-lsp",
+    "src/ephapax-package",
     # "src/ephapax-vram-cache",  # Disabled: requires ephapax-proven repo
 ]
 
@@ -42,6 +43,7 @@ ephapax-interp = { path = "src/ephapax-interp" }
 ephapax-repl = { path = "src/ephapax-repl" }
 ephapax-stdlib = { path = "src/ephapax-stdlib" }
 ephapax-lsp = { path = "src/ephapax-lsp" }
+ephapax-package = { path = "src/ephapax-package" }
 ephapax-vram-cache = { path = "src/ephapax-vram-cache" }
 
 # External dependencies

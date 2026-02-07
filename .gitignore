@@ -11,6 +11,10 @@ build/
 *.ttm
 *.ibc
 
+# Zig
+.zig-cache-global/
+*.a
+
 # Coq
 *.vo
 *.vok

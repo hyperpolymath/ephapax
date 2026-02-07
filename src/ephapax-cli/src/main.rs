@@ -12,7 +12,7 @@ use ephapax_interp::Interpreter;
 use ephapax_lexer::Lexer;
 use ephapax_parser::{parse, parse_module};
 use ephapax_repl::Repl;
-use ephapax_typing::{type_check_module, type_check_module_with_mode, Mode};
+use ephapax_typing::{type_check_module, type_check_module_with_mode, Mode as TypingMode};
 use std::fs;
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -77,6 +77,14 @@ enum Commands {
         /// Optimization level (0-3)
         #[arg(short = 'O', long, default_value = "0")]
         opt_level: u8,
+
+        /// Enable debug information generation
+        #[arg(long)]
+        debug: bool,
+
+        /// Compilation mode (linear or affine)
+        #[arg(short, long, default_value = "linear")]
+        mode: String,
     },
 
     /// Compile an S-expression IR module to WebAssembly
@@ -113,8 +121,8 @@ fn main() -> ExitCode {
         Some(Commands::Repl { preload }) => run_repl(preload, cli.verbose),
         Some(Commands::Run { file, args: _ }) => run_file(&file, cli.verbose),
         Some(Commands::Check { files, mode }) => check_files(&files, &mode, cli.verbose),
-        Some(Commands::Compile { file, output, opt_level }) => {
-            compile_file(&file, output, opt_level, cli.verbose)
+        Some(Commands::Compile { file, output, opt_level, debug, mode }) => {
+            compile_file(&file, output, opt_level, debug, &mode, cli.verbose)
         }
         Some(Commands::CompileSexpr { file, output }) => {
             compile_sexpr_file(&file, output, cli.verbose)
@@ -215,8 +223,8 @@ fn run_file(path: &PathBuf, verbose: bool) -> Result<(), String> {
 fn check_files(files: &[PathBuf], mode_str: &str, verbose: bool) -> Result<(), String> {
     // Parse mode argument
     let mode = match mode_str.to_lowercase().as_str() {
-        "linear" => Mode::Linear,
-        "affine" => Mode::Affine,
+        "linear" => TypingMode::Linear,
+        "affine" => TypingMode::Affine,
         _ => {
             return Err(format!("Invalid mode '{}'. Must be 'linear' or 'affine'", mode_str));
         }
@@ -289,12 +297,23 @@ fn compile_file(
     path: &PathBuf,
     output: Option<PathBuf>,
     opt_level: u8,
+    debug: bool,
+    mode_str: &str,
     verbose: bool,
 ) -> Result<(), String> {
     let content =
         fs::read_to_string(path).map_err(|e| format!("Cannot read {}: {}", path.display(), e))?;
 
     let filename = path.to_str().unwrap_or("input");
+
+    // Parse mode
+    let mode = match mode_str.to_lowercase().as_str() {
+        "linear" => TypingMode::Linear,
+        "affine" => TypingMode::Affine,
+        _ => {
+            return Err(format!("Invalid mode '{}'. Must be 'linear' or 'affine'", mode_str));
+        }
+    };
 
     // Parse
     let module = parse_module(&content, filename).map_err(|errors| {
@@ -308,18 +327,30 @@ fn compile_file(
         println!("{} Parsed {} declarations", "✓".green(), module.decls.len());
     }
 
-    // Type check
-    type_check_module(&module).map_err(|e| {
+    // Type check with mode
+    type_check_module_with_mode(&module, mode).map_err(|e| {
         report_type_error(filename, &content, &e);
         format!("Type error: {}", e)
     })?;
 
     if verbose {
-        println!("{} Type check passed", "✓".green());
+        println!("{} Type check passed ({} mode)", "✓".green(), mode_str);
     }
 
-    // Compile to WASM
-    let wasm_bytes = ephapax_wasm::compile_module(&module).map_err(|e| format!("Codegen error: {}", e))?;
+    // Convert typing mode to codegen mode
+    let codegen_mode = match mode {
+        TypingMode::Linear => ephapax_wasm::Mode::Linear,
+        TypingMode::Affine => ephapax_wasm::Mode::Affine,
+    };
+
+    // Compile to WASM (with or without debug info)
+    let wasm_bytes = if debug {
+        ephapax_wasm::compile_module_with_debug(&module, codegen_mode, filename)
+            .map_err(|e| format!("Codegen error: {}", e))?
+    } else {
+        ephapax_wasm::compile_module_with_mode(&module, codegen_mode)
+            .map_err(|e| format!("Codegen error: {}", e))?
+    };
 
     if verbose {
         println!(
@@ -344,11 +375,26 @@ fn compile_file(
     fs::write(&output_path, &wasm_bytes)
         .map_err(|e| format!("Cannot write {}: {}", output_path.display(), e))?;
 
+    // Write source map if debug enabled
+    if debug {
+        let source_map = ephapax_wasm::generate_source_map_for_module(&module, codegen_mode, filename)
+            .map_err(|e| format!("Source map generation error: {}", e))?;
+
+        let map_path = output_path.with_extension("wasm.map");
+        fs::write(&map_path, source_map)
+            .map_err(|e| format!("Cannot write source map {}: {}", map_path.display(), e))?;
+
+        if verbose {
+            println!("{} Generated source map: {}", "✓".green(), map_path.display());
+        }
+    }
+
     println!(
-        "{} Compiled to {} ({} bytes)",
+        "{} Compiled to {} ({} bytes{})",
         "✓".green().bold(),
         output_path.display(),
-        wasm_bytes.len()
+        wasm_bytes.len(),
+        if debug { ", with debug info" } else { "" }
     );
 
     Ok(())

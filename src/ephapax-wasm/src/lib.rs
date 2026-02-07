@@ -43,15 +43,19 @@
 //!
 //! Mode is set per-module compilation and affects how unused linear values are handled.
 
+mod debug;
+
+pub use debug::{DebugInfo, VariableMetadata};
+
 use ephapax_ir::module_from_sexpr;
 use ephapax_syntax::{
-    BaseTy, BinOp, Decl, Expr, ExprKind, Literal, Module as AstModule, Ty, UnaryOp,
+    BaseTy, BinOp, Decl, Expr, ExprKind, Literal, Module as AstModule, Span, Ty, UnaryOp,
 };
 use std::collections::HashMap;
 use wasm_encoder::{
-    CodeSection, ConstExpr, ElementSection, Elements, ExportKind, ExportSection, Function,
-    FunctionSection, ImportSection, Instruction, MemorySection, MemoryType, Module as WasmModule,
-    RefType, TableSection, TableType, TypeSection, ValType,
+    CodeSection, ConstExpr, CustomSection, ElementSection, Elements, ExportKind, ExportSection,
+    Function, FunctionSection, ImportSection, Instruction, MemorySection, MemoryType,
+    Module as WasmModule, RefType, TableSection, TableType, TypeSection, ValType,
 };
 
 // ---------------------------------------------------------------------------
@@ -276,6 +280,9 @@ pub struct Codegen {
 
     /// Compilation mode (affine or linear)
     mode: Mode,
+
+    /// Optional debug information (enabled with --debug flag)
+    debug_info: Option<DebugInfo>,
 }
 
 /// Information about a compiled lambda
@@ -330,7 +337,29 @@ impl Codegen {
             extra_types: Vec::new(),
             lambda_fns: Vec::new(),
             mode,
+            debug_info: None,
         }
+    }
+
+    /// Enable debug information generation
+    pub fn enable_debug(&mut self, file_path: String) {
+        let mode_str = match self.mode {
+            Mode::Affine => "affine".to_string(),
+            Mode::Linear => "linear".to_string(),
+        };
+
+        self.debug_info = Some(DebugInfo {
+            file_path,
+            mode: mode_str,
+            instruction_spans: Vec::new(),
+            fn_names: HashMap::new(),
+            variables: Vec::new(),
+        });
+    }
+
+    /// Check if debug mode is enabled
+    pub fn is_debug_enabled(&self) -> bool {
+        self.debug_info.is_some()
     }
 
     /// Get the current compilation mode
@@ -363,6 +392,7 @@ impl Codegen {
 
         self.module.section(&code_sec);
         self.emit_data_section();
+        self.emit_debug_sections();
         self.module.clone().finish()
     }
 
@@ -396,6 +426,7 @@ impl Codegen {
 
         self.module.section(&code_sec);
         self.emit_data_section();
+        self.emit_debug_sections();
         self.module.clone().finish()
     }
 
@@ -487,6 +518,7 @@ impl Codegen {
 
         self.module.section(&code_sec);
         self.emit_data_section();
+        self.emit_debug_sections();
         self.module.clone().finish()
     }
 
@@ -923,6 +955,23 @@ impl Codegen {
         self.module.section(&data);
     }
 
+    /// Emit debug information as custom WASM sections
+    fn emit_debug_sections(&mut self) {
+        if let Some(debug_info) = &self.debug_info {
+            // Custom section: ephapax.debug.mode (mode metadata as JSON)
+            let mode_metadata = debug::generate_mode_metadata(debug_info);
+            let mode_section = wasm_encoder::CustomSection {
+                name: "ephapax.debug.mode".into(),
+                data: mode_metadata.into(),
+            };
+            self.module.section(&mode_section);
+
+            // Note: DWARF generation disabled due to gimli API complexity
+            // Future enhancement: Implement full DWARF support with proper gimli 0.31 API usage
+            // For now, use source maps (JSON format) for debugging
+        }
+    }
+
     // (Legacy emit helpers removed -- section building now done inline)
 
     // -----------------------------------------------------------------------
@@ -1156,6 +1205,14 @@ impl Codegen {
 
     /// Compile an expression, appending instructions to a `Function`.
     pub fn compile_expr(&mut self, func: &mut Function, expr: &Expr) {
+        // Track instruction offset for debug info
+        if let Some(debug) = &mut self.debug_info {
+            // Note: We approximate WASM offset by counting instructions
+            // A more precise implementation would track actual byte offsets
+            let approx_offset = debug.instruction_spans.len() as u32;
+            debug.instruction_spans.push((approx_offset, expr.span.clone()));
+        }
+
         match &expr.kind {
             ExprKind::Lit(lit) => self.compile_lit(func, lit),
             ExprKind::Var(name) => self.compile_var(func, name),
@@ -1744,6 +1801,7 @@ impl Codegen {
 
         self.module.section(&code_sec);
         self.emit_data_section();
+        self.emit_debug_sections();
         self.module.clone().finish()
     }
 }
@@ -1798,6 +1856,37 @@ pub fn compile_module_with_mode(module: &AstModule, mode: Mode) -> Result<Vec<u8
 /// Compile an entire Ephapax [`AstModule`] to WebAssembly (defaults to Linear mode).
 pub fn compile_module(module: &AstModule) -> Result<Vec<u8>, CodegenError> {
     compile_module_with_mode(module, Mode::Linear)
+}
+
+/// Compile an Ephapax module with debug information enabled
+pub fn compile_module_with_debug(
+    module: &AstModule,
+    mode: Mode,
+    file_path: &str,
+) -> Result<Vec<u8>, CodegenError> {
+    let mut codegen = Codegen::new_with_mode(mode);
+    codegen.enable_debug(file_path.to_string());
+    codegen.compile_ast_module(module)
+}
+
+/// Generate source map for a compiled module
+pub fn generate_source_map_for_module(
+    module: &AstModule,
+    mode: Mode,
+    file_path: &str,
+) -> Result<String, CodegenError> {
+    let mut codegen = Codegen::new_with_mode(mode);
+    codegen.enable_debug(file_path.to_string());
+
+    // Compile to populate debug info
+    let _ = codegen.compile_ast_module(module)?;
+
+    // Extract and format source map
+    if let Some(debug_info) = &codegen.debug_info {
+        Ok(debug::generate_source_map(debug_info))
+    } else {
+        Err(CodegenError("Debug info not enabled".to_string()))
+    }
 }
 
 // ===========================================================================

@@ -1,0 +1,34 @@
+// SPDX-License-Identifier: EUPL-1.2
+// Linear Connection Lifecycle
+//
+// Demonstrates how linear types guarantee connection cleanup
+// This is the KEY VALUE PROPOSITION of Ephapax
+
+fn conn_open(fd: i32) -> i32 {
+    fd * 100
+}
+
+fn conn_read(conn: i32) -> i32 {
+    conn + 1
+}
+
+fn conn_write(conn: i32, data: i32) -> i32 {
+    conn + data
+}
+
+fn conn_close(conn: i32) -> i32 {
+    conn / 100
+}
+
+fn main() -> i32 {
+    let fd = 42;
+    let conn = conn_open(fd);
+
+    let conn2 = conn_read(conn);
+
+    let conn3 = conn_write(conn2, 10);
+
+    let result = conn_close(conn3);
+
+    result
+}

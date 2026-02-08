@@ -1,0 +1,41 @@
+// SPDX-License-Identifier: EUPL-1.2
+// Affine vs Linear Comparison
+//
+// This example shows the key difference between affine and linear modes.
+//
+// INSTRUCTIONS:
+// 1. Try compiling in AFFINE mode - should succeed
+// 2. Try compiling in LINEAR mode - should fail (when linear is implemented)
+//
+// This demonstrates the core value proposition of dyadic language design:
+// prototype with affine, then migrate to linear for stricter guarantees.
+
+fn add(a: i32, b: i32) -> i32 {
+    let sum = a + b;
+    sum
+}
+
+fn main() -> i32 {
+    // Create some values
+    let x = 10;
+    let y = 20;
+
+    // Use one value
+    let result = add(x, 5);
+
+    // y is never used!
+
+    // AFFINE mode:
+    //   ✅ Compiles successfully
+    //   📝 y is implicitly dropped
+    //   ⚠️  Possible resource leak if y was expensive
+
+    // LINEAR mode (when implemented):
+    //   ❌ Type error: variable 'y' not consumed
+    //   💡 Fix options:
+    //      - Use y: add it to result
+    //      - Explicitly drop: drop(y)
+    //      - Remove it: delete the line
+
+    result
+}

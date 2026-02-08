@@ -1,0 +1,26 @@
+// SPDX-License-Identifier: EUPL-1.2
+// Linear Mode: Explicit Consumption Required
+//
+// This shows the correct way to use linear variables:
+// they must be consumed explicitly with drop() or by use.
+//
+// This works in BOTH affine and linear modes.
+
+fn drop(x: i32) -> i32 {
+    // Explicit drop function
+    // In real implementation, this would deallocate resources
+    x
+}
+
+fn main() -> i32 {
+    // Linear binding (conceptual - current parser doesn't distinguish)
+    let x = 42;
+
+    // Explicit consumption via drop
+    let dropped = drop(x);
+
+    // ✅ Works in both modes
+    // x has been consumed, scope can end safely
+
+    0
+}

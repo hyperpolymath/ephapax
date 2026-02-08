@@ -1,0 +1,26 @@
+// SPDX-License-Identifier: EUPL-1.2
+// Connection Leak Example
+//
+// AFFINE MODE: Compiles (connection leaked)
+// LINEAR MODE: Type error (connection not consumed)
+
+fn conn_open(fd: i32) -> i32 {
+    fd * 100
+}
+
+fn conn_read(conn: i32) -> i32 {
+    conn + 1
+}
+
+fn main() -> i32 {
+    let fd = 42;
+    let conn = conn_open(fd);
+
+    let data = conn_read(conn);
+
+    // BUG: Connection never closed!
+    // AFFINE: ✅ Compiles (conn implicitly dropped - LEAK!)
+    // LINEAR: ❌ Type error: conn not consumed
+
+    data
+}

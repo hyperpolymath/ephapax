@@ -1,0 +1,16 @@
+// SPDX-License-Identifier: PMPL-1.0-or-later
+= Architecture
+
+Architecture overview for Ephapax Playground.
+
+== Goals
+
+- Document system boundaries and constraints.
+
+== Components
+
+- Describe major subsystems and responsibilities.
+
+== Data Flow
+
+- Explain how information moves through the system.

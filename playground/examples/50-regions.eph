@@ -1,0 +1,22 @@
+// SPDX-License-Identifier: EUPL-1.2
+// Region-Based Memory Management
+//
+// Demonstrates Ephapax's region system for efficient allocation
+
+fn allocate_in_region(region_id: i32, size: i32) -> i32 {
+    region_id * 1000 + size
+}
+
+fn process_data(ptr: i32) -> i32 {
+    ptr + 42
+}
+
+fn main() -> i32 {
+    let region = 1;
+
+    let buffer = allocate_in_region(region, 1024);
+
+    let result = process_data(buffer);
+
+    result
+}

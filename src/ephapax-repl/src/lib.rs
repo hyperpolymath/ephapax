@@ -365,6 +365,15 @@ fn format_type(ty: &Ty) -> String {
         Ty::Prod { left, right } => format!("({}, {})", format_type(left), format_type(right)),
         Ty::Sum { left, right } => format!("{} + {}", format_type(left), format_type(right)),
         Ty::Borrow(inner) => format!("&{}", format_type(inner)),
+        Ty::List(elem_ty) => format!("[{}]", format_type(elem_ty)),
+        Ty::Tuple(elem_types) => {
+            let types_str = elem_types
+                .iter()
+                .map(|t| format_type(t))
+                .collect::<Vec<_>>()
+                .join(", ");
+            format!("({})", types_str)
+        }
         Ty::Region { name, inner } => format!("region {} . {}", name, format_type(inner)),
         Ty::Ref { inner, .. } => format!("Ref({})", format_type(inner)),
         Ty::Var(v) => v.to_string(),

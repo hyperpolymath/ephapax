@@ -138,9 +138,77 @@ fn parse_fn_decl(pair: pest::iterators::Pair<Rule>) -> Result<Decl, ParseError> 
 fn parse_type_decl(pair: pest::iterators::Pair<Rule>) -> Result<Decl, ParseError> {
     let mut inner = pair.into_inner();
     let name = parse_identifier(inner.next().unwrap());
-    let ty = parse_type(inner.next().unwrap())?;
+
+    let ty_or_def = inner.next().unwrap();
+    let ty = match ty_or_def.as_rule() {
+        Rule::sum_type_def => parse_sum_type_def(ty_or_def)?,
+        Rule::record_type_def => parse_record_type_def(ty_or_def)?,
+        Rule::ty => parse_type(ty_or_def)?,
+        _ => return Err(ParseError::Syntax {
+            message: format!("Expected type or type definition, got {:?}", ty_or_def.as_rule()),
+            span: Span::dummy(),
+        }),
+    };
 
     Ok(Decl::Type { name, ty })
+}
+
+fn parse_sum_type_def(pair: pest::iterators::Pair<Rule>) -> Result<Ty, ParseError> {
+    let variants: Vec<_> = pair.into_inner().collect();
+
+    if variants.is_empty() {
+        return Err(ParseError::Syntax {
+            message: "Sum type must have at least one variant".to_string(),
+            span: Span::dummy(),
+        });
+    }
+
+    // Parse each variant
+    let mut variant_types = Vec::new();
+    for variant_pair in variants {
+        let mut inner = variant_pair.into_inner();
+        let _variant_name = parse_identifier(inner.next().unwrap());
+
+        // For now, treat each variant as a unit type
+        // In the future, we could parse the optional type parameter
+        let ty = if let Some(ty_pair) = inner.next() {
+            parse_type(ty_pair)?
+        } else {
+            Ty::Base(BaseTy::Unit)
+        };
+
+        variant_types.push(ty);
+    }
+
+    // Build nested sum type: A + (B + (C + ...))
+    let mut result = variant_types[0].clone();
+    for variant_ty in &variant_types[1..] {
+        result = Ty::Sum {
+            left: Box::new(result),
+            right: Box::new(variant_ty.clone()),
+        };
+    }
+
+    Ok(result)
+}
+
+fn parse_record_type_def(pair: pest::iterators::Pair<Rule>) -> Result<Ty, ParseError> {
+    // For now, represent records as nested products
+    let mut field_types = Vec::new();
+
+    for field_pair in pair.into_inner() {
+        let mut inner = field_pair.into_inner();
+        let _field_name = parse_identifier(inner.next().unwrap());
+        let field_ty = parse_type(inner.next().unwrap())?;
+        field_types.push(field_ty);
+    }
+
+    if field_types.is_empty() {
+        return Ok(Ty::Base(BaseTy::Unit));
+    }
+
+    // Build nested product: (A, B, C, ...) using Tuple
+    Ok(Ty::Tuple(field_types))
 }
 
 // ============================================================================
@@ -186,7 +254,11 @@ fn parse_type_atom(pair: pest::iterators::Pair<Rule>) -> Result<Ty, ParseError> 
     match inner.as_rule() {
         Rule::base_ty => parse_base_type(inner),
         Rule::string_ty => {
-            let region = parse_identifier(inner.into_inner().next().unwrap());
+            let region = inner
+                .into_inner()
+                .next()
+                .map(parse_identifier)
+                .unwrap_or_else(|| SmolStr::from("default"));
             Ok(Ty::String(region))
         }
         Rule::borrow_ty => {
@@ -216,6 +288,17 @@ fn parse_type_atom(pair: pest::iterators::Pair<Rule>) -> Result<Ty, ParseError> 
         Rule::type_var => {
             let name = parse_identifier(inner.into_inner().next().unwrap());
             Ok(Ty::Var(name))
+        }
+        Rule::record_ty => {
+            // Parse as tuple of field types
+            let mut field_types = Vec::new();
+            for field_pair in inner.into_inner() {
+                let mut field_inner = field_pair.into_inner();
+                let _field_name = parse_identifier(field_inner.next().unwrap());
+                let field_ty = parse_type(field_inner.next().unwrap())?;
+                field_types.push(field_ty);
+            }
+            Ok(Ty::Tuple(field_types))
         }
         _ => Err(ParseError::Syntax {
             message: format!("Unexpected type atom: {:?}", inner.as_rule()),
@@ -721,6 +804,27 @@ fn parse_atom_expr(pair: pest::iterators::Pair<Rule>) -> Result<Expr, ParseError
         Rule::copy_expr => {
             let inner_expr = parse_expression(inner.into_inner().next().unwrap())?;
             Ok(Expr::new(ExprKind::Copy(Box::new(inner_expr)), span))
+        }
+        Rule::record_literal => {
+            // Parse as tuple literal (field values in order)
+            let mut field_values = Vec::new();
+            for field_assign_pair in inner.into_inner() {
+                let mut field_inner = field_assign_pair.into_inner();
+                let _field_name = parse_identifier(field_inner.next().unwrap());
+
+                // Skip optional type annotation
+                let value_pair = field_inner.next().unwrap();
+                let value = if value_pair.as_rule() == Rule::ty {
+                    // Has type annotation, next is expression
+                    parse_expression(field_inner.next().unwrap())?
+                } else {
+                    // No type annotation, this is the expression
+                    parse_expression(value_pair)?
+                };
+
+                field_values.push(value);
+            }
+            Ok(Expr::new(ExprKind::TupleLit(field_values), span))
         }
         Rule::list_literal => {
             let mut elements = Vec::new();

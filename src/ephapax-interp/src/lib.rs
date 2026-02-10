@@ -23,6 +23,9 @@ pub enum RuntimeError {
     #[error("Division by zero")]
     DivisionByZero,
 
+    #[error("Unimplemented: {0}")]
+    Unimplemented(String),
+
     #[error("Region `{0}` not active")]
     InactiveRegion(RegionName),
 
@@ -56,6 +59,7 @@ pub enum Value {
     F64(f64),
     String { data: String, region: RegionName },
     Pair(Box<Value>, Box<Value>),
+    Tuple(Vec<Value>),
     Left(Box<Value>),
     Right(Box<Value>),
     Closure {
@@ -78,6 +82,7 @@ impl Value {
             Value::F64(_) => "F64",
             Value::String { .. } => "String",
             Value::Pair(_, _) => "Pair",
+            Value::Tuple(_) => "Tuple",
             Value::Left(_) => "Left",
             Value::Right(_) => "Right",
             Value::Closure { .. } => "Function",
@@ -92,6 +97,8 @@ impl Value {
             Value::String { .. } => true,
             // Pairs are linear if either component is linear
             Value::Pair(l, r) => l.is_linear() || r.is_linear(),
+            // Tuples are linear if any element is linear
+            Value::Tuple(elements) => elements.iter().any(|v| v.is_linear()),
             // Sum types are linear if either variant type is linear
             Value::Left(v) | Value::Right(v) => v.is_linear(),
             // Closures that capture linear values are linear
@@ -119,6 +126,7 @@ impl Value {
                 left: Box::new(l.to_type()),
                 right: Box::new(r.to_type()),
             },
+            Value::Tuple(elements) => Ty::Tuple(elements.iter().map(|v| v.to_type()).collect()),
             Value::Left(v) => Ty::Sum {
                 left: Box::new(v.to_type()),
                 right: Box::new(Ty::Base(BaseTy::Unit)),
@@ -147,6 +155,16 @@ impl std::fmt::Display for Value {
             Value::F64(n) => write!(f, "{}", n),
             Value::String { data, region } => write!(f, "\"{}\"@{}", data, region),
             Value::Pair(l, r) => write!(f, "({}, {})", l, r),
+            Value::Tuple(elements) => {
+                write!(f, "(")?;
+                for (i, elem) in elements.iter().enumerate() {
+                    if i > 0 {
+                        write!(f, ", ")?;
+                    }
+                    write!(f, "{}", elem)?;
+                }
+                write!(f, ")")
+            }
             Value::Left(v) => write!(f, "inl({})", v),
             Value::Right(v) => write!(f, "inr({})", v),
             Value::Closure { param, .. } => write!(f, "<fn({})>", param),
@@ -258,6 +276,35 @@ impl Interpreter {
             ExprKind::Block(exprs) => self.eval_block(exprs),
             ExprKind::BinOp { op, left, right } => self.eval_binop(*op, left, right),
             ExprKind::UnaryOp { op, operand } => self.eval_unaryop(*op, operand),
+            ExprKind::ListLit(_) => {
+                // TODO: Implement list literal evaluation
+                Err(RuntimeError::Unimplemented("list literals not yet supported in interpreter".to_string()))
+            }
+            ExprKind::ListIndex { .. } => {
+                // TODO: Implement list index evaluation
+                Err(RuntimeError::Unimplemented("list indexing not yet supported in interpreter".to_string()))
+            }
+            ExprKind::TupleLit(exprs) => {
+                // Evaluate all tuple elements
+                let mut values = Vec::new();
+                for expr in exprs {
+                    values.push(self.eval(expr)?);
+                }
+                Ok(Value::Tuple(values))
+            }
+            ExprKind::TupleIndex { tuple, index } => {
+                let tuple_val = self.eval(tuple)?;
+                match tuple_val {
+                    Value::Tuple(values) => {
+                        if *index < values.len() {
+                            Ok(values[*index].clone())
+                        } else {
+                            Err(RuntimeError::Unimplemented(format!("tuple index {} out of bounds", index)))
+                        }
+                    }
+                    _ => Err(RuntimeError::Unimplemented("tuple index on non-tuple".to_string())),
+                }
+            }
         }
     }
 

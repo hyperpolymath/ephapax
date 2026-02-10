@@ -23,7 +23,15 @@ param_list = { param ~ ("," ~ param)* }
 
 param = { identifier ~ ":" ~ ty }
 
-type_decl = { "type" ~ identifier ~ "=" ~ ty }
+type_decl = {
+    "type" ~ identifier ~ "=" ~ (sum_type_def | record_type_def | ty)
+}
+
+sum_type_def = { "|"? ~ sum_variant ~ ("|" ~ sum_variant)* }
+sum_variant = { identifier ~ ("(" ~ ty ~ ")")? }
+
+record_type_def = { "{" ~ record_field ~ ("," ~ record_field)* ~ ","? ~ "}" }
+record_field = { identifier ~ ":" ~ ty }
 
 // ============================================================================
 // Types
@@ -39,13 +47,16 @@ type_atom = {
     | borrow_ty
     | list_ty
     | product_ty
+    | record_ty
     | type_var
 }
+
+record_ty = { "{" ~ record_field ~ ("," ~ record_field)* ~ "}" }
 
 base_ty = { unit_ty | "Bool" | "I32" | "I64" | "F32" | "F64" }
 unit_ty = { "()" }
 
-string_ty = { "String" ~ "@" ~ identifier }
+string_ty = { "String" ~ ("@" ~ identifier)? }
 
 borrow_ty = { "&" ~ type_atom }
 
@@ -149,11 +160,15 @@ atom_expr = {
     | borrow_expr
     | drop_expr
     | copy_expr
+    | record_literal
     | list_literal
     | paren_or_pair
     | literal
     | variable
 }
+
+record_literal = { "{" ~ record_field_assign ~ ("," ~ record_field_assign)* ~ ","? ~ "}" }
+record_field_assign = { identifier ~ (":" ~ ty)? ~ "=" ~ expression }
 
 string_method = {
     "String" ~ "." ~ identifier ~ ("@" ~ identifier)? ~ "(" ~ expr_list? ~ ")"

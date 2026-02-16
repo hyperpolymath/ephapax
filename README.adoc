@@ -17,11 +17,11 @@ image:https://github.com/hyperpolymath/ephapax/actions/workflows/smoke.yml/badge
 
 _ἐφάπαξ — once for all_
 
-image:https://img.shields.io/badge/rust-1.83+-orange.svg[Rust 1.83+]
-image:https://img.shields.io/badge/coq-8.18+-red.svg[Coq 8.18+]
+image:[Rust 1.83+]
+image:[Coq 8.18+]
 image:https://img.shields.io/badge/target-wasm32-purple.svg[WASM]
 
-A linear type system for safe memory management targeting WebAssembly.
+A dyadic language - one part affine, the other linear - as a type system with safe memory management targeting WebAssembly.
 
 toc::[]
 

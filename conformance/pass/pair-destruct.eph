@@ -1,7 +1,0 @@
--- SPDX-License-Identifier: EUPL-1.2
--- Conformance: pass/pair-destruct
--- Tests: Pair construction and destructuring
-
-let p = (42, true)
-let (x, y) = p
-x

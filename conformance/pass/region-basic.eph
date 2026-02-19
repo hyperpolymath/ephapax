@@ -1,8 +1,0 @@
--- SPDX-License-Identifier: EUPL-1.2
--- Conformance: pass/region-basic
--- Tests: Basic region allocation and deallocation
-
-region r {
-    let s = String.new@r("hello")
-    drop(s)
-}

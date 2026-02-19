@@ -1,7 +1,0 @@
-// Simple hello world example
-// Tests: parsing, type checking, WASM compilation
-
-fn main(): I32 =
-    let x = 1 + 2 in
-    let y = x * 3 in
-    y

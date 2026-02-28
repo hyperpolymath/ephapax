@@ -1,0 +1,68 @@
+# SPDX-License-Identifier: PMPL-1.0-or-later
+# RSR-compliant .gitignore
+
+# OS & Editor
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+*~
+.idea/
+.vscode/
+.directory
+
+# Rust
+/target/
+**/*.rs.bk
+
+# Idris2
+build/
+*.ibc
+
+# Zig
+**/zig-out/
+**/.zig-cache/
+
+# Coq
+*.vo
+*.vok
+*.vos
+*.glob
+.coqdeps.d
+_CoqProject
+
+# WASM
+*.wasm
+!examples/**/*.wasm
+
+# Dependencies
+/node_modules/
+/vendor/
+/deps/
+
+# ReScript
+/lib/bs/
+/.bsb.lock
+
+# Secrets
+.env
+.env.*
+*.pem
+*.key
+secrets/
+
+# Test/Coverage
+/coverage/
+htmlcov/
+
+# Logs
+*.log
+/logs/
+
+# Temp
+/tmp/
+*.tmp
+*.bak
+
+# Crash recovery artifacts
+ai-cli-crash-capture/

@@ -1,0 +1,26 @@
+# SPDX-License-Identifier: PMPL-1.0-or-later
+# Clade declaration — part of the gv-clade-index registry
+# See: https://github.com/hyperpolymath/gv-clade-index
+
+[identity]
+uuid = "5fdbc410-eacd-54b6-b4e3-b352b4cb4868"
+primary-forge = "github"
+primary-owner = "hyperpolymath"
+canonical-name = "ephapax"
+prefixed-name = "nl-ephapax"
+
+[clade]
+primary = "nl"
+secondary = ["fv"]
+assigned = "2026-03-16"
+rationale = ""
+
+[forges]
+github = "hyperpolymath/ephapax"
+gitlab = "hyperpolymath/ephapax"
+bitbucket = "hyperpolymath/ephapax"
+
+[lineage]
+type = "standalone"
+parent = "Linear type language with uniqueness types"
+born = "2026-03-16"

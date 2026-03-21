@@ -1,0 +1,21 @@
+-- SPDX-License-Identifier: PMPL-1.0-or-later
+-- Ephapax Formal Specification Package
+--
+-- Machine-checked proofs of the Ephapax type system properties,
+-- including region-linear fusion and GC-freedom.
+
+package ephapax-formal
+version = "0.1.0"
+authors = "Jonathan D.A. Jewell"
+brief = "Formal proofs for the Ephapax dyadic type system"
+license = "PMPL-1.0-or-later"
+langversion >= 0.6.0
+
+sourcedir = "."
+
+modules = Ephapax.Formal.Region
+        , Ephapax.Formal.Qualifier
+        , Ephapax.Formal.RegionLinear
+
+depends = base
+        , contrib

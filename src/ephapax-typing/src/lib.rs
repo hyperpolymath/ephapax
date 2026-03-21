@@ -293,6 +293,7 @@ impl TypeChecker {
             ExprKind::ListIndex { list, index } => self.check_list_index(list, index),
             ExprKind::TupleLit(elements) => self.check_tuple_lit(elements),
             ExprKind::TupleIndex { tuple, index } => self.check_tuple_index(tuple, *index),
+            ExprKind::FFI { args, .. } => self.check_ffi(args),
         }
     }
 
@@ -995,6 +996,26 @@ impl TypeChecker {
                 found: tuple_ty.clone(),
             }),
         }
+    }
+
+    /// Type-check an FFI call.
+    ///
+    /// FFI calls are the boundary between Ephapax and native code (Zig/C).
+    /// The type checker validates the arguments but cannot verify the return
+    /// type — that's determined by the Idris2 ABI specification and the
+    /// function's declaration site (fn header).
+    ///
+    /// We check arguments to ensure linear variables are properly consumed
+    /// (passing a linear value to FFI counts as consumption), and return
+    /// I64 as the default FFI return type (opaque handle).
+    fn check_ffi(&mut self, args: &[Expr]) -> Result<Ty, TypeError> {
+        for arg in args {
+            self.check(arg)?;
+        }
+        // FFI calls return I64 by default (opaque handle / C int).
+        // The containing fn declaration's return type annotation
+        // provides the actual type.
+        Ok(Ty::Base(BaseTy::I64))
     }
 }
 

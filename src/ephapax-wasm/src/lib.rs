@@ -1420,6 +1420,19 @@ impl Codegen {
             ExprKind::ListIndex { list, index } => self.compile_list_index(func, list, index),
             ExprKind::TupleLit(elements) => self.compile_tuple_lit(func, elements),
             ExprKind::TupleIndex { tuple, index } => self.compile_tuple_index(func, tuple, *index),
+            ExprKind::FFI { symbol: _, args } => {
+                // FFI calls in WASM become imported functions.
+                // TODO: register import in module preamble, emit call instruction.
+                // For now, compile args (for side effects/consumption), drop them,
+                // and push 0 as placeholder return value.
+                for arg in args {
+                    self.compile_expr(func, arg);
+                }
+                for _ in args {
+                    func.instruction(&wasm_encoder::Instruction::Drop);
+                }
+                func.instruction(&wasm_encoder::Instruction::I64Const(0));
+            }
         }
     }
 
@@ -1624,6 +1637,11 @@ impl Codegen {
                 }
                 ExprKind::TupleIndex { tuple, .. } => {
                     collect(tuple, bound, free, seen);
+                }
+                ExprKind::FFI { args, .. } => {
+                    for arg in args {
+                        collect(arg, bound, free, seen);
+                    }
                 }
                 ExprKind::Lit(_) | ExprKind::StringNew { .. } => {}
             }

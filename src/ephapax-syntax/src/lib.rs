@@ -295,6 +295,19 @@ pub enum ExprKind {
     /// Sequence of expressions
     Block(Vec<Expr>),
 
+    // ===== Foreign Function Interface =====
+    /// FFI call: __ffi("symbol_name", arg1, arg2, ...)
+    ///
+    /// Calls a C ABI function from a loaded shared library (typically
+    /// the Zig FFI layer). The symbol name is resolved at link time.
+    /// Arguments are marshalled to C-compatible types.
+    FFI {
+        /// The C symbol name to call (e.g. "gossamer_create")
+        symbol: String,
+        /// Arguments to pass to the foreign function
+        args: Vec<Expr>,
+    },
+
     // ===== Operators =====
     /// Binary operation: e1 op e2
     BinOp {

@@ -152,6 +152,12 @@ impl FreeVarAnalysis {
                 Self::collect(tuple, free, bound);
             }
 
+            ExprKind::FFI { args, .. } => {
+                for arg in args {
+                    Self::collect(arg, free, bound);
+                }
+            }
+
             ExprKind::Lit(_) | ExprKind::StringNew { .. } => {}
         }
     }

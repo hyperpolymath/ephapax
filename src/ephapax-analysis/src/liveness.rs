@@ -153,6 +153,12 @@ impl LivenessAnalysis {
                 Self::compute(tuple, live);
             }
 
+            ExprKind::FFI { args, .. } => {
+                for arg in args.iter().rev() {
+                    Self::compute(arg, live);
+                }
+            }
+
             ExprKind::Lit(_) | ExprKind::StringNew { .. } => {}
         }
     }

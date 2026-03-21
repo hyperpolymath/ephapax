@@ -159,6 +159,13 @@ impl EscapeAnalysis {
                 Self::analyze_expr(tuple, escaping, in_escaping_context);
             }
 
+            ExprKind::FFI { args, .. } => {
+                // FFI args always escape (passed to native code)
+                for arg in args {
+                    Self::analyze_expr(arg, escaping, true);
+                }
+            }
+
             // Literals and string allocations never escape
             ExprKind::Lit(_) | ExprKind::StringNew { .. } => {}
         }

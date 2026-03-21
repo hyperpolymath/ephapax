@@ -768,6 +768,20 @@ fn parse_atom_expr(pair: pest::iterators::Pair<Rule>) -> Result<Expr, ParseError
     let inner = pair.into_inner().next().unwrap();
 
     match inner.as_rule() {
+        Rule::ffi_expr => {
+            let mut parts = inner.into_inner();
+            // First arg is the symbol name (a string literal)
+            let symbol_pair = parts.next().unwrap();
+            let symbol = symbol_pair.as_str().trim_matches('"').to_string();
+            // Remaining args are expressions
+            let mut args = Vec::new();
+            for arg_pair in parts {
+                if arg_pair.as_rule() == Rule::expression {
+                    args.push(parse_expression(arg_pair)?);
+                }
+            }
+            Ok(Expr::new(ExprKind::FFI { symbol, args }, span))
+        }
         Rule::string_method => parse_string_method(inner),
         Rule::inl_expr => {
             let mut parts = inner.into_inner();

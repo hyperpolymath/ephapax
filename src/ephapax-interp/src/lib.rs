@@ -305,6 +305,19 @@ impl Interpreter {
                     _ => Err(RuntimeError::Unimplemented("tuple index on non-tuple".to_string())),
                 }
             }
+            ExprKind::FFI { symbol, args } => {
+                // Evaluate all arguments
+                let mut arg_values = Vec::new();
+                for arg in args {
+                    arg_values.push(self.eval(arg)?);
+                }
+                // In the interpreter, FFI calls are stubbed — they log the call
+                // and return a placeholder value. Real FFI execution happens via
+                // WASM imports or native dlopen at link time.
+                eprintln!("[ffi] {}({:?})", symbol, arg_values);
+                // Return 0 as placeholder handle
+                Ok(Value::I64(0))
+            }
         }
     }
 

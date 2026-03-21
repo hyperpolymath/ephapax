@@ -378,6 +378,14 @@ fn expr_to_sexpr(expr: &Expr) -> SExpr {
             expr_to_sexpr(tuple),
             SExpr::Atom(index.to_string()),
         ]),
+        ExprKind::FFI { symbol, args } => {
+            let mut elems = vec![
+                SExpr::Atom("ffi".into()),
+                SExpr::Atom(symbol.clone()),
+            ];
+            elems.extend(args.iter().map(expr_to_sexpr));
+            SExpr::List(elems)
+        }
     }
 }
 

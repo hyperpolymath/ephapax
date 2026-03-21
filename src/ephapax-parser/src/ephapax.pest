@@ -154,7 +154,8 @@ member_op = { "." ~ (integer | identifier) }
 // ============================================================================
 
 atom_expr = {
-    string_method
+    ffi_expr
+    | string_method
     | inl_expr
     | inr_expr
     | borrow_expr
@@ -165,6 +166,12 @@ atom_expr = {
     | paren_or_pair
     | literal
     | variable
+}
+
+// FFI call: __ffi("symbol_name", arg1, arg2, ...)
+// Calls a C ABI function from a linked shared library.
+ffi_expr = {
+    "__ffi" ~ "(" ~ string ~ ("," ~ expression)* ~ ")"
 }
 
 record_literal = { "{" ~ record_field_assign ~ ("," ~ record_field_assign)* ~ ","? ~ "}" }

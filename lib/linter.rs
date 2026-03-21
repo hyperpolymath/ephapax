@@ -46,29 +46,39 @@ pub struct Diagnostic {
 /// Error codes:
 /// - E001: Linear variable not consumed
 /// - E002: Variable used after consumption
-/// - E003: Region escape detected
+/// - E003: Region escape detected (value type references exiting region)
+/// - E004: Linear variable in region not consumed before region exit
+/// - E005: Branches consume different linear variables
 ///
 /// Warning codes:
 /// - W001: Unused affine binding
 /// - W002: Unnecessary copy
 /// - W003: Shadowed binding
 /// - W004: Missing type annotation on public function
+/// - W005: Region block with no allocations (unnecessary region)
+/// - W006: Affine binding in region could be linear (resource handle pattern)
 ///
 /// Style codes:
 /// - S001: Non-snake_case variable name
 /// - S002: Non-PascalCase type name
 /// - S003: Inconsistent indentation
+/// - S004: Region name should be short lowercase identifier
 pub const LINT_RULES: &[(&str, Severity, &str)] = &[
     ("E001", Severity::Error, "Linear variable not consumed"),
     ("E002", Severity::Error, "Variable used after consumption"),
     ("E003", Severity::Error, "Region escape detected"),
+    ("E004", Severity::Error, "Linear variable in region not consumed before exit"),
+    ("E005", Severity::Error, "Branches consume different linear variables"),
     ("W001", Severity::Warning, "Unused affine binding"),
     ("W002", Severity::Warning, "Unnecessary copy"),
     ("W003", Severity::Warning, "Shadowed binding"),
     ("W004", Severity::Warning, "Missing type annotation on public function"),
+    ("W005", Severity::Warning, "Region block with no allocations"),
+    ("W006", Severity::Warning, "Affine binding could be linear (resource pattern)"),
     ("S001", Severity::Hint, "Non-snake_case variable name"),
     ("S002", Severity::Hint, "Non-PascalCase type name"),
     ("S003", Severity::Hint, "Inconsistent indentation"),
+    ("S004", Severity::Hint, "Region name should be short lowercase"),
 ];
 
 /// Lint context — accumulates diagnostics during analysis.

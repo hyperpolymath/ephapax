@@ -1,0 +1,19 @@
+// SPDX-License-Identifier: PMPL-1.0-or-later
+// Conformance test: region-linear fusion — the core Ephapax guarantee.
+// All linear bindings in a region consumed, result doesn't escape.
+// Expected: type-checks successfully in BOTH affine and linear modes.
+
+fn region_linear_example() -> i32 {
+    region r:
+        // Linear: connection handle MUST be consumed
+        let! conn = Db.connect@r("postgres://localhost/test")
+
+        // Affine: query result can be dropped
+        let result = Db.query(&conn, "SELECT 1")
+
+        // Linear: explicitly close connection (consumes conn)
+        Db.close(conn)
+
+        // Return plain value (i32 doesn't reference region r — no escape)
+        42
+}

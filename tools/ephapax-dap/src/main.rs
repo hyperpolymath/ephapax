@@ -110,22 +110,32 @@ impl EphapaxDebugger {
                 }))
             }
             "scopes" => {
-                // Ephapax-specific: separate scopes for linear vs affine bindings
+                // Ephapax-specific: separate scopes for linear vs affine bindings,
+                // with region-aware grouping showing which values belong to which region.
                 (true, serde_json::json!({
                     "scopes": [
                         {
-                            "name": "Linear Bindings (let!)",
+                            "name": "Linear Bindings (let!) — must consume",
                             "variablesReference": 1000,
+                            "presentationHint": "locals",
                             "expensive": false,
                         },
                         {
-                            "name": "Affine Bindings (let)",
+                            "name": "Affine Bindings (let) — may drop",
                             "variablesReference": 2000,
+                            "presentationHint": "locals",
                             "expensive": false,
                         },
                         {
-                            "name": "Active Regions",
+                            "name": "Active Regions — arena scopes",
                             "variablesReference": 3000,
+                            "presentationHint": "registers",
+                            "expensive": false,
+                        },
+                        {
+                            "name": "Region-Bound Values — grouped by region",
+                            "variablesReference": 4000,
+                            "presentationHint": "locals",
                             "expensive": false,
                         },
                     ]

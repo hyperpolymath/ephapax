@@ -1,16 +1,18 @@
 // SPDX-License-Identifier: PMPL-1.0-or-later
 // Copyright (c) 2026 Jonathan D.A. Jewell (hyperpolymath) <j.d.a.jewell@open.ac.uk>
 //
-//! Ephapax Language Server — LSP implementation for the Ephapax dyadic language.
+//! Ephapax Language Server — STANDALONE heuristic LSP.
 //!
-//! Provides:
-//! - Diagnostics (linearity violations, type errors, region escape errors)
-//! - Go-to-definition
-//! - Hover (type information, qualifier, region)
-//! - Completion (keywords, identifiers in scope)
-//! - Document symbols
+//! NOTE: The compiler-integrated LSP is at src/ephapax-lsp/ and uses the
+//! actual parser + type checker (including region-linear fusion). This
+//! standalone version provides basic diagnostics without requiring the
+//! full compiler to be linked. Use the compiler-integrated version when
+//! the full workspace is available.
 //!
-//! Designed to integrate with the BoJ lsp-mcp cartridge for MCP routing.
+//! This version is useful for:
+//! - Editor integration without building the full compiler
+//! - BoJ lsp-mcp cartridge routing (lightweight process)
+//! - Fallback when ephapax-parser/ephapax-typing are not available
 
 use tower_lsp::jsonrpc::Result;
 use tower_lsp::lsp_types::*;
@@ -84,26 +86,34 @@ impl LanguageServer for EphapaxLsp {
     async fn completion(&self, params: CompletionParams) -> Result<Option<CompletionResponse>> {
         let _ = params;
         // Provide keyword completions
-        let keywords = vec![
-            "fn", "let", "let!", "in", "region", "match", "if", "else",
-            "type", "module", "import", "return", "true", "false",
-            "copy", "borrow", "move", "drop",
-        ];
-
-        let items: Vec<CompletionItem> = keywords
-            .into_iter()
-            .map(|kw| CompletionItem {
-                label: kw.to_string(),
-                kind: Some(CompletionItemKind::KEYWORD),
-                detail: Some(match kw {
-                    "let!" => "Linear binding (must consume exactly once)".to_string(),
-                    "let" => "Affine binding (may consume at most once)".to_string(),
-                    "region" => "Region block (scoped arena allocation)".to_string(),
-                    _ => format!("Ephapax keyword: {}", kw),
-                }),
+        let items: Vec<CompletionItem> = vec![
+            ("fn", CompletionItemKind::KEYWORD, "Function declaration", Some("fn $1($2) -> $3 {\n    $0\n}")),
+            ("let", CompletionItemKind::KEYWORD, "Affine binding (may consume at most once)", Some("let $1 = $2 in $0")),
+            ("let!", CompletionItemKind::KEYWORD, "Linear binding (must consume exactly once)", Some("let! $1 = $2 in $0")),
+            ("region", CompletionItemKind::KEYWORD, "Region block (scoped arena, no GC)", Some("region $1:\n    $0")),
+            ("@", CompletionItemKind::OPERATOR, "Region annotation (allocate in region)", None),
+            ("String.new@", CompletionItemKind::FUNCTION, "Allocate string in region", Some("String.new@$1(\"$0\")")),
+            ("Region.create", CompletionItemKind::FUNCTION, "Create linear region handle", Some("Region.create()")),
+            ("Region.destroy", CompletionItemKind::FUNCTION, "Destroy region (consumes handle)", Some("Region.destroy($0)")),
+            ("copy", CompletionItemKind::KEYWORD, "Explicit copy (unrestricted types only)", Some("copy($0)")),
+            ("drop", CompletionItemKind::KEYWORD, "Explicit drop (linear types only)", Some("drop($0)")),
+            ("borrow", CompletionItemKind::KEYWORD, "Borrow without consuming (&expr)", None),
+            ("match", CompletionItemKind::KEYWORD, "Pattern matching", Some("match $1 {\n    $0\n}")),
+            ("if", CompletionItemKind::KEYWORD, "Conditional (branches must consume same linear vars)", Some("if $1 {\n    $2\n} else {\n    $0\n}")),
+            ("import", CompletionItemKind::KEYWORD, "Module import", Some("import $0")),
+        ].into_iter().map(|(label, kind, detail, snippet)| {
+            let mut item = CompletionItem {
+                label: label.to_string(),
+                kind: Some(kind),
+                detail: Some(detail.to_string()),
                 ..Default::default()
-            })
-            .collect();
+            };
+            if let Some(s) = snippet {
+                item.insert_text = Some(s.to_string());
+                item.insert_text_format = Some(InsertTextFormat::SNIPPET);
+            }
+            item
+        }).collect();
 
         Ok(Some(CompletionResponse::Array(items)))
     }

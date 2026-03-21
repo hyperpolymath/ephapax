@@ -1,0 +1,19 @@
+// SPDX-License-Identifier: PMPL-1.0-or-later
+// Conformance test: nested regions with outlives relationship.
+// Values in outer region accessible in inner region.
+// Expected: type-checks successfully.
+
+fn nested_regions() -> i32 {
+    region outer:
+        let! db = Db.connect@outer("postgres://localhost/test")
+
+        region inner:
+            // Borrow db from outer region — OK, outer outlives inner
+            let result = Db.query(&db, "SELECT count(*) FROM users")
+            result
+        // inner exits: result freed
+
+        // db still alive in outer
+        Db.close(db)
+        0
+}

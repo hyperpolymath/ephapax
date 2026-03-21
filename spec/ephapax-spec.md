@@ -226,10 +226,54 @@ When an expression has sub-expressions, the typing context is split:
 
 Both branches of `if`/`match` must consume the same linear bindings.
 
-## 3.4 Region Scoping
+## 3.4 Region-Linear Fusion
 
-A value of type `T@r` (allocated in region `r`) cannot appear in any
-type that outlives `r`. This prevents region escape.
+The interaction between regions and qualifiers is the core innovation.
+Three rules govern region exit, and they are **orthogonal** to qualifiers:
+
+### 3.4.1 NoRegionInType (No Escape)
+
+The return type of a region block must not reference the region.
+`Ty::references_region(r)` recursively checks all type constructors:
+String, Region, Ref, Fun, Prod, Sum, List, Tuple, Borrow.
+
+This rule is **qualifier-independent**: it applies identically to
+affine and linear bindings. One implementation, both modes.
+
+```
+region r:
+    let s = String.new@r("hello")
+    s   // ERROR: String@r references region r — cannot escape
+```
+
+### 3.4.2 AllLinearsConsumed
+
+At region exit, all **linear** variables bound within the region must
+have been consumed. **Affine** variables may be implicitly dropped —
+the region's arena deallocator frees their memory.
+
+```
+region r:
+    let! conn = Db.connect@r(...)  // linear
+    let buf = Buffer.new@r(1024)   // affine
+    Db.close(conn)                 // linear consumed — OK
+    // buf not consumed — OK (affine, arena handles it)
+    42
+```
+
+### 3.4.3 Region Safety
+
+After exit, the region is no longer active. Any attempt to allocate
+in it (`String.new@r(...)`) or reference it is a type error.
+
+### 3.4.4 Orthogonality Lemma
+
+The region rules (3.4.1, 3.4.3) never inspect the qualifier.
+The qualifier rules (3.1, 3.2, 3.3) never inspect the region.
+They compose without interaction. This means:
+- Adding region support doesn't change affine/linear enforcement.
+- Changing a binding's qualifier doesn't change region escape checking.
+- The region system only needs to be implemented once for both modes.
 
 ## 3.5 Borrowing
 

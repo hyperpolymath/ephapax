@@ -1,0 +1,10 @@
+// SPDX-License-Identifier: PMPL-1.0-or-later
+// Conformance test: linear variable in region NOT consumed before exit.
+// Expected: compile error E004 "linear variable 'conn' in region 'r' not consumed"
+
+fn bad_region() -> i32 {
+    region r:
+        let! conn = Db.connect@r("postgres://localhost/test")
+        // conn is linear but never closed — region exit with unconsumed linear!
+        42
+}

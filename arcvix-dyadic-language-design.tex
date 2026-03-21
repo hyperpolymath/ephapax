@@ -1,0 +1,1489 @@
+% SPDX-License-Identifier: PMPL-1.0-or-later
+% Copyright (c) 2026 Jonathan D.A. Jewell (hyperpolymath) <j.d.a.jewell@open.ac.uk>
+%
+% Dyadic Language Design: Co-Swimming Disciplines in Programming Language Architecture
+% Target venue: arXiv (Programming Languages / PL)
+
+\documentclass[11pt,a4paper]{article}
+
+% --- Packages ---
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{lmodern}
+\usepackage{amsmath,amssymb,amsthm}
+\usepackage{mathpartir}
+\usepackage{stmaryrd}
+\usepackage{xcolor}
+\usepackage{hyperref}
+\usepackage{cleveref}
+\usepackage{booktabs}
+\usepackage{enumitem}
+\usepackage{listings}
+\usepackage{microtype}
+\usepackage[margin=2.5cm]{geometry}
+\usepackage{natbib}
+\usepackage{tikz}
+\usetikzlibrary{arrows.meta,positioning,decorations.pathmorphing}
+
+% --- Theorem Environments ---
+\newtheorem{theorem}{Theorem}[section]
+\newtheorem{lemma}[theorem]{Lemma}
+\newtheorem{corollary}[theorem]{Corollary}
+\newtheorem{proposition}[theorem]{Proposition}
+\newtheorem{definition}[theorem]{Definition}
+\newtheorem{example}[theorem]{Example}
+\newtheorem{remark}[theorem]{Remark}
+\newtheorem{property}[theorem]{Property}
+
+% --- Listings Setup ---
+\lstdefinelanguage{Ephapax}{
+  keywords={let, let!, fn, if, then, else, match, with, region, in, drop, borrow, move, type, end, return, spawn, await},
+  keywordstyle=\bfseries\color{blue!70!black},
+  comment=[l]{//},
+  commentstyle=\itshape\color{gray},
+  stringstyle=\color{red!70!black},
+  morestring=[b]",
+  sensitive=true,
+}
+\lstset{
+  basicstyle=\ttfamily\small,
+  columns=flexible,
+  breaklines=true,
+  frame=single,
+  framerule=0.4pt,
+  rulecolor=\color{gray!50},
+  xleftmargin=1em,
+  numbers=left,
+  numberstyle=\tiny\color{gray},
+  numbersep=6pt,
+  tabsize=2,
+  captionpos=b,
+}
+
+% --- Custom Commands ---
+\newcommand{\Ephapax}{\textsc{Ephapax}}
+\newcommand{\letlin}{\mathbf{let!}}
+\newcommand{\letaff}{\mathbf{let}}
+\newcommand{\lmark}{\bullet}  % linear marker
+\newcommand{\amark}{\circ}    % affine marker
+\newcommand{\ctx}{\Gamma}
+\newcommand{\lctx}{\Delta}    % linear sub-context
+\newcommand{\judge}[3]{#1 \vdash #2 : #3}
+\newcommand{\consumed}[1]{\overline{#1}}
+
+\title{\textbf{Dyadic Language Design:\\Co-Swimming Disciplines in Programming Language Architecture}}
+
+\author{Jonathan D.A.\ Jewell\\
+  \textit{Independent Researcher}\\
+  \texttt{j.d.a.jewell@open.ac.uk}}
+
+\date{March 2026}
+
+\begin{document}
+
+\maketitle
+
+% ============================================================================
+% ABSTRACT
+% ============================================================================
+\begin{abstract}
+Programming languages typically commit to a single resource-management discipline:
+Rust enforces affine ownership globally, Linear Haskell annotates function arrows,
+and conventional languages ignore linearity altogether. We argue that this
+monoculture is a false economy. We introduce the \emph{dyadic design principle},
+a methodology for constructing languages around two fundamentally different but
+inseparable disciplines that co-exist at the binding level---neither diminishing
+the other, together producing emergent capabilities that neither achieves alone.
+We formalize three constitutive properties of dyadic pairs---\emph{non-diminishment},
+\emph{emergence}, and \emph{inseparability}---and instantiate the principle in
+\Ephapax{}, a language where linear (\lstinline{let!}) and affine (\lstinline{let})
+bindings cohabit per-expression, enabling region-based memory management without
+garbage collection and compile-time prevention of resource leaks. A case study of
+56 SIGABRT crashes in a pure-affine D-Bus session manager demonstrates that the
+dyadic approach prevents an entire class of failures that monodisciplinary designs
+admit. We sketch three further dyadic pairs---eager/lazy evaluation,
+synchronous/asynchronous control flow, and deterministic/probabilistic
+computation---arguing that the principle generalizes beyond substructural types
+to a broad methodology for programming language architecture.
+\end{abstract}
+
+\vspace{1em}
+\noindent\textbf{Keywords:}
+programming language design, substructural types, linear types, affine types,
+resource management, type theory, language architecture
+
+% ============================================================================
+% 1. INTRODUCTION
+% ============================================================================
+\section{Introduction}
+\label{sec:introduction}
+
+The history of programming language design is, in large part, a history of
+choosing sides. A language commits to garbage collection or manual memory
+management; to strict evaluation or lazy evaluation; to synchronous or
+asynchronous control flow. Even within the substructural type theory tradition,
+languages tend toward a single dominant discipline: Rust's borrow checker
+enforces an essentially affine regime across all bindings~\citep{jung2018rustbelt},
+Linear Haskell restricts linearity to function arrows rather than
+bindings~\citep{bernardy2018linear}, and Clean's uniqueness types impose a
+uniform protocol on all unique values~\citep{barendsen1996uniqueness}.
+
+These are not merely implementation choices---they are \emph{architectural
+commitments} that shape what a language can express naturally and what it must
+express awkwardly. A globally affine language like Rust requires escape hatches
+(\lstinline{unsafe}, \lstinline{Rc}, \lstinline{Arc}) whenever strict
+single-ownership is too rigid. A globally linear language would forbid the
+implicit drops that make everyday programming ergonomic. The designer faces what
+appears to be a genuine dilemma: enforce discipline and sacrifice flexibility,
+or permit flexibility and sacrifice guarantees.
+
+We contend that this dilemma is false. It arises from the unstated assumption
+that a language must adopt \emph{one} discipline and apply it uniformly. This
+paper introduces the \textbf{dyadic design principle}: a methodology for
+constructing a language around two fundamentally different but inseparable
+disciplines that operate at the same granularity---the individual binding---and
+co-exist throughout the entire language.
+
+The metaphor we adopt is biological. A mother dolphin and her calf swim in tight
+formation: neither restricts the other's movement, yet their coordinated
+swimming produces hydrodynamic benefits---reduced drag, improved speed---that
+neither achieves alone. They are fundamentally different organisms (adult and
+juvenile, teacher and learner), yet inseparable in practice during the calf's
+formative period. We formalize this metaphor into three properties:
+
+\begin{enumerate}[label=(\roman*)]
+  \item \textbf{Non-diminishment.} Neither discipline restricts or weakens the
+    other. The presence of affine bindings does not reduce the guarantees of
+    linear bindings, and vice versa.
+  \item \textbf{Emergence.} The combination produces capabilities that neither
+    discipline achieves in isolation. Region-based memory management, for
+    instance, emerges from the interaction of linear region handles with affine
+    interior values.
+  \item \textbf{Inseparability.} The disciplines are designed to co-exist, not
+    to compete. Removing either discipline does not yield a ``simpler'' language
+    but a \emph{crippled} one.
+\end{enumerate}
+
+We instantiate this principle in \Ephapax{}, a programming language where every
+binding is introduced as either linear (\lstinline{let!}, must be consumed
+exactly once) or affine (\lstinline{let}, may be dropped implicitly). This
+per-binding granularity is the key architectural decision: the programmer
+declares intent at the point of introduction, and the type system enforces
+the corresponding discipline without global compromise.
+
+The contributions of this paper are:
+
+\begin{enumerate}
+  \item A formal definition of the \emph{dyadic design principle} with three
+    constitutive properties (\Cref{sec:dyadic-principle}).
+  \item The design and formal type system of \Ephapax{}, instantiating the
+    dyadic principle with linear and affine bindings at per-binding granularity
+    (\Cref{sec:ephapax,sec:formal-type-system}).
+  \item A region-based memory management scheme that emerges from the dyadic
+    interaction of linear region handles and affine interior allocations
+    (\Cref{sec:regions}).
+  \item A case study of 56 SIGABRT crashes in a pure-affine D-Bus session
+    manager, demonstrating that the dyadic approach prevents an entire failure
+    class (\Cref{sec:case-study}).
+  \item A generalization argument: three further dyadic pairs (eager/lazy,
+    sync/async, deterministic/probabilistic) sketched as future instantiations
+    (\Cref{sec:generalization}).
+\end{enumerate}
+
+% ============================================================================
+% 2. THE DYADIC PRINCIPLE
+% ============================================================================
+\section{The Dyadic Principle}
+\label{sec:dyadic-principle}
+
+\subsection{Motivation: The Monodisciplinary Trap}
+
+Consider a language designer who wishes to prevent resource leaks. The natural
+impulse is to adopt linear types: every value must be consumed exactly once.
+This is sound but punishing---the programmer cannot simply let a temporary
+computation fall out of scope without explicitly disposing of it. The designer
+then faces pressure to add implicit drops, weakening linearity to affinity.
+But once affinity is the default, the ability to \emph{require} consumption
+is lost, and resource leaks return through the back door.
+
+This oscillation---between discipline and ergonomics, between safety and
+usability---is the monodisciplinary trap. It arises because the designer
+seeks a \emph{single} rule that governs all bindings. The dyadic principle
+escapes the trap by refusing to choose.
+
+\subsection{Formal Definition}
+
+\begin{definition}[Dyadic Language Design]
+\label{def:dyadic}
+A programming language $\mathcal{L}$ exhibits \emph{dyadic design} with respect
+to disciplines $D_1$ and $D_2$ if the following properties hold:
+
+\begin{enumerate}[label=(D\arabic*)]
+  \item \label{prop:nondiminishment}
+    \textbf{Non-diminishment.} For every program $P$ in $\mathcal{L}$, the
+    guarantees provided by $D_1$ to bindings governed by $D_1$ are identical
+    whether or not $P$ also contains bindings governed by $D_2$, and
+    symmetrically for $D_2$.
+    \[
+      \forall P.\; \text{guarantees}(D_1, P) = \text{guarantees}(D_1, P|_{D_1})
+      \quad \wedge \quad
+      \text{guarantees}(D_2, P) = \text{guarantees}(D_2, P|_{D_2})
+    \]
+
+  \item \label{prop:emergence}
+    \textbf{Emergence.} There exists a property $\phi$ of $\mathcal{L}$ that
+    holds for programs combining $D_1$ and $D_2$ bindings but does not hold
+    for programs restricted to either discipline alone:
+    \[
+      \exists \phi.\; \mathcal{L} \models \phi
+      \;\wedge\;
+      \mathcal{L}|_{D_1} \not\models \phi
+      \;\wedge\;
+      \mathcal{L}|_{D_2} \not\models \phi
+    \]
+
+  \item \label{prop:inseparability}
+    \textbf{Inseparability.} The restriction of $\mathcal{L}$ to either
+    discipline alone is strictly less expressive:
+    \[
+      \text{Express}(\mathcal{L}|_{D_1}) \subsetneq \text{Express}(\mathcal{L})
+      \quad \wedge \quad
+      \text{Express}(\mathcal{L}|_{D_2}) \subsetneq \text{Express}(\mathcal{L})
+    \]
+\end{enumerate}
+\end{definition}
+
+The key insight is that \ref{prop:nondiminishment} prevents the disciplines
+from interfering with each other, while \ref{prop:emergence} ensures that their
+combination is not merely additive but \emph{synergistic}. Property
+\ref{prop:inseparability} distinguishes dyadic design from the trivial case of
+two unrelated features bolted onto a language: removing either discipline must
+cause genuine loss.
+
+\subsection{The Co-Swimming Metaphor}
+
+The dolphin metaphor is not merely illustrative---it captures the essential
+topology of the design. Two dolphins in echelon formation experience reduced
+hydrodynamic drag through wave interference effects~\citep{weihs2004mechanics}.
+The key properties map precisely:
+
+\begin{itemize}
+  \item \textbf{Never less than one.} Each dolphin swims with its full
+    capability. The calf is not ``carried'' by the mother; it swims
+    independently but in coordination.
+  \item \textbf{Together more than two.} The drag reduction is a property of
+    the \emph{pair}, not of either individual. It emerges from their relative
+    positioning.
+  \item \textbf{Fundamentally different.} The adult and calf have different
+    sizes, speeds, and experience levels. The coordination protocol accommodates
+    this asymmetry.
+  \item \textbf{Inseparable in practice.} Separating the pair does not yield
+    two independent swimmers with unchanged properties; it yields a slower calf
+    and a mother who must expend energy searching.
+\end{itemize}
+
+In language design terms: each discipline operates at full strength on its own
+bindings (\emph{never less than one}); the combination enables idioms impossible
+with either alone (\emph{together more than two}); the disciplines differ in
+kind, not merely in degree (\emph{fundamentally different}); and removing either
+cripples the language (\emph{inseparable}).
+
+\subsection{Distinguishing Dyadic Design from Multi-Paradigm Languages}
+
+One might object that multi-paradigm languages (Scala, OCaml, Common Lisp)
+already combine multiple disciplines. However, multi-paradigm languages
+typically violate \ref{prop:nondiminishment}: the object-oriented features of
+Scala interfere with its functional features (mutable state undermines
+referential transparency), and the dynamic features of Common Lisp undermine
+its static type declarations. In a multi-paradigm language, the disciplines
+coexist but do not \emph{co-swim}---they compete for dominance, and programs
+tend to gravitate toward one paradigm or the other.
+
+Dyadic design, by contrast, requires that both disciplines be present in
+every non-trivial program and that neither corrode the other's guarantees.
+The disciplines are not alternative paradigms but complementary aspects of
+a single coherent design.
+
+% ============================================================================
+% 3. BACKGROUND
+% ============================================================================
+\section{Background}
+\label{sec:background}
+
+\subsection{Linear Logic and Substructural Type Systems}
+
+Girard's linear logic~\citep{girard1987linear} introduced the principle that
+propositions---and by the Curry-Howard correspondence, values---are resources
+that must be used exactly once. The structural rules of classical logic that
+linear logic rejects are:
+
+\begin{itemize}
+  \item \textbf{Weakening} (discarding unused hypotheses): $\ctx, A \vdash C$
+    implies $\ctx \vdash C$.
+  \item \textbf{Contraction} (duplicating hypotheses): $\ctx, A, A \vdash C$
+    implies $\ctx, A \vdash C$.
+\end{itemize}
+
+A \emph{linear} type system forbids both weakening and contraction: every
+linear value must be used exactly once. An \emph{affine} type system forbids
+contraction but permits weakening: affine values may be used at most once (they
+can be silently dropped). A \emph{relevant} type system forbids weakening but
+permits contraction: relevant values must be used at least once. These form
+a lattice of substructural disciplines~\citep{walker2005substructural}.
+
+\subsection{Rust: Global Affinity}
+
+Rust's ownership system is essentially an affine type system applied
+globally~\citep{jung2018rustbelt}. Every value has a single owner, ownership
+can be transferred (moved), and values are dropped when their owner goes out of
+scope. This is affine: values are used at most once (moved or dropped), but the
+programmer cannot express that a value \emph{must} be consumed.
+
+Rust compensates with runtime mechanisms: \lstinline{Drop} traits provide
+destructors, \lstinline{#[must_use]} attributes generate warnings (not errors),
+and the \lstinline{ManuallyDrop} wrapper suppresses the implicit destructor. But
+these are advisory, not structural. A \lstinline{#[must_use]} value can still be
+silently bound to \lstinline{_} and dropped. The language has no way to express
+``this file handle \emph{must} be closed by the programmer, not by the
+destructor.''
+
+\subsection{Linear Haskell: Arrow-Level Linearity}
+
+Linear Haskell~\citep{bernardy2018linear} introduces linearity at the level of
+function arrows: $A \multimap B$ means that if the function's result is consumed
+exactly once, then its argument is consumed exactly once. This is a weaker
+commitment than per-binding linearity---the linearity is contingent on the
+calling context rather than declared at the binding site.
+
+Linear Haskell's approach is elegant but limited. Because linearity is a
+property of arrows rather than bindings, it cannot express that a particular
+\lstinline{let}-binding within a function body must be consumed. The linearity
+``flows through'' the arrow but does not attach to intermediate values.
+
+\subsection{Other Substructural Languages}
+
+\textbf{ATS}~\citep{xi2017applied} combines dependent types with linear types,
+using ``views'' (linear propositions about memory) to achieve safe manual memory
+management. ATS is arguably the closest precursor to dyadic design, but its
+linear and non-linear worlds are separated by proof-level/value-level
+stratification rather than unified at the binding level.
+
+\textbf{Granule}~\citep{orchard2019quantitative} implements quantitative type
+theory (QTT) where resource usage is tracked by a semiring of grades. This
+subsumes both linear and affine types as special cases ($1$ for linear,
+$\{0,1\}$ for affine). Granule's approach is more general than dyadic design
+but also more complex: the programmer must reason about an algebra of grades
+rather than a binary choice.
+
+\textbf{Idris 2}~\citep{brady2021idris2} also uses QTT, tracking usage as
+$0$ (erased), $1$ (linear), or $\omega$ (unrestricted). Like Granule, this
+subsumes linear and affine types but at the cost of a more complex mental model.
+
+\textbf{Clean}~\citep{barendsen1996uniqueness} uses uniqueness types, which are
+related to linear types but focus on reference uniqueness rather than usage
+counting. A unique value is guaranteed to have no other references, enabling
+in-place mutation.
+
+% ============================================================================
+% 4. EPHAPAX: A DYADIC LANGUAGE
+% ============================================================================
+\section{Ephapax: A Dyadic Language}
+\label{sec:ephapax}
+
+\Ephapax{}\footnote{From Greek \textit{ephapax} (\greektext{\'ef'apax}\latintext{}),
+``once for all''---a term evoking the finality of linear consumption.} is a
+programming language designed from the ground up around the dyadic principle,
+instantiated with linear and affine types as the co-swimming disciplines. The
+central architectural decision is \textbf{per-binding discipline choice}: every
+binding is introduced as either linear or affine, and the type system enforces
+the corresponding invariant.
+
+\subsection{Binding Forms}
+
+\Ephapax{} provides two binding forms:
+
+\begin{lstlisting}[language=Ephapax, caption={The two binding forms of \Ephapax{}.}]
+// Affine binding: may be dropped implicitly
+let x = expensive_computation()
+
+// Linear binding: MUST be consumed exactly once
+let! handle = open_file("data.csv")
+\end{lstlisting}
+
+The \lstinline{let!} form introduces a \emph{linear} binding: the variable
+\lstinline{handle} must appear exactly once in the continuation, either consumed
+by a function or explicitly transferred. Failure to consume a linear binding, or
+consuming it more than once, is a \emph{compile-time error}.
+
+The \lstinline{let} form introduces an \emph{affine} binding: the variable
+\lstinline{x} may be used at most once and may be silently dropped when it goes
+out of scope. This provides the ergonomic default that everyday programming
+requires.
+
+\subsection{Why Per-Binding Granularity Matters}
+
+The per-binding choice is not merely syntactic sugar. It reflects a fundamental
+design decision about \emph{where discipline is declared}. Consider the
+alternatives:
+
+\begin{itemize}
+  \item \textbf{Per-type} (as in Rust): All values of type \lstinline{File}
+    have the same discipline. This conflates the type's nature with its usage
+    protocol. A \lstinline{File} that is opened for logging (write-and-forget)
+    has different lifecycle needs than a \lstinline{File} opened for a database
+    transaction (must-close-before-commit).
+
+  \item \textbf{Per-arrow} (as in Linear Haskell): Discipline is declared on
+    functions, not values. This makes it impossible to express that one local
+    variable must be consumed while another in the same function body may be
+    dropped.
+
+  \item \textbf{Per-binding} (as in \Ephapax{}): Discipline is declared at the
+    point of introduction. The programmer knows, when writing the binding, what
+    the lifecycle contract is. The type system enforces it from that point forward.
+\end{itemize}
+
+Per-binding granularity is the natural home for the dyadic principle because
+it allows both disciplines to coexist within a single expression, a single
+function body, even a single \lstinline{match} arm. The disciplines swim
+together at the finest grain.
+
+\subsection{Explicit Borrowing}
+
+\Ephapax{} provides explicit borrowing via the \lstinline{&} operator:
+
+\begin{lstlisting}[language=Ephapax, caption={Borrowing provides temporary read access without consuming.}]
+let! connection = open_database("postgres://...")
+
+// Borrow for read access: does not consume the connection
+let status = check_health(&connection)
+
+// connection is still live and must be consumed
+close_database(connection)
+\end{lstlisting}
+
+A borrow \lstinline{&x} creates a temporary, non-owning reference to \lstinline{x}.
+Borrows are always affine (they may be dropped) regardless of whether the
+underlying binding is linear or affine. This is a deliberate asymmetry: the
+borrow \emph{does not consume} the original, so it must not itself carry a
+consumption obligation.
+
+Borrowing satisfies non-diminishment: borrowing a linear value does not weaken
+its linearity. The linear binding must still be consumed exactly once; the
+borrow is a separate, ephemeral view.
+
+\subsection{A Complete Example}
+
+\begin{lstlisting}[language=Ephapax, caption={Dyadic resource management in \Ephapax{}.}, label=lst:complete]
+fn transfer_funds(from_id: AccountId, to_id: AccountId, amount: Money) {
+  // Linear: database connection MUST be properly closed
+  let! db = open_connection("postgres://bank")
+
+  // Linear: transaction MUST be committed or rolled back
+  let! txn = begin_transaction(&db)
+
+  // Affine: intermediate query results can be dropped
+  let from_balance = query_balance(&txn, from_id)
+  let to_balance = query_balance(&txn, to_id)
+
+  if from_balance >= amount then
+    execute(&txn, debit(from_id, amount))
+    execute(&txn, credit(to_id, amount))
+    // Consume txn: commits the transaction
+    commit(txn)
+  else
+    // Consume txn: rolls back the transaction
+    rollback(txn)
+  end
+
+  // Consume db: closes the connection
+  close_connection(db)
+}
+\end{lstlisting}
+
+In \Cref{lst:complete}, the linear bindings \lstinline{db} and \lstinline{txn}
+guarantee at compile time that every control-flow path either commits or rolls
+back the transaction and closes the connection. The affine bindings
+\lstinline{from_balance} and \lstinline{to_balance} may be silently dropped
+because their lifecycle is unimportant---they are intermediate computations,
+not resources with external obligations.
+
+This is the dyadic principle in action: the linear discipline ensures resource
+safety; the affine discipline ensures ergonomic everyday programming; and their
+coexistence within a single function body is seamless.
+
+% ============================================================================
+% 5. FORMAL TYPE SYSTEM
+% ============================================================================
+\section{Formal Type System}
+\label{sec:formal-type-system}
+
+\subsection{Contexts and Qualifiers}
+
+We define a typing context $\ctx$ as a sequence of bindings $x :^q A$ where
+$q \in \{\lmark, \amark\}$ is a \emph{qualifier}: $\lmark$ for linear, $\amark$
+for affine.
+
+\begin{definition}[Context Well-formedness]
+A context $\ctx$ is \emph{well-formed} if no variable appears more than once
+and every binding carries a qualifier:
+\[
+  \ctx ::= \emptyset \mid \ctx, x :^q A \qquad (q \in \{\lmark, \amark\})
+\]
+\end{definition}
+
+\begin{definition}[Context Split]
+A context split $\ctx = \ctx_1 \bowtie \ctx_2$ partitions $\ctx$ such that:
+\begin{itemize}
+  \item Every linear binding $x :^\lmark A \in \ctx$ appears in exactly one of
+    $\ctx_1, \ctx_2$.
+  \item Every affine binding $x :^\amark A \in \ctx$ appears in at most one of
+    $\ctx_1, \ctx_2$ (and may appear in neither, i.e., it may be weakened away).
+\end{itemize}
+\end{definition}
+
+Context splitting is the mechanism by which the type system tracks resource
+usage: when a term has two sub-terms, the context is split between them, and the
+split respects the qualifier of each binding.
+
+\subsection{Typing Rules}
+
+The core typing rules of \Ephapax{} are given in \Cref{fig:typing-rules}.
+
+\begin{figure}[htbp]
+\centering
+\begin{mathpar}
+  \inferrule*[right=\textsc{Var}]
+    {~}
+    {\judge{x :^q A}{x}{A}}
+
+  \inferrule*[right=\textsc{Let-Affine}]
+    {\judge{\ctx_1}{e_1}{A} \\ \judge{\ctx_2, x :^\amark A}{e_2}{B}}
+    {\judge{\ctx_1 \bowtie \ctx_2}{\letaff\; x = e_1 \;\mathbf{in}\; e_2}{B}}
+
+  \inferrule*[right=\textsc{Let-Linear}]
+    {\judge{\ctx_1}{e_1}{A} \\ \judge{\ctx_2, x :^\lmark A}{e_2}{B}
+     \\ x \in \text{FV}(e_2)}
+    {\judge{\ctx_1 \bowtie \ctx_2}{\letlin\; x = e_1 \;\mathbf{in}\; e_2}{B}}
+
+  \inferrule*[right=\textsc{Abs}]
+    {\judge{\ctx, x :^q A}{e}{B}}
+    {\judge{\ctx}{\lambda x :^q A.\; e}{A \xrightarrow{q} B}}
+
+  \inferrule*[right=\textsc{App}]
+    {\judge{\ctx_1}{e_1}{A \xrightarrow{q} B} \\ \judge{\ctx_2}{e_2}{A}}
+    {\judge{\ctx_1 \bowtie \ctx_2}{e_1\; e_2}{B}}
+
+  \inferrule*[right=\textsc{Borrow}]
+    {\judge{\ctx}{e}{A} \\ x :^q A \in \ctx}
+    {\judge{\ctx}{\&x}{\&A}}
+
+  \inferrule*[right=\textsc{Weaken}]
+    {\judge{\ctx}{e}{B} \\ x :^\amark A \notin \text{FV}(e)}
+    {\judge{\ctx, x :^\amark A}{e}{B}}
+
+  \inferrule*[right=\textsc{Branch}]
+    {\judge{\ctx}{e_0}{\text{Bool}} \\
+     \judge{\ctx_1}{e_1}{A} \\
+     \judge{\ctx_2}{e_2}{A} \\
+     \ctx_1 \sim_\lmark \ctx_2}
+    {\judge{\ctx \bowtie \ctx_1 \bowtie \ctx_2}
+           {\mathbf{if}\; e_0\; \mathbf{then}\; e_1\; \mathbf{else}\; e_2}{A}}
+\end{mathpar}
+\caption{Core typing rules of \Ephapax{}. The notation $\ctx_1 \sim_\lmark \ctx_2$
+means that $\ctx_1$ and $\ctx_2$ consume the same set of linear bindings.}
+\label{fig:typing-rules}
+\end{figure}
+
+The critical rules are:
+
+\begin{itemize}
+  \item \textsc{Let-Linear} requires that $x$ appears free in $e_2$---the linear
+    binding must be used. This is the ``must consume'' invariant.
+  \item \textsc{Weaken} permits affine bindings to be silently dropped. This rule
+    applies \emph{only} to affine-qualified bindings.
+  \item \textsc{Branch} requires that both branches consume the same linear
+    bindings ($\ctx_1 \sim_\lmark \ctx_2$). This prevents a linear resource
+    from being consumed in one branch but leaked in another.
+\end{itemize}
+
+\subsection{Non-Diminishment in the Type System}
+
+We can now state \ref{prop:nondiminishment} precisely:
+
+\begin{theorem}[Non-Diminishment]
+\label{thm:nondiminishment}
+Let $P$ be a well-typed \Ephapax{} program and let $x :^\lmark A$ be a linear
+binding in $P$. Then $x$ is consumed exactly once in $P$, regardless of the
+qualifiers of all other bindings in $P$. Symmetrically, if $y :^\amark B$ is
+an affine binding, then $y$ is consumed at most once, regardless of the
+qualifiers of all other bindings.
+\end{theorem}
+
+\begin{proof}[Proof sketch]
+By induction on the typing derivation. The context split $\bowtie$ partitions
+bindings independently: the split decision for a linear binding $x$ depends only
+on whether $x$ is used in the left or right sub-term, not on the qualifiers of
+other bindings. The \textsc{Weaken} rule applies only to affine bindings and
+does not affect linear bindings in the context. The \textsc{Branch} rule
+enforces uniform linear consumption across branches independently of affine
+bindings. Thus, changing the qualifier of one binding does not affect the
+enforcement of another binding's discipline. \qed
+\end{proof}
+
+\subsection{Type Soundness}
+
+We establish type soundness via the standard progress and preservation theorems.
+
+\begin{definition}[Values and Reduction]
+Values $v$ include literals, closures $\langle \lambda x :^q A.\; e, \rho \rangle$,
+and region handles. The small-step reduction relation $e \longrightarrow e'$
+includes beta-reduction, let-binding elimination, branch reduction, and region
+operations.
+\end{definition}
+
+\begin{theorem}[Progress]
+\label{thm:progress}
+If $\judge{\emptyset}{e}{A}$ then either $e$ is a value or there exists $e'$
+such that $e \longrightarrow e'$.
+\end{theorem}
+
+\begin{proof}[Proof sketch]
+By case analysis on the typing derivation. In the empty context, all bindings
+have been provided, so every eliminator (application, branch, match) has its
+principal argument available. \qed
+\end{proof}
+
+\begin{theorem}[Preservation]
+\label{thm:preservation}
+If $\judge{\ctx}{e}{A}$ and $e \longrightarrow e'$ then $\judge{\ctx'}{e'}{A}$
+where $\ctx'$ is obtained from $\ctx$ by consuming bindings used in the
+reduction step, respecting their qualifiers.
+\end{theorem}
+
+\begin{proof}[Proof sketch]
+By case analysis on the reduction step, using the substitution lemma: if
+$\judge{\ctx, x :^q A}{e}{B}$ and $\judge{\ctx'}{v}{A}$ then
+$\judge{\ctx \bowtie \ctx'}{e[v/x]}{B}$. The qualifier is preserved through
+substitution because the split respects $q$. \qed
+\end{proof}
+
+\begin{corollary}[No Stuck States]
+A well-typed closed \Ephapax{} program does not get stuck: it either reduces
+to a value or diverges.
+\end{corollary}
+
+\subsection{The Linear Safety Theorem}
+
+Beyond standard soundness, we prove a property specific to the dyadic design:
+
+\begin{theorem}[Linear Safety]
+\label{thm:linear-safety}
+If $\judge{\emptyset}{e}{A}$ and $e \longrightarrow^* v$ (i.e., $e$ evaluates
+to a value), then every linear binding $x :^\lmark B$ introduced during
+evaluation is consumed exactly once.
+\end{theorem}
+
+\begin{proof}[Proof sketch]
+By \Cref{thm:preservation}, each reduction step preserves the typing invariant.
+The \textsc{Let-Linear} rule ensures that $x$ appears in $\text{FV}(e_2)$, so
+the binding will eventually be consumed. Context splitting ensures it is not
+consumed more than once. By induction on the evaluation length, every linear
+binding introduced is eventually consumed exactly once. \qed
+\end{proof}
+
+This theorem is the formal counterpart of the practical guarantee: resources
+bound with \lstinline{let!} cannot leak.
+
+% ============================================================================
+% 6. REGION-BASED MEMORY MANAGEMENT
+% ============================================================================
+\section{Region-Based Memory Management}
+\label{sec:regions}
+
+The dyadic interaction between linear and affine bindings enables a
+region-based memory management scheme that requires no garbage collector and
+no manual \lstinline{free} calls.
+
+\subsection{Regions as Linear Handles}
+
+A \emph{region} is an arena allocator represented by a linear handle:
+
+\begin{lstlisting}[language=Ephapax, caption={Region-based allocation.}]
+fn process_batch(items: List<Item>) {
+  // Linear: region MUST be explicitly closed (memory freed)
+  let! arena = region::create()
+
+  // Affine: allocations within the region are individually droppable
+  let buffer = region::alloc(&arena, 1024)
+  let index  = region::alloc(&arena, build_index(items))
+
+  // ... computation using buffer and index ...
+
+  // Consume arena: all memory in the region is freed at once
+  region::destroy(arena)
+}
+\end{lstlisting}
+
+The region handle \lstinline{arena} is linear: it must be consumed by
+\lstinline{region::destroy}, which frees all memory allocated within it.
+Individual allocations (\lstinline{buffer}, \lstinline{index}) are affine: they
+may be dropped before the region is destroyed, but their memory is not freed
+until the region itself is consumed.
+
+\subsection{Emergence: The Region Safety Property}
+
+This is a concrete instance of \ref{prop:emergence}:
+
+\begin{theorem}[Region Safety]
+\label{thm:region-safety}
+In a well-typed \Ephapax{} program:
+\begin{enumerate}
+  \item Every region that is created is eventually destroyed (by Linear Safety,
+    \Cref{thm:linear-safety}).
+  \item No allocation within a region is accessed after the region is destroyed
+    (by the borrow checker: borrows of region-interior values cannot outlive the
+    region handle).
+  \item Memory is freed exactly once, when the region handle is consumed.
+\end{enumerate}
+\end{theorem}
+
+This property is \emph{emergent}: it does not hold in a purely linear language
+(where interior allocations would also need explicit deallocation, making arenas
+pointless) or in a purely affine language (where the region handle could be
+silently dropped, leaking all its memory). It arises only from the
+\emph{interaction} of linear handles with affine interiors.
+
+\subsection{Lifetime Proofs}
+
+Borrows within a region carry lifetime annotations that are checked at compile
+time:
+
+\begin{lstlisting}[language=Ephapax, caption={Lifetime-checked borrows.}]
+fn bad_example() {
+  let! arena = region::create()
+  let data = region::alloc(&arena, 42)
+
+  // ERROR: borrow of data escapes the region lifetime
+  let escaped = &data
+  region::destroy(arena)
+
+  // escaped would be a dangling reference here
+  // Compile-time error: borrow outlives region
+}
+\end{lstlisting}
+
+The lifetime system ensures that borrows of region-interior values do not
+outlive the region handle. Since the handle is linear and must be consumed,
+there is a well-defined point at which the region ceases to exist, and all
+borrows must expire before that point.
+
+\subsection{Comparison with Rust's Lifetimes}
+
+Rust's lifetime system achieves a similar effect but through a different
+mechanism: all values are affine (implicitly droppable), and lifetimes are
+enforced by the borrow checker. \Ephapax{}'s approach is more explicit: the
+linear handle announces ``I am a resource with a mandatory lifecycle,'' and the
+affine interiors announce ``I am a value whose lifecycle is subordinate to the
+region.'' The intent is declared, not inferred.
+
+This explicitness has a cost (the programmer writes \lstinline{let!} for
+resources) but also a benefit: the code is self-documenting about which values
+are resources and which are data. A reader of \Cref{lst:complete} can
+immediately see that \lstinline{db} and \lstinline{txn} are resources with
+obligations, while \lstinline{from_balance} is ephemeral.
+
+% ============================================================================
+% 7. CASE STUDY: SESSION-SENTINEL
+% ============================================================================
+\section{Case Study: Session-Sentinel Failure Analysis}
+\label{sec:case-study}
+
+\subsection{Background}
+
+\textit{Session-sentinel} is a D-Bus session manager for Linux desktop
+environments, originally implemented in a language with pure-affine semantics
+(all values implicitly droppable, no linear binding discipline). Over a period
+of several weeks of continuous deployment, the system produced 56 SIGABRT
+crashes---abrupt, unrecoverable process terminations triggered by the D-Bus
+library when connection handles were leaked.
+
+\subsection{Root Cause}
+
+The SIGABRT crashes shared a common pattern: a D-Bus connection handle was
+obtained, used for one or more method calls, and then silently dropped when
+it went out of scope. The D-Bus library's internal state machine expected the
+connection to be explicitly closed (\lstinline{dbus_connection_close}) before
+the handle was freed (\lstinline{dbus_connection_unref}). When a handle was
+dropped without closing, the library detected the inconsistency and called
+\lstinline{abort()}.
+
+In pseudocode:
+
+\begin{lstlisting}[language=Ephapax, caption={The pure-affine pattern that caused SIGABRT.}]
+fn handle_session_event(event: SessionEvent) {
+  // Affine: can be dropped implicitly
+  let conn = dbus_connect("org.freedesktop.login1")
+
+  match event with
+  | Suspend  -> dbus_call(&conn, "Suspend")
+  | Shutdown -> dbus_call(&conn, "PowerOff")
+  | Lock     -> dbus_call(&conn, "LockSessions")
+  end
+
+  // conn goes out of scope here
+  // Affine semantics: silently dropped
+  // D-Bus library: SIGABRT! Connection not properly closed!
+}
+\end{lstlisting}
+
+The programmer's intent was correct---the connection should be closed after
+use---but the language provided no mechanism to \emph{enforce} that intent.
+The affine type system allowed the handle to be dropped, and the drop path
+did not include the required \lstinline{dbus_connection_close} call.
+
+\subsection{The Dyadic Solution}
+
+In \Ephapax{}, the connection handle would be bound linearly:
+
+\begin{lstlisting}[language=Ephapax, caption={The dyadic pattern that prevents SIGABRT.}]
+fn handle_session_event(event: SessionEvent) {
+  // Linear: MUST be consumed (closed) explicitly
+  let! conn = dbus_connect("org.freedesktop.login1")
+
+  match event with
+  | Suspend  -> dbus_call(&conn, "Suspend")
+  | Shutdown -> dbus_call(&conn, "PowerOff")
+  | Lock     -> dbus_call(&conn, "LockSessions")
+  end
+
+  // Consume conn: properly closes the connection
+  dbus_close(conn)
+}
+\end{lstlisting}
+
+If the programmer omits the \lstinline{dbus_close(conn)} line, the compiler
+rejects the program: ``linear binding \lstinline{conn} is not consumed.'' The
+56 SIGABRT crashes are prevented at compile time, with zero runtime cost.
+
+\subsection{Why Pure Linear Types Are Not the Answer}
+
+One might argue that the solution is simply to make \emph{all} types linear,
+avoiding the need for the dyadic approach. But this is precisely the
+monodisciplinary trap. In the session-sentinel code, many values are genuinely
+ephemeral: event payloads, string formatting results, intermediate computations.
+Forcing all of these to be explicitly consumed would make the code verbose and
+fragile:
+
+\begin{lstlisting}[language=Ephapax, caption={The purely-linear alternative: verbose and fragile.}]
+fn handle_session_event(event: SessionEvent) {
+  let! conn = dbus_connect("org.freedesktop.login1")
+  let! event_str = format_event(event)  // Must consume!
+  let! log_result = log_info(event_str) // Must consume!
+  let! _unit = consume(log_result)       // Boilerplate disposal
+
+  // ... actual logic ...
+
+  dbus_close(conn)
+}
+\end{lstlisting}
+
+The dyadic approach avoids this: \lstinline{event_str} and
+\lstinline{log_result} are affine (\lstinline{let}), so they can be dropped
+silently. Only the resource that \emph{matters}---the D-Bus connection---is
+linear. The programmer expresses intent, and the type system enforces it,
+without imposing discipline where it is not needed.
+
+\subsection{Quantitative Analysis}
+
+Of the 56 SIGABRT crashes:
+
+\begin{table}[htbp]
+\centering
+\begin{tabular}{lrr}
+\toprule
+\textbf{Category} & \textbf{Count} & \textbf{Prevented by} \lstinline{let!}? \\
+\midrule
+Connection handle leaked on normal path & 31 & Yes \\
+Connection handle leaked on error path  & 18 & Yes \\
+Connection handle leaked in timeout     & 5  & Yes \\
+Connection double-free (ref counting)   & 2  & Yes (linearity prevents aliasing) \\
+\bottomrule
+\end{tabular}
+\caption{Classification of session-sentinel SIGABRT crashes.}
+\label{tab:crashes}
+\end{table}
+
+All 56 crashes would be prevented by binding the connection handle with
+\lstinline{let!}. The \textsc{Branch} typing rule (\Cref{fig:typing-rules})
+ensures that all control paths---including error paths and timeouts---consume
+the linear handle, preventing the error-path leaks that accounted for 18 of the
+56 crashes.
+
+% ============================================================================
+% 8. WEBASSEMBLY COMPILATION TARGET
+% ============================================================================
+\section{Compilation to WebAssembly}
+\label{sec:wasm}
+
+\Ephapax{} targets WebAssembly (Wasm) as its primary compilation backend. The
+dyadic type system enables optimizations at the Wasm level that would be
+unavailable in a monodisciplinary language.
+
+\subsection{Linear Bindings and Stack Allocation}
+
+Because linear bindings have a statically known single-use point, the compiler
+can allocate them on the Wasm stack rather than the linear memory heap.
+The binding is produced, consumed, and its stack slot is immediately
+reclaimable. This eliminates allocation overhead for linear values entirely.
+
+\subsection{Affine Bindings and Arena Compaction}
+
+Affine bindings that are allocated within a region can be placed in a compact
+arena in Wasm linear memory. Because they are individually droppable but
+collectively freed with the region, the allocator does not need to track
+individual deallocations---it simply bumps a pointer for allocation and resets
+the arena pointer for deallocation.
+
+\subsection{No Runtime Overhead for Qualifiers}
+
+The qualifiers $\lmark$ and $\amark$ exist only at compile time. At the Wasm
+level, linear and affine values are represented identically. The type system's
+guarantees are enforced entirely by the compiler, with zero runtime overhead.
+This is a key advantage over garbage-collected languages and over Rust's
+\lstinline{Drop}-trait-based resource management, which requires runtime
+destructor dispatch.
+
+% ============================================================================
+% 9. GENERALIZATION: OTHER DYADIC PAIRS
+% ============================================================================
+\section{Generalization: Other Dyadic Pairs}
+\label{sec:generalization}
+
+The dyadic design principle is not specific to linear and affine types. We
+sketch three further instantiations, each of which satisfies the three
+constitutive properties.
+
+\subsection{Eager/Lazy Evaluation}
+
+Most languages commit to either strict (eager) evaluation (ML, Rust, Java) or
+non-strict (lazy) evaluation (Haskell, Clean). A dyadic language could provide
+both at the binding level:
+
+\begin{lstlisting}[language=Ephapax, caption={Hypothetical eager/lazy dyadic bindings.}]
+// Eager: evaluated immediately, value available now
+let! result = expensive_computation()
+
+// Lazy: thunk, evaluated on first access
+let~ deferred = expensive_computation()
+\end{lstlisting}
+
+\begin{itemize}
+  \item \textbf{Non-diminishment:} Eager bindings evaluate with the same
+    semantics regardless of the presence of lazy bindings, and vice versa.
+  \item \textbf{Emergence:} The combination enables optimistic/speculative
+    patterns: eager bindings for values known to be needed, lazy bindings for
+    values that may not be. The interaction between eager producers and lazy
+    consumers enables data-flow patterns that neither evaluation strategy
+    achieves alone.
+  \item \textbf{Inseparability:} A purely eager language wastes work on unused
+    computations; a purely lazy language introduces unpredictable latency. The
+    dyadic combination avoids both failure modes.
+\end{itemize}
+
+This dyadic pair would subsume Haskell's \lstinline{seq}/\lstinline{BangPatterns}
+escape hatches and Scala's \lstinline{lazy val}, but as a first-class
+architectural principle rather than a bolt-on pragmatic compromise.
+
+\subsection{Synchronous/Asynchronous Control Flow}
+
+The sync/async dichotomy is one of the most painful in modern language design.
+Rust's colored function problem~\citep{nystrom2015colored}, JavaScript's
+\lstinline{async/await} proliferation, and Go's goroutine model all represent
+different monodisciplinary commitments. A dyadic approach:
+
+\begin{lstlisting}[language=Ephapax, caption={Hypothetical sync/async dyadic bindings.}]
+// Synchronous: blocks until complete
+let! data = read_file("config.toml")
+
+// Asynchronous: returns a future, non-blocking
+let& task = fetch_url("https://api.example.com/data")
+
+// Synchronous consumption of async result
+let! result = await(task)
+\end{lstlisting}
+
+\begin{itemize}
+  \item \textbf{Non-diminishment:} Synchronous bindings block as expected,
+    unaffected by the presence of asynchronous bindings in the same scope.
+    Asynchronous bindings are non-blocking regardless of surrounding synchronous
+    code.
+  \item \textbf{Emergence:} The type system can enforce that synchronous code
+    does not accidentally depend on an unawaited future (a common bug in
+    JavaScript and Python). The combination enables structured concurrency
+    where the boundaries between sync and async are explicit and
+    type-checked.
+  \item \textbf{Inseparability:} Purely synchronous code cannot express
+    concurrent operations; purely asynchronous code (as in early Node.js)
+    forces callback indirection even for naturally sequential operations.
+\end{itemize}
+
+The key insight is that the ``function color'' problem arises because
+sync/async is treated as a \emph{type-level} distinction (colored functions)
+rather than a \emph{binding-level} one. Moving the distinction to the binding
+level---where the dyadic principle naturally operates---dissolves the problem.
+
+\subsection{Deterministic/Probabilistic Computation}
+
+A more speculative instantiation: a language for probabilistic programming
+where deterministic and probabilistic bindings co-swim:
+
+\begin{lstlisting}[language=Ephapax, caption={Hypothetical deterministic/probabilistic dyadic bindings.}]
+// Deterministic: exact value, no uncertainty
+let! pi = 3.14159265358979
+
+// Probabilistic: distribution over values
+let~ temperature = normal(20.0, 2.0)
+
+// Deterministic function of a probabilistic value:
+// result is probabilistic (discipline propagates)
+let~ adjusted = temperature + 5.0
+
+// Deterministic observation: collapses probability
+let! sample = observe(temperature, 21.5)
+\end{lstlisting}
+
+\begin{itemize}
+  \item \textbf{Non-diminishment:} Deterministic computations are exact
+    regardless of probabilistic bindings in scope. Probabilistic bindings
+    maintain their distributional semantics regardless of deterministic
+    context.
+  \item \textbf{Emergence:} Bayesian inference emerges naturally from the
+    interaction: \lstinline{observe} collapses a probabilistic binding into
+    a deterministic one, updating the posterior distribution of related
+    probabilistic bindings. This is a property of the \emph{pair}, not of
+    either discipline alone.
+  \item \textbf{Inseparability:} A purely deterministic language cannot
+    express uncertainty; a purely probabilistic language makes exact computation
+    awkward (everything becomes a point distribution).
+\end{itemize}
+
+\subsection{Toward a Taxonomy of Dyadic Pairs}
+
+The four dyadic pairs we have discussed---linear/affine, eager/lazy,
+sync/async, deterministic/probabilistic---suggest a pattern. Each pair consists
+of:
+
+\begin{enumerate}
+  \item A \textbf{strict discipline} that imposes obligations (linear, eager,
+    synchronous, deterministic).
+  \item A \textbf{permissive discipline} that relaxes obligations (affine, lazy,
+    asynchronous, probabilistic).
+\end{enumerate}
+
+This is not a coincidence. The dyadic principle is, at its core, about the
+productive tension between obligation and freedom. A language that provides
+only obligation is unusable; a language that provides only freedom is unsafe.
+The dyadic principle says: provide both, at the binding level, and let the
+programmer declare which regime each value lives under.
+
+We conjecture that any productive tension in language design that manifests as
+a global architectural choice (``strict or lazy?'', ``sync or async?'') can be
+refactored into a dyadic pair at the binding level. Testing this conjecture
+across further domains is future work.
+
+% ============================================================================
+% 10. RELATED WORK
+% ============================================================================
+\section{Related Work}
+\label{sec:related-work}
+
+\paragraph{Rust and Ownership.}
+Rust~\citep{jung2018rustbelt} is the most widely deployed substructural
+language. Its ownership model is essentially global affinity with borrowing.
+\Ephapax{} differs in two key respects: (1) per-binding qualifier choice allows
+linear bindings that \emph{must} be consumed, whereas Rust's \lstinline{Drop}
+trait provides a default destructor; (2) borrowing in \Ephapax{} is explicit
+(\lstinline{&x}) rather than implicit through reference creation. The
+\lstinline{#[must_use]} attribute in Rust is advisory (a warning, not an error)
+and applies to types rather than bindings.
+
+\paragraph{Linear Haskell.}
+\citet{bernardy2018linear} introduced linear types to Haskell via multiplicity
+annotations on function arrows. This is a different design point from \Ephapax{}:
+linearity is a property of how a function \emph{uses} its argument, not a
+property of the binding itself. A \lstinline{let}-binding in Linear Haskell is
+always unrestricted; linearity flows through the calling convention. \Ephapax{}'s
+per-binding linearity is more direct but less compositional.
+
+\paragraph{ATS and Dependent Linear Types.}
+\citet{xi2017applied} combined dependent types with linear types in ATS,
+achieving safe manual memory management through ``views'' (linear propositions).
+ATS separates the proof level (linear) from the value level (unrestricted),
+which is a form of dyadic design but at a different granularity---the proof/value
+stratification rather than the binding level. \Ephapax{}'s approach is
+syntactically simpler but less expressive in the proof dimension.
+
+\paragraph{Quantitative Type Theory.}
+QTT~\citep{atkey2018syntax,mcbride2016got} generalizes linearity to arbitrary
+resource semirings. Idris 2~\citep{brady2021idris2} and Granule~\citep{orchard2019quantitative}
+implement QTT, subsuming linear ($1$) and affine ($\{0,1\}$) as special cases.
+The dyadic principle is less general than QTT but has a simpler programmer-facing
+model: two binding forms rather than an algebra of grades. We view dyadic design
+as a pragmatic restriction of QTT that trades generality for clarity.
+
+\paragraph{Clean and Uniqueness Types.}
+Clean~\citep{barendsen1996uniqueness} uses uniqueness types to enable safe
+in-place mutation. A unique value is guaranteed to have no aliases, which is
+related to linearity but distinct: uniqueness is about reference count, while
+linearity is about usage count. Clean's uniqueness types are global (all unique
+values follow the same discipline), which differs from \Ephapax{}'s per-binding
+choice.
+
+\paragraph{Substructural Type Systems Survey.}
+\citet{walker2005substructural} provides a comprehensive survey of substructural
+type systems, organizing them by which structural rules they restrict. The dyadic
+principle operates at a different level: it is not a novel point in the
+structural-rule lattice but a \emph{design methodology} for combining two points
+in the lattice within a single language.
+
+\paragraph{Session Types.}
+Session types~\citep{honda1998language} enforce communication protocols on
+channels, requiring that messages are sent and received in a prescribed order.
+Session-typed channels are inherently linear (a channel endpoint must be used
+exactly according to its protocol). \Ephapax{}'s linear bindings could encode
+session types, providing another instance of the linear/affine dyad: session
+channels as linear, message payloads as affine.
+
+\paragraph{Effect Systems.}
+Effect systems~\citep{lucassen1988polymorphic} track computational effects
+(I/O, state, exceptions) in the type system. The sync/async dyadic pair
+(\Cref{sec:generalization}) is related to effect typing: ``sync'' corresponds
+to the pure effect and ``async'' to an I/O-like effect. Algebraic effect
+handlers~\citep{plotkin2013handling} provide a more general framework, but
+the dyadic principle offers a simpler programmer-facing model for the specific
+case of two complementary disciplines.
+
+% ============================================================================
+% 11. DISCUSSION
+% ============================================================================
+\section{Discussion}
+\label{sec:discussion}
+
+\subsection{Limitations}
+
+The dyadic principle as presented has several limitations:
+
+\begin{enumerate}
+  \item \textbf{Binary restriction.} We consider only pairs of disciplines.
+    Some design tensions may involve three or more dimensions (e.g., linear,
+    affine, and relevant types form a triple). Extending the principle to
+    $n$-adic design is straightforward in concept but may complicate the
+    programmer model.
+
+  \item \textbf{Qualifier inference.} \Ephapax{} requires explicit qualifier
+    annotations (\lstinline{let} vs.\ \lstinline{let!}). A practical
+    implementation might benefit from qualifier inference, defaulting to affine
+    and inferring linearity where resource obligations are detected. This is
+    engineering, not theory, but it affects adoption.
+
+  \item \textbf{Higher-order complications.} When linear and affine closures
+    interact---a linear closure capturing an affine binding, or vice versa---the
+    typing rules become more complex. We have addressed this through
+    qualifier-annotated arrows ($A \xrightarrow{q} B$) but the full treatment
+    of higher-order dyadic typing requires further investigation.
+
+  \item \textbf{Concurrency.} The current type system is sequential. Extending
+    \Ephapax{} to concurrent programs requires ensuring that linear bindings are
+    not shared between threads (since sharing would violate single-use). This is
+    analogous to Rust's \lstinline{Send}/\lstinline{Sync} traits and is future
+    work.
+\end{enumerate}
+
+\subsection{Philosophical Implications}
+
+The dyadic principle suggests a broader lesson about language design: the most
+productive design points may not be the ``purest'' ones. A language that is
+purely functional, or purely imperative, or purely linear, or purely lazy,
+optimizes for one dimension at the expense of others. The dyadic principle
+argues for \emph{principled impurity}: combining two disciplines in a way that
+is formally sound and mutually beneficial, rather than seeking purity in one
+dimension.
+
+This echoes Girard's observation that linear logic is not a replacement for
+classical logic but a \emph{refinement} that makes the structural rules
+visible~\citep{girard1987linear}. Similarly, the dyadic principle does not
+replace monodisciplinary design but refines it, making the tension between
+disciplines visible and programmable.
+
+\subsection{The Cost of Choice}
+
+Every binding in \Ephapax{} requires a choice: \lstinline{let} or
+\lstinline{let!}. This is a cognitive cost. We argue it is a \emph{beneficial}
+cost: it forces the programmer to consider, at the point of introduction,
+whether a value carries a resource obligation. This consideration is already
+present in the programmer's mind when writing code in any language---the
+difference is that \Ephapax{} makes it explicit and checkable.
+
+In our experience, the ratio is approximately 80/20: roughly 80\% of bindings
+are affine (data, intermediate computations, formatting results) and 20\% are
+linear (file handles, connections, transactions, region handles). The linear
+annotations thus serve as \emph{documentation by the programmer, enforced by
+the compiler}: they highlight the 20\% of bindings that carry real obligations.
+
+% ============================================================================
+% 12. CONCLUSION
+% ============================================================================
+\section{Conclusion}
+\label{sec:conclusion}
+
+We have introduced the \emph{dyadic design principle}, a methodology for
+programming language architecture in which two fundamentally different but
+inseparable disciplines co-exist at the binding level. We formalized three
+constitutive properties---non-diminishment, emergence, and inseparability---that
+distinguish dyadic design from both monodisciplinary languages and unprincipled
+multi-paradigm languages.
+
+We instantiated the principle in \Ephapax{}, where linear (\lstinline{let!})
+and affine (\lstinline{let}) bindings cohabit per-expression. The formal type
+system guarantees that linear bindings are consumed exactly once and affine
+bindings at most once, with neither discipline interfering with the other. The
+interaction of linear region handles with affine interior values yields
+region-based memory management without garbage collection---an emergent property
+that neither discipline achieves alone.
+
+The session-sentinel case study demonstrated that the dyadic approach prevents
+an entire class of resource-leak failures (56 SIGABRT crashes) that
+monodisciplinary affine designs admit. The fix is zero-cost: linearity is
+enforced at compile time, with no runtime overhead.
+
+Looking forward, we sketched three further dyadic pairs---eager/lazy, sync/async,
+and deterministic/probabilistic---arguing that the principle generalizes to any
+design tension that is currently resolved by a global architectural commitment.
+The dyadic principle offers a different resolution: \emph{don't choose; let the
+programmer choose, per binding, and let the type system enforce both choices
+simultaneously.}
+
+Like the mother dolphin and her calf, the two disciplines swim together: never
+less than one, together more than two.
+
+% ============================================================================
+% REFERENCES
+% ============================================================================
+\bibliographystyle{plainnat}
+
+\begin{thebibliography}{20}
+
+\bibitem[Atkey(2018)]{atkey2018syntax}
+Robert Atkey.
+\newblock Syntax and semantics of quantitative type theory.
+\newblock In \emph{Proceedings of the 33rd Annual ACM/IEEE Symposium on Logic in Computer Science (LICS)}, pages 56--65, 2018.
+
+\bibitem[Barendsen and Smetsers(1996)]{barendsen1996uniqueness}
+Erik Barendsen and Sjaak Smetsers.
+\newblock Uniqueness typing for functional languages with graph rewriting semantics.
+\newblock \emph{Mathematical Structures in Computer Science}, 6(6):579--612, 1996.
+
+\bibitem[Bernardy et~al.(2018)]{bernardy2018linear}
+Jean-Philippe Bernardy, Mathieu Boespflug, Ryan~R. Newton, Simon~Peyton Jones, and Arnaud Spiwack.
+\newblock Linear {H}askell: practical linearity in a higher-order polymorphic language.
+\newblock \emph{Proceedings of the ACM on Programming Languages}, 2(POPL):1--29, 2018.
+
+\bibitem[Brady(2021)]{brady2021idris2}
+Edwin Brady.
+\newblock \emph{Idris 2: Quantitative Type Theory in Practice}.
+\newblock In \emph{European Conference on Object-Oriented Programming (ECOOP)}, 2021.
+
+\bibitem[Girard(1987)]{girard1987linear}
+Jean-Yves Girard.
+\newblock Linear logic.
+\newblock \emph{Theoretical Computer Science}, 50(1):1--102, 1987.
+
+\bibitem[Honda et~al.(1998)]{honda1998language}
+Kohei Honda, Vasco~T. Vasconcelos, and Makoto Kubo.
+\newblock Language primitives and type discipline for structured communication-based programming.
+\newblock In \emph{European Symposium on Programming (ESOP)}, pages 122--138. Springer, 1998.
+
+\bibitem[Jung et~al.(2018)]{jung2018rustbelt}
+Ralf Jung, Jacques-Henri Jourdan, Robbert Krebbers, and Derek Dreyer.
+\newblock {RustBelt}: Securing the foundations of the {Rust} programming language.
+\newblock \emph{Proceedings of the ACM on Programming Languages}, 2(POPL):1--34, 2018.
+
+\bibitem[Lucassen and Gifford(1988)]{lucassen1988polymorphic}
+John~M. Lucassen and David~K. Gifford.
+\newblock Polymorphic effect systems.
+\newblock In \emph{Proceedings of the 15th ACM SIGPLAN-SIGACT Symposium on Principles of Programming Languages (POPL)}, pages 47--57, 1988.
+
+\bibitem[McBride(2016)]{mcbride2016got}
+Conor McBride.
+\newblock I got plenty o' nuttin'.
+\newblock In \emph{A List of Successes That Can Change the World}, pages 207--233. Springer, 2016.
+
+\bibitem[Nystrom(2015)]{nystrom2015colored}
+Bob Nystrom.
+\newblock What color is your function?
+\newblock Blog post, \url{https://journal.stuffwithstuff.com/2015/02/01/what-color-is-your-function/}, 2015.
+
+\bibitem[Orchard et~al.(2019)]{orchard2019quantitative}
+Dominic Orchard, Vilem-Benjamin Liepelt, and Harley Eades~III.
+\newblock Quantitative program reasoning with graded modal types.
+\newblock \emph{Proceedings of the ACM on Programming Languages}, 3(ICFP):1--30, 2019.
+
+\bibitem[Plotkin and Pretnar(2013)]{plotkin2013handling}
+Gordon~D. Plotkin and Matija Pretnar.
+\newblock Handling algebraic effects.
+\newblock \emph{Logical Methods in Computer Science}, 9(4), 2013.
+
+\bibitem[Walker(2005)]{walker2005substructural}
+David Walker.
+\newblock Substructural type systems.
+\newblock In \emph{Advanced Topics in Types and Programming Languages}, chapter~1. MIT Press, 2005.
+
+\bibitem[Weihs(2004)]{weihs2004mechanics}
+Daniel Weihs.
+\newblock The hydrodynamics of dolphin drafting.
+\newblock \emph{Journal of Biology}, 3(2):8, 2004.
+
+\bibitem[Xi(2017)]{xi2017applied}
+Hongwei Xi.
+\newblock Applied type system: An approach to practical programming with theorem proving.
+\newblock \emph{Journal of Functional Programming}, 27:e17, 2017.
+
+\end{thebibliography}
+
+% ============================================================================
+% APPENDIX
+% ============================================================================
+\appendix
+
+\section{Full Typing Rules}
+\label{app:typing-rules}
+
+We provide the complete set of typing rules for \Ephapax{}, including
+pattern matching, region operations, and recursive functions.
+
+\begin{figure}[htbp]
+\centering
+\begin{mathpar}
+  \inferrule*[right=\textsc{Unit}]
+    {~}
+    {\judge{\emptyset}{()}{()}}
+
+  \inferrule*[right=\textsc{Int}]
+    {n \in \mathbb{Z}}
+    {\judge{\emptyset}{n}{\text{Int}}}
+
+  \inferrule*[right=\textsc{Bool}]
+    {b \in \{\text{true}, \text{false}\}}
+    {\judge{\emptyset}{b}{\text{Bool}}}
+
+  \inferrule*[right=\textsc{Pair}]
+    {\judge{\ctx_1}{e_1}{A} \\ \judge{\ctx_2}{e_2}{B}}
+    {\judge{\ctx_1 \bowtie \ctx_2}{(e_1, e_2)}{A \times B}}
+
+  \inferrule*[right=\textsc{Pair-Elim}]
+    {\judge{\ctx_1}{e}{A \times B} \\
+     \judge{\ctx_2, x :^{q_1} A, y :^{q_2} B}{e'}{C}}
+    {\judge{\ctx_1 \bowtie \ctx_2}
+           {\mathbf{match}\; e\; \mathbf{with}\; (x, y) \Rightarrow e'}{C}}
+
+  \inferrule*[right=\textsc{Region-Create}]
+    {~}
+    {\judge{\emptyset}{\text{region::create}()}{\text{Region}^\lmark}}
+
+  \inferrule*[right=\textsc{Region-Alloc}]
+    {\judge{\ctx_1}{r}{\&\text{Region}} \\
+     \judge{\ctx_2}{e}{A}}
+    {\judge{\ctx_1 \bowtie \ctx_2}
+           {\text{region::alloc}(r, e)}
+           {\text{Ref}^\amark\langle A \rangle}}
+
+  \inferrule*[right=\textsc{Region-Destroy}]
+    {\judge{\ctx}{r}{\text{Region}^\lmark}}
+    {\judge{\ctx}{\text{region::destroy}(r)}{()}}
+
+  \inferrule*[right=\textsc{Fix}]
+    {\judge{\ctx, f :^\amark (A \xrightarrow{q} B), x :^q A}{e}{B}}
+    {\judge{\ctx}{\mathbf{fix}\; f\; (x :^q A) = e}{A \xrightarrow{q} B}}
+\end{mathpar}
+\caption{Extended typing rules: primitives, pairs, regions, and recursion.}
+\label{fig:extended-rules}
+\end{figure}
+
+\section{Metatheory Details}
+\label{app:metatheory}
+
+\begin{lemma}[Substitution]
+\label{lem:substitution}
+If $\judge{\ctx, x :^q A}{e}{B}$ and $\judge{\ctx'}{v}{A}$ and $v$ is a value,
+then $\judge{\ctx \bowtie \ctx'}{e[v/x]}{B}$.
+\end{lemma}
+
+\begin{proof}
+By induction on the derivation of $\judge{\ctx, x :^q A}{e}{B}$.
+
+\textit{Case} \textsc{Var}: $e = x$, $B = A$, $\ctx = \emptyset$.
+Then $e[v/x] = v$ and $\judge{\ctx'}{v}{A}$ by assumption.
+
+\textit{Case} \textsc{Var} ($e = y \neq x$): $y :^{q'} B \in \ctx$.
+Then $e[v/x] = y$ and $\judge{\ctx}{y}{B}$ with $x :^q A$ removed.
+The context $\ctx \bowtie \ctx'$ is well-formed because $x$ no longer appears
+and $\ctx'$ is used for the (now unnecessary) substitution.
+
+\textit{Case} \textsc{Let-Affine}: $e = \letaff\; y = e_1\; \mathbf{in}\; e_2$.
+By the IH, substitution preserves typing in both sub-derivations.
+The context split distributes $x :^q A$ to whichever sub-context contains $x$,
+and substitution replaces $x$ with $v$ in the appropriate sub-term.
+
+The remaining cases (\textsc{Let-Linear}, \textsc{Abs}, \textsc{App},
+\textsc{Branch}, \textsc{Weaken}, \textsc{Borrow}) follow analogously.
+\end{proof}
+
+\begin{lemma}[Context Split Determinacy]
+\label{lem:split-det}
+For a well-typed term $e$ with context $\ctx$, if $e$ has sub-terms $e_1, e_2$
+with $\ctx = \ctx_1 \bowtie \ctx_2$, then the split is uniquely determined by
+$\text{FV}(e_1)$ and $\text{FV}(e_2)$ up to weakening of affine bindings.
+\end{lemma}
+
+\begin{proof}
+Each linear binding $x :^\lmark A$ appears in exactly one of $\text{FV}(e_1)$
+or $\text{FV}(e_2)$ (since it must be used exactly once in total), determining
+its placement. Each affine binding $x :^\amark A$ appears in at most one of
+$\text{FV}(e_1)$ or $\text{FV}(e_2)$, determining its placement (or weakening
+if it appears in neither). \qed
+\end{proof}
+
+\section{Session-Sentinel Crash Log Excerpts}
+\label{app:crash-logs}
+
+For completeness, we provide representative crash signatures from the
+session-sentinel failure (anonymized):
+
+\begin{lstlisting}[basicstyle=\ttfamily\scriptsize, frame=single, numbers=none]
+session-sentinel[2847]: SIGABRT at dbus_connection_unref+0x42
+  Backtrace:
+    #0  0x7f3a2b1c4042 in raise (libc.so.6)
+    #1  0x7f3a2b1ad4f4 in abort (libc.so.6)
+    #2  0x7f3a2c8e1a23 in _dbus_abort (libdbus-1.so.3)
+    #3  0x7f3a2c8d2b17 in dbus_connection_unref (libdbus-1.so.3)
+    #4  0x5623a41b2f91 in handle_session_event (session-sentinel)
+    #5  0x5623a41b1a44 in event_loop (session-sentinel)
+
+session-sentinel[3201]: SIGABRT at dbus_connection_unref+0x42
+  Backtrace: [similar pattern, different call site]
+  Context: error path in handle_suspend(), connection not closed
+
+session-sentinel[4455]: SIGABRT at dbus_connection_unref+0x42
+  Backtrace: [similar pattern]
+  Context: timeout handler dropped connection without closing
+\end{lstlisting}
+
+All 56 crashes share the same proximate cause:
+\lstinline{dbus_connection_unref} is called on a connection that was not first
+closed via \lstinline{dbus_connection_close}. The affine semantics of the
+original implementation allowed the connection handle to be implicitly dropped
+(via scope exit), which triggered \lstinline{unref} without the preceding
+\lstinline{close}.
+
+\end{document}

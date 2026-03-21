@@ -1,0 +1,126 @@
+{
+  "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+  "name": "Ephapax",
+  "scopeName": "source.ephapax",
+  "patterns": [
+    { "include": "#comments" },
+    { "include": "#keywords" },
+    { "include": "#linear-keywords" },
+    { "include": "#region-keywords" },
+    { "include": "#types" },
+    { "include": "#strings" },
+    { "include": "#numbers" },
+    { "include": "#operators" },
+    { "include": "#functions" },
+    { "include": "#region-annotations" }
+  ],
+  "repository": {
+    "comments": {
+      "name": "comment.line.double-slash.ephapax",
+      "match": "//.*$"
+    },
+    "keywords": {
+      "patterns": [
+        {
+          "name": "keyword.control.ephapax",
+          "match": "\\b(fn|if|else|match|return|in|import|module|type)\\b"
+        },
+        {
+          "name": "keyword.other.ephapax",
+          "match": "\\b(let|copy|borrow|move|drop)\\b"
+        },
+        {
+          "name": "constant.language.ephapax",
+          "match": "\\b(true|false)\\b"
+        }
+      ]
+    },
+    "linear-keywords": {
+      "patterns": [
+        {
+          "name": "keyword.control.linear.ephapax",
+          "match": "\\blet!\\b",
+          "comment": "Linear binding — the key dyadic marker. Visually distinct."
+        }
+      ]
+    },
+    "region-keywords": {
+      "patterns": [
+        {
+          "name": "keyword.storage.region.ephapax",
+          "match": "\\bregion\\b"
+        }
+      ]
+    },
+    "types": {
+      "patterns": [
+        {
+          "name": "entity.name.type.ephapax",
+          "match": "\\b[A-Z][a-zA-Z0-9_]*\\b"
+        },
+        {
+          "name": "support.type.primitive.ephapax",
+          "match": "\\b(i32|i64|f32|f64|bool|String)\\b"
+        }
+      ]
+    },
+    "strings": {
+      "name": "string.quoted.double.ephapax",
+      "begin": "\"",
+      "end": "\"",
+      "patterns": [
+        {
+          "name": "constant.character.escape.ephapax",
+          "match": "\\\\(n|r|t|\\\\|\"|'|x[0-9a-fA-F]{2}|u\\{[0-9a-fA-F]+\\})"
+        }
+      ]
+    },
+    "numbers": {
+      "patterns": [
+        {
+          "name": "constant.numeric.float.ephapax",
+          "match": "\\b[0-9][0-9_]*\\.[0-9][0-9_]*([eE][+-]?[0-9]+)?\\b"
+        },
+        {
+          "name": "constant.numeric.hex.ephapax",
+          "match": "\\b0x[0-9a-fA-F][0-9a-fA-F_]*\\b"
+        },
+        {
+          "name": "constant.numeric.binary.ephapax",
+          "match": "\\b0b[01][01_]*\\b"
+        },
+        {
+          "name": "constant.numeric.integer.ephapax",
+          "match": "\\b[0-9][0-9_]*\\b"
+        }
+      ]
+    },
+    "operators": {
+      "name": "keyword.operator.ephapax",
+      "match": "(->|=>|==|!=|<=|>=|&&|\\|\\||\\+\\+|[+\\-*/%<>&@!])"
+    },
+    "functions": {
+      "patterns": [
+        {
+          "match": "\\b(fn)\\s+([a-z_][a-zA-Z0-9_]*)",
+          "captures": {
+            "1": { "name": "keyword.control.ephapax" },
+            "2": { "name": "entity.name.function.ephapax" }
+          }
+        }
+      ]
+    },
+    "region-annotations": {
+      "patterns": [
+        {
+          "match": "@([a-z_][a-zA-Z0-9_]*)",
+          "captures": {
+            "0": { "name": "entity.name.label.region.ephapax" },
+            "1": { "name": "variable.other.region.ephapax" }
+          },
+          "comment": "Region annotation @r — visually distinct as a label"
+        }
+      ]
+    }
+  }
+}

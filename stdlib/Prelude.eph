@@ -1,0 +1,43 @@
+// SPDX-License-Identifier: PMPL-1.0-or-later
+// Copyright (c) 2026 Jonathan D.A. Jewell (hyperpolymath) <j.d.a.jewell@open.ac.uk>
+//
+// Ephapax Prelude — implicitly imported into every module.
+
+module Prelude
+
+// --- Primitive Types ---
+// i32, i64, f32, f64, bool, String, () are built-in
+
+// --- Option ---
+type Option<A> = Some(A) | None
+
+// --- Result ---
+type Result<A, E> = Ok(A) | Err(E)
+
+// --- Pair ---
+type Pair<A, B> = Pair(A, B)
+
+// --- Unit operations ---
+fn ignore<A>(x: A) -> () {
+    drop(x)
+}
+
+// --- Arithmetic (compiler intrinsics) ---
+// +, -, *, /, % are built-in for i32, i64, f32, f64
+
+// --- Comparison (compiler intrinsics) ---
+// ==, !=, <, >, <=, >= are built-in
+
+// --- Boolean (compiler intrinsics) ---
+// &&, ||, ! are built-in
+
+// --- String ---
+fn string_length(s: &String) -> i32 {
+    // Compiler intrinsic
+    __intrinsic_string_length(s)
+}
+
+fn string_concat(a: String, b: String) -> String {
+    // Consumes both strings (affine consumption)
+    __intrinsic_string_concat(a, b)
+}

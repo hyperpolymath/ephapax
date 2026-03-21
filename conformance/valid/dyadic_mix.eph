@@ -1,0 +1,28 @@
+// SPDX-License-Identifier: PMPL-1.0-or-later
+// Conformance test: mixing affine and linear bindings in one function.
+// Demonstrates the dyadic principle: both coexist without interference.
+// Expected: type-checks successfully.
+
+fn transfer(amount: i32) -> i32 {
+    // Linear: database connection MUST be closed
+    let! conn = Db.connect("postgres://localhost/bank")
+
+    // Affine: intermediate values can be dropped
+    let from_balance = Db.query(&conn, "SELECT balance FROM accounts WHERE id = 1")
+    let to_balance = Db.query(&conn, "SELECT balance FROM accounts WHERE id = 2")
+
+    // Affine: computation result, dropped if unused
+    let new_from = from_balance - amount
+    let new_to = to_balance + amount
+
+    // Linear: transaction MUST be committed or rolled back
+    let! txn = Db.begin(&conn)
+    Db.execute(&txn, "UPDATE accounts SET balance = ? WHERE id = 1", new_from)
+    Db.execute(&txn, "UPDATE accounts SET balance = ? WHERE id = 2", new_to)
+    Db.commit(txn)
+
+    // Linear: connection MUST be closed
+    Db.close(conn)
+
+    new_from
+}

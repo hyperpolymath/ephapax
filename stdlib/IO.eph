@@ -1,0 +1,21 @@
+// SPDX-License-Identifier: PMPL-1.0-or-later
+// Copyright (c) 2026 Jonathan D.A. Jewell (hyperpolymath) <j.d.a.jewell@open.ac.uk>
+//
+// Ephapax IO — basic input/output operations.
+
+module IO
+
+// Print a string to stdout (borrows, does not consume).
+fn print(s: &String) -> () {
+    __intrinsic_print(s)
+}
+
+// Print a string followed by a newline.
+fn println(s: &String) -> () {
+    __intrinsic_println(s)
+}
+
+// Read a line from stdin (allocates a new String).
+fn read_line() -> String {
+    __intrinsic_read_line()
+}

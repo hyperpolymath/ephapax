@@ -1,0 +1,40 @@
+{
+  "name": "tree-sitter-ephapax",
+  "version": "0.1.0",
+  "description": "Tree-sitter grammar for Ephapax — dyadic linear/affine language",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/hyperpolymath/ephapax"
+  },
+  "license": "PMPL-1.0-or-later",
+  "author": "Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk>",
+  "main": "bindings/node",
+  "keywords": [
+    "tree-sitter",
+    "parser",
+    "ephapax",
+    "linear-types",
+    "affine-types"
+  ],
+  "dependencies": {
+    "nan": "^2.17.0"
+  },
+  "devDependencies": {
+    "tree-sitter-cli": "^0.22.0"
+  },
+  "scripts": {
+    "build": "tree-sitter generate",
+    "test": "tree-sitter test",
+    "parse": "tree-sitter parse"
+  },
+  "tree-sitter": [
+    {
+      "scope": "source.ephapax",
+      "file-types": [
+        "eph"
+      ],
+      "highlights": "queries/highlights.scm",
+      "locals": "queries/locals.scm"
+    }
+  ]
+}

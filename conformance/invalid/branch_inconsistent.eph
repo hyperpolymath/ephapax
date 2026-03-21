@@ -1,0 +1,12 @@
+// SPDX-License-Identifier: PMPL-1.0-or-later
+// Conformance test: branches consume different linear bindings — must be rejected.
+// Expected: compile error "branches consume different linear resources"
+
+fn example(cond: bool) -> i32 {
+    let! x = 42;
+    if cond {
+        x           // consumes x in true branch
+    } else {
+        0           // does NOT consume x in false branch — ERROR
+    }
+}

@@ -1,0 +1,9 @@
+// SPDX-License-Identifier: PMPL-1.0-or-later
+// Conformance test: basic function declaration and let bindings.
+// Expected: type-checks successfully.
+
+fn main() -> i32 {
+    let x = 1 + 2;
+    let y = x * 3;
+    y
+}

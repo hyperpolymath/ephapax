@@ -1,0 +1,47 @@
+# SPDX-License-Identifier: PMPL-1.0-or-later
+# Copyright (c) 2026 Jonathan D.A. Jewell (hyperpolymath) <j.d.a.jewell@open.ac.uk>
+
+[package]
+name = "ephapax-lsp"
+version = "0.1.0"
+edition = "2021"
+description = "Language Server Protocol implementation for Ephapax"
+license = "PMPL-1.0-or-later"
+repository = "https://github.com/hyperpolymath/ephapax"
+authors = ["Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk>"]
+keywords = ["lsp", "language-server", "ephapax", "linear-types", "ide"]
+categories = ["development-tools", "text-editors"]
+
+[dependencies]
+# LSP protocol
+tower-lsp = "0.20"
+lsp-types = "0.94"
+
+# Async runtime
+tokio = { version = "1", features = ["full"] }
+
+# Serialization
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# Logging
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# Error handling
+thiserror = "1"
+anyhow = "1"
+
+# Regex for parsing
+regex = "1"
+
+# TODO: Add ephapax compiler as dependency once crates are published
+# ephapax-syntax = { path = "../../src/ephapax-syntax" }
+# ephapax-typing = { path = "../../src/ephapax-typing" }
+
+[dev-dependencies]
+tokio-test = "0.4"
+
+[[bin]]
+name = "ephapax-lsp"
+path = "src/main.rs"

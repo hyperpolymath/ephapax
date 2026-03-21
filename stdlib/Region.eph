@@ -1,0 +1,32 @@
+// SPDX-License-Identifier: PMPL-1.0-or-later
+// Copyright (c) 2026 Jonathan D.A. Jewell (hyperpolymath) <j.d.a.jewell@open.ac.uk>
+//
+// Ephapax Region API — arena-based memory management.
+//
+// Regions are the core memory management primitive. They provide:
+// - Scoped allocation (values allocated in a region)
+// - Bulk deallocation (all values freed when region exits)
+// - No garbage collection (deterministic, zero overhead)
+//
+// Region handles are LINEAR: they must be destroyed exactly once.
+// Values within a region are AFFINE: they may be dropped before
+// the region exits, but their memory isn't freed until exit.
+
+module Region
+
+// Create a new region (linear handle — MUST be destroyed).
+fn create() -> Region! {
+    __intrinsic_region_create()
+}
+
+// Allocate a value in a region.
+// The value's lifetime is bounded by the region.
+fn alloc<A>(arena: &Region, value: A) -> A {
+    __intrinsic_region_alloc(arena, value)
+}
+
+// Destroy a region, freeing all allocations.
+// Consumes the region handle (linear consumption).
+fn destroy(arena: Region!) -> () {
+    __intrinsic_region_destroy(arena)
+}

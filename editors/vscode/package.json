@@ -1,0 +1,52 @@
+{
+  "name": "ephapax-vscode",
+  "displayName": "Ephapax",
+  "description": "Ephapax language support — syntax highlighting, LSP integration, linear type diagnostics",
+  "version": "0.1.0",
+  "publisher": "hyperpolymath",
+  "license": "PMPL-1.0-or-later",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/hyperpolymath/ephapax"
+  },
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Programming Languages",
+    "Linters",
+    "Debuggers"
+  ],
+  "keywords": [
+    "ephapax",
+    "linear-types",
+    "affine-types",
+    "region-based-memory"
+  ],
+  "activationEvents": [
+    "onLanguage:ephapax"
+  ],
+  "main": "./src/extension.js",
+  "contributes": {
+    "languages": [
+      {
+        "id": "ephapax",
+        "aliases": [
+          "Ephapax",
+          "ephapax"
+        ],
+        "extensions": [
+          ".eph"
+        ],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "ephapax",
+        "scopeName": "source.ephapax",
+        "path": "./syntaxes/ephapax.tmLanguage.json"
+      }
+    ]
+  }
+}

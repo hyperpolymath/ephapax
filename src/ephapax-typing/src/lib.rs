@@ -56,8 +56,11 @@ pub enum TypeError {
         else_status: &'static str,
     },
 
-    #[error("String escapes its region `{0}`")]
-    RegionEscape(RegionName),
+    #[error("Value of type {ty:?} escapes region `{region}`")]
+    RegionEscape { region: RegionName, ty: Ty },
+
+    #[error("Linear variable `{var}` in region `{region}` not consumed before region exit")]
+    RegionLinearNotConsumed { var: Var, region: RegionName },
 
     #[error("String literal must be allocated with String.new@region(\"...\")")]
     UnallocatedStringLiteral,
@@ -71,6 +74,10 @@ pub enum TypeError {
 struct CtxEntry {
     ty: Ty,
     used: bool,
+    /// Which region this variable was bound in (None = top-level / no region).
+    /// Used by the region-linear fusion to track which variables belong to
+    /// which region, so we can check AllLinearsConsumed at region exit.
+    region: Option<RegionName>,
 }
 
 /// Typing context: tracks variables and their usage
@@ -87,9 +94,10 @@ impl Context {
         Self::default()
     }
 
-    /// Extend context with new binding
+    /// Extend context with new binding, tagged with the current region.
     pub fn extend(&mut self, name: Var, ty: Ty) {
-        self.vars.insert(name, CtxEntry { ty, used: false });
+        let region = self.regions.last().cloned();
+        self.vars.insert(name, CtxEntry { ty, used: false, region });
     }
 
     /// Look up variable type
@@ -463,17 +471,70 @@ impl TypeChecker {
         Ok(then_ty)
     }
 
+    /// Type check a region block: `region r: { body }`
+    ///
+    /// Implements the region-linear fusion rules from the formal proofs
+    /// (RegionLinear.idr):
+    ///
+    /// 1. **NoRegionInType**: The return type of the body must NOT reference
+    ///    region `r`. This prevents values from escaping their region.
+    ///    This rule is ORTHOGONAL to the qualifier — it applies identically
+    ///    to affine and linear bindings (Orthogonality Lemma).
+    ///
+    /// 2. **AllLinearsConsumed**: All linear variables bound within region `r`
+    ///    must be consumed before the region exits. Affine variables may be
+    ///    implicitly dropped (the region's arena deallocator handles cleanup).
+    ///
+    /// 3. **Region Safety**: After exit, the region is no longer active.
+    ///    Any attempt to use a variable from this region is a type error
+    ///    (InactiveRegion).
     fn check_region(&mut self, name: &RegionName, body: &Expr) -> Result<Ty, TypeError> {
+        // Enter the region — all bindings created inside will be tagged with `name`
         self.ctx.enter_region(name.clone());
-        let body_ty = self.check(body)?;
-        self.ctx.exit_region();
 
-        // Check no strings from this region escape
-        if let Ty::String(r) = &body_ty {
-            if r == name {
-                return Err(TypeError::RegionEscape(name.clone()));
-            }
+        // Type check the body
+        let body_ty = self.check(body)?;
+
+        // === Rule 1: NoRegionInType (No Escape) ===
+        // The return type must not reference this region.
+        // This is the ONE rule that prevents region escape, and it applies
+        // to both affine and linear bindings identically.
+        if body_ty.references_region(name) {
+            // Exit region before returning error (maintain invariant)
+            self.ctx.exit_region();
+            return Err(TypeError::RegionEscape {
+                region: name.clone(),
+                ty: body_ty,
+            });
         }
+
+        // === Rule 2: AllLinearsConsumed ===
+        // All LINEAR variables bound in this region must have been consumed.
+        // AFFINE variables are implicitly dropped — the arena handles cleanup.
+        // This is the qualifier-specific part of region exit.
+        for (var_name, entry) in &self.ctx.vars {
+            // Only check variables that belong to THIS region
+            if entry.region.as_ref() != Some(name) {
+                continue;
+            }
+
+            // Linear variables MUST be consumed
+            if entry.ty.is_linear() && !entry.used {
+                let var = var_name.clone();
+                let region = name.clone();
+                self.ctx.exit_region();
+                return Err(TypeError::RegionLinearNotConsumed { var, region });
+            }
+
+            // Affine variables: no check needed — implicit drop is fine.
+            // The region's arena deallocator frees the memory.
+        }
+
+        // === Rule 3: Region Safety ===
+        // Exit the region. After this, the region is no longer active.
+        // Any StringNew@name or other allocation attempt will fail with
+        // InactiveRegion.
+        self.ctx.exit_region();
 
         Ok(body_ty)
     }
@@ -1344,7 +1405,7 @@ mod tests {
         });
         assert!(matches!(
             tc.check(&expr),
-            Err(TypeError::RegionEscape(_))
+            Err(TypeError::RegionEscape { .. })
         ));
     }
 

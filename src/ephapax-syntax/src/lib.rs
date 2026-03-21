@@ -92,6 +92,30 @@ pub enum Ty {
 
 impl Ty {
     /// Check if type is linear (must be used exactly once)
+    /// Check if this type references a specific region.
+    ///
+    /// Used by the region-linear fusion: a value whose type references
+    /// region r cannot escape r (NoRegionInType from the formal proofs).
+    /// This is ORTHOGONAL to the qualifier — it applies to both affine
+    /// and linear bindings identically.
+    pub fn references_region(&self, region: &RegionName) -> bool {
+        match self {
+            Ty::String(r) => r == region,
+            Ty::Region { name, inner } => name == region || inner.references_region(region),
+            Ty::Ref { inner, .. } => inner.references_region(region),
+            Ty::Fun { param, ret } => {
+                param.references_region(region) || ret.references_region(region)
+            }
+            Ty::Prod { left, right } | Ty::Sum { left, right } => {
+                left.references_region(region) || right.references_region(region)
+            }
+            Ty::Borrow(inner) => inner.references_region(region),
+            Ty::List(inner) => inner.references_region(region),
+            Ty::Tuple(elements) => elements.iter().any(|t| t.references_region(region)),
+            Ty::Base(_) | Ty::Var(_) => false,
+        }
+    }
+
     pub fn is_linear(&self) -> bool {
         match self {
             Ty::String(_) => true,

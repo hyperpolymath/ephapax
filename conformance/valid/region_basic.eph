@@ -1,0 +1,12 @@
+// SPDX-License-Identifier: PMPL-1.0-or-later
+// Conformance test: basic region with affine allocations.
+// Expected: type-checks successfully.
+
+fn example() -> i32 {
+    region r:
+        let s1 = String.new@r("hello")
+        let s2 = String.new@r("world")
+        let len = String.len(&s1)
+        let result = String.concat(s1, s2)
+        len
+}

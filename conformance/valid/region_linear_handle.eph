@@ -1,0 +1,12 @@
+// SPDX-License-Identifier: PMPL-1.0-or-later
+// Conformance test: linear region handle consumed by destroy.
+// This is the dyadic emergence: linear handle + affine interiors.
+// Expected: type-checks successfully.
+
+fn example() -> i32 {
+    let! arena = Region.create()
+    let buffer = Region.alloc(&arena, 1024)
+    let index = Region.alloc(&arena, 42)
+    Region.destroy(arena)
+    0
+}

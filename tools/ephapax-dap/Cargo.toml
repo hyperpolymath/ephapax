@@ -1,0 +1,43 @@
+# SPDX-License-Identifier: PMPL-1.0-or-later
+# Copyright (c) 2026 Jonathan D.A. Jewell (hyperpolymath) <j.d.a.jewell@open.ac.uk>
+
+[package]
+name = "ephapax-dap"
+version = "0.1.0"
+edition = "2021"
+description = "Debug Adapter Protocol implementation for Ephapax"
+license = "PMPL-1.0-or-later"
+repository = "https://github.com/hyperpolymath/ephapax"
+authors = ["Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk>"]
+keywords = ["dap", "debugger", "ephapax", "linear-types"]
+categories = ["development-tools"]
+
+[dependencies]
+# Async runtime
+tokio = { version = "1", features = ["full"] }
+
+# Serialization
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# Logging
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# Error handling
+anyhow = "1"
+
+# TODO: Add ephapax compiler as dependency
+# ephapax-syntax = { path = "../../src/ephapax-syntax" }
+# ephapax-interp = { path = "../../src/ephapax-interp" }
+
+[dev-dependencies]
+tokio-test = "0.4"
+
+[lib]
+name = "ephapax_dap"
+path = "src/lib.rs"
+
+[[bin]]
+name = "ephapax-dap"
+path = "src/main.rs"

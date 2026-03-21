@@ -1,0 +1,10 @@
+// SPDX-License-Identifier: PMPL-1.0-or-later
+// Conformance test: value escaping its region — must be rejected.
+// Expected: compile error E003 "value in region 'r' escapes to outer scope"
+
+fn example() -> String {
+    region r:
+        let s = String.new@r("hello")
+        s   // ERROR: s is allocated in r, cannot be returned
+            // (return type String would need to outlive r)
+}

@@ -1,0 +1,10 @@
+// SPDX-License-Identifier: PMPL-1.0-or-later
+// Conformance test: linear binding used twice — must be rejected.
+// Expected: compile error E002 "linear variable 'x' already consumed"
+
+fn example() -> i32 {
+    let! x = 42;
+    let a = x;     // first use — consumes x
+    let b = x;     // second use — ERROR: x already consumed
+    a + b
+}

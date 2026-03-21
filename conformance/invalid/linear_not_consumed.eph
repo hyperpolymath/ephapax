@@ -1,0 +1,9 @@
+// SPDX-License-Identifier: PMPL-1.0-or-later
+// Conformance test: linear binding NOT consumed — must be rejected.
+// Expected: compile error E001 "linear variable 'x' not consumed"
+
+fn example() -> i32 {
+    let! x = 42;
+    // x is never used — linear violation!
+    0
+}

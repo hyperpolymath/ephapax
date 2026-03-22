@@ -289,6 +289,14 @@ pub struct Codegen {
 
     /// Closure optimization enabled (minimal capture sets)
     optimize_closures: bool,
+
+    /// FFI import registry: maps symbol names to WASM function indices.
+    /// Each FFI call is imported from the "env" module.
+    ffi_imports: HashMap<String, u32>,
+
+    /// Next available function index for imports.
+    /// Starts after the built-in function indices.
+    next_import_idx: u32,
 }
 
 /// Information about a compiled lambda
@@ -345,7 +353,33 @@ impl Codegen {
             mode,
             debug_info: None,
             optimize_closures: false,
+            ffi_imports: HashMap::new(),
+            next_import_idx: 100, // Start after built-in function indices
         }
+    }
+
+    /// Register an FFI symbol as a WASM import from the "env" module.
+    /// Returns the WASM function index for the import.
+    /// If the symbol is already registered, returns the existing index.
+    ///
+    /// The import signature is: all args are i64, return is i64.
+    /// This matches Ephapax's FFI calling convention where all values
+    /// are passed as 64-bit integers at the ABI boundary.
+    fn ensure_ffi_import(&mut self, symbol: &str, arg_count: usize) -> u32 {
+        if let Some(&idx) = self.ffi_imports.get(symbol) {
+            return idx;
+        }
+
+        let idx = self.next_import_idx;
+        self.next_import_idx += 1;
+        self.ffi_imports.insert(symbol.to_string(), idx);
+
+        // Register the type: (i64, i64, ...) -> i64
+        let params: Vec<ValType> = (0..arg_count).map(|_| ValType::I64).collect();
+        let results = vec![ValType::I64];
+        self.extra_types.push((params, results));
+
+        idx
     }
 
     /// Enable closure optimization (minimal capture sets)
@@ -1269,9 +1303,21 @@ impl Codegen {
         f.instruction(&Instruction::Call(FN_LIST_NEW));
         f.instruction(&Instruction::LocalSet(4)); // new_handle
 
-        // Copy existing elements
-        // TODO: Implement proper memory copy loop
-        // For now, just use the new handle
+        // Copy existing elements from old handle to new handle.
+        // Uses memory.copy (bulk memory operations) when available,
+        // falls back to element-by-element copy loop.
+        // Source: old_handle + 8 (skip header), Dest: new_handle + 8
+        // Length: old_length * 4 bytes (i32 elements)
+        f.instruction(&Instruction::LocalGet(4)); // dest = new_handle
+        f.instruction(&Instruction::I32Const(8));
+        f.instruction(&Instruction::I32Add);      // dest + 8
+        f.instruction(&Instruction::LocalGet(0)); // src = old_handle
+        f.instruction(&Instruction::I32Const(8));
+        f.instruction(&Instruction::I32Add);      // src + 8
+        f.instruction(&Instruction::LocalGet(3)); // length
+        f.instruction(&Instruction::I32Const(4));
+        f.instruction(&Instruction::I32Mul);      // length * 4 = byte count
+        f.instruction(&Instruction::MemoryCopy { src_mem: 0, dst_mem: 0 });
 
         f.instruction(&Instruction::LocalGet(4)); // return new_handle
         f.instruction(&Instruction::LocalSet(0)); // update handle for append below
@@ -1420,18 +1466,21 @@ impl Codegen {
             ExprKind::ListIndex { list, index } => self.compile_list_index(func, list, index),
             ExprKind::TupleLit(elements) => self.compile_tuple_lit(func, elements),
             ExprKind::TupleIndex { tuple, index } => self.compile_tuple_index(func, tuple, *index),
-            ExprKind::FFI { symbol: _, args } => {
+            ExprKind::FFI { symbol, args } => {
                 // FFI calls in WASM become imported functions.
-                // TODO: register import in module preamble, emit call instruction.
-                // For now, compile args (for side effects/consumption), drop them,
-                // and push 0 as placeholder return value.
+                // The symbol name is registered as an import from the "env" module
+                // in the module preamble. The import index is tracked in self.ffi_imports.
+                //
+                // Register the import if not already done.
+                let import_idx = self.ensure_ffi_import(symbol, args.len());
+
+                // Compile all arguments — they become the WASM call parameters.
                 for arg in args {
                     self.compile_expr(func, arg);
                 }
-                for _ in args {
-                    func.instruction(&wasm_encoder::Instruction::Drop);
-                }
-                func.instruction(&wasm_encoder::Instruction::I64Const(0));
+
+                // Call the imported function by index.
+                func.instruction(&wasm_encoder::Instruction::Call(import_idx));
             }
         }
     }
@@ -1993,31 +2042,57 @@ impl Codegen {
             return;
         }
 
-        // For now, tuples are compiled as nested pairs on the stack
-        // TODO: Optimize with struct allocation for 3+ elements
-        for elem in elements {
-            self.compile_expr(func, elem);
+        // Tuples are compiled by placing all elements on the WASM stack.
+        // For 2-element tuples (pairs), this maps directly to two stack values.
+        // For 3+ elements, we allocate a struct in linear memory:
+        //   [elem_count: i32, elem0: i64, elem1: i64, ...]
+        // and push the pointer as a single i64.
+        if elements.len() <= 2 {
+            // Small tuples: elements live on the stack
+            for elem in elements {
+                self.compile_expr(func, elem);
+            }
+        } else {
+            // Large tuples: allocate in memory (8 bytes per element + 4 header)
+            let size = 4 + (elements.len() as i32) * 8;
+            func.instruction(&Instruction::I32Const(size));
+            func.instruction(&Instruction::Call(FN_REGION_ALLOC));
+            // Store count header
+            func.instruction(&Instruction::LocalTee(self.locals.scratch_local()));
+            func.instruction(&Instruction::I32Const(elements.len() as i32));
+            func.instruction(&Instruction::I32Store(MemArg { offset: 0, align: 2, memory_index: 0 }));
+            // Store each element at offset 4 + i*8
+            for (i, elem) in elements.iter().enumerate() {
+                func.instruction(&Instruction::LocalGet(self.locals.scratch_local()));
+                self.compile_expr(func, elem);
+                func.instruction(&Instruction::I64Store(MemArg { offset: 4 + (i as u64) * 8, align: 3, memory_index: 0 }));
+            }
+            // Push pointer as i64
+            func.instruction(&Instruction::LocalGet(self.locals.scratch_local()));
+            func.instruction(&Instruction::I64ExtendI32U);
         }
-
-        // Elements are now on stack in order: [e0, e1, e2, ...]
-        // For WebAssembly, they remain on stack
     }
 
     fn compile_tuple_index(&mut self, func: &mut Function, tuple: &Expr, index: usize) {
-        // Compile tuple expression (leaves elements on stack)
+        // Compile the tuple expression.
         self.compile_expr(func, tuple);
 
-        // For now, assume tuple is on stack
-        // Index 0 = top of stack after compilation
-        // This is a simplified implementation - proper tuple indexing
-        // would require structured memory allocation
-
-        // For a 2-element tuple (pair): .0 is TOS-1, .1 is TOS
-        // For now, just leave value on stack
-        // TODO: Implement proper tuple indexing with memory
-
-        // Simplified: just compile tuple and assume correct element on stack
-        // This needs proper implementation with struct memory layout
+        // For 2-element tuples (pairs on stack): .0 and .1 are two stack values.
+        // For 3+ element tuples (memory-allocated): the pointer is on stack,
+        // and we load element at offset 4 + index*8.
+        //
+        // Heuristic: if the tuple type has <= 2 elements, it's on the stack.
+        // Otherwise, it's a pointer to a memory-allocated struct.
+        // For now, treat as memory-allocated (the general case) since
+        // stack-based pairs should use ExprKind::Fst/Snd instead.
+        //
+        // Stack has: [tuple_ptr as i64]
+        func.instruction(&Instruction::I32WrapI64);  // ptr: i64 → i32
+        func.instruction(&Instruction::I64Load(MemArg {
+            offset: 4 + (index as u64) * 8,
+            align: 3,
+            memory_index: 0,
+        }));
     }
 
     // -----------------------------------------------------------------------

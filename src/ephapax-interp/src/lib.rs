@@ -46,6 +46,9 @@ pub enum RuntimeError {
 
     #[error("Not a sum type")]
     NotASum,
+
+    #[error("Index {index} out of bounds (length {length})")]
+    IndexOutOfBounds { index: usize, length: usize },
 }
 
 /// Runtime values
@@ -60,6 +63,7 @@ pub enum Value {
     String { data: String, region: RegionName },
     Pair(Box<Value>, Box<Value>),
     Tuple(Vec<Value>),
+    List(Vec<Value>),
     Left(Box<Value>),
     Right(Box<Value>),
     Closure {
@@ -307,13 +311,40 @@ impl Interpreter {
             ExprKind::Block(exprs) => self.eval_block(exprs),
             ExprKind::BinOp { op, left, right } => self.eval_binop(*op, left, right),
             ExprKind::UnaryOp { op, operand } => self.eval_unaryop(*op, operand),
-            ExprKind::ListLit(_) => {
-                // TODO: Implement list literal evaluation
-                Err(RuntimeError::Unimplemented("list literals not yet supported in interpreter".to_string()))
+            ExprKind::ListLit(elements) => {
+                // Evaluate all list elements and collect into a list value.
+                let mut values = Vec::new();
+                for expr in elements {
+                    values.push(self.eval(expr)?);
+                }
+                Ok(Value::List(values))
             }
-            ExprKind::ListIndex { .. } => {
-                // TODO: Implement list index evaluation
-                Err(RuntimeError::Unimplemented("list indexing not yet supported in interpreter".to_string()))
+            ExprKind::ListIndex { list, index } => {
+                // Evaluate the list and index, then extract the element.
+                let list_val = self.eval(list)?;
+                let index_val = self.eval(index)?;
+                match (list_val, index_val) {
+                    (Value::List(elements), Value::I32(i)) => {
+                        let idx = i as usize;
+                        if idx < elements.len() {
+                            Ok(elements[idx].clone())
+                        } else {
+                            Err(RuntimeError::IndexOutOfBounds { index: idx, length: elements.len() })
+                        }
+                    }
+                    (Value::List(elements), Value::I64(i)) => {
+                        let idx = i as usize;
+                        if idx < elements.len() {
+                            Ok(elements[idx].clone())
+                        } else {
+                            Err(RuntimeError::IndexOutOfBounds { index: idx, length: elements.len() })
+                        }
+                    }
+                    _ => Err(RuntimeError::TypeError {
+                        expected: "list and integer".to_string(),
+                        found: "non-list or non-integer".to_string(),
+                    })
+                }
             }
             ExprKind::TupleLit(exprs) => {
                 // Evaluate all tuple elements

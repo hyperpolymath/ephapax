@@ -1,0 +1,79 @@
+;; SPDX-License-Identifier: PMPL-1.0-or-later
+;; ECOSYSTEM.scm - Ecosystem relationships for Ephapax ↔ Proven FFI
+
+(ecosystem
+  (version "1.0.0")
+  (name "Ephapax ↔ Proven FFI")
+  (type "library")
+  (purpose "FFI/ABI adapter between Ephapax (linear types) and Proven (dependent types)")
+
+  ;;; Position in Ecosystem
+  (position-in-ecosystem
+    (layer "infrastructure")
+    (role "ffi-adapter")
+    (domain "formal-verification" "linear-types" "systems-programming"))
+
+  ;;; Related Projects
+  (related-projects
+    (project
+      (name "Ephapax")
+      (url "https://github.com/hyperpolymath/ephapax")
+      (relationship potential-consumer)
+      (description "Dyadic language with affine/linear modes - will use this FFI for VRAM cache")
+      (integration-status "planned")
+      (integration-point "Rust bindings for compiler integration"))
+
+    (project
+      (name "Proven")
+      (url "https://github.com/usernamehw/proven")
+      (relationship foundation-library)
+      (description "87 formally verified Idris2 modules - provides the verified implementations")
+      (integration-status "active")
+      (integration-point "Currently using Zig stubs - will link to Idris2-compiled code"))
+
+    (project
+      (name "Ubicity")
+      (url "https://github.com/hyperpolymath/ubicity")
+      (relationship sibling-standard)
+      (description "Repository synthesis architecture - may use verified buffers for code generation")
+      (integration-status "potential")
+      (integration-point "SafeBuffer for AST serialization"))
+
+    (project
+      (name "Palimpsest License")
+      (url "https://github.com/hyperpolymath/palimpsest-license")
+      (relationship license-provider)
+      (description "Licensing framework with formal verification provisions")
+      (integration-status "active")
+      (integration-point "Palimpsest-1.0-or-later license"))
+
+    (project
+      (name "Hypatia")
+      (url "https://github.com/hyperpolymath/hypatia")
+      (relationship ecosystem-orchestrator)
+      (description "Polymathematical ecosystem coordinator")
+      (integration-status "managed")
+      (integration-point "Part of hyperpolymath ecosystem"))
+
+    (project
+      (name "Zig Programming Language")
+      (url "https://ziglang.org")
+      (relationship implementation-language)
+      (description "Systems programming language for FFI implementation")
+      (integration-status "active")
+      (integration-point "Pure Zig implementation with C-compatible ABI")))
+
+  ;;; What This Is
+  (what-this-is
+    "Bidirectional FFI adapter enabling Ephapax to use Proven's formally verified code"
+    "Pure Zig implementation with C-compatible ABI (no C files, no headers)"
+    "Supports both affine and linear resource modes with single FFI"
+    "Foundation for integrating linear types (Ephapax) with dependent types (Idris2)")
+
+  ;;; What This Is Not
+  (what-this-is-not
+    "NOT a standalone Ephapax runtime - just FFI to verified libraries"
+    "NOT a complete wrapper for all 87 Proven modules - only 3 implemented so far"
+    "NOT type-safe at FFI boundary - caller must ensure linear/affine discipline"
+    "NOT a replacement for Proven - depends on it as foundation"
+    "NOT production-ready yet - still in alpha (0.x.y versioning)"))

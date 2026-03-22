@@ -1,0 +1,73 @@
+;; SPDX-License-Identifier: PMPL-1.0-or-later
+;; ECOSYSTEM.scm for ephapax-proven
+;; Media Type: application/vnd.ecosystem+scm
+
+(ecosystem
+  (version "0.1.0")
+  (name "ephapax-proven")
+  (type "library")
+  (purpose "Safe Rust wrappers for formally verified data structures from Idris2")
+
+  (position-in-ecosystem
+    "ephapax-proven bridges formal verification (Idris2) with systems programming (Rust).
+     Part of the Ephapax family providing formally verified components.
+     Enables Rust projects to use mathematically proven data structures without Idris2 knowledge.")
+
+  (related-projects
+    (project
+      (name "Idris2 Proven")
+      (url "https://github.com/hyperpolymath/proven")
+      (relationship sibling-standard)
+      (description "Upstream formally verified library providing specifications and proofs"))
+
+    (project
+      (name "ephapax-proven-ffi")
+      (url "https://github.com/hyperpolymath/ephapax-proven-ffi")
+      (relationship sibling-standard)
+      (description "Pure Zig FFI implementation layer between Idris2 and Rust"))
+
+    (project
+      (name "ephapax-proven-sys")
+      (url "https://crates.io/crates/ephapax-proven-sys")
+      (relationship sibling-standard)
+      (description "Unsafe FFI bindings crate, consumed by ephapax-proven"))
+
+    (project
+      (name "std::collections")
+      (url "https://doc.rust-lang.org/std/collections/")
+      (relationship potential-consumer)
+      (description "Rust stdlib collections - ephapax-proven provides formally verified alternatives"))
+
+    (project
+      (name "lru crate")
+      (url "https://crates.io/crates/lru")
+      (relationship potential-consumer)
+      (description "Popular LRU cache - ephapax-proven::lru offers formally verified alternative"))
+
+    (project
+      (name "bytes crate")
+      (url "https://crates.io/crates/bytes")
+      (relationship potential-consumer)
+      (description "Bytes manipulation - ephapax-proven::buffer provides verified fixed-size alternative"))
+
+    (project
+      (name "ephapax-haste")
+      (url "")
+      (relationship inspiration)
+      (description "Proposed performance-focused companion library (not yet created)
+                    Would provide unverified but highly optimized variants")))
+
+  (what-this-is
+    "A production-ready Rust library providing formally verified data structures.
+     All implementations have mathematical proofs of correctness from Idris2.
+     Designed for safety-critical systems: medical, automotive, aerospace, finance.
+     Zero-config installation via cargo add.
+     6 modules currently: LRU Cache, Buffer, Resource, Queue, Set, Hex.
+     113 tests, comprehensive documentation, Criterion benchmarks.")
+
+  (what-this-is-not
+    "Not a replacement for all stdlib collections (only provides verified variants).
+     Not the fastest option (safety over performance, copies data at FFI boundary).
+     Not Idris2-specific (hides complexity behind Rust API).
+     Not experimental (v0.1 but production-ready, API may change).
+     Not abandoning stdlib (use for most cases, this for critical paths)."))

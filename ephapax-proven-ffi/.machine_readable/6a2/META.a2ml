@@ -1,0 +1,186 @@
+;; SPDX-License-Identifier: PMPL-1.0-or-later
+;; META.scm - Meta-level information for Ephapax ↔ Proven FFI
+
+(define-module (ephapax-proven-ffi meta)
+  #:version "1.0.0")
+
+;;; ===========================================================================
+;;; Architecture Decisions
+;;; ===========================================================================
+
+(architecture-decisions
+  (adr-001
+    (status accepted)
+    (date "2026-01-24")
+    (context "Need FFI between Ephapax (linear types) and Proven (dependent types)")
+    (decision "Use pure Zig implementation with C-compatible ABI")
+    (consequences
+      (positive
+        "No C files - maintainable Zig code"
+        "Standard C ABI - works with any language"
+        "Manual memory management - full control")
+      (negative
+        "Zig API unstable in 0.16.0-dev"
+        "Manual exports required - verbose comptime block"
+        "No GC - callers must manage lifetimes")))
+
+  (adr-002
+    (status accepted)
+    (date "2026-01-24")
+    (context "Ephapax has two modes: affine and linear - do we need separate FFIs?")
+    (decision "ONE FFI handles both dyadic modes")
+    (consequences
+      (positive
+        "Single codebase - less maintenance"
+        "Type system enforcement in Ephapax compiler - FFI stays simple"
+        "Rust bindings can provide mode-specific wrappers")
+      (negative
+        "FFI doesn't enforce linearity - caller responsibility"
+        "No compile-time guarantees at FFI boundary")))
+
+  (adr-003
+    (status accepted)
+    (date "2026-01-24")
+    (context "Zig build.zig API is unstable (addSharedLibrary doesn't exist)")
+    (decision "Use GNU Make + zig build-lib directly")
+    (consequences
+      (positive
+        "Stable build - works with current Zig"
+        "Simple Makefile - easy to understand"
+        "Direct control over flags")
+      (negative
+        "Not using Zig package manager conventions"
+        "May need to revisit when Zig stabilizes")))
+
+  (adr-004
+    (status accepted)
+    (date "2026-01-24")
+    (context "Should we implement all 87 Proven modules at once?")
+    (decision "Start with 3 modules (LRU, Buffer, Resource) - add as needed")
+    (consequences
+      (positive
+        "Faster iteration - validate design early"
+        "Focus on Ephapax VRAM cache use case"
+        "Modular design - easy to add modules")
+      (negative
+        "Incomplete coverage - may need refactoring"
+        "Users might need modules we haven't wrapped"))))
+
+;;; ===========================================================================
+;;; Development Practices
+;;; ===========================================================================
+
+(development-practices
+  (code-style
+    (language "Zig")
+    (naming-convention "snake_case for functions, PascalCase for types")
+    (documentation "Zig doc comments (//!) for public API")
+    (exports "All FFI functions: pub export fn - no callconv needed")
+    (memory-management "Explicit allocator pattern - callers own memory"))
+
+  (security
+    (no-unsafe-code "Zig is memory-safe by default")
+    (bounds-checking "All buffer operations checked")
+    (null-handling "Use ?*Type for nullable pointers")
+    (abi-safety "pub export ensures stable C ABI"))
+
+  (testing
+    (unit-tests "Zig test blocks for internal logic")
+    (integration-tests "test_simple.c validates FFI boundary")
+    (fuzzing "TODO: Add libFuzzer for FFI inputs")
+    (ci-cd "TODO: GitHub Actions for build/test"))
+
+  (versioning
+    (scheme "Semantic Versioning 2.0.0")
+    (stability "0.x.y - unstable API during development")
+    (breaking-changes "Major version bump for FFI signature changes"))
+
+  (documentation
+    (format "AsciiDoc for user docs, Zig doc comments for API")
+    (required-files "README.adoc, DYADIC-FFI-DESIGN.md, API reference")
+    (examples "examples/ directory for integration patterns"))
+
+  (branching
+    (model "GitHub Flow - main + feature branches")
+    (protection "main requires PR reviews (when contributors exist)")
+    (releases "Tagged commits on main")))
+
+;;; ===========================================================================
+;;; Design Rationale
+;;; ===========================================================================
+
+(design-rationale
+  (why-zig
+    "Zig provides C-compatible ABI without C code"
+    "Manual memory management - no GC overhead"
+    "Comptime - zero-cost abstractions"
+    "Active development - good for experimental projects")
+
+  (why-c-abi
+    "C ABI is universal - works with Rust, C++, Python, etc."
+    "Proven library (Idris2) can compile to C"
+    "Simple calling convention - predictable performance")
+
+  (why-pure-zig
+    "No C files - modern codebase"
+    "Zig safety guarantees throughout"
+    "Single language - easier maintenance")
+
+  (why-makefile
+    "Zig 0.16.0-dev build.zig API is unstable"
+    "Makefile is stable and well-understood"
+    "Simple project - don't need complex build system")
+
+  (why-stubs-first
+    "Validate FFI architecture before full Idris2 integration"
+    "Faster iteration during development"
+    "Can replace with proven implementations incrementally")
+
+  (why-single-ffi-for-dyadic
+    "Affine/linear distinction is type-level, not runtime"
+    "FFI is about ABI compatibility, not type enforcement"
+    "Ephapax compiler enforces mode - FFI just provides operations"
+    "Rust bindings can add mode-specific safety wrappers"))
+
+;;; ===========================================================================
+;;; Cross-Cutting Concerns
+;;; ===========================================================================
+
+(cross-cutting-concerns
+  (performance
+    (zero-copy "FFI uses pointers - no data copying")
+    (allocation "Caller-controlled - can use stack or heap")
+    (inlining "pub export prevents inlining - small overhead"))
+
+  (portability
+    (platforms "Linux (tested), macOS, Windows (untested)")
+    (architecture "x86_64 (tested), ARM64 (should work)")
+    (libc "Requires C standard library"))
+
+  (integration
+    (ephapax "Primary consumer - Rust bindings pending")
+    (proven "Foundation - links to Idris2 compiled code")
+    (other-languages "Any language with C FFI support"))
+
+  (maintenance
+    (zig-version "Currently 0.16.0-dev - may need updates")
+    (proven-updates "Sync with upstream proven library")
+    (api-stability "Unstable until 1.0.0 release")))
+
+;;; ===========================================================================
+;;; Future Vision
+;;; ===========================================================================
+
+(future-vision
+  (long-term-goals
+    "Complete coverage of all 87 Proven modules"
+    "Replace Zig stubs with Idris2-compiled implementations"
+    "High-performance VRAM cache for Ephapax compiler"
+    "Benchmark suite proving formal verification overhead is minimal"
+    "Reference implementation for linear-types ↔ dependent-types FFI")
+
+  (research-directions
+    "Automated proof-carrying code across FFI boundary"
+    "Linear type checking at FFI level (linear Rust types)"
+    "WebGPU integration for GPU-accelerated formal verification"
+    "Compile-time FFI validation using comptime in Zig"))

@@ -13,6 +13,11 @@ use ephapax_lexer::Lexer;
 use ephapax_parser::{parse, parse_module};
 use ephapax_repl::Repl;
 use ephapax_typing::{type_check_module, type_check_module_with_mode, Mode as TypingMode};
+// AST dump support (sexpr + json output)
+#[allow(unused_imports)]
+use ephapax_ir;
+#[allow(unused_imports)]
+use ephapax_syntax;
 use std::fs;
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -115,6 +120,10 @@ enum Commands {
         /// Pretty print AST
         #[arg(short, long)]
         pretty: bool,
+
+        /// Output format: pretty (default), sexpr, json
+        #[arg(short, long, default_value = "pretty")]
+        format: String,
     },
 
     /// Package management commands
@@ -164,7 +173,7 @@ fn main() -> ExitCode {
             compile_sexpr_file(&file, output, cli.verbose)
         }
         Some(Commands::Tokens { input }) => show_tokens(&input),
-        Some(Commands::Parse { input, pretty }) => show_parse(&input, pretty),
+        Some(Commands::Parse { input, pretty, format }) => show_parse(&input, pretty, &format),
         Some(Commands::Package(pkg_cmd)) => handle_package_command(pkg_cmd, cli.verbose),
         None => {
             // If a file is given without subcommand, run it
@@ -500,7 +509,7 @@ fn show_tokens(input: &str) -> Result<(), String> {
     }
 }
 
-fn show_parse(input: &str, pretty: bool) -> Result<(), String> {
+fn show_parse(input: &str, pretty: bool, format: &str) -> Result<(), String> {
     // Try to read as file first
     let source = if std::path::Path::new(input).exists() {
         fs::read_to_string(input).map_err(|e| format!("Cannot read {}: {}", input, e))?
@@ -508,6 +517,56 @@ fn show_parse(input: &str, pretty: bool) -> Result<(), String> {
         input.to_string()
     };
 
+    let filename = if std::path::Path::new(input).exists() {
+        input
+    } else {
+        "input"
+    };
+
+    // For sexpr/json, parse as module (richer output)
+    if format == "sexpr" || format == "json" {
+        // Try as module first (preferred for structured output)
+        match parse_module(&source, filename) {
+            Ok(module) => {
+                match format {
+                    "sexpr" => println!("{}", ephapax_ir::module_to_sexpr(&module)),
+                    "json" => println!("{}", ephapax_ir::module_to_json(&module)),
+                    _ => unreachable!(),
+                }
+                return Ok(());
+            }
+            Err(_) => {}
+        }
+        // Fall back to expression
+        match parse(&source) {
+            Ok(expr) => {
+                // Wrap single expression in a synthetic module for consistent output
+                let module = ephapax_syntax::Module {
+                    name: smol_str::SmolStr::new(filename),
+                    decls: vec![ephapax_syntax::Decl::Fn {
+                        name: smol_str::SmolStr::new("_expr"),
+                        params: vec![],
+                        ret_ty: ephapax_syntax::Ty::Base(ephapax_syntax::BaseTy::Unit),
+                        body: expr,
+                    }],
+                };
+                match format {
+                    "sexpr" => println!("{}", ephapax_ir::module_to_sexpr(&module)),
+                    "json" => println!("{}", ephapax_ir::module_to_json(&module)),
+                    _ => unreachable!(),
+                }
+                return Ok(());
+            }
+            Err(errors) => {
+                for error in &errors {
+                    eprintln!("{} {}", "Parse error:".red().bold(), error);
+                }
+                return Err(format!("{} parse error(s)", errors.len()));
+            }
+        }
+    }
+
+    // Default: pretty/debug format
     // Try as expression first
     match parse(&source) {
         Ok(expr) => {
@@ -522,7 +581,7 @@ fn show_parse(input: &str, pretty: bool) -> Result<(), String> {
     }
 
     // Try as module
-    match parse_module(&source, "input") {
+    match parse_module(&source, filename) {
         Ok(module) => {
             if pretty {
                 println!("{:#?}", module);

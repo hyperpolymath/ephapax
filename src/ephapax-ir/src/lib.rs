@@ -164,6 +164,63 @@ pub fn module_to_sexpr(module: &Module) -> String {
     .to_string()
 }
 
+/// Convert a module AST to a JSON string.
+///
+/// Recursively encodes the full AST using the same structure as the
+/// S-expression codec but in JSON format.
+pub fn module_to_json(module: &Module) -> String {
+    let sexpr = SExpr::List(vec![
+        SExpr::Atom("module".into()),
+        SExpr::Atom(escape_atom(&module.name)),
+        SExpr::List(module.decls.iter().map(decl_to_sexpr).collect()),
+    ]);
+    sexpr_to_json(&sexpr, 0)
+}
+
+/// Convert an S-expression tree to indented JSON.
+fn sexpr_to_json(sexpr: &SExpr, depth: usize) -> String {
+    let indent = "  ".repeat(depth);
+    let inner = "  ".repeat(depth + 1);
+    match sexpr {
+        SExpr::Atom(s) => format!("\"{}\"", s.replace('\\', "\\\\").replace('"', "\\\"")),
+        SExpr::List(items) if items.is_empty() => "[]".to_string(),
+        SExpr::List(items) => {
+            // If first item is an atom, use it as a "kind" key for readability
+            if let Some(SExpr::Atom(kind)) = items.first() {
+                let rest: Vec<String> = items[1..]
+                    .iter()
+                    .enumerate()
+                    .map(|(i, item)| {
+                        format!(
+                            "{}\"{}\": {}",
+                            inner,
+                            i,
+                            sexpr_to_json(item, depth + 1)
+                        )
+                    })
+                    .collect();
+                if rest.is_empty() {
+                    format!("{{ {}\"kind\": \"{}\" }}", indent, kind)
+                } else {
+                    format!(
+                        "{{\n{}\"kind\": \"{}\",\n{}\n{}}}",
+                        inner,
+                        kind,
+                        rest.join(",\n"),
+                        indent
+                    )
+                }
+            } else {
+                let elems: Vec<String> = items
+                    .iter()
+                    .map(|item| format!("{}{}", inner, sexpr_to_json(item, depth + 1)))
+                    .collect();
+                format!("[\n{}\n{}]", elems.join(",\n"), indent)
+            }
+        }
+    }
+}
+
 pub fn module_from_sexpr(sexpr: &str) -> Result<Module, SExprError> {
     let parsed = parse_sexpr(sexpr)?;
     match parsed {

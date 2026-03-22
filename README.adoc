@@ -1,6 +1,6 @@
 image:https://img.shields.io/badge/License-PMPL--1.0-blue.svg[License: PMPL-1.0,link="https://github.com/hyperpolymath/palimpsest-license"]
 image:https://img.shields.io/badge/Philosophy-Palimpsest-indigo.svg[Palimpsest,link="https://github.com/hyperpolymath/palimpsest-license"]
-image:https://github.com/hyperpolymath/ephapax/actions/workflows/smoke.yml/badge.svg?branch=main[Smoke,link="https://github.com/hyperpolymath/ephapax/actions/workflows/smoke.yml"]
+image:https://github.com/hyperpolymath/ephapax/actions/workflows/codeql.yml/badge.svg?branch=main[CodeQL,link="https://github.com/hyperpolymath/ephapax/actions/workflows/codeql.yml"]
 
 
 // SPDX-License-Identifier: PMPL-1.0-or-later
@@ -56,10 +56,10 @@ Grammar highlights:
 [source,bash]
 ----
 just idris-build
-just smoke
+just golden
 ----
 
-This compiles `examples/hello.eph` end-to-end and produces a WASM artifact.
+This runs tests, builds all crates, and verifies Coq proofs.
 
 == Current Limitations
 
@@ -237,8 +237,8 @@ just golden
 == Documentation
 
 * link:spec/SPEC.md[Language Specification]
-* link:docs/wiki/[Wiki Documentation]
-* link:docs/coqdoc/[Coq Documentation] (generated)
+* link:formal/[Coq Formalisation] (`just proofs` to verify)
+* link:src/formal/[Idris2 Formalisation] (`just idris-build` to verify)
 
 == Two-Phase Compiler (Idris2 → WASM)
 
@@ -330,7 +330,9 @@ Contributions are welcome! Please see:
 
 == Licence
 
-EUPL-1.2 — See link:LICENSE.txt[LICENSE.txt]
+PMPL-1.0-or-later — See link:LICENSES/PMPL-1.0-or-later.txt[PMPL-1.0-or-later.txt]
+
+MPL-2.0 fallback available — See link:LICENSES/MPL-2.0.txt[MPL-2.0.txt]
 
 == Author
 

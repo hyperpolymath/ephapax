@@ -1001,20 +1001,26 @@ impl TypeChecker {
     /// Type-check an FFI call.
     ///
     /// FFI calls are the boundary between Ephapax and native code (Zig/C).
-    /// The type checker validates the arguments but cannot verify the return
-    /// type — that's determined by the Idris2 ABI specification and the
-    /// function's declaration site (fn header).
+    /// String literal arguments are allowed WITHOUT region allocation — they
+    /// become temporary C strings (null-terminated pointers) at the FFI boundary.
+    /// This is safe because the C function receives a copy; the string doesn't
+    /// need to be region-managed.
     ///
-    /// We check arguments to ensure linear variables are properly consumed
-    /// (passing a linear value to FFI counts as consumption), and return
-    /// I64 as the default FFI return type (opaque handle).
+    /// Linear variables passed to FFI are consumed (counts as consumption).
+    /// Return type is I64 (opaque C handle).
     fn check_ffi(&mut self, args: &[Expr]) -> Result<Ty, TypeError> {
         for arg in args {
-            self.check(arg)?;
+            match &arg.kind {
+                // Allow bare string literals in FFI context — they become
+                // temporary C strings, not region-allocated Ephapax strings.
+                ExprKind::Lit(Literal::String(_)) => {
+                    // OK — string literal is passed as C string pointer
+                }
+                _ => {
+                    self.check(arg)?;
+                }
+            }
         }
-        // FFI calls return I64 by default (opaque handle / C int).
-        // The containing fn declaration's return type annotation
-        // provides the actual type.
         Ok(Ty::Base(BaseTy::I64))
     }
 }

@@ -337,11 +337,20 @@ impl Interpreter {
                 }
             }
             ExprKind::FFI { symbol, args } => {
-                // Evaluate all arguments to i64 values for C ABI
+                // Evaluate all arguments to i64 values for C ABI.
+                // CStrings are kept alive in this vec until the call completes.
+                let mut cstrings = Vec::new();
                 let mut c_args: Vec<i64> = Vec::new();
                 for arg in args {
-                    let val = self.eval(arg)?;
-                    c_args.push(self.value_to_i64(&val));
+                    // String literals in FFI context: create Value::String
+                    // directly (bypass region requirement)
+                    let val = match &arg.kind {
+                        ExprKind::Lit(Literal::String(s)) => {
+                            Value::String { data: s.clone(), region: "ffi".into() }
+                        }
+                        _ => self.eval(arg)?,
+                    };
+                    c_args.push(self.value_to_i64_with_cstrings(&val, &mut cstrings));
                 }
 
                 // Try to find the symbol in loaded FFI libraries
@@ -783,9 +792,10 @@ impl Interpreter {
     }
 
     /// Call the main function (no arguments)
-    /// Convert a Value to an i64 for passing to C ABI functions.
-    /// Strings are converted to null pointers (0) — use CString FFI for real strings.
-    fn value_to_i64(&self, val: &Value) -> i64 {
+    /// Temporary C string storage for FFI calls.
+    /// Kept alive for the duration of the FFI call to prevent dangling pointers.
+    /// Cleared after each FFI call returns.
+    fn value_to_i64_with_cstrings(&self, val: &Value, cstrings: &mut Vec<std::ffi::CString>) -> i64 {
         match val {
             Value::I32(n) => *n as i64,
             Value::I64(n) => *n,
@@ -793,8 +803,19 @@ impl Interpreter {
             Value::F32(f) => *f as i64,
             Value::F64(f) => *f as i64,
             Value::Unit => 0,
-            // Strings: for now return 0. Real string FFI needs CString allocation.
-            Value::String { .. } => 0,
+            Value::String { data, .. } => {
+                // Convert to CString and return pointer as i64.
+                // The CString is stored in `cstrings` to keep it alive
+                // until the FFI call completes.
+                match std::ffi::CString::new(data.as_str()) {
+                    Ok(cstr) => {
+                        let ptr = cstr.as_ptr() as i64;
+                        cstrings.push(cstr);
+                        ptr
+                    }
+                    Err(_) => 0, // String contains null byte — return null
+                }
+            }
             // Compound values: not directly passable to C ABI
             _ => 0,
         }

@@ -29,7 +29,7 @@ build/
 *.vos
 *.glob
 .coqdeps.d
-_CoqProject
+# NOTE: _CoqProject IS tracked (it's the project definition file)
 
 # WASM
 *.wasm

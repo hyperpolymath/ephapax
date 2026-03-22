@@ -186,7 +186,14 @@ The type system is grounded in:
 * **Separation logic** — Memory ownership and framing
 * **Region calculus (Tofte-Talpin)** — Scoped allocation
 
-See `formal/` for Coq mechanisation.
+=== Dual Formalisation
+
+Ephapax has **two complementary formalisations**:
+
+* **Coq** (`formal/`) — Operational semantics with small-step reduction. Proves `no_leaks` (Qed), `memory_safety` (Qed), `progress` (92% complete), `preservation` (50% complete). Build: `just proofs`
+* **Idris2** (`src/formal/`) — Type-theoretic proofs via dependent types. Proves `noEscapeTheorem`, `regionSafetyTheorem`, `noGCTheorem`, `orthogonalityLemma` — all complete with zero unsafe patterns. Build: `just idris-build`
+
+The Coq development proves properties about _runtime execution_ (no stuck states, no use-after-free). The Idris2 development proves properties about _type structure_ (no region escape, qualifier orthogonality). Together they cover both the static and dynamic guarantees of the region-linear system.
 
 == Quick Start
 

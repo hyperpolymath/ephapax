@@ -1,4 +1,4 @@
-(* SPDX-License-Identifier: EUPL-1.2 *)
+(* SPDX-License-Identifier: PMPL-1.0-or-later *)
 (* SPDX-FileCopyrightText: 2025 Jonathan D.A. Jewell *)
 
 (** * Ephapax Typing Rules
@@ -61,6 +61,11 @@ Inductive has_type : region_env -> ctx -> expr -> ty -> ctx -> Prop :=
       R; G |- EVar x : T -| G
 
   (** ===== Strings ===== *)
+
+  (** Runtime location value (produced by string allocation) *)
+  | T_Loc : forall R G l r,
+      region_active R r ->
+      R; G |- ELoc l r : TString r -| G
 
   (** String allocation in region *)
   | T_StringNew : forall R G r s,

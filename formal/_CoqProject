@@ -1,0 +1,9 @@
+# SPDX-License-Identifier: EUPL-1.2
+# Ephapax formal semantics — Coq project file
+# Build: coq_makefile -f _CoqProject -o Makefile && make
+
+-R . Ephapax
+
+Syntax.v
+Typing.v
+Semantics.v

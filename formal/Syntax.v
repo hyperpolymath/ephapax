@@ -1,4 +1,4 @@
-(* SPDX-License-Identifier: EUPL-1.2 *)
+(* SPDX-License-Identifier: PMPL-1.0-or-later *)
 (* SPDX-FileCopyrightText: 2025 Jonathan D.A. Jewell *)
 
 (** * Ephapax: A Linear Type System for Safe Memory Management
@@ -89,7 +89,10 @@ Inductive expr : Type :=
 
   (* Explicit resource management *)
   | EDrop   : expr -> expr                         (* Explicitly consume/drop *)
-  | ECopy   : expr -> expr.                        (* Explicit copy (unrestricted only) *)
+  | ECopy   : expr -> expr                         (* Explicit copy (unrestricted only) *)
+
+  (* Runtime-only values (not written by programmers) *)
+  | ELoc    : nat -> region_name -> expr.           (* Memory location with region tag *)
 
 (** ** Values *)
 
@@ -100,7 +103,8 @@ Inductive is_value : expr -> Prop :=
   | VLam    : forall x T e, is_value (ELam x T e)
   | VPair   : forall v1 v2, is_value v1 -> is_value v2 -> is_value (EPair v1 v2)
   | VInl    : forall T v, is_value v -> is_value (EInl T v)
-  | VInr    : forall T v, is_value v -> is_value (EInr T v).
+  | VInr    : forall T v, is_value v -> is_value (EInr T v)
+  | VLoc    : forall l r, is_value (ELoc l r).
 
 (** ** Typing Contexts *)
 

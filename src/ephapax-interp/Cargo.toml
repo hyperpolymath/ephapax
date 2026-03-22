@@ -15,3 +15,4 @@ ephapax-syntax.workspace = true
 ephapax-typing.workspace = true
 smol_str.workspace = true
 thiserror.workspace = true
+libloading = "0.8"

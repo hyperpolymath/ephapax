@@ -49,6 +49,10 @@ enum Commands {
         /// File to run
         file: PathBuf,
 
+        /// Native shared libraries to load for FFI (e.g. libgossamer.so)
+        #[arg(long = "ffi-lib", short = 'L')]
+        ffi_libs: Vec<String>,
+
         /// Arguments to pass to the program
         #[arg(trailing_var_arg = true)]
         args: Vec<String>,
@@ -151,7 +155,7 @@ fn main() -> ExitCode {
 
     let result = match cli.command {
         Some(Commands::Repl { preload }) => run_repl(preload, cli.verbose),
-        Some(Commands::Run { file, args: _ }) => run_file(&file, cli.verbose),
+        Some(Commands::Run { file, ffi_libs, args: _ }) => run_file(&file, &ffi_libs, cli.verbose),
         Some(Commands::Check { files, mode }) => check_files(&files, &mode, cli.verbose),
         Some(Commands::Compile { file, output, opt_level, debug, mode }) => {
             compile_file(&file, output, opt_level, debug, &mode, cli.verbose)
@@ -165,7 +169,7 @@ fn main() -> ExitCode {
         None => {
             // If a file is given without subcommand, run it
             if let Some(file) = cli.file {
-                run_file(&file, cli.verbose)
+                run_file(&file, &[], cli.verbose)
             } else {
                 // No file, start REPL
                 run_repl(None, cli.verbose)
@@ -203,7 +207,7 @@ fn run_repl(preload: Option<PathBuf>, verbose: bool) -> Result<(), String> {
     repl.run()
 }
 
-fn run_file(path: &PathBuf, verbose: bool) -> Result<(), String> {
+fn run_file(path: &PathBuf, ffi_libs: &[String], verbose: bool) -> Result<(), String> {
     let content =
         fs::read_to_string(path).map_err(|e| format!("Cannot read {}: {}", path.display(), e))?;
 
@@ -233,10 +237,23 @@ fn run_file(path: &PathBuf, verbose: bool) -> Result<(), String> {
 
     // Run with interpreter
     let mut interp = Interpreter::new();
+
+    // Load FFI libraries (native shared objects for __ffi() calls)
+    for lib_path in ffi_libs {
+        if verbose {
+            println!("{} Loading FFI library: {}", "⚙".yellow(), lib_path);
+        }
+        interp.load_ffi_library(lib_path)
+            .map_err(|e| format!("Failed to load FFI library '{}': {}", lib_path, e))?;
+        if verbose {
+            println!("{} Loaded FFI library: {}", "✓".green(), lib_path);
+        }
+    }
+
     interp.load_module(&module);
 
     // Look for main function and run it
-    if let Some(_main_val) = interp.get_binding("main") {
+    if interp.has_function("main") {
         match interp.call_main() {
             Ok(result) => {
                 println!("{}", result);

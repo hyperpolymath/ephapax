@@ -222,6 +222,9 @@ pub struct Interpreter {
     regions: Vec<RegionName>,
     /// Function definitions
     functions: HashMap<Var, (Vec<(Var, Ty)>, Ty, Expr)>,
+    /// Loaded native libraries for FFI (dlopen handles).
+    /// Libraries are kept alive for the lifetime of the interpreter.
+    ffi_libraries: Vec<libloading::Library>,
 }
 
 impl Interpreter {
@@ -230,7 +233,35 @@ impl Interpreter {
             env: Environment::new(),
             regions: Vec::new(),
             functions: HashMap::new(),
+            ffi_libraries: Vec::new(),
         }
+    }
+
+    /// Load a native shared library for FFI calls.
+    ///
+    /// Symbols from the library become available to `__ffi("symbol", ...)`.
+    /// The library handle is kept alive until the interpreter is dropped.
+    ///
+    /// # Safety
+    /// Loading shared libraries is inherently unsafe. The caller must
+    /// ensure the library is trustworthy.
+    pub fn load_ffi_library(&mut self, path: &str) -> Result<(), RuntimeError> {
+        let lib = unsafe {
+            libloading::Library::new(path)
+                .map_err(|e| RuntimeError::Unimplemented(format!("Failed to load FFI library '{}': {}", path, e)))?
+        };
+        self.ffi_libraries.push(lib);
+        Ok(())
+    }
+
+    /// Look up an FFI symbol across all loaded libraries.
+    fn find_ffi_symbol(&self, name: &str) -> Option<libloading::Symbol<unsafe extern "C" fn(i64, i64, i64, i64, i64, i64) -> i64>> {
+        for lib in &self.ffi_libraries {
+            if let Ok(sym) = unsafe { lib.get(name.as_bytes()) } {
+                return Some(sym);
+            }
+        }
+        None
     }
 
     /// Load a module (register all function definitions)
@@ -306,17 +337,24 @@ impl Interpreter {
                 }
             }
             ExprKind::FFI { symbol, args } => {
-                // Evaluate all arguments
-                let mut arg_values = Vec::new();
+                // Evaluate all arguments to i64 values for C ABI
+                let mut c_args: Vec<i64> = Vec::new();
                 for arg in args {
-                    arg_values.push(self.eval(arg)?);
+                    let val = self.eval(arg)?;
+                    c_args.push(self.value_to_i64(&val));
                 }
-                // In the interpreter, FFI calls are stubbed — they log the call
-                // and return a placeholder value. Real FFI execution happens via
-                // WASM imports or native dlopen at link time.
-                eprintln!("[ffi] {}({:?})", symbol, arg_values);
-                // Return 0 as placeholder handle
-                Ok(Value::I64(0))
+
+                // Try to find the symbol in loaded FFI libraries
+                if let Some(func) = self.find_ffi_symbol(symbol) {
+                    // Pad args to 6 (max C ABI args we support)
+                    let a = |i: usize| *c_args.get(i).unwrap_or(&0);
+                    let result = unsafe { func(a(0), a(1), a(2), a(3), a(4), a(5)) };
+                    Ok(Value::I64(result))
+                } else {
+                    // No library loaded or symbol not found — stub mode
+                    eprintln!("[ffi:stub] {}({:?})", symbol, c_args);
+                    Ok(Value::I64(0))
+                }
             }
         }
     }
@@ -738,7 +776,30 @@ impl Interpreter {
         self.env.get(&name)
     }
 
+    /// Check if a function is defined.
+    pub fn has_function(&self, name: &str) -> bool {
+        let name: SmolStr = name.into();
+        self.functions.contains_key(&name)
+    }
+
     /// Call the main function (no arguments)
+    /// Convert a Value to an i64 for passing to C ABI functions.
+    /// Strings are converted to null pointers (0) — use CString FFI for real strings.
+    fn value_to_i64(&self, val: &Value) -> i64 {
+        match val {
+            Value::I32(n) => *n as i64,
+            Value::I64(n) => *n,
+            Value::Bool(b) => if *b { 1 } else { 0 },
+            Value::F32(f) => *f as i64,
+            Value::F64(f) => *f as i64,
+            Value::Unit => 0,
+            // Strings: for now return 0. Real string FFI needs CString allocation.
+            Value::String { .. } => 0,
+            // Compound values: not directly passable to C ABI
+            _ => 0,
+        }
+    }
+
     pub fn call_main(&mut self) -> Result<Value, RuntimeError> {
         let name: SmolStr = "main".into();
 

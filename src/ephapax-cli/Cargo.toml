@@ -16,6 +16,7 @@ path = "src/main.rs"
 
 [dependencies]
 ephapax-syntax.workspace = true
+ephapax-ir.workspace = true
 ephapax-lexer.workspace = true
 ephapax-parser.workspace = true
 ephapax-typing.workspace = true
@@ -27,3 +28,4 @@ smol_str.workspace = true
 clap.workspace = true
 colored.workspace = true
 ariadne.workspace = true
+serde_json.workspace = true

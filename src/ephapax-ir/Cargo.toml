@@ -11,3 +11,5 @@ license = "EUPL-1.2"
 smol_str = { workspace = true }
 thiserror = { workspace = true }
 ephapax-syntax = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }

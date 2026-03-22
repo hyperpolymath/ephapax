@@ -1,10 +1,13 @@
-// SPDX-License-Identifier: EUPL-1.2
-// SPDX-FileCopyrightText: 2025 Jonathan D.A. Jewell
+#![forbid(unsafe_code)]
+// SPDX-License-Identifier: PMPL-1.0-or-later
+// SPDX-FileCopyrightText: 2025 Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk>
 
 //! Ephapax Abstract Syntax Tree
 //!
 //! Core syntax definitions aligned with the formal Coq semantics.
+//! All types derive `serde::Serialize` for JSON AST dump support.
 
+use serde::Serialize;
 use smol_str::SmolStr;
 
 /// Variable identifier
@@ -14,7 +17,7 @@ pub type Var = SmolStr;
 pub type RegionName = SmolStr;
 
 /// Source location span
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub struct Span {
     pub start: usize,
     pub end: usize,
@@ -31,7 +34,8 @@ impl Span {
 }
 
 /// Linearity annotation
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
 pub enum Linearity {
     /// Must use exactly once
     Linear,
@@ -40,7 +44,8 @@ pub enum Linearity {
 }
 
 /// Base (primitive) types
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
 pub enum BaseTy {
     Unit,
     Bool,
@@ -51,7 +56,8 @@ pub enum BaseTy {
 }
 
 /// Types with region and linearity annotations
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(tag = "kind", content = "value", rename_all = "snake_case")]
 pub enum Ty {
     /// Primitive type
     Base(BaseTy),
@@ -130,7 +136,8 @@ impl Ty {
 }
 
 /// Literal values
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(tag = "kind", content = "value", rename_all = "snake_case")]
 pub enum Literal {
     Unit,
     Bool(bool),
@@ -142,7 +149,8 @@ pub enum Literal {
 }
 
 /// Binary operators
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
 pub enum BinOp {
     // Arithmetic
     Add,
@@ -163,7 +171,8 @@ pub enum BinOp {
 }
 
 /// Unary operators
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
 pub enum UnaryOp {
     /// Logical negation
     Not,
@@ -172,7 +181,8 @@ pub enum UnaryOp {
 }
 
 /// Pattern for destructuring
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(tag = "kind", content = "value", rename_all = "snake_case")]
 pub enum Pattern {
     /// Wildcard _
     Wildcard,
@@ -187,13 +197,14 @@ pub enum Pattern {
 }
 
 /// Expressions
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct Expr {
     pub kind: ExprKind,
     pub span: Span,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(tag = "node", rename_all = "snake_case")]
 pub enum ExprKind {
     /// Literal value
     Lit(Literal),
@@ -353,7 +364,8 @@ impl Expr {
 }
 
 /// Top-level declarations
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
 pub enum Decl {
     /// Function definition
     Fn {
@@ -368,7 +380,7 @@ pub enum Decl {
 }
 
 /// A complete module
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct Module {
     pub name: SmolStr,
     pub decls: Vec<Decl>,

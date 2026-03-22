@@ -355,6 +355,7 @@ dependencies = [
  "clap",
  "colored",
  "ephapax-interp",
+ "ephapax-ir",
  "ephapax-lexer",
  "ephapax-package",
  "ephapax-parser",
@@ -362,6 +363,7 @@ dependencies = [
  "ephapax-syntax",
  "ephapax-typing",
  "ephapax-wasm",
+ "serde_json",
  "smol_str",
 ]
 
@@ -381,6 +383,8 @@ name = "ephapax-ir"
 version = "0.1.0"
 dependencies = [
  "ephapax-syntax",
+ "serde",
+ "serde_json",
  "smol_str",
  "thiserror",
 ]
@@ -468,6 +472,7 @@ dependencies = [
 name = "ephapax-syntax"
 version = "0.1.0"
 dependencies = [
+ "serde",
  "smol_str",
 ]
 

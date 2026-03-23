@@ -1,5 +1,5 @@
 #![forbid(unsafe_code)]
-// SPDX-License-Identifier: EUPL-1.2
+// SPDX-License-Identifier: PMPL-1.0-or-later
 // SPDX-FileCopyrightText: 2026 Jonathan D.A. Jewell
 
 //! Ephapax S-expression IR bridge.

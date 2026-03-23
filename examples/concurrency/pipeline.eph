@@ -1,0 +1,55 @@
+// SPDX-License-Identifier: PMPL-1.0-or-later
+// Copyright (c) 2026 Jonathan D.A. Jewell (hyperpolymath)
+//
+// Example: Multi-stage concurrent pipeline.
+//
+// Each stage owns its input and output channel endpoints. Linear types
+// ensure buffers pass through the pipeline without aliasing — each
+// stage has exclusive access to the data it processes.
+
+fn stage_parse(rx: ChannelRx!(Buffer!), tx: ChannelTx!(Record!)) {
+    for buf in Channel.iter(rx) {
+        let! record = Parser.parse(buf)
+        // buf consumed by parse — ownership transferred into record.
+        Channel.send(&tx, record)
+    }
+    Channel.close(tx)
+}
+
+fn stage_transform(rx: ChannelRx!(Record!), tx: ChannelTx!(Record!)) {
+    for record in Channel.iter(rx) {
+        let! transformed = Record.normalize(record)
+        // record consumed by normalize — no stale references.
+        Channel.send(&tx, transformed)
+    }
+    Channel.close(tx)
+}
+
+fn stage_write(rx: ChannelRx!(Record!), db: DbConn!) -> i32 {
+    let count = 0
+    for record in Channel.iter(rx) {
+        Db.insert(&db, record)
+        count = count + 1
+    }
+    Db.close(db)
+    count
+}
+
+fn main() -> i32 {
+    let! Pair(tx1, rx1) = Channel.multi_shot()
+    let! Pair(tx2, rx2) = Channel.multi_shot()
+    let! Pair(tx3, rx3) = Channel.multi_shot()
+    let! db = Db.connect("localhost", 5432)?
+
+    Task.spawn(fn() { stage_parse(rx1, tx2) })
+    Task.spawn(fn() { stage_transform(rx2, tx3) })
+
+    // Feed raw buffers into the pipeline.
+    for chunk in Io.read_chunks("/data/input.bin", 4096) {
+        Channel.send(&tx1, chunk)
+    }
+    Channel.close(tx1)
+
+    // Final stage runs on main task.
+    stage_write(rx3, db)
+}

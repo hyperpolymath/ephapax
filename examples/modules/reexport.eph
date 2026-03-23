@@ -1,0 +1,41 @@
+// SPDX-License-Identifier: PMPL-1.0-or-later
+// Copyright (c) 2026 Jonathan D.A. Jewell (hyperpolymath) <j.d.a.jewell@open.ac.uk>
+//
+// Example: Re-exporting from modules.
+//
+// A facade module can re-export items from other modules, presenting
+// a unified API. Users import the facade and access everything through
+// a single namespace, while the implementation stays modular internally.
+
+module Crypto
+
+// Re-export hash functions from the internal HashImpl module.
+import HashImpl
+export HashImpl.sha256
+export HashImpl.sha512
+
+// Re-export HMAC from the internal MacImpl module.
+import MacImpl
+export MacImpl.hmac
+
+// Add facade-level convenience functions that combine re-exported items.
+fn verify_hmac(key: &String, message: &String, expected: &String) -> i32 {
+    let computed = hmac(key, message)
+    if String.eq(&computed, expected) {
+        1
+    } else {
+        0
+    }
+}
+
+fn hash_and_verify(data: &String, expected_hash: &String) -> i32 {
+    let hash = sha256(data)
+    if String.eq(&hash, expected_hash) {
+        1
+    } else {
+        0
+    }
+}
+
+// Users write: Crypto.sha256(&data) or Crypto.verify_hmac(&k, &m, &h)
+// without knowing about HashImpl or MacImpl.

@@ -1,0 +1,24 @@
+// SPDX-License-Identifier: PMPL-1.0-or-later
+// Copyright (c) 2026 Jonathan D.A. Jewell (hyperpolymath) <j.d.a.jewell@open.ac.uk>
+//
+// Example: Importing from another module.
+//
+// The import statement brings a module's definitions into scope.
+// After importing, call functions via the module name prefix.
+// Imports are resolved relative to the package root.
+
+import MathUtils
+import IO
+
+fn main() -> i32 {
+    // Use functions from the imported MathUtils module.
+    let clamped = MathUtils.clamp(150, 0, 100)
+    let absolute = MathUtils.abs(0 - 42)
+    let bigger = MathUtils.max(clamped, absolute)
+
+    // Use the IO module (always available via Prelude, but shown
+    // here with an explicit import for clarity).
+    IO.println(&"computing result...")
+
+    bigger
+}

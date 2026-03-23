@@ -1,0 +1,31 @@
+// SPDX-License-Identifier: PMPL-1.0-or-later
+// Copyright (c) 2026 Jonathan D.A. Jewell (hyperpolymath)
+//
+// Example: Capability-based access control.
+//
+// Capabilities are linear tokens that grant specific permissions.
+// They cannot be duplicated (no privilege escalation), must be explicitly
+// revoked (no dangling access), and can be narrowed but never widened.
+
+fn sandbox_operation() -> Result!(i32, AccessError) {
+    // Root capability — grants full filesystem access. Linear.
+    let! root = Capability.mint("fs:read,write", "/data/")
+
+    // Narrow to read-only on a subdirectory. Consumes root.
+    let! read_cap = Capability.narrow(root, "fs:read", "/data/reports/")
+
+    // Read is allowed.
+    let count = Fs.list_files(&read_cap, "/data/reports/").len()
+
+    // Writing would be a compile error — read_cap only grants fs:read.
+    // Fs.write(&read_cap, "/data/reports/out.txt", "x")  // ERROR
+
+    // Further narrowing: single-file access.
+    let! file_cap = Capability.narrow(read_cap, "fs:read", "/data/reports/q1.csv")
+    let! data = Fs.read_file(&file_cap, "/data/reports/q1.csv")?
+
+    // Revoke — the token is consumed, all access ends.
+    Capability.revoke(file_cap)
+
+    Ok(count + Bytes.len(&data) as i32)
+}

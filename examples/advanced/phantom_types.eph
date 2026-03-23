@@ -1,0 +1,48 @@
+// SPDX-License-Identifier: PMPL-1.0-or-later
+// Copyright (c) 2026 Jonathan D.A. Jewell (hyperpolymath)
+//
+// Example: Phantom type parameters.
+//
+// Phantom types carry compile-time information without runtime cost.
+// Combined with linear types, they prevent mixing values that share
+// the same representation but have different semantic meaning.
+
+// Phantom unit markers — zero-sized, exist only at compile time.
+type Metres
+type Kilometres
+type Seconds
+
+// Distance(T) is parameterised by a phantom unit type.
+type Distance(Unit) = Distance(f64)
+
+// Speed is always km/s in this example.
+type Speed = Speed(f64)
+
+fn km(value: f64) -> Distance(Kilometres) {
+    Distance(value)
+}
+
+fn metres(value: f64) -> Distance(Metres) {
+    Distance(value)
+}
+
+fn to_km(d: Distance(Metres)) -> Distance(Kilometres) {
+    let Distance(v) = d
+    Distance(v / 1000.0)
+}
+
+// Only accepts Distance(Kilometres) — passing Distance(Metres) is a type error.
+fn calculate_speed(dist: Distance(Kilometres), seconds: f64) -> Speed {
+    let Distance(km_val) = dist
+    Speed(km_val / seconds)
+}
+
+fn main() -> i32 {
+    let d = metres(4200.0)
+    let d_km = to_km(d)
+    // d is consumed by to_km — cannot accidentally use the metres value again.
+
+    let speed = calculate_speed(d_km, 60.0)
+    let Speed(v) = speed
+    if v > 0.0 { 0 } else { 1 }
+}

@@ -1,0 +1,44 @@
+// SPDX-License-Identifier: PMPL-1.0-or-later
+// Copyright (c) 2026 Jonathan D.A. Jewell (hyperpolymath)
+//
+// Example: Higher-order functions with linear constraints.
+//
+// Functions that accept linear values as arguments must consume them
+// exactly once. When passing such functions as arguments, the type system
+// tracks the linearity obligation through the higher-order call.
+
+// with_file opens a file, passes it to a callback, then guarantees closure.
+// The callback receives the linear handle, borrows it, and returns a result.
+// with_file retains ownership and closes the handle after the callback.
+fn with_file(path: &str, f: fn(&File!) -> i32) -> Result!(i32, IoError) {
+    let! handle = File.open(path)?
+    let result = f(&handle)
+    File.close(handle)
+    Ok(result)
+}
+
+// map_linear applies a transformation that consumes one linear value
+// and produces another. The function itself is consumed once.
+fn map_linear(buf: Buffer!, transform: fn(Buffer!) -> Buffer!) -> Buffer! {
+    transform(buf)
+}
+
+fn main() -> i32 {
+    // Higher-order: pass a closure that borrows the file handle.
+    let size = with_file("/tmp/data.bin", fn(f: &File!) -> i32 {
+        File.size(f)
+    })
+
+    // Higher-order with linear transform: the closure consumes the buffer.
+    let! buf = Buffer.alloc(256)
+    let! encrypted = map_linear(buf, fn(b: Buffer!) -> Buffer! {
+        Crypto.encrypt(b, "aes-256-gcm")
+    })
+    // buf is consumed — only encrypted is live.
+
+    Buffer.free(encrypted)
+    match size {
+        Ok(n)  => n,
+        Err(_) => -1,
+    }
+}

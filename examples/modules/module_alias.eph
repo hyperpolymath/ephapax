@@ -1,0 +1,36 @@
+// SPDX-License-Identifier: PMPL-1.0-or-later
+// Copyright (c) 2026 Jonathan D.A. Jewell (hyperpolymath) <j.d.a.jewell@open.ac.uk>
+//
+// Example: Module aliasing.
+//
+// Long or deeply nested module paths can be aliased to shorter names
+// using `import ... as`. The alias is local to the current file and
+// does not affect the module's canonical name elsewhere.
+
+import Encoding.Base64 as B64
+import Encoding.Hex as Hex
+import Network.Http.Client as Http
+
+fn encode_and_send(payload: &String) -> i32 {
+    // Use the alias instead of the full path.
+    let encoded_len = B64.encode_length(String.len(payload))
+    let encoded = B64.encode(payload)
+
+    // Create an HTTP request with the encoded payload.
+    let! request = Http.new_request("POST", "https://api.example.com/data")
+    Http.set_header(&request, "Content-Type", "application/base64")
+    Http.set_body(&request, &encoded)
+
+    let! response = Http.send(request)
+    let status = Http.status(&response)
+    Http.close(response)
+
+    status
+}
+
+fn debug_hex_dump(data: &String) -> () {
+    // Hex alias for the encoding sub-module.
+    let hex_len = Hex.encode_length(String.len(data))
+    let hex_str = Hex.encode(data)
+    IO.println(&hex_str)
+}

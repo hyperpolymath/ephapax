@@ -1,0 +1,47 @@
+// SPDX-License-Identifier: PMPL-1.0-or-later
+// Copyright (c) 2026 Jonathan D.A. Jewell (hyperpolymath)
+//
+// Example: Zero-copy buffer passing.
+//
+// Linear ownership guarantees that exactly one task holds a buffer at
+// any time. This enables zero-copy transfers between pipeline stages:
+// no memcpy needed because the sender provably never touches the
+// buffer again after handing it off.
+
+fn network_receive(socket: &Socket!) -> Buffer! {
+    // Allocate from a pre-registered DMA-capable pool.
+    let! buf = BufferPool.alloc(4096)
+
+    // Read directly into the buffer — zero-copy from kernel.
+    Socket.recv_into(socket, &buf)
+    buf
+}
+
+fn process_packet(buf: Buffer!) -> Buffer! {
+    // Mutate the buffer in place — we have exclusive linear ownership.
+    // No defensive copies needed; the type system guarantees no aliases.
+    let header_len = Packet.parse_header(&buf)
+    Buffer.trim_front(buf, header_len)
+    // Original buf consumed by trim_front — returns a narrowed buffer.
+}
+
+fn forward(socket: &Socket!, buf: Buffer!) {
+    // Send consumes the buffer — ownership moves to the kernel.
+    // After this call, buf is gone. No use-after-send possible.
+    Socket.send_buf(socket, buf)
+}
+
+fn main() -> i32 {
+    let! listener = Socket.bind("0.0.0.0", 9000)?
+    let! client = Socket.accept(&listener)?
+
+    // Zero-copy path: receive -> process -> forward.
+    // The buffer is never copied, only moved between stages.
+    let! raw = network_receive(&client)
+    let! processed = process_packet(raw)
+    forward(&client, processed)
+
+    Socket.close(client)
+    Socket.close(listener)
+    0
+}

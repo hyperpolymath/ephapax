@@ -3,7 +3,7 @@
 **Version**: 0.1.0-draft
 **Date**: 2025-12-17
 **Status**: Draft
-**SPDX-License-Identifier**: EUPL-1.2
+**SPDX-License-Identifier**: PMPL-1.0-or-later
 
 ---
 

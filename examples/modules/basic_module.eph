@@ -1,0 +1,37 @@
+// SPDX-License-Identifier: PMPL-1.0-or-later
+// Copyright (c) 2026 Jonathan D.A. Jewell (hyperpolymath) <j.d.a.jewell@open.ac.uk>
+//
+// Example: Simple module definition.
+//
+// A module groups related functions and types under a namespace.
+// The module declaration must appear at the top of the file.
+// Functions within a module are accessed via Module.function() syntax.
+
+module MathUtils
+
+// Absolute value — returns the non-negative magnitude.
+fn abs(x: i32) -> i32 {
+    if x < 0 {
+        0 - x
+    } else {
+        x
+    }
+}
+
+// Clamp a value to a range [lo, hi].
+fn clamp(value: i32, lo: i32, hi: i32) -> i32 {
+    if value < lo {
+        lo
+    } else {
+        if value > hi {
+            hi
+        } else {
+            value
+        }
+    }
+}
+
+// Maximum of two values.
+fn max(a: i32, b: i32) -> i32 {
+    if a > b { a } else { b }
+}

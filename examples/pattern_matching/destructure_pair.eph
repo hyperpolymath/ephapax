@@ -1,0 +1,38 @@
+// SPDX-License-Identifier: PMPL-1.0-or-later
+// Copyright (c) 2026 Jonathan D.A. Jewell (hyperpolymath) <j.d.a.jewell@open.ac.uk>
+//
+// Example: Destructuring linear pairs via pattern matching.
+//
+// When a Pair contains linear values, destructuring splits the obligation:
+// each component must be independently consumed. Match arms that bind
+// linear components enforce the same rules as let! destructuring.
+
+fn add_coordinates() -> i32 {
+    // Create a linear pair of coordinates.
+    let! point = Pair(10, 20)
+
+    // Destructure via match — splits the pair into its components.
+    match point {
+        Pair(x, y) => x + y
+    }
+}
+
+fn swap_endpoints() -> i32 {
+    // Two linear pipe endpoints bundled as a pair.
+    let! reader = Pipe.reader()
+    let! writer = Pipe.writer()
+    let! endpoints = Pair(reader, writer)
+
+    // Destructure and rebundle in swapped order.
+    match endpoints {
+        Pair(r, w) => {
+            Pipe.write(w, "swapped")
+            let msg = Pipe.read(r)
+            String.len(&msg)
+        }
+    }
+}
+
+fn main() -> i32 {
+    add_coordinates()
+}

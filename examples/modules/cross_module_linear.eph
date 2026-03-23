@@ -1,0 +1,59 @@
+// SPDX-License-Identifier: PMPL-1.0-or-later
+// Copyright (c) 2026 Jonathan D.A. Jewell (hyperpolymath) <j.d.a.jewell@open.ac.uk>
+//
+// Example: Linear resources across module boundaries.
+//
+// Linear values can cross module boundaries via function parameters
+// and return types. The compiler tracks linearity across the call
+// regardless of which module created or consumes the resource.
+// This enables clean separation of allocation and deallocation.
+
+module ResourcePool
+
+// Allocate a pooled connection — linear, caller must return it.
+fn acquire() -> Connection! {
+    let! conn = Connection.create("pool://default")
+    conn
+}
+
+// Return a connection to the pool — consumes the linear value.
+fn release(conn: Connection!) -> () {
+    Connection.close(conn)
+}
+
+// ---
+
+module BusinessLogic
+
+import ResourcePool
+
+// Borrow from one module, use here, return to the original module.
+// The linear obligation flows: Pool.acquire -> use -> Pool.release.
+fn process_order(order_id: i32) -> i32 {
+    // Acquire from ResourcePool — linear obligation starts here.
+    let! conn = ResourcePool.acquire()
+
+    // Use the connection (borrow — does not consume).
+    let result = Connection.execute(&conn, "INSERT INTO orders VALUES (?)", order_id)
+
+    // Return to ResourcePool — linear obligation fulfilled.
+    ResourcePool.release(conn)
+
+    // conn is consumed — cannot use after release.
+    result
+}
+
+fn batch_process(count: i32) -> i32 {
+    let total = 0
+    let i = 0
+    // Each iteration independently acquires and releases.
+    // No connection leaks possible — the compiler enforces it per-call.
+    if i < count {
+        let! conn = ResourcePool.acquire()
+        let r = Connection.execute(&conn, "SELECT count(*) FROM orders", 0)
+        ResourcePool.release(conn)
+        r
+    } else {
+        total
+    }
+}

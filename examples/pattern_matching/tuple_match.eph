@@ -1,0 +1,48 @@
+// SPDX-License-Identifier: PMPL-1.0-or-later
+// Copyright (c) 2026 Jonathan D.A. Jewell (hyperpolymath) <j.d.a.jewell@open.ac.uk>
+//
+// Example: Matching tuples.
+//
+// Tuples group multiple values of different types into a single
+// unnamed structure. Pattern matching destructures them positionally.
+// Unlike Pair (which is always 2 elements), tuples can have any arity.
+
+fn dot_product_2d(ax: i32, ay: i32, bx: i32, by: i32) -> i32 {
+    let a = (ax, ay)
+    let b = (bx, by)
+
+    // Destructure both tuples via nested match.
+    match a {
+        (x1, y1) => match b {
+            (x2, y2) => (x1 * x2) + (y1 * y2)
+        }
+    }
+}
+
+fn classify_rgb(r: i32, g: i32, b: i32) -> i32 {
+    let colour = (r, g, b)
+
+    // Match specific colour tuples.
+    match colour {
+        (0, 0, 0)       => 1   // black
+        (255, 255, 255) => 2   // white
+        (255, 0, 0)     => 3   // red
+        (0, 255, 0)     => 4   // green
+        (0, 0, 255)     => 5   // blue
+        (_, _, _)       => 0   // other
+    }
+}
+
+fn unpack_triple() -> i32 {
+    let coords = (3, 4, 5)
+
+    match coords {
+        (x, y, z) => x + y + z
+    }
+}
+
+fn main() -> i32 {
+    let dot = dot_product_2d(1, 2, 3, 4)
+    let colour_id = classify_rgb(255, 0, 0)
+    dot + colour_id
+}

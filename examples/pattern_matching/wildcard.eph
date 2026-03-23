@@ -1,0 +1,45 @@
+// SPDX-License-Identifier: PMPL-1.0-or-later
+// Copyright (c) 2026 Jonathan D.A. Jewell (hyperpolymath) <j.d.a.jewell@open.ac.uk>
+//
+// Example: Wildcard patterns.
+//
+// The wildcard pattern _ matches any value without binding it to a name.
+// For affine values this silently drops them. For linear values, the
+// compiler still requires consumption — wildcards cannot discard linear
+// obligations. Use wildcards when you need a value's structure but not
+// all of its components.
+
+fn first_of_pair(p: Pair<i32, i32>) -> i32 {
+    // We only care about the first element; discard the second.
+    match p {
+        Pair(x, _) => x
+    }
+}
+
+fn is_origin(x: i32, y: i32, z: i32) -> i32 {
+    // Match all three coordinates — wildcard in the default arm.
+    match x {
+        0 => match y {
+            0 => match z {
+                0 => 1   // origin
+                _ => 0
+            }
+            _ => 0
+        }
+        _ => 0
+    }
+}
+
+fn classify_pair() -> i32 {
+    let p = Pair(42, 99)
+
+    // Use wildcard to ignore the value when only testing structure.
+    match p {
+        Pair(_, _) => 1  // always matches — it is a pair
+    }
+}
+
+fn main() -> i32 {
+    let result = first_of_pair(Pair(7, 13))
+    result
+}

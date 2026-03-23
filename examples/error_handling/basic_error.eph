@@ -1,0 +1,39 @@
+// SPDX-License-Identifier: PMPL-1.0-or-later
+// Copyright (c) 2026 Jonathan D.A. Jewell (hyperpolymath)
+//
+// Example: Simple error propagation.
+//
+// Fallible functions return Result!(T, E) — a linear result that must be
+// inspected. The ? operator propagates errors upward, consuming the Err
+// variant and returning early. The Ok variant is unwrapped in place.
+
+fn parse_port(input: &str) -> Result!(u16, ParseError) {
+    let value = Str.parse_u64(input)?
+    if value > 65535 {
+        Err(ParseError.new("port out of range"))
+    } else {
+        Ok(value as u16)
+    }
+}
+
+fn connect_to(host: &str, port_str: &str) -> Result!(Connection!, IoError) {
+    // ? propagates ParseError, auto-converted to IoError via From trait.
+    let port = parse_port(port_str)?
+
+    // Connection is linear — must be closed even if later operations fail.
+    let! conn = Connection.open(host, port)?
+    Ok(conn)
+}
+
+fn main() -> i32 {
+    match connect_to("localhost", "8080") {
+        Ok(conn) => {
+            Connection.close(conn)
+            0
+        }
+        Err(e) => {
+            Log.error(&e)
+            1
+        }
+    }
+}

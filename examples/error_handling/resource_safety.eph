@@ -1,0 +1,37 @@
+// SPDX-License-Identifier: PMPL-1.0-or-later
+// Copyright (c) 2026 Jonathan D.A. Jewell (hyperpolymath)
+//
+// Example: Guaranteed cleanup via linear error handling.
+//
+// When multiple linear resources are held simultaneously, every error path
+// must close all of them. The compiler enforces this — you cannot forget
+// to release a resource, even in deeply nested error scenarios.
+
+fn copy_file(src: &str, dst: &str) -> Result!(i64, IoError) {
+    let! reader = File.open(src)?
+
+    // If creating the writer fails, we must still close the reader.
+    let! writer = match File.create(dst) {
+        Ok(w) => w,
+        Err(e) => {
+            File.close(reader)
+            return Err(e)
+        }
+    }
+
+    // Both reader and writer are live — both must be consumed.
+    let copied = match Io.copy(&reader, &writer) {
+        Ok(n) => n,
+        Err(e) => {
+            // Error: close both before propagating.
+            File.close(reader)
+            File.close(writer)
+            return Err(e)
+        }
+    }
+
+    // Happy path: close both.
+    File.close(reader)
+    File.close(writer)
+    Ok(copied)
+}

@@ -1,0 +1,38 @@
+// SPDX-License-Identifier: PMPL-1.0-or-later
+// Copyright (c) 2026 Jonathan D.A. Jewell (hyperpolymath) <j.d.a.jewell@open.ac.uk>
+//
+// Example: Nested module structure.
+//
+// Modules can contain sub-modules, forming a hierarchy. Access nested
+// functions via dot-separated paths: Outer.Inner.function(). This
+// organises large codebases without flat namespace pollution.
+
+module Encoding
+
+    module Base64
+        fn encode_length(input_len: i32) -> i32 {
+            // Base64 output is 4/3 of input, rounded up to 4-byte boundary.
+            ((input_len + 2) / 3) * 4
+        }
+
+        fn decode_length(encoded_len: i32) -> i32 {
+            // Inverse of encode: 3/4 of encoded length.
+            (encoded_len / 4) * 3
+        }
+
+    module Hex
+        fn encode_length(input_len: i32) -> i32 {
+            // Each byte becomes two hex characters.
+            input_len * 2
+        }
+
+        fn nibble_to_char(nibble: i32) -> i32 {
+            if nibble < 10 {
+                nibble + 48   // '0' = 48
+            } else {
+                nibble + 87   // 'a' = 97, minus 10
+            }
+        }
+
+// Usage from outside: Encoding.Base64.encode_length(100)
+// or:                  Encoding.Hex.nibble_to_char(12)

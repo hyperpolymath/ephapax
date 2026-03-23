@@ -1,0 +1,36 @@
+// SPDX-License-Identifier: PMPL-1.0-or-later
+// Copyright (c) 2026 Jonathan D.A. Jewell (hyperpolymath) <j.d.a.jewell@open.ac.uk>
+//
+// Example: Exporting types from modules.
+//
+// Modules can define types alongside functions. Types defined in a
+// module are namespaced: users refer to them as Module.TypeName.
+// Constructors follow the same namespacing rules.
+
+module Temperature
+
+// A temperature tagged with its unit — prevents Celsius/Fahrenheit confusion.
+type Unit = Celsius | Fahrenheit | Kelvin
+
+type Reading = Reading(i32, Unit)
+
+fn celsius(degrees: i32) -> Reading {
+    Reading(degrees, Celsius)
+}
+
+fn fahrenheit(degrees: i32) -> Reading {
+    Reading(degrees, Fahrenheit)
+}
+
+fn to_celsius(reading: Reading) -> i32 {
+    match reading {
+        Reading(value, Celsius)    => value
+        Reading(value, Fahrenheit) => (value - 32) * 5 / 9
+        Reading(value, Kelvin)     => value - 273
+    }
+}
+
+fn is_freezing(reading: Reading) -> i32 {
+    let c = to_celsius(reading)
+    if c <= 0 { 1 } else { 0 }
+}

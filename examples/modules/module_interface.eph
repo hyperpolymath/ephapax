@@ -1,0 +1,45 @@
+// SPDX-License-Identifier: PMPL-1.0-or-later
+// Copyright (c) 2026 Jonathan D.A. Jewell (hyperpolymath) <j.d.a.jewell@open.ac.uk>
+//
+// Example: Module interfaces (signatures).
+//
+// An interface declares the types and function signatures a module
+// must provide, without giving implementations. Any module that
+// claims to implement the interface must supply every declared item.
+// This enables programming against abstractions rather than concrete modules.
+
+// Interface: any key-value store must provide these operations.
+interface KeyValueStore {
+    type Handle!                           // linear — must be closed
+    fn open(path: &String) -> Handle!
+    fn get(store: &Handle, key: &String) -> Option<String>
+    fn put(store: &Handle, key: &String, value: &String) -> i32
+    fn delete(store: &Handle, key: &String) -> i32
+    fn close(store: Handle!) -> ()
+}
+
+// A concrete module implementing the interface.
+module MemoryStore : KeyValueStore {
+    type Handle! = MemHandle!
+
+    fn open(path: &String) -> Handle! {
+        let! h = MemHandle.create()
+        h
+    }
+
+    fn get(store: &Handle, key: &String) -> Option<String> {
+        MemHandle.lookup(store, key)
+    }
+
+    fn put(store: &Handle, key: &String, value: &String) -> i32 {
+        MemHandle.insert(store, key, value)
+    }
+
+    fn delete(store: &Handle, key: &String) -> i32 {
+        MemHandle.remove(store, key)
+    }
+
+    fn close(store: Handle!) -> () {
+        MemHandle.destroy(store)
+    }
+}

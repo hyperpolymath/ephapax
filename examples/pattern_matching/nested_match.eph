@@ -1,0 +1,47 @@
+// SPDX-License-Identifier: PMPL-1.0-or-later
+// Copyright (c) 2026 Jonathan D.A. Jewell (hyperpolymath) <j.d.a.jewell@open.ac.uk>
+//
+// Example: Nested pattern matching.
+//
+// Patterns can be nested arbitrarily deep. Inner patterns destructure
+// the components of outer patterns. This is especially useful for
+// pairs-of-pairs or options containing structured data.
+
+fn sum_nested_pair() -> i32 {
+    // A pair containing another pair: Pair(Pair(1, 2), 3).
+    let! inner = Pair(1, 2)
+    let! outer = Pair(inner, 3)
+
+    // Nested destructuring — reaches into the inner pair.
+    match outer {
+        Pair(Pair(a, b), c) => a + b + c
+    }
+}
+
+fn classify_http_response(status: i32) -> i32 {
+    // Match on status code category, then sub-classify.
+    let category = status / 100
+    let sub = status % 100
+
+    match category {
+        2 => match sub {
+            0 => 1    // 200 OK
+            1 => 2    // 201 Created
+            4 => 3    // 204 No Content
+            _ => 4    // other 2xx
+        }
+        4 => match sub {
+            0 => 10   // 400 Bad Request
+            1 => 11   // 401 Unauthorized
+            3 => 12   // 403 Forbidden
+            4 => 13   // 404 Not Found
+            _ => 14   // other 4xx
+        }
+        5 => 20        // any 5xx
+        _ => 0         // informational or redirect
+    }
+}
+
+fn main() -> i32 {
+    sum_nested_pair()
+}

@@ -1,0 +1,37 @@
+// SPDX-License-Identifier: PMPL-1.0-or-later
+// Copyright (c) 2026 Jonathan D.A. Jewell (hyperpolymath) <j.d.a.jewell@open.ac.uk>
+//
+// Example: Matching on enum/variant types.
+//
+// Ephapax sum types (enums) carry data in their variants. Pattern
+// matching destructures the variant, binding the inner data. Each
+// variant arm sees only the fields relevant to that case.
+
+// A shape with associated measurements.
+type Shape = Circle(i32) | Rectangle(i32, i32) | Triangle(i32, i32, i32)
+
+fn perimeter(s: Shape) -> i32 {
+    match s {
+        Circle(radius)           => 2 * 3 * radius   // approx 2*pi*r
+        Rectangle(width, height) => 2 * (width + height)
+        Triangle(a, b, c)        => a + b + c
+    }
+}
+
+// Log severity levels with optional context.
+type LogLevel = Debug(String) | Info(String) | Warn(String) | Error(String, i32)
+
+fn severity_code(level: LogLevel) -> i32 {
+    match level {
+        Debug(_)    => 0
+        Info(_)     => 1
+        Warn(_)     => 2
+        Error(_, _) => 3
+    }
+}
+
+fn main() -> i32 {
+    let p = perimeter(Rectangle(10, 5))
+    let s = severity_code(Info("startup complete"))
+    p + s
+}

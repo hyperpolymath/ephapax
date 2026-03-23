@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: EUPL-1.2
+// SPDX-License-Identifier: PMPL-1.0-or-later
 // SPDX-FileCopyrightText: 2025 Jonathan D.A. Jewell
 
 //! Error reporting for the Ephapax parser
@@ -37,6 +37,23 @@ impl ParseError {
             ParseError::Syntax { span, .. } => *span,
             ParseError::UnexpectedEof { span } => *span,
             ParseError::Expected { span, .. } => *span,
+        }
+    }
+
+    /// Convenience constructor for when a pest iterator is unexpectedly empty.
+    /// `context` describes what element was expected (e.g. "expression", "identifier").
+    pub fn unexpected_end(_context: &str) -> Self {
+        ParseError::UnexpectedEof {
+            span: Span::dummy(),
+        }
+    }
+
+    /// Convenience constructor for a missing required element with context.
+    pub fn missing(expected: &str) -> Self {
+        ParseError::Expected {
+            expected: expected.to_string(),
+            found: "end of input".to_string(),
+            span: Span::dummy(),
         }
     }
 }

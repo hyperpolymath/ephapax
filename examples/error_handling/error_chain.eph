@@ -1,0 +1,41 @@
+// SPDX-License-Identifier: PMPL-1.0-or-later
+// Copyright (c) 2026 Jonathan D.A. Jewell (hyperpolymath)
+//
+// Example: Chaining fallible operations.
+//
+// Multiple fallible steps compose naturally with ?. Each step may fail,
+// and the first failure short-circuits the chain. Linear resources
+// acquired along the way must be consumed on every path.
+
+fn load_config(path: &str) -> Result!(Config, AppError) {
+    let! file = File.open(path)?
+    let raw = File.read_all(&file)?
+    File.close(file)
+
+    let parsed = Json.parse(&raw)?
+    let config = Config.from_json(parsed)?
+    Ok(config)
+}
+
+fn connect_db(cfg: &Config) -> Result!(DbConn!, AppError) {
+    let host = Config.get_str(cfg, "db.host")?
+    let port = Config.get_u16(cfg, "db.port")?
+    let! conn = Db.connect(host, port)?
+    Ok(conn)
+}
+
+fn main() -> i32 {
+    let cfg = match load_config("/etc/app/config.json") {
+        Ok(c)  => c,
+        Err(e) => { Log.error(&e); return 1 }
+    }
+
+    let! conn = match connect_db(&cfg) {
+        Ok(c)  => c,
+        Err(e) => { Log.error(&e); return 2 }
+    }
+
+    let rows = Db.query(&conn, "SELECT count(*) FROM users")?
+    Db.close(conn)
+    rows
+}

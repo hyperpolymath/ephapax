@@ -1,0 +1,36 @@
+// SPDX-License-Identifier: PMPL-1.0-or-later
+// Copyright (c) 2026 Jonathan D.A. Jewell (hyperpolymath)
+//
+// Example: Cleaning up linear resources on error paths.
+//
+// When a linear resource is in scope and an error occurs, the compiler
+// requires that every code path consumes it. This guarantees cleanup
+// even under failure — no finally blocks or destructors needed.
+
+fn process_file(path: &str) -> Result!(i32, IoError) {
+    // Linear: handle MUST be closed on every path.
+    let! handle = File.open(path)?
+
+    // This read might fail. If it does, we still must close handle.
+    let data = match File.read_all(&handle) {
+        Ok(bytes) => bytes,
+        Err(e) => {
+            // Error path: close the handle before propagating.
+            File.close(handle)
+            return Err(e)
+        }
+    }
+
+    let count = Bytes.len(&data)
+
+    // Happy path: close the handle normally.
+    File.close(handle)
+    Ok(count)
+}
+
+fn main() -> i32 {
+    match process_file("/tmp/input.dat") {
+        Ok(n)  => n,
+        Err(_) => -1,
+    }
+}

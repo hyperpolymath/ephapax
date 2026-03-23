@@ -1,0 +1,32 @@
+// SPDX-License-Identifier: PMPL-1.0-or-later
+// Copyright (c) 2026 Jonathan D.A. Jewell (hyperpolymath)
+//
+// Example: Send/receive on linear channels.
+//
+// A linear channel endpoint must be used exactly once. After sending,
+// the tx endpoint is consumed and cannot be reused. After receiving,
+// the rx endpoint is consumed. This prevents data races at compile time.
+
+fn send_greeting() -> String {
+    // Create a typed one-shot channel for String values.
+    let! Pair(tx, rx) = Channel.one_shot()
+
+    // Spawn a task that owns the tx endpoint.
+    Task.spawn(fn() {
+        let msg = String.from("hello from spawned task")
+        Channel.send(tx, msg)
+        // tx is consumed — cannot send again.
+    })
+
+    // Main task owns the rx endpoint.
+    let! greeting = Channel.recv(rx)
+    // rx is consumed — cannot receive again.
+
+    greeting
+}
+
+fn main() -> i32 {
+    let msg = send_greeting()
+    Log.info(&msg)
+    0
+}

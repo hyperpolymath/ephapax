@@ -1,0 +1,53 @@
+// SPDX-License-Identifier: PMPL-1.0-or-later
+// Copyright (c) 2026 Jonathan D.A. Jewell (hyperpolymath) <j.d.a.jewell@open.ac.uk>
+//
+// Example: Pattern matching with linear resource consumption.
+//
+// When matching on a value that contains linear resources, every arm
+// must consume the linear components. The compiler verifies that no
+// arm drops a linear value silently — each branch must fulfil the
+// obligation, even if the branches handle different variants.
+
+type Command = Open(String!) | Close(File!) | Send(File!, String!)
+
+fn execute_command(cmd: Command) -> i32 {
+    // Every arm must consume the linear values bound by its pattern.
+    // Open consumes the filename, Close consumes the handle, etc.
+    match cmd {
+        Open(path) => {
+            // path is linear (String!) — must consume it.
+            let! handle = File.open_linear(path)
+            let size = File.size(&handle)
+            File.close(handle)
+            size
+        }
+        Close(handle) => {
+            // handle is linear (File!) — must close it.
+            File.close(handle)
+            0
+        }
+        Send(handle, data) => {
+            // Both handle and data are linear — must consume both.
+            File.write(handle, data)
+            1
+        }
+    }
+}
+
+fn handle_option_linear(opt: Option<File!>) -> i32 {
+    // Even in the None branch, the Some branch's linear file must be
+    // consumed if it exists. The compiler tracks each arm independently.
+    match opt {
+        Some(file) => {
+            let size = File.size(&file)
+            File.close(file)
+            size
+        }
+        None => 0
+    }
+}
+
+fn main() -> i32 {
+    let cmd = Open("data.txt")
+    execute_command(cmd)
+}

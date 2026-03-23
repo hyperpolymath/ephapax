@@ -1,0 +1,48 @@
+// SPDX-License-Identifier: PMPL-1.0-or-later
+// Copyright (c) 2026 Jonathan D.A. Jewell (hyperpolymath) <j.d.a.jewell@open.ac.uk>
+//
+// Example: Public vs private visibility.
+//
+// By default, functions in a module are public. Prefix with `priv` to
+// make a function private — callable only within the same module.
+// This encapsulates implementation details and keeps the public API
+// clean. Types follow the same visibility rules.
+
+module Password
+
+// --- Public API ---
+
+fn validate(input: &String) -> i32 {
+    let len = String.len(input)
+    let has_upper = check_uppercase(input)
+    let has_digit = check_digit(input)
+
+    // All three checks must pass.
+    if len >= 8 {
+        if has_upper == 1 {
+            if has_digit == 1 {
+                1   // valid
+            } else { 0 }
+        } else { 0 }
+    } else { 0 }
+}
+
+fn strength(input: &String) -> i32 {
+    // Score from 0-3 based on character diversity.
+    let score = check_uppercase(input) + check_digit(input) + check_special(input)
+    score
+}
+
+// --- Private helpers (not accessible outside this module) ---
+
+priv fn check_uppercase(s: &String) -> i32 {
+    String.has_class(s, "uppercase")
+}
+
+priv fn check_digit(s: &String) -> i32 {
+    String.has_class(s, "digit")
+}
+
+priv fn check_special(s: &String) -> i32 {
+    String.has_class(s, "special")
+}

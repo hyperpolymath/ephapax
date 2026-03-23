@@ -1,0 +1,47 @@
+// SPDX-License-Identifier: PMPL-1.0-or-later
+// Copyright (c) 2026 Jonathan D.A. Jewell (hyperpolymath) <j.d.a.jewell@open.ac.uk>
+//
+// Example: Exhaustive pattern matching.
+//
+// Ephapax requires that match expressions cover every possible value
+// of the scrutinee type. For sum types (enums), every variant must
+// appear in at least one arm. For integers, a wildcard _ is required.
+// This prevents runtime match failures — every value has a handler.
+
+// A three-state traffic light. Every variant must be matched.
+type Light = Red | Amber | Green
+
+fn light_to_wait_seconds(light: Light) -> i32 {
+    // All three variants are covered — this is exhaustive.
+    // Removing any arm would be a compile error.
+    match light {
+        Red   => 60
+        Amber => 5
+        Green => 0
+    }
+}
+
+// Boolean-like type — exactly two variants.
+type Answer = Yes | No
+
+fn answer_to_flag(a: Answer) -> i32 {
+    match a {
+        Yes => 1
+        No  => 0
+    }
+}
+
+// Option must cover both Some and None.
+fn unwrap_or_default(opt: Option<i32>) -> i32 {
+    match opt {
+        Some(v) => v
+        None    => 0
+    }
+}
+
+fn main() -> i32 {
+    let seconds = light_to_wait_seconds(Green)
+    let flag = answer_to_flag(Yes)
+    let value = unwrap_or_default(None)
+    seconds + flag + value
+}

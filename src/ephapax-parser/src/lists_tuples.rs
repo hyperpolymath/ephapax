@@ -83,7 +83,9 @@ impl<'a> Parser<'a> {
 
             // Single-element tuple is just the element
             if elements.len() == 1 {
-                Ok(elements.into_iter().next().unwrap())
+                // SAFETY: len() == 1 guarantees next() returns Some
+                Ok(elements.into_iter().next()
+                    .ok_or(ParseError::unexpected_end("tuple element"))?)
             } else {
                 Ok(Expr::new(ExprKind::TupleLit(elements), Span::new(start, end)))
             }

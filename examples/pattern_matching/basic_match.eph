@@ -1,0 +1,36 @@
+// SPDX-License-Identifier: PMPL-1.0-or-later
+// Copyright (c) 2026 Jonathan D.A. Jewell (hyperpolymath) <j.d.a.jewell@open.ac.uk>
+//
+// Example: Simple match on values.
+//
+// The match expression dispatches on a value, binding the result to the
+// first arm whose pattern matches. All arms must return the same type.
+// Every possible value must be covered — the compiler rejects partial matches.
+
+fn describe_exit_code(code: i32) -> String {
+    match code {
+        0 => "success"
+        1 => "general error"
+        2 => "misuse of shell command"
+        126 => "command not executable"
+        127 => "command not found"
+        130 => "interrupted by Ctrl-C"
+        _ => "unknown exit code"
+    }
+}
+
+fn traffic_light_duration(colour: i32) -> i32 {
+    // 0 = red, 1 = amber, 2 = green.
+    match colour {
+        0 => 60
+        1 => 5
+        2 => 45
+        _ => 0
+    }
+}
+
+fn main() -> i32 {
+    let msg = describe_exit_code(127)
+    let duration = traffic_light_duration(2)
+    duration
+}

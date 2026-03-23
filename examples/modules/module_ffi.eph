@@ -1,0 +1,54 @@
+// SPDX-License-Identifier: PMPL-1.0-or-later
+// Copyright (c) 2026 Jonathan D.A. Jewell (hyperpolymath) <j.d.a.jewell@open.ac.uk>
+//
+// Example: FFI declarations in modules.
+//
+// Modules can wrap __ffi calls behind safe Ephapax interfaces. The
+// raw C ABI is hidden inside the module; callers see only typed
+// functions with proper linearity annotations. This is the standard
+// pattern for binding to Zig FFI layers or system libraries.
+
+module Sqlite
+
+// Opaque handle to a database connection — linear, must be closed.
+// Internally a pointer from sqlite3_open().
+type Db! = i64
+
+// Open a database file. Returns a linear handle.
+fn open(path: &String) -> Db! {
+    let! ptr = __ffi("sqlite3_open", path)
+    ptr
+}
+
+// Execute a SQL statement (borrows the handle).
+fn exec(db: &Db, sql: &String) -> i32 {
+    let rc = __ffi("sqlite3_exec", db, sql, 0, 0)
+    rc
+}
+
+// Prepare a statement (borrows the handle, returns linear statement).
+fn prepare(db: &Db, sql: &String) -> Stmt! {
+    let! stmt = __ffi("sqlite3_prepare_v2", db, sql)
+    stmt
+}
+
+// Finalize a prepared statement — consumes the linear handle.
+fn finalize(stmt: Stmt!) -> i32 {
+    let rc = __ffi("sqlite3_finalize", stmt)
+    rc
+}
+
+// Close the database — consumes the linear handle.
+fn close(db: Db!) -> i32 {
+    let rc = __ffi("sqlite3_close", db)
+    rc
+}
+
+// --- Usage example ---
+
+fn create_table() -> i32 {
+    let! db = Sqlite.open(&"test.db")
+    let rc = Sqlite.exec(&db, &"CREATE TABLE IF NOT EXISTS items (id INTEGER, name TEXT)")
+    let close_rc = Sqlite.close(db)
+    rc + close_rc
+}

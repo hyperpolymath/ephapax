@@ -1,0 +1,36 @@
+// SPDX-License-Identifier: PMPL-1.0-or-later
+// Copyright (c) 2026 Jonathan D.A. Jewell (hyperpolymath)
+//
+// Example: Typestate programming pattern.
+//
+// Each phase of a builder is a distinct linear type. Calling a method
+// consumes the current state and returns the next. The compiler prevents
+// calling methods out of order or skipping required steps.
+
+// Builder states — each is a separate linear type.
+type HttpRequest_Headers!
+type HttpRequest_Body!
+type HttpRequest_Ready!
+
+fn build_request() -> Response {
+    // Phase 1: set URL — returns Headers state.
+    let! req = HttpRequest.new("https://api.example.com/data")
+
+    // Phase 2: add headers — consumes new, returns Body state.
+    let! req = HttpRequest.header(req, "Authorization", "Bearer abc")
+    let! req = HttpRequest.header(req, "Content-Type", "application/json")
+
+    // Phase 3: set body — consumes Headers state, returns Ready state.
+    let! req = HttpRequest.body(req, "{\"key\": \"value\"}")
+
+    // Phase 4: send — consumes Ready state, returns plain Response.
+    // Cannot call .header() or .body() here — req is now Ready!, not Headers!.
+    let response = HttpRequest.send(req)
+
+    response
+}
+
+fn main() -> i32 {
+    let resp = build_request()
+    Response.status(&resp)
+}

@@ -1,0 +1,41 @@
+// SPDX-License-Identifier: PMPL-1.0-or-later
+// Copyright (c) 2026 Jonathan D.A. Jewell (hyperpolymath)
+//
+// Example: Session-typed communication.
+//
+// Session types encode a protocol as a sequence of send/receive steps.
+// Each step returns a new channel endpoint for the next step, ensuring
+// the protocol is followed in order. Skipping a step is a type error.
+
+// Protocol: Client sends query, server sends count, client sends ack.
+type QueryProtocol = Send!(String, Recv!(i32, Send!(bool, End)))
+
+fn client(ch: QueryProtocol) {
+    // Step 1: send the query string, get channel for step 2.
+    let! ch = Session.send(ch, "SELECT * FROM logs")
+
+    // Step 2: receive the result count, get channel for step 3.
+    let! Pair(count, ch) = Session.recv(ch)
+
+    // Step 3: send acknowledgement, get End token.
+    let! end = Session.send(ch, count > 0)
+
+    // Consume the End token — protocol complete.
+    Session.close(end)
+}
+
+fn server(ch: Dual!(QueryProtocol)) {
+    // Dual type flips Send/Recv — server receives where client sends.
+    let! Pair(query, ch) = Session.recv(ch)
+    let count = Db.count_rows(&query)
+    let! ch = Session.send(ch, count)
+    let! Pair(_ack, end) = Session.recv(ch)
+    Session.close(end)
+}
+
+fn main() -> i32 {
+    let! Pair(client_end, server_end) = Session.new()
+    Task.spawn(fn() { server(server_end) })
+    client(client_end)
+    0
+}

@@ -1,5 +1,5 @@
 #![forbid(unsafe_code)]
-// SPDX-License-Identifier: EUPL-1.2
+// SPDX-License-Identifier: PMPL-1.0-or-later
 // SPDX-FileCopyrightText: 2025 Jonathan D.A. Jewell
 
 //! Ephapax Parser
@@ -36,8 +36,10 @@ pub fn parse(source: &str) -> Result<Expr, Vec<ParseError>> {
             span: Span::dummy(),
         }])?;
 
-    let pair = pairs.into_iter().next().unwrap();
-    let inner = pair.into_inner().next().unwrap();
+    let pair = pairs.into_iter().next()
+        .ok_or_else(|| vec![ParseError::unexpected_end("top-level expression")])?;
+    let inner = pair.into_inner().next()
+        .ok_or_else(|| vec![ParseError::unexpected_end("inner expression")])?;
 
     parse_expression(inner).map_err(|e| vec![e])
 }
@@ -50,7 +52,8 @@ pub fn parse_module(source: &str, name: &str) -> Result<Module, Vec<ParseError>>
             span: Span::dummy(),
         }])?;
 
-    let pair = pairs.into_iter().next().unwrap();
+    let pair = pairs.into_iter().next()
+        .ok_or_else(|| vec![ParseError::unexpected_end("module")])?;
     let mut decls = Vec::new();
 
     for inner in pair.into_inner() {
@@ -83,7 +86,8 @@ fn parse_identifier(pair: pest::iterators::Pair<Rule>) -> SmolStr {
 // ============================================================================
 
 fn parse_declaration(pair: pest::iterators::Pair<Rule>) -> Result<Decl, ParseError> {
-    let inner = pair.into_inner().next().unwrap();
+    let inner = pair.into_inner().next()
+        .ok_or_else(|| ParseError::unexpected_end("declaration"))?;
 
     match inner.as_rule() {
         Rule::fn_decl => parse_fn_decl(inner),
@@ -98,7 +102,8 @@ fn parse_declaration(pair: pest::iterators::Pair<Rule>) -> Result<Decl, ParseErr
 fn parse_fn_decl(pair: pest::iterators::Pair<Rule>) -> Result<Decl, ParseError> {
     let mut inner = pair.into_inner();
 
-    let name = parse_identifier(inner.next().unwrap());
+    let name = parse_identifier(inner.next()
+        .ok_or_else(|| ParseError::missing("function name"))?);
 
     let mut params = Vec::new();
     let mut ret_ty = None;
@@ -110,8 +115,10 @@ fn parse_fn_decl(pair: pest::iterators::Pair<Rule>) -> Result<Decl, ParseError> 
                 for param in item.into_inner() {
                     if param.as_rule() == Rule::param {
                         let mut parts = param.into_inner();
-                        let param_name = parse_identifier(parts.next().unwrap());
-                        let param_ty = parse_type(parts.next().unwrap())?;
+                        let param_name = parse_identifier(parts.next()
+                            .ok_or_else(|| ParseError::missing("parameter name"))?);
+                        let param_ty = parse_type(parts.next()
+                            .ok_or_else(|| ParseError::missing("parameter type"))?)?;
                         params.push((param_name, param_ty));
                     }
                 }
@@ -138,9 +145,11 @@ fn parse_fn_decl(pair: pest::iterators::Pair<Rule>) -> Result<Decl, ParseError> 
 
 fn parse_type_decl(pair: pest::iterators::Pair<Rule>) -> Result<Decl, ParseError> {
     let mut inner = pair.into_inner();
-    let name = parse_identifier(inner.next().unwrap());
+    let name = parse_identifier(inner.next()
+        .ok_or_else(|| ParseError::missing("type name"))?);
 
-    let ty_or_def = inner.next().unwrap();
+    let ty_or_def = inner.next()
+        .ok_or_else(|| ParseError::missing("type definition"))?;
     let ty = match ty_or_def.as_rule() {
         Rule::sum_type_def => parse_sum_type_def(ty_or_def)?,
         Rule::record_type_def => parse_record_type_def(ty_or_def)?,
@@ -168,7 +177,9 @@ fn parse_sum_type_def(pair: pest::iterators::Pair<Rule>) -> Result<Ty, ParseErro
     let mut variant_types = Vec::new();
     for variant_pair in variants {
         let mut inner = variant_pair.into_inner();
-        let _variant_name = parse_identifier(inner.next().unwrap());
+        let _variant_name = parse_identifier(inner.next()
+            .ok_or_else(|| ParseError::missing("variant name"))?);
+
 
         // For now, treat each variant as a unit type
         // In the future, we could parse the optional type parameter
@@ -199,8 +210,10 @@ fn parse_record_type_def(pair: pest::iterators::Pair<Rule>) -> Result<Ty, ParseE
 
     for field_pair in pair.into_inner() {
         let mut inner = field_pair.into_inner();
-        let _field_name = parse_identifier(inner.next().unwrap());
-        let field_ty = parse_type(inner.next().unwrap())?;
+        let _field_name = parse_identifier(inner.next()
+            .ok_or_else(|| ParseError::missing("field name"))?);
+        let field_ty = parse_type(inner.next()
+            .ok_or_else(|| ParseError::missing("field type"))?)?;
         field_types.push(field_ty);
     }
 
@@ -219,7 +232,8 @@ fn parse_record_type_def(pair: pest::iterators::Pair<Rule>) -> Result<Ty, ParseE
 fn parse_type(pair: pest::iterators::Pair<Rule>) -> Result<Ty, ParseError> {
     let mut inner = pair.into_inner().peekable();
 
-    let first = inner.next().unwrap();
+    let first = inner.next()
+        .ok_or_else(|| ParseError::missing("type"))?;
     let left = parse_sum_type(first)?;
 
     // Check for function type (->)
@@ -236,7 +250,8 @@ fn parse_type(pair: pest::iterators::Pair<Rule>) -> Result<Ty, ParseError> {
 
 fn parse_sum_type(pair: pest::iterators::Pair<Rule>) -> Result<Ty, ParseError> {
     let mut inner = pair.into_inner();
-    let mut result = parse_type_atom(inner.next().unwrap())?;
+    let mut result = parse_type_atom(inner.next()
+        .ok_or_else(|| ParseError::missing("sum type component"))?)?;
 
     for atom in inner {
         let right = parse_type_atom(atom)?;
@@ -250,7 +265,8 @@ fn parse_sum_type(pair: pest::iterators::Pair<Rule>) -> Result<Ty, ParseError> {
 }
 
 fn parse_type_atom(pair: pest::iterators::Pair<Rule>) -> Result<Ty, ParseError> {
-    let inner = pair.into_inner().next().unwrap();
+    let inner = pair.into_inner().next()
+        .ok_or_else(|| ParseError::missing("type atom"))?;
 
     match inner.as_rule() {
         Rule::base_ty => parse_base_type(inner),
@@ -263,11 +279,13 @@ fn parse_type_atom(pair: pest::iterators::Pair<Rule>) -> Result<Ty, ParseError> 
             Ok(Ty::String(region))
         }
         Rule::borrow_ty => {
-            let inner_ty = parse_type_atom(inner.into_inner().next().unwrap())?;
+            let inner_ty = parse_type_atom(inner.into_inner().next()
+                .ok_or_else(|| ParseError::missing("borrowed type"))?)?;
             Ok(Ty::Borrow(Box::new(inner_ty)))
         }
         Rule::list_ty => {
-            let elem_ty = parse_type(inner.into_inner().next().unwrap())?;
+            let elem_ty = parse_type(inner.into_inner().next()
+                .ok_or_else(|| ParseError::missing("list element type"))?)?;
             Ok(Ty::List(Box::new(elem_ty)))
         }
         Rule::product_ty => {
@@ -277,17 +295,22 @@ fn parse_type_atom(pair: pest::iterators::Pair<Rule>) -> Result<Ty, ParseError> 
             }
 
             if types.len() == 1 {
-                Ok(types.into_iter().next().unwrap())
+                // SAFETY: len() == 1 guarantees next() returns Some
+                Ok(types.into_iter().next()
+                    .ok_or_else(|| ParseError::missing("product type element"))?)
             } else {
                 let result = types.into_iter().reduce(|acc, t| Ty::Prod {
                     left: Box::new(acc),
                     right: Box::new(t),
                 });
-                Ok(result.unwrap())
+                // SAFETY: reduce on non-empty iterator always returns Some
+                Ok(result
+                    .ok_or_else(|| ParseError::missing("product type"))?)
             }
         }
         Rule::type_var => {
-            let name = parse_identifier(inner.into_inner().next().unwrap());
+            let name = parse_identifier(inner.into_inner().next()
+                .ok_or_else(|| ParseError::missing("type variable name"))?);
             Ok(Ty::Var(name))
         }
         Rule::record_ty => {
@@ -295,8 +318,10 @@ fn parse_type_atom(pair: pest::iterators::Pair<Rule>) -> Result<Ty, ParseError> 
             let mut field_types = Vec::new();
             for field_pair in inner.into_inner() {
                 let mut field_inner = field_pair.into_inner();
-                let _field_name = parse_identifier(field_inner.next().unwrap());
-                let field_ty = parse_type(field_inner.next().unwrap())?;
+                let _field_name = parse_identifier(field_inner.next()
+                    .ok_or_else(|| ParseError::missing("record field name"))?);
+                let field_ty = parse_type(field_inner.next()
+                    .ok_or_else(|| ParseError::missing("record field type"))?)?;
                 field_types.push(field_ty);
             }
             Ok(Ty::Tuple(field_types))
@@ -330,7 +355,8 @@ fn parse_base_type(pair: pest::iterators::Pair<Rule>) -> Result<Ty, ParseError> 
 
 fn parse_expression(pair: pest::iterators::Pair<Rule>) -> Result<Expr, ParseError> {
     let span = span_from_pair(&pair);
-    let inner = pair.into_inner().next().unwrap();
+    let inner = pair.into_inner().next()
+        .ok_or_else(|| ParseError::unexpected_end("expression"))?;
 
     match inner.as_rule() {
         Rule::let_expr => parse_let_expr(inner),
@@ -351,7 +377,8 @@ fn parse_let_expr(pair: pest::iterators::Pair<Rule>) -> Result<Expr, ParseError>
     let span = span_from_pair(&pair);
     let mut inner = pair.into_inner();
 
-    let name = parse_identifier(inner.next().unwrap());
+    let name = parse_identifier(inner.next()
+        .ok_or_else(|| ParseError::missing("let binding name"))?);
 
     let mut ty = None;
     let mut value = None;
@@ -375,8 +402,10 @@ fn parse_let_expr(pair: pest::iterators::Pair<Rule>) -> Result<Expr, ParseError>
         ExprKind::Let {
             name,
             ty,
-            value: Box::new(value.unwrap()),
-            body: Box::new(body.unwrap()),
+            value: Box::new(value
+                .ok_or_else(|| ParseError::missing("let binding value"))?),
+            body: Box::new(body
+                .ok_or_else(|| ParseError::missing("let binding body"))?),
         },
         span,
     ))
@@ -386,7 +415,8 @@ fn parse_let_lin_expr(pair: pest::iterators::Pair<Rule>) -> Result<Expr, ParseEr
     let span = span_from_pair(&pair);
     let mut inner = pair.into_inner();
 
-    let name = parse_identifier(inner.next().unwrap());
+    let name = parse_identifier(inner.next()
+        .ok_or_else(|| ParseError::missing("let-lin binding name"))?);
 
     let mut ty = None;
     let mut value = None;
@@ -410,8 +440,10 @@ fn parse_let_lin_expr(pair: pest::iterators::Pair<Rule>) -> Result<Expr, ParseEr
         ExprKind::LetLin {
             name,
             ty,
-            value: Box::new(value.unwrap()),
-            body: Box::new(body.unwrap()),
+            value: Box::new(value
+                .ok_or_else(|| ParseError::missing("let-lin binding value"))?),
+            body: Box::new(body
+                .ok_or_else(|| ParseError::missing("let-lin binding body"))?),
         },
         span,
     ))
@@ -421,9 +453,12 @@ fn parse_lambda_expr(pair: pest::iterators::Pair<Rule>) -> Result<Expr, ParseErr
     let span = span_from_pair(&pair);
     let mut inner = pair.into_inner();
 
-    let param = parse_identifier(inner.next().unwrap());
-    let param_ty = parse_type(inner.next().unwrap())?;
-    let body = parse_expression(inner.next().unwrap())?;
+    let param = parse_identifier(inner.next()
+        .ok_or_else(|| ParseError::missing("lambda parameter name"))?);
+    let param_ty = parse_type(inner.next()
+        .ok_or_else(|| ParseError::missing("lambda parameter type"))?)?;
+    let body = parse_expression(inner.next()
+        .ok_or_else(|| ParseError::missing("lambda body"))?)?;
 
     Ok(Expr::new(
         ExprKind::Lambda {
@@ -439,9 +474,12 @@ fn parse_if_expr(pair: pest::iterators::Pair<Rule>) -> Result<Expr, ParseError> 
     let span = span_from_pair(&pair);
     let mut inner = pair.into_inner();
 
-    let cond = parse_expression(inner.next().unwrap())?;
-    let then_branch = parse_expression(inner.next().unwrap())?;
-    let else_branch = parse_expression(inner.next().unwrap())?;
+    let cond = parse_expression(inner.next()
+        .ok_or_else(|| ParseError::missing("if condition"))?)?;
+    let then_branch = parse_expression(inner.next()
+        .ok_or_else(|| ParseError::missing("if then-branch"))?)?;
+    let else_branch = parse_expression(inner.next()
+        .ok_or_else(|| ParseError::missing("if else-branch"))?)?;
 
     Ok(Expr::new(
         ExprKind::If {
@@ -457,8 +495,10 @@ fn parse_region_expr(pair: pest::iterators::Pair<Rule>) -> Result<Expr, ParseErr
     let span = span_from_pair(&pair);
     let mut inner = pair.into_inner();
 
-    let name = parse_identifier(inner.next().unwrap());
-    let body = parse_expression(inner.next().unwrap())?;
+    let name = parse_identifier(inner.next()
+        .ok_or_else(|| ParseError::missing("region name"))?);
+    let body = parse_expression(inner.next()
+        .ok_or_else(|| ParseError::missing("region body"))?)?;
 
     Ok(Expr::new(
         ExprKind::Region {
@@ -473,11 +513,16 @@ fn parse_case_expr(pair: pest::iterators::Pair<Rule>) -> Result<Expr, ParseError
     let span = span_from_pair(&pair);
     let mut inner = pair.into_inner();
 
-    let scrutinee = parse_expression(inner.next().unwrap())?;
-    let left_var = parse_identifier(inner.next().unwrap());
-    let left_body = parse_expression(inner.next().unwrap())?;
-    let right_var = parse_identifier(inner.next().unwrap());
-    let right_body = parse_expression(inner.next().unwrap())?;
+    let scrutinee = parse_expression(inner.next()
+        .ok_or_else(|| ParseError::missing("case scrutinee"))?)?;
+    let left_var = parse_identifier(inner.next()
+        .ok_or_else(|| ParseError::missing("case left variable"))?);
+    let left_body = parse_expression(inner.next()
+        .ok_or_else(|| ParseError::missing("case left body"))?)?;
+    let right_var = parse_identifier(inner.next()
+        .ok_or_else(|| ParseError::missing("case right variable"))?);
+    let right_body = parse_expression(inner.next()
+        .ok_or_else(|| ParseError::missing("case right body"))?)?;
 
     Ok(Expr::new(
         ExprKind::Case {
@@ -499,7 +544,8 @@ fn parse_or_expr(pair: pest::iterators::Pair<Rule>) -> Result<Expr, ParseError> 
     let span = span_from_pair(&pair);
     let mut inner = pair.into_inner();
 
-    let mut result = parse_and_expr(inner.next().unwrap())?;
+    let mut result = parse_and_expr(inner.next()
+        .ok_or_else(|| ParseError::unexpected_end("or expression"))?)?;
 
     for and_expr in inner {
         let right = parse_and_expr(and_expr)?;
@@ -520,7 +566,8 @@ fn parse_and_expr(pair: pest::iterators::Pair<Rule>) -> Result<Expr, ParseError>
     let span = span_from_pair(&pair);
     let mut inner = pair.into_inner();
 
-    let mut result = parse_eq_expr(inner.next().unwrap())?;
+    let mut result = parse_eq_expr(inner.next()
+        .ok_or_else(|| ParseError::unexpected_end("and expression"))?)?;
 
     for eq_expr in inner {
         let right = parse_eq_expr(eq_expr)?;
@@ -541,7 +588,8 @@ fn parse_eq_expr(pair: pest::iterators::Pair<Rule>) -> Result<Expr, ParseError> 
     let span = span_from_pair(&pair);
     let mut inner = pair.into_inner().peekable();
 
-    let mut result = parse_cmp_expr(inner.next().unwrap())?;
+    let mut result = parse_cmp_expr(inner.next()
+        .ok_or_else(|| ParseError::unexpected_end("equality expression"))?)?;
 
     while let Some(next) = inner.next() {
         let (op, right_pair) = if next.as_rule() == Rule::eq_op {
@@ -550,7 +598,8 @@ fn parse_eq_expr(pair: pest::iterators::Pair<Rule>) -> Result<Expr, ParseError> 
                 "!=" => BinOp::Ne,
                 _ => unreachable!(),
             };
-            (op, inner.next().unwrap())
+            (op, inner.next()
+                .ok_or_else(|| ParseError::missing("right-hand side of equality"))?)
         } else {
             continue;
         };
@@ -573,7 +622,8 @@ fn parse_cmp_expr(pair: pest::iterators::Pair<Rule>) -> Result<Expr, ParseError>
     let span = span_from_pair(&pair);
     let mut inner = pair.into_inner().peekable();
 
-    let mut result = parse_add_expr(inner.next().unwrap())?;
+    let mut result = parse_add_expr(inner.next()
+        .ok_or_else(|| ParseError::unexpected_end("comparison expression"))?)?;
 
     while let Some(next) = inner.next() {
         let (op, right_pair) = if next.as_rule() == Rule::cmp_op {
@@ -584,7 +634,8 @@ fn parse_cmp_expr(pair: pest::iterators::Pair<Rule>) -> Result<Expr, ParseError>
                 ">=" => BinOp::Ge,
                 _ => unreachable!(),
             };
-            (op, inner.next().unwrap())
+            (op, inner.next()
+                .ok_or_else(|| ParseError::missing("right-hand side of comparison"))?)
         } else {
             continue;
         };
@@ -607,7 +658,8 @@ fn parse_add_expr(pair: pest::iterators::Pair<Rule>) -> Result<Expr, ParseError>
     let span = span_from_pair(&pair);
     let mut inner = pair.into_inner().peekable();
 
-    let mut result = parse_mul_expr(inner.next().unwrap())?;
+    let mut result = parse_mul_expr(inner.next()
+        .ok_or_else(|| ParseError::unexpected_end("additive expression"))?)?;
 
     while let Some(next) = inner.next() {
         let (op, right_pair) = if next.as_rule() == Rule::add_op {
@@ -616,7 +668,8 @@ fn parse_add_expr(pair: pest::iterators::Pair<Rule>) -> Result<Expr, ParseError>
                 "-" => BinOp::Sub,
                 _ => unreachable!(),
             };
-            (op, inner.next().unwrap())
+            (op, inner.next()
+                .ok_or_else(|| ParseError::missing("right-hand side of addition"))?)
         } else {
             continue;
         };
@@ -639,7 +692,8 @@ fn parse_mul_expr(pair: pest::iterators::Pair<Rule>) -> Result<Expr, ParseError>
     let span = span_from_pair(&pair);
     let mut inner = pair.into_inner().peekable();
 
-    let mut result = parse_unary_expr(inner.next().unwrap())?;
+    let mut result = parse_unary_expr(inner.next()
+        .ok_or_else(|| ParseError::unexpected_end("multiplicative expression"))?)?;
 
     while let Some(next) = inner.next() {
         let (op, right_pair) = if next.as_rule() == Rule::mul_op {
@@ -649,7 +703,8 @@ fn parse_mul_expr(pair: pest::iterators::Pair<Rule>) -> Result<Expr, ParseError>
                 "%" => BinOp::Mod,
                 _ => unreachable!(),
             };
-            (op, inner.next().unwrap())
+            (op, inner.next()
+                .ok_or_else(|| ParseError::missing("right-hand side of multiplication"))?)
         } else {
             continue;
         };
@@ -673,7 +728,8 @@ fn parse_unary_expr(pair: pest::iterators::Pair<Rule>) -> Result<Expr, ParseErro
     let text = pair.as_str().trim();
 
     if text.starts_with('!') {
-        let inner = pair.into_inner().next().unwrap();
+        let inner = pair.into_inner().next()
+            .ok_or_else(|| ParseError::missing("unary not operand"))?;
         let operand = parse_unary_expr(inner)?;
         Ok(Expr::new(
             ExprKind::UnaryOp {
@@ -683,7 +739,8 @@ fn parse_unary_expr(pair: pest::iterators::Pair<Rule>) -> Result<Expr, ParseErro
             span,
         ))
     } else if text.starts_with('-') && !text.chars().nth(1).map_or(false, |c| c.is_ascii_digit()) {
-        let inner = pair.into_inner().next().unwrap();
+        let inner = pair.into_inner().next()
+            .ok_or_else(|| ParseError::missing("unary negation operand"))?;
         let operand = parse_unary_expr(inner)?;
         Ok(Expr::new(
             ExprKind::UnaryOp {
@@ -693,7 +750,8 @@ fn parse_unary_expr(pair: pest::iterators::Pair<Rule>) -> Result<Expr, ParseErro
             span,
         ))
     } else {
-        let inner = pair.into_inner().next().unwrap();
+        let inner = pair.into_inner().next()
+            .ok_or_else(|| ParseError::unexpected_end("unary expression"))?;
         parse_postfix_expr(inner)
     }
 }
@@ -702,15 +760,18 @@ fn parse_postfix_expr(pair: pest::iterators::Pair<Rule>) -> Result<Expr, ParseEr
     let span = span_from_pair(&pair);
     let mut inner = pair.into_inner();
 
-    let mut result = parse_atom_expr(inner.next().unwrap())?;
+    let mut result = parse_atom_expr(inner.next()
+        .ok_or_else(|| ParseError::unexpected_end("postfix expression"))?)?;
 
     for op in inner {
         match op.as_rule() {
             Rule::postfix_op => {
-                let op_inner = op.into_inner().next().unwrap();
+                let op_inner = op.into_inner().next()
+                    .ok_or_else(|| ParseError::unexpected_end("postfix operator"))?;
                 match op_inner.as_rule() {
                     Rule::call_op => {
-                        let arg = parse_expression(op_inner.into_inner().next().unwrap())?;
+                        let arg = parse_expression(op_inner.into_inner().next()
+                            .ok_or_else(|| ParseError::missing("function call argument"))?)?;
                         result = Expr::new(
                             ExprKind::App {
                                 func: Box::new(result),
@@ -720,7 +781,8 @@ fn parse_postfix_expr(pair: pest::iterators::Pair<Rule>) -> Result<Expr, ParseEr
                         );
                     }
                     Rule::index_op => {
-                        let index = parse_expression(op_inner.into_inner().next().unwrap())?;
+                        let index = parse_expression(op_inner.into_inner().next()
+                            .ok_or_else(|| ParseError::missing("index expression"))?)?;
                         result = Expr::new(
                             ExprKind::ListIndex {
                                 list: Box::new(result),
@@ -730,10 +792,15 @@ fn parse_postfix_expr(pair: pest::iterators::Pair<Rule>) -> Result<Expr, ParseEr
                         );
                     }
                     Rule::member_op => {
-                        let member = op_inner.into_inner().next().unwrap();
+                        let member = op_inner.into_inner().next()
+                            .ok_or_else(|| ParseError::missing("member access target"))?;
                         match member.as_rule() {
                             Rule::integer => {
-                                let index = member.as_str().parse::<usize>().unwrap();
+                                let index = member.as_str().parse::<usize>()
+                                    .map_err(|_| ParseError::Syntax {
+                                        message: format!("Invalid tuple index: {}", member.as_str()),
+                                        span: span_from_pair(&member),
+                                    })?;
                                 if index == 0 {
                                     result = Expr::new(ExprKind::Fst(Box::new(result)), span);
                                 } else if index == 1 {
@@ -766,13 +833,15 @@ fn parse_postfix_expr(pair: pest::iterators::Pair<Rule>) -> Result<Expr, ParseEr
 
 fn parse_atom_expr(pair: pest::iterators::Pair<Rule>) -> Result<Expr, ParseError> {
     let span = span_from_pair(&pair);
-    let inner = pair.into_inner().next().unwrap();
+    let inner = pair.into_inner().next()
+        .ok_or_else(|| ParseError::unexpected_end("atom expression"))?;
 
     match inner.as_rule() {
         Rule::ffi_expr => {
             let mut parts = inner.into_inner();
             // First arg is the symbol name (a string literal)
-            let symbol_pair = parts.next().unwrap();
+            let symbol_pair = parts.next()
+                .ok_or_else(|| ParseError::missing("FFI symbol name"))?;
             let symbol = symbol_pair.as_str().trim_matches('"').to_string();
             // Remaining args are expressions
             let mut args = Vec::new();
@@ -786,8 +855,10 @@ fn parse_atom_expr(pair: pest::iterators::Pair<Rule>) -> Result<Expr, ParseError
         Rule::string_method => parse_string_method(inner),
         Rule::inl_expr => {
             let mut parts = inner.into_inner();
-            let ty = parse_type(parts.next().unwrap())?;
-            let value = parse_expression(parts.next().unwrap())?;
+            let ty = parse_type(parts.next()
+                .ok_or_else(|| ParseError::missing("inl type"))?)?;
+            let value = parse_expression(parts.next()
+                .ok_or_else(|| ParseError::missing("inl value"))?)?;
             Ok(Expr::new(
                 ExprKind::Inl {
                     ty,
@@ -798,8 +869,10 @@ fn parse_atom_expr(pair: pest::iterators::Pair<Rule>) -> Result<Expr, ParseError
         }
         Rule::inr_expr => {
             let mut parts = inner.into_inner();
-            let ty = parse_type(parts.next().unwrap())?;
-            let value = parse_expression(parts.next().unwrap())?;
+            let ty = parse_type(parts.next()
+                .ok_or_else(|| ParseError::missing("inr type"))?)?;
+            let value = parse_expression(parts.next()
+                .ok_or_else(|| ParseError::missing("inr value"))?)?;
             Ok(Expr::new(
                 ExprKind::Inr {
                     ty,
@@ -809,15 +882,18 @@ fn parse_atom_expr(pair: pest::iterators::Pair<Rule>) -> Result<Expr, ParseError
             ))
         }
         Rule::borrow_expr => {
-            let inner_expr = parse_unary_expr(inner.into_inner().next().unwrap())?;
+            let inner_expr = parse_unary_expr(inner.into_inner().next()
+                .ok_or_else(|| ParseError::missing("borrow operand"))?)?;
             Ok(Expr::new(ExprKind::Borrow(Box::new(inner_expr)), span))
         }
         Rule::drop_expr => {
-            let inner_expr = parse_expression(inner.into_inner().next().unwrap())?;
+            let inner_expr = parse_expression(inner.into_inner().next()
+                .ok_or_else(|| ParseError::missing("drop operand"))?)?;
             Ok(Expr::new(ExprKind::Drop(Box::new(inner_expr)), span))
         }
         Rule::copy_expr => {
-            let inner_expr = parse_expression(inner.into_inner().next().unwrap())?;
+            let inner_expr = parse_expression(inner.into_inner().next()
+                .ok_or_else(|| ParseError::missing("copy operand"))?)?;
             Ok(Expr::new(ExprKind::Copy(Box::new(inner_expr)), span))
         }
         Rule::record_literal => {
@@ -825,13 +901,16 @@ fn parse_atom_expr(pair: pest::iterators::Pair<Rule>) -> Result<Expr, ParseError
             let mut field_values = Vec::new();
             for field_assign_pair in inner.into_inner() {
                 let mut field_inner = field_assign_pair.into_inner();
-                let _field_name = parse_identifier(field_inner.next().unwrap());
+                let _field_name = parse_identifier(field_inner.next()
+                    .ok_or_else(|| ParseError::missing("record field name"))?);
 
                 // Skip optional type annotation
-                let value_pair = field_inner.next().unwrap();
+                let value_pair = field_inner.next()
+                    .ok_or_else(|| ParseError::missing("record field value"))?;
                 let value = if value_pair.as_rule() == Rule::ty {
                     // Has type annotation, next is expression
-                    parse_expression(field_inner.next().unwrap())?
+                    parse_expression(field_inner.next()
+                        .ok_or_else(|| ParseError::missing("record field expression"))?)?
                 } else {
                     // No type annotation, this is the expression
                     parse_expression(value_pair)?
@@ -853,7 +932,8 @@ fn parse_atom_expr(pair: pest::iterators::Pair<Rule>) -> Result<Expr, ParseError
         Rule::paren_or_pair => parse_paren_or_pair(inner),
         Rule::literal => parse_literal(inner),
         Rule::variable => {
-            let name = parse_identifier(inner.into_inner().next().unwrap());
+            let name = parse_identifier(inner.into_inner().next()
+                .ok_or_else(|| ParseError::missing("variable name"))?);
             Ok(Expr::new(ExprKind::Var(name), span))
         }
         _ => Err(ParseError::Syntax {
@@ -867,7 +947,8 @@ fn parse_string_method(pair: pest::iterators::Pair<Rule>) -> Result<Expr, ParseE
     let span = span_from_pair(&pair);
     let mut inner = pair.into_inner();
 
-    let method = parse_identifier(inner.next().unwrap());
+    let method = parse_identifier(inner.next()
+        .ok_or_else(|| ParseError::missing("string method name"))?);
 
     let mut region = None;
     let mut args = Vec::new();
@@ -927,12 +1008,19 @@ fn parse_paren_or_pair(pair: pest::iterators::Pair<Rule>) -> Result<Expr, ParseE
 
     match exprs.len() {
         0 => Ok(Expr::new(ExprKind::Lit(Literal::Unit), span)),
-        1 => Ok(exprs.into_iter().next().unwrap()),
+        1 => {
+            // SAFETY: match arm guarantees len() == 1, so next() returns Some
+            Ok(exprs.into_iter().next()
+                .ok_or_else(|| ParseError::unexpected_end("parenthesized expression"))?)
+        }
         2 => {
             // Keep using Pair for 2-element tuples for backward compatibility
             let mut iter = exprs.into_iter();
-            let left = iter.next().unwrap();
-            let right = iter.next().unwrap();
+            // SAFETY: match arm guarantees len() == 2
+            let left = iter.next()
+                .ok_or_else(|| ParseError::unexpected_end("pair left"))?;
+            let right = iter.next()
+                .ok_or_else(|| ParseError::unexpected_end("pair right"))?;
             Ok(Expr::new(
                 ExprKind::Pair {
                     left: Box::new(left),
@@ -950,7 +1038,8 @@ fn parse_paren_or_pair(pair: pest::iterators::Pair<Rule>) -> Result<Expr, ParseE
 
 fn parse_literal(pair: pest::iterators::Pair<Rule>) -> Result<Expr, ParseError> {
     let span = span_from_pair(&pair);
-    let inner = pair.into_inner().next().unwrap();
+    let inner = pair.into_inner().next()
+        .ok_or_else(|| ParseError::unexpected_end("literal"))?;
 
     let lit = match inner.as_rule() {
         Rule::unit_literal => Literal::Unit,

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: EUPL-1.2
+// SPDX-License-Identifier: PMPL-1.0-or-later
 // SPDX-FileCopyrightText: 2025 Jonathan D.A. Jewell
 
 use criterion::{black_box, criterion_group, criterion_main, Criterion, BenchmarkId};

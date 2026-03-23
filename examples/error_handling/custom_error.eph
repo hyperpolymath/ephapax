@@ -1,0 +1,45 @@
+// SPDX-License-Identifier: PMPL-1.0-or-later
+// Copyright (c) 2026 Jonathan D.A. Jewell (hyperpolymath)
+//
+// Example: Custom error types.
+//
+// Ephapax error types are plain variants. They compose via From conversions
+// so that ? can translate between error domains automatically.
+
+type ValidationError =
+    | TooShort(i32)
+    | TooLong(i32)
+    | InvalidChar(char)
+
+type AppError =
+    | Validation(ValidationError)
+    | Io(IoError)
+
+// From conversion lets ? auto-wrap ValidationError into AppError.
+impl From(ValidationError) for AppError {
+    fn from(e: ValidationError) -> AppError {
+        AppError.Validation(e)
+    }
+}
+
+fn validate_username(name: &str) -> Result!((), ValidationError) {
+    let len = Str.len(name)
+    if len < 3 { return Err(TooShort(len)) }
+    if len > 32 { return Err(TooLong(len)) }
+
+    for c in Str.chars(name) {
+        if !Char.is_alphanumeric(c) && c != '_' {
+            return Err(InvalidChar(c))
+        }
+    }
+    Ok(())
+}
+
+fn register(name: &str) -> Result!(i32, AppError) {
+    // ? converts ValidationError -> AppError via From.
+    validate_username(name)?
+    let! conn = Db.connect("localhost", 5432)?
+    let id = Db.insert(&conn, "INSERT INTO users (name) VALUES (?)", name)?
+    Db.close(conn)
+    Ok(id)
+}

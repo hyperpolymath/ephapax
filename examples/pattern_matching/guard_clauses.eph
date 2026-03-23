@@ -1,0 +1,39 @@
+// SPDX-License-Identifier: PMPL-1.0-or-later
+// Copyright (c) 2026 Jonathan D.A. Jewell (hyperpolymath) <j.d.a.jewell@open.ac.uk>
+//
+// Example: Match with guard clauses.
+//
+// Guards add boolean conditions to match arms using the `if` keyword
+// after the pattern. The arm only fires if both the pattern matches
+// AND the guard evaluates to true. Guards cannot consume linear values
+// — they borrow the bound variables for the test.
+
+fn classify_temperature(celsius: i32) -> i32 {
+    // Return a classification code based on temperature range.
+    // Guards allow range-checking without nested if/else.
+    match celsius {
+        t if t < 0   => 1   // freezing
+        t if t < 10  => 2   // cold
+        t if t < 20  => 3   // cool
+        t if t < 30  => 4   // warm
+        t if t < 40  => 5   // hot
+        _             => 6   // extreme
+    }
+}
+
+fn score_grade(score: i32) -> i32 {
+    // Map percentage to grade code.
+    match score {
+        s if s >= 90 => 1   // A
+        s if s >= 80 => 2   // B
+        s if s >= 70 => 3   // C
+        s if s >= 60 => 4   // D
+        _            => 5   // F
+    }
+}
+
+fn main() -> i32 {
+    let temp_class = classify_temperature(22)
+    let grade = score_grade(85)
+    temp_class + grade
+}

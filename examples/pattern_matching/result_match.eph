@@ -1,0 +1,43 @@
+// SPDX-License-Identifier: PMPL-1.0-or-later
+// Copyright (c) 2026 Jonathan D.A. Jewell (hyperpolymath) <j.d.a.jewell@open.ac.uk>
+//
+// Example: Matching Result types (Ok/Err).
+//
+// Result<A, E> is defined in the Prelude as Ok(A) | Err(E). Pattern
+// matching on Result is the standard way to handle fallible operations
+// in Ephapax. Both branches must handle their payload and return the
+// same type — no silent error ignoring.
+
+fn parse_port(input: &String) -> Result<i32, String> {
+    let value = String.parse_i32(input)
+    if value > 0 {
+        if value < 65536 {
+            Ok(value)
+        } else {
+            Err("port out of range")
+        }
+    } else {
+        Err("invalid port number")
+    }
+}
+
+fn connect_to_service(host: &String, port_str: &String) -> i32 {
+    let parsed = parse_port(port_str)
+
+    match parsed {
+        Ok(port) => {
+            // Valid port — attempt connection.
+            let status = Network.connect(host, port)
+            status
+        }
+        Err(msg) => {
+            // Invalid input — log the error and return failure code.
+            IO.println(&msg)
+            1
+        }
+    }
+}
+
+fn main() -> i32 {
+    connect_to_service(&"localhost", &"8080")
+}

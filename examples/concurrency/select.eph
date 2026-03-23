@@ -1,0 +1,37 @@
+// SPDX-License-Identifier: PMPL-1.0-or-later
+// Copyright (c) 2026 Jonathan D.A. Jewell (hyperpolymath)
+//
+// Example: Select over multiple channels.
+//
+// Select waits on multiple linear receive endpoints and returns whichever
+// fires first. The chosen endpoint is consumed; the others remain live
+// and must still be consumed on every code path.
+
+fn race_two_sources() -> i32 {
+    let! Pair(tx_a, rx_a) = Channel.one_shot()
+    let! Pair(tx_b, rx_b) = Channel.one_shot()
+
+    // Two competing producers.
+    Task.spawn(fn() { Channel.send(tx_a, 10) })
+    Task.spawn(fn() { Channel.send(tx_b, 20) })
+
+    // Select returns which channel fired and the value.
+    match Select.either(rx_a, rx_b) {
+        Left(value, remaining_rx_b) => {
+            // rx_a was consumed by Select. rx_b is still live — must drain.
+            let! _ = Channel.recv(remaining_rx_b)
+            value
+        }
+        Right(value, remaining_rx_a) => {
+            // rx_b was consumed. rx_a still live — drain it.
+            let! _ = Channel.recv(remaining_rx_a)
+            value
+        }
+    }
+}
+
+fn main() -> i32 {
+    let winner = race_two_sources()
+    Log.info("winner: ", winner)
+    0
+}

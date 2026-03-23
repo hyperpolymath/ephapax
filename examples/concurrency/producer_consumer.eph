@@ -1,0 +1,38 @@
+// SPDX-License-Identifier: PMPL-1.0-or-later
+// Copyright (c) 2026 Jonathan D.A. Jewell (hyperpolymath)
+//
+// Example: Producer-consumer pattern with linear channels.
+//
+// A multi-shot channel transfers linear ownership of each item.
+// The producer sends items one at a time; the consumer receives them.
+// Closing the send end signals completion to the receiver.
+
+fn producer(tx: ChannelTx!(Buffer!)) {
+    for i in 0..10 {
+        let! buf = Buffer.alloc(1024)
+        Buffer.fill(&buf, i as u8)
+        Channel.send(&tx, buf)
+    }
+    // Close the tx endpoint — signals no more items.
+    Channel.close(tx)
+}
+
+fn consumer(rx: ChannelRx!(Buffer!)) -> i64 {
+    let total: i64 = 0
+    // Recv loop yields items until the channel is closed.
+    for buf in Channel.iter(rx) {
+        total = total + Buffer.checksum(&buf) as i64
+        // Each buf is linear — must be freed after use.
+        Buffer.free(buf)
+    }
+    // rx is consumed by Channel.iter when the loop ends.
+    total
+}
+
+fn main() -> i32 {
+    let! Pair(tx, rx) = Channel.multi_shot()
+    Task.spawn(fn() { producer(tx) })
+    let checksum = consumer(rx)
+    Log.info("total checksum: ", checksum)
+    0
+}

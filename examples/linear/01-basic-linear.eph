@@ -1,0 +1,16 @@
+// SPDX-License-Identifier: PMPL-1.0-or-later
+// Copyright (c) 2026 Jonathan D.A. Jewell (hyperpolymath) <j.d.a.jewell@open.ac.uk>
+//
+// Example: Basic linear binding.
+//
+// A linear binding (let!) creates a value that MUST be consumed exactly once.
+// The compiler rejects code where a linear value is unused or used twice.
+// This is the simplest possible linear example: bind and return.
+
+fn main() -> i32 {
+    // Linear binding: x MUST be consumed exactly once.
+    let! x = 42;
+
+    // Returning x counts as consuming it — satisfies the linear obligation.
+    x
+}

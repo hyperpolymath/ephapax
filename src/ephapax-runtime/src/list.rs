@@ -28,7 +28,11 @@ pub type ListHandle = u32;
 /// Requires bump allocator to be initialized
 #[no_mangle]
 pub unsafe extern "C" fn __ephapax_list_new(initial_capacity: u32) -> ListHandle {
-    let capacity = if initial_capacity < 4 { 4 } else { initial_capacity };
+    let capacity = if initial_capacity < 4 {
+        4
+    } else {
+        initial_capacity
+    };
 
     // Allocate: header (8 bytes) + elements (capacity * 4 bytes)
     let total_size = 8 + (capacity * 4);
@@ -198,10 +202,7 @@ pub unsafe extern "C" fn __ephapax_string_list_append(
 
 /// Get string from string list
 #[no_mangle]
-pub unsafe extern "C" fn __ephapax_string_list_get(
-    handle: ListHandle,
-    idx: i32,
-) -> u32 {
+pub unsafe extern "C" fn __ephapax_string_list_get(handle: ListHandle, idx: i32) -> u32 {
     __ephapax_list_get(handle, idx) as u32
 }
 

@@ -1,0 +1,28 @@
+// SPDX-License-Identifier: PMPL-1.0-or-later
+// Copyright (c) 2026 Jonathan D.A. Jewell (hyperpolymath) <j.d.a.jewell@open.ac.uk>
+//
+// Example: Consuming iterator with linear types.
+//
+// Each call to next() consumes the current iterator and yields an element
+// plus the remaining iterator. The iterator cannot be rewound or cloned.
+// When exhausted, the terminal state must be consumed to prove completion.
+
+fn sum_three_elements() -> i32 {
+    // Create iterator over a linear collection — must fully consume.
+    let! iter = LinearIter.from_array([10, 20, 30])
+
+    // First element: consumes iter, yields (element, rest).
+    let! Pair(a, iter2) = LinearIter.next(iter)
+
+    // Second element: consumes iter2.
+    let! Pair(b, iter3) = LinearIter.next(iter2)
+
+    // Third element: consumes iter3.
+    let! Pair(c, done) = LinearIter.next(iter3)
+
+    // Consume the exhausted iterator — proves we processed everything.
+    LinearIter.finish(done)
+
+    // Cannot access iter, iter2, or iter3 — all consumed.
+    a + b + c
+}

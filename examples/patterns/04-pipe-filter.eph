@@ -1,0 +1,31 @@
+// SPDX-License-Identifier: PMPL-1.0-or-later
+// Copyright (c) 2026 Jonathan D.A. Jewell (hyperpolymath) <j.d.a.jewell@open.ac.uk>
+//
+// Example: Pipe-and-filter architecture.
+//
+// Data flows through a chain of filters. Each filter is affine (can be
+// dropped to skip a stage). The pipe itself is linear — it must be
+// drained to completion, ensuring no data is silently lost.
+
+fn process_log_stream() -> i32 {
+    // Create a linear pipe — must be drained.
+    let! pipe = Pipe.from_file("access.log")
+
+    // Attach affine filters — any filter can be skipped/dropped.
+    let filter_errors = Filter.by_status(500)
+    let filter_recent = Filter.by_time("last-24h")
+    let formatter = Filter.to_json()
+
+    // Chain filters onto the pipe (each consumes and returns pipe).
+    let! pipe = Pipe.attach(pipe, &filter_errors)
+    let! pipe = Pipe.attach(pipe, &filter_recent)
+    let! pipe = Pipe.attach(pipe, &formatter)
+
+    // Drain the pipe to a sink — consumes the pipe (linear obligation met).
+    let! sink = Sink.to_file("errors.json")
+    let records_written = Pipe.drain_into(pipe, sink)
+
+    // Filters drop here — affine, no cleanup needed.
+    // Pipe and sink consumed by drain_into.
+    records_written
+}

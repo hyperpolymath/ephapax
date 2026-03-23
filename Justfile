@@ -38,3 +38,15 @@ golden: test build proofs
 # Run panic-attack pre-commit checks
 lint:
     panic-attack assail
+
+# Run panic-attacker pre-commit scan
+assail:
+    @command -v panic-attack >/dev/null 2>&1 && panic-attack assail . || echo "panic-attack not found — install from https://github.com/hyperpolymath/panic-attacker"
+
+# Format code
+fmt:
+    cargo fmt --all
+
+# Check formatting without modifying
+fmt-check:
+    cargo fmt --all --check

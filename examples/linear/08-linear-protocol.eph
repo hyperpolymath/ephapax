@@ -1,0 +1,30 @@
+// SPDX-License-Identifier: PMPL-1.0-or-later
+// Copyright (c) 2026 Jonathan D.A. Jewell (hyperpolymath) <j.d.a.jewell@open.ac.uk>
+//
+// Example: Network protocol state machine with linear types.
+//
+// Models a TCP-like connection lifecycle: Connect -> Authenticate -> Ready -> Close.
+// Each state transition consumes the previous state, making it impossible to
+// send data on an unauthenticated connection or reuse a closed one.
+
+fn protocol_lifecycle() -> i32 {
+    // State 1: Connecting — linear, must progress or abort.
+    let! sock = Socket.connect("192.168.1.10", 8080)
+
+    // State 2: Authenticate — consumes connecting state.
+    let! authed = Socket.authenticate(sock, "api-key-abc123")
+
+    // State 3: Ready — can send/receive via borrows.
+    let bytes_sent = Socket.send(&authed, "GET /status HTTP/1.1\r\n")
+    let response = Socket.recv(&authed)
+    let code = Response.status_code(&response)
+
+    // State 4: Graceful shutdown — consumes ready state.
+    let! closing = Socket.shutdown(authed)
+
+    // State 5: Close — terminal, consumes closing state.
+    Socket.close(closing)
+
+    // All states consumed. Cannot access sock, authed, or closing here.
+    code
+}

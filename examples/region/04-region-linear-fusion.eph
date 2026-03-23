@@ -1,0 +1,40 @@
+// SPDX-License-Identifier: PMPL-1.0-or-later
+// Copyright (c) 2026 Jonathan D.A. Jewell (hyperpolymath) <j.d.a.jewell@open.ac.uk>
+//
+// Example: Combining regions with linear types — the core Ephapax feature.
+//
+// "Region-linear fusion" is what makes Ephapax unique. Within a region:
+//   - Linear bindings (let!) enforce protocol obligations (must close, must commit)
+//   - Affine bindings (let) handle ordinary data (can drop)
+//   - The region scopes all allocations for deterministic cleanup
+//
+// Together, they guarantee: no leaks, no forgotten cleanup, no use-after-free.
+
+fn transfer_funds(from_id: i32, to_id: i32, amount: i32) -> i32 {
+    region r:
+        // LINEAR: connection MUST be explicitly closed.
+        let! conn = Db.connect@r("postgres://localhost/bank")
+
+        // AFFINE: query results can be dropped if unused.
+        let from_bal = Db.query(&conn, "SELECT balance WHERE id = ?", from_id)
+        let to_bal = Db.query(&conn, "SELECT balance WHERE id = ?", to_id)
+
+        // LINEAR: transaction MUST be committed or rolled back.
+        let! txn = Db.begin(&conn)
+
+        // AFFINE: intermediate computations.
+        let new_from = from_bal - amount
+        let new_to = to_bal + amount
+
+        Db.execute(&txn, "UPDATE accounts SET balance = ? WHERE id = ?", new_from, from_id)
+        Db.execute(&txn, "UPDATE accounts SET balance = ? WHERE id = ?", new_to, to_id)
+
+        // Consume linear obligations.
+        Db.commit(txn)
+        Db.close(conn)
+
+        // Plain i32 — safe to return from region r.
+        new_from
+    // Region r exits: all affine allocations bulk-freed.
+    // Linear obligations already satisfied above.
+}

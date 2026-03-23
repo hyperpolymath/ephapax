@@ -335,19 +335,13 @@ pub enum ExprKind {
     ListLit(Vec<Expr>),
 
     /// List index access list[idx]
-    ListIndex {
-        list: Box<Expr>,
-        index: Box<Expr>,
-    },
+    ListIndex { list: Box<Expr>, index: Box<Expr> },
 
     /// Tuple literal (e1, e2, e3, ...)
     TupleLit(Vec<Expr>),
 
     /// Tuple field access tuple.N
-    TupleIndex {
-        tuple: Box<Expr>,
-        index: usize,
-    },
+    TupleIndex { tuple: Box<Expr>, index: usize },
 }
 
 impl Expr {

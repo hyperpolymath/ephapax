@@ -1,0 +1,18 @@
+# SPDX-License-Identifier: PMPL-1.0-or-later
+# SPDX-FileCopyrightText: 2025 Jonathan D.A. Jewell
+
+[package]
+name = "ephapax-linear"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.83"
+license = "PMPL-1.0-or-later"
+authors = ["Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk>"]
+repository = "https://github.com/hyperpolymath/ephapax"
+description = "Solo dialect linear types parser, type checker, and interpreter for ephapax"
+keywords = ["linear-types", "parser", "affine", "memory-safety"]
+categories = ["compilers", "parser-implementations"]
+
+[dependencies]
+
+[dev-dependencies]

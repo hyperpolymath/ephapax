@@ -1,0 +1,33 @@
+// SPDX-License-Identifier: PMPL-1.0-or-later
+// Copyright (c) 2026 Jonathan D.A. Jewell (hyperpolymath) <j.d.a.jewell@open.ac.uk>
+//
+// Example: Promise that must be resolved or rejected.
+//
+// Unlike JavaScript promises which can be silently ignored, a linear promise
+// forces the creator to either resolve or reject it. Unresolved promises
+// are a compile-time error. The waiter also has a linear handle.
+
+fn async_computation(should_succeed: Bool) -> i32 {
+    // Create a promise pair — both halves are linear.
+    let! Pair(resolver, waiter) = Promise.create()
+
+    // The resolver MUST be consumed by resolve() or reject().
+    if should_succeed {
+        // Resolve with a value — consumes the resolver.
+        Promise.resolve(resolver, 200)
+    } else {
+        // Reject with an error code — also consumes the resolver.
+        Promise.reject(resolver, 500)
+    }
+
+    // The waiter MUST be consumed by await() to get the result.
+    let! result = Promise.await(waiter)
+
+    // Unwrap the result (plain i32 — no longer linear).
+    let code = Result.unwrap_or(&result, 0)
+
+    // Consume the result container.
+    Result.discard(result)
+
+    code
+}

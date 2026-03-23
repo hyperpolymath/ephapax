@@ -1,0 +1,26 @@
+// SPDX-License-Identifier: PMPL-1.0-or-later
+// Copyright (c) 2026 Jonathan D.A. Jewell (hyperpolymath) <j.d.a.jewell@open.ac.uk>
+//
+// Example: Log entries that can be discarded.
+//
+// Log entries are affine: they can be written to a sink (consumed) or
+// silently dropped if the log level is below threshold. This models
+// conditional logging where debug messages are compiled away.
+
+fn process_order(order_id: i32) -> i32 {
+    // Create log entries (affine — can be dropped).
+    let debug_entry = Log.entry("DEBUG", "Processing order")
+    let info_entry = Log.entry("INFO", "Order validated")
+
+    // Perform the actual work.
+    let total = order_id * 100
+
+    // Write the info entry to the log (consumes it).
+    Log.write(info_entry)
+
+    // The debug_entry is never written — silently dropped.
+    // If it were linear (let!), this would be a compile error.
+    // As affine (let), the compiler allows it.
+
+    total
+}

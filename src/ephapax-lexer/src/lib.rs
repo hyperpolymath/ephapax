@@ -459,9 +459,7 @@ impl<'src> Iterator for Lexer<'src> {
 
         match self.inner.next() {
             Some((Ok(kind), span)) => Some(Ok(Token::new(kind, span.into()))),
-            Some((Err(()), span)) => {
-                Some(Err(LexerError::UnexpectedCharacter(span.start)))
-            }
+            Some((Err(()), span)) => Some(Err(LexerError::UnexpectedCharacter(span.start))),
             None => {
                 self.finished = true;
                 Some(Ok(Token::eof(self.source.len())))
@@ -515,51 +513,62 @@ mod tests {
 
     #[test]
     fn test_operators() {
-        assert_eq!(lex("+ - * / %"), vec![
-            TokenKind::Plus,
-            TokenKind::Minus,
-            TokenKind::Star,
-            TokenKind::Slash,
-            TokenKind::Percent,
-        ]);
+        assert_eq!(
+            lex("+ - * / %"),
+            vec![
+                TokenKind::Plus,
+                TokenKind::Minus,
+                TokenKind::Star,
+                TokenKind::Slash,
+                TokenKind::Percent,
+            ]
+        );
 
-        assert_eq!(lex("== != < > <= >="), vec![
-            TokenKind::EqEq,
-            TokenKind::NotEq,
-            TokenKind::Lt,
-            TokenKind::Gt,
-            TokenKind::LtEq,
-            TokenKind::GtEq,
-        ]);
+        assert_eq!(
+            lex("== != < > <= >="),
+            vec![
+                TokenKind::EqEq,
+                TokenKind::NotEq,
+                TokenKind::Lt,
+                TokenKind::Gt,
+                TokenKind::LtEq,
+                TokenKind::GtEq,
+            ]
+        );
 
-        assert_eq!(lex("&& || !"), vec![
-            TokenKind::AndAnd,
-            TokenKind::OrOr,
-            TokenKind::Not,
-        ]);
+        assert_eq!(
+            lex("&& || !"),
+            vec![TokenKind::AndAnd, TokenKind::OrOr, TokenKind::Not,]
+        );
 
-        assert_eq!(lex("& @ -> = : , . ;"), vec![
-            TokenKind::Ampersand,
-            TokenKind::At,
-            TokenKind::Arrow,
-            TokenKind::Eq,
-            TokenKind::Colon,
-            TokenKind::Comma,
-            TokenKind::Dot,
-            TokenKind::Semi,
-        ]);
+        assert_eq!(
+            lex("& @ -> = : , . ;"),
+            vec![
+                TokenKind::Ampersand,
+                TokenKind::At,
+                TokenKind::Arrow,
+                TokenKind::Eq,
+                TokenKind::Colon,
+                TokenKind::Comma,
+                TokenKind::Dot,
+                TokenKind::Semi,
+            ]
+        );
     }
 
     #[test]
     fn test_delimiters() {
-        assert_eq!(lex("( ) { } [ ]"), vec![
-            TokenKind::LParen,
-            TokenKind::RParen,
-            TokenKind::LBrace,
-            TokenKind::RBrace,
-            TokenKind::LBracket,
-            TokenKind::RBracket,
-        ]);
+        assert_eq!(
+            lex("( ) { } [ ]"),
+            vec![
+                TokenKind::LParen,
+                TokenKind::RParen,
+                TokenKind::LBrace,
+                TokenKind::RBrace,
+                TokenKind::LBracket,
+                TokenKind::RBracket,
+            ]
+        );
     }
 
     #[test]
@@ -583,8 +592,14 @@ mod tests {
 
     #[test]
     fn test_strings() {
-        assert_eq!(lex(r#""hello""#), vec![TokenKind::String("hello".to_string())]);
-        assert_eq!(lex(r#""hello\nworld""#), vec![TokenKind::String("hello\nworld".to_string())]);
+        assert_eq!(
+            lex(r#""hello""#),
+            vec![TokenKind::String("hello".to_string())]
+        );
+        assert_eq!(
+            lex(r#""hello\nworld""#),
+            vec![TokenKind::String("hello\nworld".to_string())]
+        );
         assert_eq!(lex(r#""""#), vec![TokenKind::String("".to_string())]);
     }
 
@@ -598,133 +613,155 @@ mod tests {
 
     #[test]
     fn test_comments() {
-        assert_eq!(lex("-- this is a comment\n42"), vec![TokenKind::Integer(42)]);
+        assert_eq!(
+            lex("-- this is a comment\n42"),
+            vec![TokenKind::Integer(42)]
+        );
         assert_eq!(lex("{- block comment -}42"), vec![TokenKind::Integer(42)]);
-        assert_eq!(lex("{- nested {- comment -} -}42"), vec![TokenKind::Integer(42)]);
+        assert_eq!(
+            lex("{- nested {- comment -} -}42"),
+            vec![TokenKind::Integer(42)]
+        );
     }
 
     #[test]
     fn test_complex_expression() {
         let tokens = lex("let x = 42 in x + 1");
-        assert_eq!(tokens, vec![
-            TokenKind::Let,
-            TokenKind::Ident("x".into()),
-            TokenKind::Eq,
-            TokenKind::Integer(42),
-            TokenKind::In,
-            TokenKind::Ident("x".into()),
-            TokenKind::Plus,
-            TokenKind::Integer(1),
-        ]);
+        assert_eq!(
+            tokens,
+            vec![
+                TokenKind::Let,
+                TokenKind::Ident("x".into()),
+                TokenKind::Eq,
+                TokenKind::Integer(42),
+                TokenKind::In,
+                TokenKind::Ident("x".into()),
+                TokenKind::Plus,
+                TokenKind::Integer(1),
+            ]
+        );
     }
 
     #[test]
     fn test_region_expression() {
         let tokens = lex(r#"region r { String.new@r("hello") }"#);
-        assert_eq!(tokens, vec![
-            TokenKind::Region,
-            TokenKind::Ident("r".into()),
-            TokenKind::LBrace,
-            TokenKind::TyString,
-            TokenKind::Dot,
-            TokenKind::Ident("new".into()),
-            TokenKind::At,
-            TokenKind::Ident("r".into()),
-            TokenKind::LParen,
-            TokenKind::String("hello".to_string()),
-            TokenKind::RParen,
-            TokenKind::RBrace,
-        ]);
+        assert_eq!(
+            tokens,
+            vec![
+                TokenKind::Region,
+                TokenKind::Ident("r".into()),
+                TokenKind::LBrace,
+                TokenKind::TyString,
+                TokenKind::Dot,
+                TokenKind::Ident("new".into()),
+                TokenKind::At,
+                TokenKind::Ident("r".into()),
+                TokenKind::LParen,
+                TokenKind::String("hello".to_string()),
+                TokenKind::RParen,
+                TokenKind::RBrace,
+            ]
+        );
     }
 
     #[test]
     fn test_function_definition() {
         let tokens = lex("fn add(x: I32, y: I32): I32 = x + y");
-        assert_eq!(tokens, vec![
-            TokenKind::Fn,
-            TokenKind::Ident("add".into()),
-            TokenKind::LParen,
-            TokenKind::Ident("x".into()),
-            TokenKind::Colon,
-            TokenKind::TyI32,
-            TokenKind::Comma,
-            TokenKind::Ident("y".into()),
-            TokenKind::Colon,
-            TokenKind::TyI32,
-            TokenKind::RParen,
-            TokenKind::Colon,
-            TokenKind::TyI32,
-            TokenKind::Eq,
-            TokenKind::Ident("x".into()),
-            TokenKind::Plus,
-            TokenKind::Ident("y".into()),
-        ]);
+        assert_eq!(
+            tokens,
+            vec![
+                TokenKind::Fn,
+                TokenKind::Ident("add".into()),
+                TokenKind::LParen,
+                TokenKind::Ident("x".into()),
+                TokenKind::Colon,
+                TokenKind::TyI32,
+                TokenKind::Comma,
+                TokenKind::Ident("y".into()),
+                TokenKind::Colon,
+                TokenKind::TyI32,
+                TokenKind::RParen,
+                TokenKind::Colon,
+                TokenKind::TyI32,
+                TokenKind::Eq,
+                TokenKind::Ident("x".into()),
+                TokenKind::Plus,
+                TokenKind::Ident("y".into()),
+            ]
+        );
     }
 
     #[test]
     fn test_lambda() {
         let tokens = lex("fn(x: I32) -> x + 1");
-        assert_eq!(tokens, vec![
-            TokenKind::Fn,
-            TokenKind::LParen,
-            TokenKind::Ident("x".into()),
-            TokenKind::Colon,
-            TokenKind::TyI32,
-            TokenKind::RParen,
-            TokenKind::Arrow,
-            TokenKind::Ident("x".into()),
-            TokenKind::Plus,
-            TokenKind::Integer(1),
-        ]);
+        assert_eq!(
+            tokens,
+            vec![
+                TokenKind::Fn,
+                TokenKind::LParen,
+                TokenKind::Ident("x".into()),
+                TokenKind::Colon,
+                TokenKind::TyI32,
+                TokenKind::RParen,
+                TokenKind::Arrow,
+                TokenKind::Ident("x".into()),
+                TokenKind::Plus,
+                TokenKind::Integer(1),
+            ]
+        );
     }
 
     #[test]
     fn test_case_expression() {
         let tokens = lex("case x of inl(n) -> n inr(b) -> 0 end");
-        assert_eq!(tokens, vec![
-            TokenKind::Case,
-            TokenKind::Ident("x".into()),
-            TokenKind::Of,
-            TokenKind::Inl,
-            TokenKind::LParen,
-            TokenKind::Ident("n".into()),
-            TokenKind::RParen,
-            TokenKind::Arrow,
-            TokenKind::Ident("n".into()),
-            TokenKind::Inr,
-            TokenKind::LParen,
-            TokenKind::Ident("b".into()),
-            TokenKind::RParen,
-            TokenKind::Arrow,
-            TokenKind::Integer(0),
-            TokenKind::End,
-        ]);
+        assert_eq!(
+            tokens,
+            vec![
+                TokenKind::Case,
+                TokenKind::Ident("x".into()),
+                TokenKind::Of,
+                TokenKind::Inl,
+                TokenKind::LParen,
+                TokenKind::Ident("n".into()),
+                TokenKind::RParen,
+                TokenKind::Arrow,
+                TokenKind::Ident("n".into()),
+                TokenKind::Inr,
+                TokenKind::LParen,
+                TokenKind::Ident("b".into()),
+                TokenKind::RParen,
+                TokenKind::Arrow,
+                TokenKind::Integer(0),
+                TokenKind::End,
+            ]
+        );
     }
 
     #[test]
     fn test_borrow() {
         let tokens = lex("String.len(&s)");
-        assert_eq!(tokens, vec![
-            TokenKind::TyString,
-            TokenKind::Dot,
-            TokenKind::Ident("len".into()),
-            TokenKind::LParen,
-            TokenKind::Ampersand,
-            TokenKind::Ident("s".into()),
-            TokenKind::RParen,
-        ]);
+        assert_eq!(
+            tokens,
+            vec![
+                TokenKind::TyString,
+                TokenKind::Dot,
+                TokenKind::Ident("len".into()),
+                TokenKind::LParen,
+                TokenKind::Ampersand,
+                TokenKind::Ident("s".into()),
+                TokenKind::RParen,
+            ]
+        );
     }
 
     #[test]
     fn test_spans() {
         let source = "let x = 42";
-        let tokens: Vec<Token> = Lexer::new(source)
-            .filter_map(|r| r.ok())
-            .collect();
+        let tokens: Vec<Token> = Lexer::new(source).filter_map(|r| r.ok()).collect();
 
-        assert_eq!(tokens[0].span, Span::new(0, 3));  // "let"
-        assert_eq!(tokens[1].span, Span::new(4, 5));  // "x"
-        assert_eq!(tokens[2].span, Span::new(6, 7));  // "="
+        assert_eq!(tokens[0].span, Span::new(0, 3)); // "let"
+        assert_eq!(tokens[1].span, Span::new(4, 5)); // "x"
+        assert_eq!(tokens[2].span, Span::new(6, 7)); // "="
         assert_eq!(tokens[3].span, Span::new(8, 10)); // "42"
     }
 

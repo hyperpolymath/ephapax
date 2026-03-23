@@ -1,0 +1,27 @@
+// SPDX-License-Identifier: PMPL-1.0-or-later
+// Copyright (c) 2026 Jonathan D.A. Jewell (hyperpolymath) <j.d.a.jewell@open.ac.uk>
+//
+// Example: Transferring ownership of a linear resource.
+//
+// Linear values can be passed to another function, transferring the obligation
+// to consume them. The caller gives up ownership; the callee takes it on.
+// This models "move semantics" with a compile-time guarantee.
+
+// accept_and_close takes ownership of the handle (linear parameter).
+// The caller is relieved of the obligation; this function must consume it.
+fn accept_and_close(handle: File!) -> i32 {
+    let size = File.size(&handle)
+    File.close(handle)
+    size
+}
+
+fn main() -> i32 {
+    // Linear: handle created here.
+    let! handle = File.open("/tmp/data.bin")
+
+    // Ownership transferred to accept_and_close.
+    // After this call, 'handle' is consumed — using it again is a compile error.
+    let size = accept_and_close(handle)
+
+    size
+}

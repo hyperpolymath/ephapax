@@ -1,0 +1,43 @@
+// SPDX-License-Identifier: PMPL-1.0-or-later
+// Copyright (c) 2026 Jonathan D.A. Jewell (hyperpolymath) <j.d.a.jewell@open.ac.uk>
+//
+// Example: Automatic cleanup on error path using regions.
+//
+// Without regions, error handling requires carefully freeing every
+// resource on every error branch. With regions, all affine resources
+// are cleaned up automatically. Linear resources still require
+// explicit handling on both success and error paths.
+
+fn deploy_artifact(artifact: &String, target: &String) -> i32 {
+    region deploy:
+        // Affine temporaries — auto-cleaned on any exit path.
+        let checksum = Crypto.sha256@deploy(artifact)
+        let metadata = Metadata.read@deploy(artifact)
+        let manifest = Manifest.parse@deploy(&metadata)
+
+        // Linear resource — must handle on ALL paths.
+        let! remote = Ssh.connect@deploy(target, 22)
+
+        // Validate checksum.
+        if Crypto.verify(&checksum, &manifest) == 0 {
+            // ERROR: checksum mismatch. Close linear resource.
+            Ssh.disconnect(remote)
+            // checksum, metadata, manifest drop automatically.
+            1
+        } else {
+            // Upload the artifact (borrow remote).
+            let uploaded = Ssh.upload(&remote, artifact, "/opt/deploy/")
+
+            if uploaded == 0 {
+                // ERROR: upload failed. Close linear resource.
+                Ssh.disconnect(remote)
+                2
+            } else {
+                // Success path.
+                Ssh.exec(&remote, "systemctl restart app")
+                Ssh.disconnect(remote)
+                0
+            }
+        }
+    // Region exits: all affine allocations freed on every path.
+}

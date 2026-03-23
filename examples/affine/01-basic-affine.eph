@@ -1,0 +1,20 @@
+// SPDX-License-Identifier: PMPL-1.0-or-later
+// Copyright (c) 2026 Jonathan D.A. Jewell (hyperpolymath) <j.d.a.jewell@open.ac.uk>
+//
+// Example: Basic affine binding — used and dropped.
+//
+// Affine bindings (let, without !) can be used AT MOST once. Unlike linear
+// bindings, they can also be silently dropped (never used). This is the
+// default mode in Ephapax and covers most ordinary values.
+
+fn main() -> i32 {
+    // Affine: used once below.
+    let x = 10;
+    let y = 20;
+
+    // Affine: computed but never used — this is fine. Silently dropped.
+    let unused = x * y * 999;
+
+    // Only x and y are consumed here. 'unused' is dropped without error.
+    x + y
+}

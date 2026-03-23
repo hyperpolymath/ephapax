@@ -1,0 +1,34 @@
+// SPDX-License-Identifier: PMPL-1.0-or-later
+// Copyright (c) 2026 Jonathan D.A. Jewell (hyperpolymath) <j.d.a.jewell@open.ac.uk>
+//
+// Example: Data pipeline with affine stages.
+//
+// Each pipeline stage produces an affine intermediate result. If any
+// stage detects invalid data, the pipeline short-circuits by simply
+// not passing the result forward — it drops silently. No cleanup needed.
+
+fn process_record(raw: &String) -> i32 {
+    // Stage 1: Parse — affine result, droppable if parsing fails.
+    let parsed = Parser.from_json(raw)
+    if Parser.is_error(&parsed) {
+        // parsed drops here. Short-circuit, return error code.
+        400
+    } else {
+        // Stage 2: Validate — checks business rules.
+        let validated = Validator.check(&parsed, "schema-v2")
+        if Validator.has_errors(&validated) {
+            // Both parsed and validated drop. No cleanup.
+            422
+        } else {
+            // Stage 3: Transform — enrich the data.
+            let enriched = Transform.normalize(&validated)
+            let enriched = Transform.add_timestamp(&enriched)
+
+            // Stage 4: Persist — final output.
+            let rows = Store.insert(&enriched)
+
+            // All intermediates (parsed, validated, enriched) drop.
+            rows
+        }
+    }
+}

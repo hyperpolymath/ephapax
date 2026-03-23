@@ -1,0 +1,34 @@
+// SPDX-License-Identifier: PMPL-1.0-or-later
+// Copyright (c) 2026 Jonathan D.A. Jewell (hyperpolymath) <j.d.a.jewell@open.ac.uk>
+//
+// Example: Working with C arrays via FFI with bounds checking.
+//
+// C arrays have no built-in bounds checking. Ephapax wraps the raw
+// pointer with a known length, ensuring all accesses are within bounds.
+// The array pointer is linear — must be freed exactly once.
+
+fn sum_c_array(count: i32) -> i32 {
+    // Allocate array: count elements of 4 bytes each.
+    let byte_size = count * 4
+    let! arr = __ffi("malloc", byte_size)
+
+    // Fill array with values 0..count via bounded set.
+    // ephapax_array_set checks 0 <= index < count at runtime.
+    __ffi("ephapax_array_set_i32", &arr, count, 0, 100)
+    __ffi("ephapax_array_set_i32", &arr, count, 1, 200)
+    __ffi("ephapax_array_set_i32", &arr, count, 2, 300)
+
+    // Read with bounds checking.
+    // ephapax_array_get aborts if index >= count — no buffer overread.
+    let a = __ffi("ephapax_array_get_i32", &arr, count, 0)
+    let b = __ffi("ephapax_array_get_i32", &arr, count, 1)
+    let c = __ffi("ephapax_array_get_i32", &arr, count, 2)
+
+    // This would abort at runtime: index 10 >= count 3.
+    // let bad = __ffi("ephapax_array_get_i32", &arr, count, 10)
+
+    // Free the array — consumes linear pointer.
+    __ffi("free", arr)
+
+    a + b + c
+}

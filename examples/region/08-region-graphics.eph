@@ -1,0 +1,33 @@
+// SPDX-License-Identifier: PMPL-1.0-or-later
+// Copyright (c) 2026 Jonathan D.A. Jewell (hyperpolymath) <j.d.a.jewell@open.ac.uk>
+//
+// Example: Graphics context scoped to a region.
+//
+// GPU surfaces, shaders, and draw calls are confined to a region.
+// When the region exits, all GPU resources are released in correct
+// reverse order — no leaked textures, no orphaned framebuffers.
+
+fn render_frame(window: &Window) -> i32 {
+    region frame:
+        // Create surface and framebuffer — scoped to this frame.
+        let surface = Gpu.create_surface@frame(window)
+        let framebuffer = Gpu.create_framebuffer@frame(&surface, 1920, 1080)
+
+        // Load shaders within the region.
+        let vert = Gpu.compile_shader@frame("triangle.vert", Shader.Vertex)
+        let frag = Gpu.compile_shader@frame("triangle.frag", Shader.Fragment)
+        let pipeline = Gpu.create_pipeline@frame(&vert, &frag)
+
+        // Begin render pass.
+        let pass = Gpu.begin_render_pass@frame(&framebuffer)
+        Gpu.bind_pipeline(&pass, &pipeline)
+        Gpu.draw(&pass, 0, 3)
+        Gpu.end_render_pass(pass)
+
+        // Present to screen (borrow surface).
+        let presented = Gpu.present(&surface, &framebuffer)
+
+        presented
+    // Region exits: pipeline, shaders, framebuffer, surface all freed.
+    // Reverse allocation order — no dangling GPU references.
+}

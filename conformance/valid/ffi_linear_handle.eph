@@ -1,0 +1,9 @@
+// SPDX-License-Identifier: PMPL-1.0-or-later
+// Conformance test: FFI with linear handle pattern (Gossamer-style).
+// A linear handle is created via FFI, used, then consumed via FFI.
+// Expected: type-checks successfully in both affine and linear modes.
+
+fn gossamer_lifecycle(): I64 =
+    let! handle = __ffi("gossamer_create", "Window", 800, 600) in
+    let result = __ffi("gossamer_load_html", handle, "<h1>Hello</h1>") in
+    result

@@ -1,0 +1,32 @@
+// SPDX-License-Identifier: PMPL-1.0-or-later
+// Copyright (c) 2026 Jonathan D.A. Jewell (hyperpolymath) <j.d.a.jewell@open.ac.uk>
+//
+// Example: Retry with backoff — intermediate results are droppable.
+//
+// Each retry attempt produces an affine result that can be inspected
+// and then dropped if the attempt failed. Only the final successful
+// result matters. Failed attempts need no cleanup.
+
+fn fetch_with_retry(url: &String) -> i32 {
+    // Attempt 1 — result is affine, droppable on failure.
+    let attempt1 = Http.get(url, 1000)
+    if Response.is_ok(&attempt1) {
+        Response.status(&attempt1)
+        // attempt1 drops here — affine, no obligation.
+    } else {
+        // Drop attempt1 implicitly, retry with longer timeout.
+
+        // Attempt 2 — backoff to 3 seconds.
+        let attempt2 = Http.get(url, 3000)
+        if Response.is_ok(&attempt2) {
+            Response.status(&attempt2)
+        } else {
+            // Drop attempt2, final attempt.
+
+            // Attempt 3 — backoff to 10 seconds.
+            let attempt3 = Http.get(url, 10000)
+            Response.status(&attempt3)
+            // attempt3 drops after extracting status.
+        }
+    }
+}

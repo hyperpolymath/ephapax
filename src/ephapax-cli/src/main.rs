@@ -165,16 +165,28 @@ fn main() -> ExitCode {
 
     let result = match cli.command {
         Some(Commands::Repl { preload }) => run_repl(preload, cli.verbose),
-        Some(Commands::Run { file, ffi_libs, args: _ }) => run_file(&file, &ffi_libs, cli.verbose),
+        Some(Commands::Run {
+            file,
+            ffi_libs,
+            args: _,
+        }) => run_file(&file, &ffi_libs, cli.verbose),
         Some(Commands::Check { files, mode }) => check_files(&files, &mode, cli.verbose),
-        Some(Commands::Compile { file, output, opt_level, debug, mode }) => {
-            compile_file(&file, output, opt_level, debug, &mode, cli.verbose)
-        }
+        Some(Commands::Compile {
+            file,
+            output,
+            opt_level,
+            debug,
+            mode,
+        }) => compile_file(&file, output, opt_level, debug, &mode, cli.verbose),
         Some(Commands::CompileSexpr { file, output }) => {
             compile_sexpr_file(&file, output, cli.verbose)
         }
         Some(Commands::Tokens { input }) => show_tokens(&input),
-        Some(Commands::Parse { input, pretty, format }) => show_parse(&input, pretty, &format),
+        Some(Commands::Parse {
+            input,
+            pretty,
+            format,
+        }) => show_parse(&input, pretty, &format),
         Some(Commands::Package(pkg_cmd)) => handle_package_command(pkg_cmd, cli.verbose),
         None => {
             // If a file is given without subcommand, run it
@@ -253,7 +265,8 @@ fn run_file(path: &PathBuf, ffi_libs: &[String], verbose: bool) -> Result<(), St
         if verbose {
             println!("{} Loading FFI library: {}", "⚙".yellow(), lib_path);
         }
-        interp.load_ffi_library(lib_path)
+        interp
+            .load_ffi_library(lib_path)
             .map_err(|e| format!("Failed to load FFI library '{}': {}", lib_path, e))?;
         if verbose {
             println!("{} Loaded FFI library: {}", "✓".green(), lib_path);
@@ -286,7 +299,10 @@ fn check_files(files: &[PathBuf], mode_str: &str, verbose: bool) -> Result<(), S
         "linear" => TypingMode::Linear,
         "affine" => TypingMode::Affine,
         _ => {
-            return Err(format!("Invalid mode '{}'. Must be 'linear' or 'affine'", mode_str));
+            return Err(format!(
+                "Invalid mode '{}'. Must be 'linear' or 'affine'",
+                mode_str
+            ));
         }
     };
 
@@ -371,7 +387,10 @@ fn compile_file(
         "linear" => TypingMode::Linear,
         "affine" => TypingMode::Affine,
         _ => {
-            return Err(format!("Invalid mode '{}'. Must be 'linear' or 'affine'", mode_str));
+            return Err(format!(
+                "Invalid mode '{}'. Must be 'linear' or 'affine'",
+                mode_str
+            ));
         }
     };
 
@@ -423,7 +442,11 @@ fn compile_file(
     // Optimize if requested
     let wasm_bytes = if opt_level > 0 {
         if verbose {
-            println!("{} Optimization level {} (not yet implemented)", "⚠".yellow(), opt_level);
+            println!(
+                "{} Optimization level {} (not yet implemented)",
+                "⚠".yellow(),
+                opt_level
+            );
         }
         wasm_bytes
     } else {
@@ -437,15 +460,20 @@ fn compile_file(
 
     // Write source map if debug enabled
     if debug {
-        let source_map = ephapax_wasm::generate_source_map_for_module(&module, codegen_mode, filename)
-            .map_err(|e| format!("Source map generation error: {}", e))?;
+        let source_map =
+            ephapax_wasm::generate_source_map_for_module(&module, codegen_mode, filename)
+                .map_err(|e| format!("Source map generation error: {}", e))?;
 
         let map_path = output_path.with_extension("wasm.map");
         fs::write(&map_path, source_map)
             .map_err(|e| format!("Cannot write source map {}: {}", map_path.display(), e))?;
 
         if verbose {
-            println!("{} Generated source map: {}", "✓".green(), map_path.display());
+            println!(
+                "{} Generated source map: {}",
+                "✓".green(),
+                map_path.display()
+            );
         }
     }
 
@@ -629,7 +657,9 @@ fn handle_package_command(cmd: PackageCommands, verbose: bool) -> Result<(), Str
                 // Install from ephapax.toml
                 let manifest_path = PathBuf::from("ephapax.toml");
                 if !manifest_path.exists() {
-                    return Err("No ephapax.toml found. Run 'ephapax package init' first.".to_string());
+                    return Err(
+                        "No ephapax.toml found. Run 'ephapax package init' first.".to_string()
+                    );
                 }
 
                 if verbose {
@@ -639,7 +669,11 @@ fn handle_package_command(cmd: PackageCommands, verbose: bool) -> Result<(), Str
                 let resolved = ephapax_package::install_dependencies(&manifest_path)
                     .map_err(|e| format!("Failed to install dependencies: {}", e))?;
 
-                println!("{} Resolved {} packages:", "✓".green().bold(), resolved.packages.len());
+                println!(
+                    "{} Resolved {} packages:",
+                    "✓".green().bold(),
+                    resolved.packages.len()
+                );
                 for (name, pkg) in &resolved.packages {
                     println!("  {} v{}", name, pkg.version);
                 }
@@ -691,11 +725,7 @@ fn handle_package_command(cmd: PackageCommands, verbose: bool) -> Result<(), Str
     }
 }
 
-fn report_parse_error(
-    _filename: &str,
-    _source: &str,
-    error: &ephapax_parser::ParseError,
-) {
+fn report_parse_error(_filename: &str, _source: &str, error: &ephapax_parser::ParseError) {
     let span = error.span();
     eprintln!(
         "{}: {} at {}..{}",
@@ -706,15 +736,6 @@ fn report_parse_error(
     );
 }
 
-fn report_type_error(
-    filename: &str,
-    _source: &str,
-    error: &ephapax_typing::TypeError,
-) {
-    eprintln!(
-        "{}: {} in {}",
-        "Type error".red().bold(),
-        error,
-        filename
-    );
+fn report_type_error(filename: &str, _source: &str, error: &ephapax_typing::TypeError) {
+    eprintln!("{}: {} in {}", "Type error".red().bold(), error, filename);
 }

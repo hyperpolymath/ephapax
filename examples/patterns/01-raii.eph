@@ -1,0 +1,32 @@
+// SPDX-License-Identifier: PMPL-1.0-or-later
+// Copyright (c) 2026 Jonathan D.A. Jewell (hyperpolymath) <j.d.a.jewell@open.ac.uk>
+//
+// Example: RAII pattern — acquire in region, auto-release on exit.
+//
+// RAII (Resource Acquisition Is Initialization) ties a resource's lifetime
+// to a scope. In Ephapax, regions ARE the scope. Allocate in the region,
+// and deallocation happens automatically when the region exits.
+// For resources needing explicit cleanup, combine with linear types.
+
+fn raii_file_processing() -> i32 {
+    region r:
+        // Acquire: open file in region r.
+        // Linear because file handles need explicit close protocol.
+        let! file = File.open@r("/var/log/app.log")
+
+        // Acquire: allocate working buffer in region r.
+        // Affine because buffers can be silently dropped.
+        let buffer = Buffer.new@r(4096)
+
+        // Use the resources.
+        let bytes = File.read_into(&file, &buffer)
+        let line_count = Buffer.count_char(&buffer, 10)  // 10 = '\n'
+
+        // Release: explicitly close file (linear obligation).
+        File.close(file)
+
+        // No need to free buffer — region r handles that.
+        line_count
+    // Region r exits: buffer and all other affine allocations freed.
+    // Linear obligations (file) were already fulfilled above.
+}

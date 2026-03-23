@@ -1,0 +1,27 @@
+// SPDX-License-Identifier: PMPL-1.0-or-later
+// Copyright (c) 2026 Jonathan D.A. Jewell (hyperpolymath) <j.d.a.jewell@open.ac.uk>
+//
+// Example: Splitting and joining linear pairs.
+//
+// When a pair contains linear values, destructuring splits the obligation:
+// each component must be independently consumed. Constructing a pair from
+// linear values bundles their obligations together.
+
+// Split a linear pair into its components. Each component inherits linearity.
+fn split_pipe() -> i32 {
+    // Create two linear endpoints of a pipe.
+    let! reader = Pipe.reader()
+    let! writer = Pipe.writer()
+
+    // Bundle them into a pair — the pair itself is now linear.
+    let! pipe = Pair(reader, writer)
+
+    // Destructure: splits the obligation back into two linear bindings.
+    let! Pair(r, w) = pipe
+
+    // Each endpoint must be independently consumed.
+    Pipe.write(w, "hello from the other side")
+    let msg = Pipe.read(r)
+
+    String.len(&msg)
+}

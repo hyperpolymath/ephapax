@@ -62,8 +62,12 @@ impl LivenessAnalysis {
                 live.extend(body_live);
             }
 
-            ExprKind::Let { name, value, body, .. }
-            | ExprKind::LetLin { name, value, body, .. } => {
+            ExprKind::Let {
+                name, value, body, ..
+            }
+            | ExprKind::LetLin {
+                name, value, body, ..
+            } => {
                 let mut body_live = HashSet::new();
                 Self::compute(body, &mut body_live);
                 body_live.remove(name);
@@ -76,7 +80,11 @@ impl LivenessAnalysis {
                 Self::compute(arg, live);
             }
 
-            ExprKind::If { cond, then_branch, else_branch } => {
+            ExprKind::If {
+                cond,
+                then_branch,
+                else_branch,
+            } => {
                 let mut then_live = HashSet::new();
                 let mut else_live = HashSet::new();
                 Self::compute(then_branch, &mut then_live);
@@ -86,7 +94,13 @@ impl LivenessAnalysis {
                 Self::compute(cond, live);
             }
 
-            ExprKind::Case { scrutinee, left_var, left_body, right_var, right_body } => {
+            ExprKind::Case {
+                scrutinee,
+                left_var,
+                left_body,
+                right_var,
+                right_body,
+            } => {
                 let mut left_live = HashSet::new();
                 let mut right_live = HashSet::new();
                 Self::compute(left_body, &mut left_live);
@@ -112,14 +126,12 @@ impl LivenessAnalysis {
                 Self::compute(inner, live);
             }
 
-            ExprKind::Pair { left, right }
-            | ExprKind::StringConcat { left, right } => {
+            ExprKind::Pair { left, right } | ExprKind::StringConcat { left, right } => {
                 Self::compute(left, live);
                 Self::compute(right, live);
             }
 
-            ExprKind::Inl { value, .. }
-            | ExprKind::Inr { value, .. } => {
+            ExprKind::Inl { value, .. } | ExprKind::Inr { value, .. } => {
                 Self::compute(value, live);
             }
 

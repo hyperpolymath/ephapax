@@ -1,0 +1,32 @@
+// SPDX-License-Identifier: PMPL-1.0-or-later
+// Copyright (c) 2026 Jonathan D.A. Jewell (hyperpolymath) <j.d.a.jewell@open.ac.uk>
+//
+// Example: State machine transitions via linear types.
+//
+// Each state is a linear value. Transitioning consumes the old state and
+// produces a new one. This makes illegal state transitions impossible:
+// you cannot skip steps or revisit a consumed state.
+
+// Connection lifecycle: Created -> Connected -> Authenticated -> Closed
+// Each transition consumes the previous state and returns the next.
+
+fn connection_lifecycle() -> i32 {
+    // State 1: Created (linear — must transition or close).
+    let! created = Connection.new("api.example.com", 443)
+
+    // State 2: Connected (consumes Created, produces Connected).
+    let! connected = Connection.connect(created)
+
+    // State 3: Authenticated (consumes Connected, produces Authenticated).
+    let! authed = Connection.authenticate(connected, "bearer-token-xyz")
+
+    // Use the authenticated connection (borrow — does not consume).
+    let response = Connection.request(&authed, "GET", "/users")
+    let status = Response.status(&response)
+
+    // State 4: Closed (consumes Authenticated — terminal state).
+    Connection.close(authed)
+
+    // Cannot use 'created', 'connected', or 'authed' here — all consumed.
+    status
+}

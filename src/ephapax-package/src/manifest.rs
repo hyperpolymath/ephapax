@@ -85,9 +85,7 @@ impl Dependency {
     pub fn version(&self) -> &str {
         match self {
             Dependency::Simple(v) => v,
-            Dependency::Detailed { version, .. } => {
-                version.as_deref().unwrap_or("*")
-            }
+            Dependency::Detailed { version, .. } => version.as_deref().unwrap_or("*"),
         }
     }
 
@@ -144,16 +142,12 @@ impl Manifest {
     pub fn validate(&self) -> Result<(), ManifestError> {
         // Validate package name
         if !is_valid_package_name(&self.package.name) {
-            return Err(ManifestError::InvalidPackageName(
-                self.package.name.clone(),
-            ));
+            return Err(ManifestError::InvalidPackageName(self.package.name.clone()));
         }
 
         // Validate version
         if semver::Version::parse(&self.package.version).is_err() {
-            return Err(ManifestError::InvalidVersion(
-                self.package.version.clone(),
-            ));
+            return Err(ManifestError::InvalidVersion(self.package.version.clone()));
         }
 
         // Validate authors

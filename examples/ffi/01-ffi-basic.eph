@@ -1,0 +1,28 @@
+// SPDX-License-Identifier: PMPL-1.0-or-later
+// Copyright (c) 2026 Jonathan D.A. Jewell (hyperpolymath) <j.d.a.jewell@open.ac.uk>
+//
+// Example: Calling a C function via __ffi.
+//
+// The __ffi intrinsic calls a C-ABI function by name. Arguments are
+// marshalled automatically for primitive types (i32, i64, f32, f64).
+// The C function must be linked at compile time.
+
+fn get_process_id() -> i32 {
+    // Call POSIX getpid() — no arguments, returns i32.
+    let pid = __ffi("getpid")
+    pid
+}
+
+fn compute_sqrt(x: f64) -> f64 {
+    // Call libm sqrt — one f64 argument, returns f64.
+    let result = __ffi("sqrt", x)
+    result
+}
+
+fn write_message() -> i32 {
+    // Call POSIX write(fd, buf, count).
+    // fd=1 is stdout, writing 6 bytes.
+    let msg = "hello\n"
+    let bytes_written = __ffi("write", 1, &msg, 6)
+    bytes_written
+}

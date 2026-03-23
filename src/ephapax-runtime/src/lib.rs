@@ -110,7 +110,10 @@ pub unsafe extern "C" fn __ephapax_string_ptr(handle: StringHandle) -> u32 {
 ///
 /// Both handles must be valid string handles.
 #[no_mangle]
-pub unsafe extern "C" fn __ephapax_string_concat(h1: StringHandle, h2: StringHandle) -> StringHandle {
+pub unsafe extern "C" fn __ephapax_string_concat(
+    h1: StringHandle,
+    h2: StringHandle,
+) -> StringHandle {
     let ptr1 = core::ptr::read(h1 as *const u32);
     let len1 = core::ptr::read((h1 + 4) as *const u32);
     let ptr2 = core::ptr::read(h2 as *const u32);
@@ -123,7 +126,11 @@ pub unsafe extern "C" fn __ephapax_string_concat(h1: StringHandle, h2: StringHan
     core::ptr::copy_nonoverlapping(ptr1 as *const u8, new_data as *mut u8, len1 as usize);
 
     // Copy second string
-    core::ptr::copy_nonoverlapping(ptr2 as *const u8, (new_data + len1) as *mut u8, len2 as usize);
+    core::ptr::copy_nonoverlapping(
+        ptr2 as *const u8,
+        (new_data + len1) as *mut u8,
+        len2 as usize,
+    );
 
     // Create new handle
     __ephapax_string_new(new_data, new_len)
@@ -236,7 +243,11 @@ pub unsafe extern "C" fn __ephapax_string_eq(h1: StringHandle, h2: StringHandle)
     let slice1 = core::slice::from_raw_parts(ptr1 as *const u8, len1 as usize);
     let slice2 = core::slice::from_raw_parts(ptr2 as *const u8, len2 as usize);
 
-    if slice1 == slice2 { 1 } else { 0 }
+    if slice1 == slice2 {
+        1
+    } else {
+        0
+    }
 }
 
 // ============================================================================

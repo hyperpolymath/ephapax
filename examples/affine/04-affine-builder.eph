@@ -1,0 +1,28 @@
+// SPDX-License-Identifier: PMPL-1.0-or-later
+// Copyright (c) 2026 Jonathan D.A. Jewell (hyperpolymath) <j.d.a.jewell@open.ac.uk>
+//
+// Example: Builder pattern with optional steps.
+//
+// A builder is affine: each method consumes the old builder and returns a new
+// one with the option applied. Steps can be skipped — the builder is simply
+// consumed by .build() at whatever stage it has reached.
+
+fn create_request() -> i32 {
+    // Start a builder (affine).
+    let b = HttpRequest.builder()
+
+    // Each step consumes the old builder and returns a new one.
+    let b = HttpRequest.method(b, "POST")
+    let b = HttpRequest.url(b, "https://api.example.com/data")
+    let b = HttpRequest.header(b, "Content-Type", "application/json")
+
+    // Optional step — could be skipped entirely.
+    let b = HttpRequest.timeout(b, 30)
+
+    // .build() consumes the final builder and produces the request.
+    let request = HttpRequest.build(b)
+
+    // Use the request (affine — could also be dropped without sending).
+    let response = HttpClient.send(request)
+    Response.status(&response)
+}

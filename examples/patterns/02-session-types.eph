@@ -1,0 +1,36 @@
+// SPDX-License-Identifier: PMPL-1.0-or-later
+// Copyright (c) 2026 Jonathan D.A. Jewell (hyperpolymath) <j.d.a.jewell@open.ac.uk>
+//
+// Example: Session-typed protocol via linear bindings.
+//
+// Session types describe a communication protocol as a sequence of typed
+// interactions. Each step consumes the current session state and returns
+// the next. The compiler enforces that the protocol is followed in order
+// and completed — no skipped steps, no out-of-order messages.
+
+// Protocol: Client sends login -> Server sends challenge ->
+//           Client sends response -> Server sends token -> Done.
+
+fn authenticate_session() -> i32 {
+    // Step 1: Initiate session (linear — must progress through protocol).
+    let! session = Session.connect("auth.example.com", 8443)
+
+    // Step 2: Send login credentials (consumes session, returns new state).
+    let! challenged = Session.send_login(session, "alice", "password123")
+
+    // Step 3: Receive challenge from server (consumes challenged state).
+    let! Pair(responding, challenge) = Session.recv_challenge(challenged)
+
+    // Step 4: Compute and send challenge response.
+    let answer = Crypto.hmac(&challenge, "shared-secret")
+    let! authenticated = Session.send_response(responding, &answer)
+
+    // Step 5: Receive auth token (consumes authenticated state).
+    let! Pair(done, token) = Session.recv_token(authenticated)
+
+    // Step 6: Close session (terminal state — consumes done).
+    Session.close(done)
+
+    // token_len is a plain i32 — no session state escapes.
+    String.len(&token)
+}

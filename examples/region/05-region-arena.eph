@@ -1,0 +1,32 @@
+// SPDX-License-Identifier: PMPL-1.0-or-later
+// Copyright (c) 2026 Jonathan D.A. Jewell (hyperpolymath) <j.d.a.jewell@open.ac.uk>
+//
+// Example: Arena allocator pattern using regions.
+//
+// All allocations within the region share a single arena. When the region
+// exits, the entire arena is freed in one operation — no per-object
+// destructors, no fragmentation, no use-after-free.
+
+fn parse_document(input: &String) -> i32 {
+    region arena:
+        // All nodes allocated within region 'arena'.
+        let root = AstNode.new@arena("document")
+        let header = AstNode.new@arena("header")
+        let body = AstNode.new@arena("body")
+        let footer = AstNode.new@arena("footer")
+
+        // Build tree structure (borrow nodes).
+        AstNode.add_child(&root, &header)
+        AstNode.add_child(&root, &body)
+        AstNode.add_child(&root, &footer)
+
+        // Parse content into body — allocates many sub-nodes in arena.
+        let paragraphs = Parser.parse_body@arena(input)
+        AstNode.add_children(&body, &paragraphs)
+
+        // Count total nodes — extract a plain i32 to return.
+        let total = AstNode.descendant_count(&root)
+        total
+    // Region 'arena' exits: ALL nodes freed in one bulk deallocation.
+    // No individual free() calls, no forgotten nodes.
+}

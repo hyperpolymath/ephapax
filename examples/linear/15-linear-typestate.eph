@@ -1,0 +1,32 @@
+// SPDX-License-Identifier: PMPL-1.0-or-later
+// Copyright (c) 2026 Jonathan D.A. Jewell (hyperpolymath) <j.d.a.jewell@open.ac.uk>
+//
+// Example: Typestate pattern — Door: Locked -> Unlocked -> Open -> Closed.
+//
+// Each state is a distinct linear type. You cannot open a locked door
+// or lock an open one — the type system forbids it. Every door must
+// eventually reach the Closed state to satisfy its linear obligation.
+
+fn door_lifecycle() -> i32 {
+    // Start with a locked door — linear, must reach Closed.
+    let! locked = Door.new_locked("front-entrance")
+
+    // Unlock it (consumes Locked, produces Unlocked).
+    let! unlocked = Door.unlock(locked, "master-key-001")
+
+    // Open it (consumes Unlocked, produces Open).
+    let! opened = Door.open(unlocked)
+
+    // Walk through (borrow — does not consume the open door).
+    let people_entered = Door.walk_through(&opened, 3)
+
+    // Close it (consumes Open, produces Closed — terminal state).
+    let! closed = Door.close(opened)
+
+    // Dispose of the closed door handle.
+    Door.dispose(closed)
+
+    // Attempting Door.open(locked) would fail: locked is consumed.
+    // Attempting Door.unlock(opened) would fail: wrong type.
+    people_entered
+}

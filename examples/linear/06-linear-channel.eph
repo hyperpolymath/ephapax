@@ -1,0 +1,39 @@
+// SPDX-License-Identifier: PMPL-1.0-or-later
+// Copyright (c) 2026 Jonathan D.A. Jewell (hyperpolymath) <j.d.a.jewell@open.ac.uk>
+//
+// Example: Typed channel send/receive.
+//
+// Channels are linear: the send endpoint must be used to send exactly one
+// message, and the receive endpoint must be used to receive exactly one.
+// This prevents use-after-send and forgotten-receive bugs at compile time.
+
+fn one_shot_request() -> i32 {
+    // Create a one-shot channel pair. Both endpoints are linear.
+    let! Pair(tx, rx) = Channel.one_shot()
+
+    // Send consumes the tx endpoint — it cannot be reused.
+    Channel.send(tx, 42)
+
+    // Receive consumes the rx endpoint — it cannot be polled again.
+    let! response = Channel.recv(rx)
+
+    // response is a plain i32 after unwrapping.
+    response
+}
+
+fn bidirectional() -> i32 {
+    // Two channels for request/response pattern.
+    let! Pair(req_tx, req_rx) = Channel.one_shot()
+    let! Pair(res_tx, res_rx) = Channel.one_shot()
+
+    // Send request, consume req_tx.
+    Channel.send(req_tx, 100)
+
+    // Simulate processing: receive request, send response.
+    let! value = Channel.recv(req_rx)
+    Channel.send(res_tx, value * 2)
+
+    // Receive response, consume res_rx.
+    let! result = Channel.recv(res_rx)
+    result
+}

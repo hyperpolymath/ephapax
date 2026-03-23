@@ -55,7 +55,7 @@ use ephapax_syntax::{
 use std::collections::HashMap;
 use wasm_encoder::{
     CodeSection, ConstExpr, CustomSection, ElementSection, Elements, ExportKind, ExportSection,
-    Function, FunctionSection, ImportSection, Instruction, MemorySection, MemoryType,
+    Function, FunctionSection, ImportSection, Instruction, MemArg, MemorySection, MemoryType,
     Module as WasmModule, RefType, TableSection, TableType, TypeSection, ValType,
 };
 
@@ -90,6 +90,8 @@ const FN_STRING_CONCAT: u32 = 5;
 const FN_STRING_DROP: u32 = 6;
 const FN_REGION_ENTER: u32 = 7;
 const FN_REGION_EXIT: u32 = 8;
+/// Alias for bump allocation within the current region.
+const FN_REGION_ALLOC: u32 = FN_BUMP_ALLOC;
 const FN_LIST_NEW: u32 = 9;
 const FN_LIST_APPEND: u32 = 10;
 const FN_LIST_GET: u32 = 11;
@@ -231,6 +233,15 @@ impl LocalTracker {
         }
     }
 
+    /// Return a scratch local for temporary values, allocating one on first use.
+    fn scratch_local(&mut self) -> u32 {
+        if let Some(&idx) = self.name_to_idx.get("__scratch") {
+            idx
+        } else {
+            self.bind("__scratch", false)
+        }
+    }
+
     /// Total number of extra (non-parameter) locals needed.
     fn num_extra_locals(&self, num_params: u32) -> u32 {
         if self.next_idx > num_params {
@@ -260,12 +271,10 @@ pub struct Codegen {
     module: WasmModule,
 
     // -- Per-function state (set up before each function compilation) --------
-
     /// Local variable tracker for the function currently being compiled
     locals: LocalTracker,
 
     // -- Module-level bookkeeping -------------------------------------------
-
     /// String literal data section entries: (offset, bytes)
     data_entries: Vec<(u32, Vec<u8>)>,
     /// Next data offset for string literals
@@ -525,11 +534,7 @@ impl Codegen {
 
     /// Compile a module that has a `main` function with a body expression.
     /// (Legacy helper retained for backward compatibility.)
-    pub fn compile_module_with_main(
-        &mut self,
-        module: &AstModule,
-        main_body: &Expr,
-    ) -> Vec<u8> {
+    pub fn compile_module_with_main(&mut self, module: &AstModule, main_body: &Expr) -> Vec<u8> {
         // Try full module compilation first; fall back to expression mode.
         if let Ok(bytes) = self.compile_ast_module(module) {
             return bytes;
@@ -673,9 +678,7 @@ impl Codegen {
             vec![ValType::I64],
         );
         // Type 6: (i32) -> i32
-        types
-            .ty()
-            .function(vec![ValType::I32], vec![ValType::I32]);
+        types.ty().function(vec![ValType::I32], vec![ValType::I32]);
 
         // Dynamic extra types
         for (params, results) in &self.extra_types {
@@ -758,7 +761,7 @@ impl Codegen {
 
         // Populate table starting at offset 0
         elements.active(
-            Some(0), // table index (we only have one table)
+            Some(0),                  // table index (we only have one table)
             &ConstExpr::i32_const(0), // offset in the table
             Elements::Functions(std::borrow::Cow::Borrowed(&func_indices)),
         );
@@ -767,11 +770,7 @@ impl Codegen {
     }
 
     /// Append the 7 runtime helper functions to the given sections.
-    fn append_runtime_funcs(
-        &self,
-        func_sec: &mut FunctionSection,
-        code_sec: &mut CodeSection,
-    ) {
+    fn append_runtime_funcs(&self, func_sec: &mut FunctionSection, code_sec: &mut CodeSection) {
         // 2: bump_alloc  (i32, i32) -> i32
         func_sec.function(TYPE_I32_I32_I32);
         code_sec.function(&self.gen_bump_alloc());
@@ -832,18 +831,11 @@ impl Codegen {
         for decl in &ast.decls {
             match decl {
                 Decl::Fn {
-                    name,
-                    params,
-                    body,
-                    ..
+                    name, params, body, ..
                 } => {
-                    let info = self
-                        .user_fns
-                        .get(name.as_str())
-                        .cloned()
-                        .ok_or_else(|| {
-                            CodegenError(format!("BUG: function `{}` not collected", name))
-                        })?;
+                    let info = self.user_fns.get(name.as_str()).cloned().ok_or_else(|| {
+                        CodegenError(format!("BUG: function `{}` not collected", name))
+                    })?;
 
                     func_sec.function(info.wasm_type_idx);
 
@@ -852,9 +844,7 @@ impl Codegen {
                     // --- Pass 1: count locals by doing a dry-run compile ----
                     self.locals = LocalTracker::new(num_params);
                     for (i, (pname, pty)) in params.iter().enumerate() {
-                        self.locals
-                            .name_to_idx
-                            .insert(pname.to_string(), i as u32);
+                        self.locals.name_to_idx.insert(pname.to_string(), i as u32);
                         if pty.is_linear() {
                             self.locals.linear_locals.insert(i as u32, false);
                         }
@@ -874,9 +864,7 @@ impl Codegen {
                     // --- Pass 2: compile for real with correct local count --
                     self.locals = LocalTracker::new(num_params);
                     for (i, (pname, pty)) in params.iter().enumerate() {
-                        self.locals
-                            .name_to_idx
-                            .insert(pname.to_string(), i as u32);
+                        self.locals.name_to_idx.insert(pname.to_string(), i as u32);
                         if pty.is_linear() {
                             self.locals.linear_locals.insert(i as u32, false);
                         }
@@ -990,11 +978,7 @@ impl Codegen {
             FN_STRING_CONCAT,
         );
         exports.export("__ephapax_string_drop", ExportKind::Func, FN_STRING_DROP);
-        exports.export(
-            "__ephapax_region_enter",
-            ExportKind::Func,
-            FN_REGION_ENTER,
-        );
+        exports.export("__ephapax_region_enter", ExportKind::Func, FN_REGION_ENTER);
         exports.export("__ephapax_region_exit", ExportKind::Func, FN_REGION_EXIT);
         exports.export("memory", ExportKind::Memory, 0);
     }
@@ -1199,14 +1183,14 @@ impl Codegen {
         f.instruction(&Instruction::LocalSet(0)); // new_sp
 
         // mem[new_sp] = mem[0]  (save bump_ptr at stack position)
-        f.instruction(&Instruction::LocalGet(0));   // address = new_sp
+        f.instruction(&Instruction::LocalGet(0)); // address = new_sp
         f.instruction(&Instruction::I32Const(0));
         f.instruction(&Instruction::I32Load(mem_arg(0))); // value = bump_ptr
         f.instruction(&Instruction::I32Store(mem_arg(0))); // mem[new_sp] = bump_ptr
 
         // mem[8] = new_sp  (update region stack pointer)
-        f.instruction(&Instruction::I32Const(8));    // address = 8
-        f.instruction(&Instruction::LocalGet(0));    // value = new_sp
+        f.instruction(&Instruction::I32Const(8)); // address = 8
+        f.instruction(&Instruction::LocalGet(0)); // value = new_sp
         f.instruction(&Instruction::I32Store(mem_arg(0))); // mem[8] = new_sp
 
         f.instruction(&Instruction::End);
@@ -1224,16 +1208,16 @@ impl Codegen {
         f.instruction(&Instruction::LocalSet(0)); // sp
 
         // mem[0] = mem[sp]  (restore bump_ptr)
-        f.instruction(&Instruction::I32Const(0));    // address = 0
-        f.instruction(&Instruction::LocalGet(0));    // address for load = sp
+        f.instruction(&Instruction::I32Const(0)); // address = 0
+        f.instruction(&Instruction::LocalGet(0)); // address for load = sp
         f.instruction(&Instruction::I32Load(mem_arg(0))); // value = mem[sp]
         f.instruction(&Instruction::I32Store(mem_arg(0))); // mem[0] = saved_ptr
 
         // mem[8] = sp - 4  (pop region stack)
-        f.instruction(&Instruction::I32Const(8));    // address = 8
-        f.instruction(&Instruction::LocalGet(0));    // sp
+        f.instruction(&Instruction::I32Const(8)); // address = 8
+        f.instruction(&Instruction::LocalGet(0)); // sp
         f.instruction(&Instruction::I32Const(4));
-        f.instruction(&Instruction::I32Sub);         // sp - 4
+        f.instruction(&Instruction::I32Sub); // sp - 4
         f.instruction(&Instruction::I32Store(mem_arg(0))); // mem[8] = sp - 4
 
         f.instruction(&Instruction::End);
@@ -1311,14 +1295,17 @@ impl Codegen {
         // Length: old_length * 4 bytes (i32 elements)
         f.instruction(&Instruction::LocalGet(4)); // dest = new_handle
         f.instruction(&Instruction::I32Const(8));
-        f.instruction(&Instruction::I32Add);      // dest + 8
+        f.instruction(&Instruction::I32Add); // dest + 8
         f.instruction(&Instruction::LocalGet(0)); // src = old_handle
         f.instruction(&Instruction::I32Const(8));
-        f.instruction(&Instruction::I32Add);      // src + 8
+        f.instruction(&Instruction::I32Add); // src + 8
         f.instruction(&Instruction::LocalGet(3)); // length
         f.instruction(&Instruction::I32Const(4));
-        f.instruction(&Instruction::I32Mul);      // length * 4 = byte count
-        f.instruction(&Instruction::MemoryCopy { src_mem: 0, dst_mem: 0 });
+        f.instruction(&Instruction::I32Mul); // length * 4 = byte count
+        f.instruction(&Instruction::MemoryCopy {
+            src_mem: 0,
+            dst_mem: 0,
+        });
 
         f.instruction(&Instruction::LocalGet(4)); // return new_handle
         f.instruction(&Instruction::LocalSet(0)); // update handle for append below
@@ -1399,16 +1386,16 @@ impl Codegen {
             // Note: We approximate WASM offset by counting instructions
             // A more precise implementation would track actual byte offsets
             let approx_offset = debug.instruction_spans.len() as u32;
-            debug.instruction_spans.push((approx_offset, expr.span.clone()));
+            debug
+                .instruction_spans
+                .push((approx_offset, expr.span.clone()));
         }
 
         match &expr.kind {
             ExprKind::Lit(lit) => self.compile_lit(func, lit),
             ExprKind::Var(name) => self.compile_var(func, name),
             ExprKind::StringNew { region: _, value } => self.compile_string_new(func, value),
-            ExprKind::StringConcat { left, right } => {
-                self.compile_string_concat(func, left, right)
-            }
+            ExprKind::StringConcat { left, right } => self.compile_string_concat(func, left, right),
             ExprKind::StringLen(inner) => self.compile_string_len(func, inner),
             ExprKind::Let {
                 name, value, body, ..
@@ -1416,9 +1403,11 @@ impl Codegen {
             ExprKind::LetLin {
                 name, value, body, ..
             } => self.compile_let(func, name, value, body, true),
-            ExprKind::Lambda { param, param_ty, body } => {
-                self.compile_lambda(func, param, param_ty, body)
-            }
+            ExprKind::Lambda {
+                param,
+                param_ty,
+                body,
+            } => self.compile_lambda(func, param, param_ty, body),
             ExprKind::App { func: fn_expr, arg } => self.compile_app(func, fn_expr, arg),
             ExprKind::Pair { left, right } => self.compile_pair(func, left, right),
             ExprKind::Fst(inner) => self.compile_fst(func, inner),
@@ -1431,9 +1420,7 @@ impl Codegen {
                 left_body,
                 right_var,
                 right_body,
-            } => self.compile_case(
-                func, scrutinee, left_var, left_body, right_var, right_body,
-            ),
+            } => self.compile_case(func, scrutinee, left_var, left_body, right_var, right_body),
             ExprKind::If {
                 cond,
                 then_branch,
@@ -1457,12 +1444,8 @@ impl Codegen {
             }
             ExprKind::Copy(inner) => self.compile_copy(func, inner),
             ExprKind::Block(exprs) => self.compile_block(func, exprs),
-            ExprKind::BinOp { op, left, right } => {
-                self.compile_binop(func, *op, left, right)
-            }
-            ExprKind::UnaryOp { op, operand } => {
-                self.compile_unaryop(func, *op, operand)
-            }
+            ExprKind::BinOp { op, left, right } => self.compile_binop(func, *op, left, right),
+            ExprKind::UnaryOp { op, operand } => self.compile_unaryop(func, *op, operand),
             ExprKind::ListLit(elements) => self.compile_list_lit(func, elements),
             ExprKind::ListIndex { list, index } => self.compile_list_index(func, list, index),
             ExprKind::TupleLit(elements) => self.compile_tuple_lit(func, elements),
@@ -1537,12 +1520,7 @@ impl Codegen {
         func.instruction(&Instruction::Call(FN_STRING_NEW));
     }
 
-    fn compile_string_concat(
-        &mut self,
-        func: &mut Function,
-        left: &Expr,
-        right: &Expr,
-    ) {
+    fn compile_string_concat(&mut self, func: &mut Function, left: &Expr, right: &Expr) {
         self.compile_expr(func, left);
         self.compile_expr(func, right);
         func.instruction(&Instruction::Call(FN_STRING_CONCAT));
@@ -1589,7 +1567,11 @@ impl Codegen {
 
     /// Find free variables in an expression.
     /// A free variable is one that is referenced but not bound in the current scope.
-    fn find_free_vars(&self, expr: &Expr, bound_vars: &std::collections::HashSet<String>) -> Vec<String> {
+    fn find_free_vars(
+        &self,
+        expr: &Expr,
+        bound_vars: &std::collections::HashSet<String>,
+    ) -> Vec<String> {
         use std::collections::HashSet;
         let mut free_vars = Vec::new();
         let mut seen = HashSet::new();
@@ -1607,7 +1589,12 @@ impl Codegen {
                         seen.insert(name.to_string());
                     }
                 }
-                ExprKind::Let { name, value, body, .. } | ExprKind::LetLin { name, value, body, .. } => {
+                ExprKind::Let {
+                    name, value, body, ..
+                }
+                | ExprKind::LetLin {
+                    name, value, body, ..
+                } => {
                     collect(value, bound, free, seen);
                     let mut new_bound = bound.clone();
                     new_bound.insert(name.to_string());
@@ -1622,7 +1609,11 @@ impl Codegen {
                     collect(func, bound, free, seen);
                     collect(arg, bound, free, seen);
                 }
-                ExprKind::If { cond, then_branch, else_branch } => {
+                ExprKind::If {
+                    cond,
+                    then_branch,
+                    else_branch,
+                } => {
                     collect(cond, bound, free, seen);
                     collect(then_branch, bound, free, seen);
                     collect(else_branch, bound, free, seen);
@@ -1631,10 +1622,19 @@ impl Codegen {
                     collect(left, bound, free, seen);
                     collect(right, bound, free, seen);
                 }
-                ExprKind::Fst(inner) | ExprKind::Snd(inner) | ExprKind::Inl { value: inner, .. } | ExprKind::Inr { value: inner, .. } => {
+                ExprKind::Fst(inner)
+                | ExprKind::Snd(inner)
+                | ExprKind::Inl { value: inner, .. }
+                | ExprKind::Inr { value: inner, .. } => {
                     collect(inner, bound, free, seen);
                 }
-                ExprKind::Case { scrutinee, left_var, left_body, right_var, right_body } => {
+                ExprKind::Case {
+                    scrutinee,
+                    left_var,
+                    left_body,
+                    right_var,
+                    right_body,
+                } => {
                     collect(scrutinee, bound, free, seen);
                     let mut left_bound = bound.clone();
                     left_bound.insert(left_var.to_string());
@@ -1701,13 +1701,7 @@ impl Codegen {
         free_vars
     }
 
-    fn compile_lambda(
-        &mut self,
-        func: &mut Function,
-        param: &str,
-        param_ty: &Ty,
-        body: &Expr,
-    ) {
+    fn compile_lambda(&mut self, func: &mut Function, param: &str, param_ty: &Ty, body: &Expr) {
         // 1. Find free variables in the lambda body
         let mut bound_vars = std::collections::HashSet::new();
         bound_vars.insert(param.to_string());
@@ -1719,7 +1713,10 @@ impl Codegen {
 
         // 3. Calculate function index for this lambda
         // Function indices: imports (2) + runtime helpers (7) + user functions + lambdas
-        let lambda_fn_idx = NUM_IMPORTS + NUM_RUNTIME_FNS + self.user_fns.len() as u32 + self.lambda_fns.len() as u32;
+        let lambda_fn_idx = NUM_IMPORTS
+            + NUM_RUNTIME_FNS
+            + self.user_fns.len() as u32
+            + self.lambda_fns.len() as u32;
 
         // 4. Record this lambda for later emission
         self.lambda_fns.push(LambdaInfo {
@@ -1736,12 +1733,7 @@ impl Codegen {
         func.instruction(&Instruction::I32Const(lambda_fn_idx as i32));
     }
 
-    fn compile_app(
-        &mut self,
-        func: &mut Function,
-        fn_expr: &Expr,
-        arg: &Expr,
-    ) {
+    fn compile_app(&mut self, func: &mut Function, fn_expr: &Expr, arg: &Expr) {
         // Check if the function expression is a named function we know about.
         if let ExprKind::Var(name) = &fn_expr.kind {
             if let Some(info) = self.user_fns.get(name.as_str()).cloned() {
@@ -1754,8 +1746,8 @@ impl Codegen {
 
         // Indirect call via function table (for lambdas and first-class functions)
         // Stack layout: [fn_index] [arg] -> call_indirect -> [result]
-        self.compile_expr(func, arg);       // Push argument
-        self.compile_expr(func, fn_expr);   // Push function index
+        self.compile_expr(func, arg); // Push argument
+        self.compile_expr(func, fn_expr); // Push function index
 
         // Use call_indirect with type signature (i32) -> i32
         // Type 6 is TYPE_I32_TO_I32 defined at the top
@@ -1765,12 +1757,7 @@ impl Codegen {
         });
     }
 
-    fn compile_pair(
-        &mut self,
-        func: &mut Function,
-        left: &Expr,
-        right: &Expr,
-    ) {
+    fn compile_pair(&mut self, func: &mut Function, left: &Expr, right: &Expr) {
         // Allocate 8 bytes for pair (2 x i32)
         func.instruction(&Instruction::I32Const(8));
         func.instruction(&Instruction::I32Const(0));
@@ -1948,13 +1935,7 @@ impl Codegen {
         }
     }
 
-    fn compile_binop(
-        &mut self,
-        func: &mut Function,
-        op: BinOp,
-        left: &Expr,
-        right: &Expr,
-    ) {
+    fn compile_binop(&mut self, func: &mut Function, op: BinOp, left: &Expr, right: &Expr) {
         self.compile_expr(func, left);
         self.compile_expr(func, right);
 
@@ -1976,12 +1957,7 @@ impl Codegen {
         func.instruction(&instr);
     }
 
-    fn compile_unaryop(
-        &mut self,
-        func: &mut Function,
-        op: UnaryOp,
-        operand: &Expr,
-    ) {
+    fn compile_unaryop(&mut self, func: &mut Function, op: UnaryOp, operand: &Expr) {
         match op {
             UnaryOp::Not => {
                 self.compile_expr(func, operand);
@@ -2061,12 +2037,20 @@ impl Codegen {
             // Store count header
             func.instruction(&Instruction::LocalTee(self.locals.scratch_local()));
             func.instruction(&Instruction::I32Const(elements.len() as i32));
-            func.instruction(&Instruction::I32Store(MemArg { offset: 0, align: 2, memory_index: 0 }));
+            func.instruction(&Instruction::I32Store(MemArg {
+                offset: 0,
+                align: 2,
+                memory_index: 0,
+            }));
             // Store each element at offset 4 + i*8
             for (i, elem) in elements.iter().enumerate() {
                 func.instruction(&Instruction::LocalGet(self.locals.scratch_local()));
                 self.compile_expr(func, elem);
-                func.instruction(&Instruction::I64Store(MemArg { offset: 4 + (i as u64) * 8, align: 3, memory_index: 0 }));
+                func.instruction(&Instruction::I64Store(MemArg {
+                    offset: 4 + (i as u64) * 8,
+                    align: 3,
+                    memory_index: 0,
+                }));
             }
             // Push pointer as i64
             func.instruction(&Instruction::LocalGet(self.locals.scratch_local()));
@@ -2088,7 +2072,7 @@ impl Codegen {
         // stack-based pairs should use ExprKind::Fst/Snd instead.
         //
         // Stack has: [tuple_ptr as i64]
-        func.instruction(&Instruction::I32WrapI64);  // ptr: i64 → i32
+        func.instruction(&Instruction::I32WrapI64); // ptr: i64 → i32
         func.instruction(&Instruction::I64Load(MemArg {
             offset: 4 + (index as u64) * 8,
             align: 3,
@@ -2682,9 +2666,7 @@ mod tests {
     fn compile_copy() {
         let mut codegen = Codegen::new();
         // copy(42)
-        let expr = e(ExprKind::Copy(Box::new(e(ExprKind::Lit(
-            Literal::I32(42),
-        )))));
+        let expr = e(ExprKind::Copy(Box::new(e(ExprKind::Lit(Literal::I32(42))))));
         let wasm = codegen.compile_program(&expr);
         assert_wasm_header(&wasm);
         validate_wasm(&wasm);
@@ -2742,9 +2724,9 @@ mod tests {
     fn compile_borrow_deref() {
         let mut codegen = Codegen::new();
         // *(&42)
-        let expr = e(ExprKind::Deref(Box::new(e(ExprKind::Borrow(Box::new(
-            e(ExprKind::Lit(Literal::I32(42))),
-        ))))));
+        let expr = e(ExprKind::Deref(Box::new(e(ExprKind::Borrow(Box::new(e(
+            ExprKind::Lit(Literal::I32(42)),
+        )))))));
         let wasm = codegen.compile_program(&expr);
         assert_wasm_header(&wasm);
         validate_wasm(&wasm);
@@ -2978,9 +2960,7 @@ mod tests {
             name: "x".into(),
             ty: None,
             value: Box::new(e(ExprKind::Lit(Literal::I32(42)))),
-            body: Box::new(e(ExprKind::Drop(Box::new(e(ExprKind::Var(
-                "x".into(),
-            )))))),
+            body: Box::new(e(ExprKind::Drop(Box::new(e(ExprKind::Var("x".into())))))),
         });
         let wasm = codegen.compile_program(&expr);
         assert_wasm_header(&wasm);
@@ -3233,9 +3213,6 @@ mod tests {
 
     #[test]
     fn ty_to_valtype_string() {
-        assert_eq!(
-            ty_to_valtype(&Ty::String("r".into())),
-            ValType::I32
-        );
+        assert_eq!(ty_to_valtype(&Ty::String("r".into())), ValType::I32);
     }
 }

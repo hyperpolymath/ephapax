@@ -1,0 +1,24 @@
+// SPDX-License-Identifier: PMPL-1.0-or-later
+// Copyright (c) 2026 Jonathan D.A. Jewell (hyperpolymath) <j.d.a.jewell@open.ac.uk>
+//
+// Example: Simple region scope with allocation.
+//
+// A region is a memory scope: values allocated with @r live until the region
+// exits, then are bulk-freed. No garbage collector, no reference counting —
+// just deterministic deallocation at scope exit.
+
+fn main() -> i32 {
+    region r:
+        // Allocate strings inside region r.
+        let greeting = String.new@r("hello")
+        let name = String.new@r("world")
+
+        // Borrow to compute a result (plain i32, not region-bound).
+        let g_len = String.len(&greeting)
+        let n_len = String.len(&name)
+        let total = g_len + n_len
+
+        // total is a plain i32 — safe to return from the region.
+        total
+    // Region r exits here: greeting and name are bulk-freed.
+}

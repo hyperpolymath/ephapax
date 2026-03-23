@@ -1,0 +1,34 @@
+// SPDX-License-Identifier: PMPL-1.0-or-later
+// Copyright (c) 2026 Jonathan D.A. Jewell (hyperpolymath) <j.d.a.jewell@open.ac.uk>
+//
+// Example: Safely swapping two linear values.
+//
+// Swapping linear values is subtle: you must consume both inputs and
+// produce both outputs without accidentally duplicating or dropping either.
+// This demonstrates that linear types compose safely through destructuring.
+
+// Swap two linear handles — each input is consumed, each output is fresh.
+fn swap_handles() -> i32 {
+    // Two linear file descriptors — both MUST be consumed.
+    let! fd_a = File.open("alpha.txt")
+    let! fd_b = File.open("beta.txt")
+
+    // Read sizes before swap (borrow — does not consume).
+    let size_a = File.size(&fd_a)
+    let size_b = File.size(&fd_b)
+
+    // Swap: destructure both into a new pair with reversed bindings.
+    // This consumes fd_a and fd_b, producing fd_x and fd_y.
+    let! Pair(fd_x, fd_y) = Pair(fd_b, fd_a)
+
+    // fd_x is the old fd_b, fd_y is the old fd_a.
+    let new_size_x = File.size(&fd_x)
+    let new_size_y = File.size(&fd_y)
+
+    // Close both — satisfies all linear obligations.
+    File.close(fd_x)
+    File.close(fd_y)
+
+    // Verify the swap worked.
+    (size_a - new_size_y) + (size_b - new_size_x)
+}

@@ -1,0 +1,45 @@
+// SPDX-License-Identifier: PMPL-1.0-or-later
+// Copyright (c) 2026 Jonathan D.A. Jewell (hyperpolymath) <j.d.a.jewell@open.ac.uk>
+//
+// Example: Passing an Ephapax callback to C code.
+//
+// C libraries often accept function pointers for callbacks (e.g., qsort,
+// signal handlers). Ephapax wraps the callback in a linear handle that
+// must be unregistered to prevent dangling function pointers.
+
+// Comparator callback for qsort — receives two pointers, returns ordering.
+fn compare_ascending(a: &i32, b: &i32) -> i32 {
+    if a < b { -1 }
+    else if a > b { 1 }
+    else { 0 }
+}
+
+fn sort_c_array() -> i32 {
+    // Allocate a C array of 5 integers.
+    let! arr = __ffi("malloc", 20)
+    __ffi("memset_i32", &arr, 0, 5)
+
+    // Fill the array via FFI.
+    __ffi("array_set_i32", &arr, 0, 42)
+    __ffi("array_set_i32", &arr, 1, 7)
+    __ffi("array_set_i32", &arr, 2, 23)
+    __ffi("array_set_i32", &arr, 3, 1)
+    __ffi("array_set_i32", &arr, 4, 99)
+
+    // Register callback as a C function pointer — linear handle.
+    let! cb_handle = __ffi("ephapax_register_callback", compare_ascending)
+
+    // Call qsort with our callback.
+    __ffi("qsort", &arr, 5, 4, &cb_handle)
+
+    // Read first element (should be 1 after ascending sort).
+    let first = __ffi("array_get_i32", &arr, 0)
+
+    // Unregister callback — consumes linear handle.
+    __ffi("ephapax_unregister_callback", cb_handle)
+
+    // Free the array.
+    __ffi("free", arr)
+
+    first
+}

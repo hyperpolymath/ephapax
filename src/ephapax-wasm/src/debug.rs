@@ -22,7 +22,9 @@ use std::collections::HashMap;
 // DWARF support temporarily disabled - gimli 0.31 API requires more complex usage
 // Future enhancement: Implement proper DWARF generation for standard debugger support
 #[allow(unused_imports)]
-use gimli::write::{Address, AttributeValue, DwarfUnit, EndianVec, LineProgram, LineString, Sections};
+use gimli::write::{
+    Address, AttributeValue, DwarfUnit, EndianVec, LineProgram, LineString, Sections,
+};
 #[allow(unused_imports)]
 use gimli::{Encoding, Format, LineEncoding};
 
@@ -149,15 +151,13 @@ mod tests {
             mode: "affine".to_string(),
             instruction_spans: vec![],
             fn_names: HashMap::new(),
-            variables: vec![
-                VariableMetadata {
-                    name: "x".to_string(),
-                    ty: "i32".to_string(),
-                    is_linear: true,
-                    fn_index: 0,
-                    local_index: 0,
-                },
-            ],
+            variables: vec![VariableMetadata {
+                name: "x".to_string(),
+                ty: "i32".to_string(),
+                is_linear: true,
+                fn_index: 0,
+                local_index: 0,
+            }],
         };
 
         let metadata = generate_mode_metadata(&debug_info);

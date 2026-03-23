@@ -70,13 +70,7 @@ impl<'a> Resolver<'a> {
 
         // Resolve each direct dependency
         for (name, dep) in &manifest.dependencies {
-            self.resolve_dependency(
-                name,
-                dep,
-                &mut resolved,
-                &mut in_progress,
-                0,
-            )?;
+            self.resolve_dependency(name, dep, &mut resolved, &mut in_progress, 0)?;
         }
 
         Ok(ResolvedGraph { packages: resolved })
@@ -113,8 +107,8 @@ impl<'a> Resolver<'a> {
         in_progress.insert(name.to_string());
 
         // Get version requirement
-        let req = VersionReq::parse(dep.version())
-            .map_err(|_| ResolverError::NoMatchingVersion {
+        let req =
+            VersionReq::parse(dep.version()).map_err(|_| ResolverError::NoMatchingVersion {
                 package: name.to_string(),
                 requirement: dep.version().to_string(),
             })?;
@@ -131,13 +125,7 @@ impl<'a> Resolver<'a> {
         // Resolve transitive dependencies
         let mut dependencies = HashMap::new();
         for (dep_name, dep_spec) in &manifest.dependencies {
-            self.resolve_dependency(
-                dep_name,
-                dep_spec,
-                resolved,
-                in_progress,
-                depth + 1,
-            )?;
+            self.resolve_dependency(dep_name, dep_spec, resolved, in_progress, depth + 1)?;
 
             // Record the resolved version
             if let Some(resolved_dep) = resolved.get(dep_name) {
@@ -287,9 +275,7 @@ mod tests {
         std::fs::create_dir_all(&pkg_dir).unwrap();
 
         let dep_manifest = create_test_package("dep", "1.0.0", vec![]);
-        dep_manifest
-            .to_file(&pkg_dir.join("ephapax.toml"))
-            .unwrap();
+        dep_manifest.to_file(&pkg_dir.join("ephapax.toml")).unwrap();
         registry.install_package("dep", "1.0.0", &pkg_dir).unwrap();
 
         // Main package depends on dep

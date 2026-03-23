@@ -50,9 +50,7 @@ pub fn parse_sexpr(input: &str) -> Result<SExpr, SExprError> {
     let expr = parse_expr(&mut chars)?;
     consume_ws(&mut chars);
     if chars.peek().is_some() {
-        return Err(SExprError::UnexpectedToken(
-            chars.collect::<String>(),
-        ));
+        return Err(SExprError::UnexpectedToken(chars.collect::<String>()));
     }
     Ok(expr)
 }
@@ -192,12 +190,7 @@ fn sexpr_to_json(sexpr: &SExpr, depth: usize) -> String {
                     .iter()
                     .enumerate()
                     .map(|(i, item)| {
-                        format!(
-                            "{}\"{}\": {}",
-                            inner,
-                            i,
-                            sexpr_to_json(item, depth + 1)
-                        )
+                        format!("{}\"{}\": {}", inner, i, sexpr_to_json(item, depth + 1))
                     })
                     .collect();
                 if rest.is_empty() {
@@ -232,7 +225,9 @@ pub fn module_from_sexpr(sexpr: &str) -> Result<Module, SExprError> {
 
 fn decode_module(items: &[SExpr]) -> Result<Module, SExprError> {
     if items.len() != 3 {
-        return Err(SExprError::Invalid("module requires name and decl list".into()));
+        return Err(SExprError::Invalid(
+            "module requires name and decl list".into(),
+        ));
     }
     if !is_atom(&items[0], "module") {
         return Err(SExprError::Invalid("expected 'module' tag".into()));
@@ -286,7 +281,9 @@ fn decode_decl(expr: &SExpr) -> Result<Decl, SExprError> {
     }
     if is_atom(&list[0], "fn") {
         if list.len() != 5 {
-            return Err(SExprError::Invalid("fn decl shape: (fn name (params) ret body)".into()));
+            return Err(SExprError::Invalid(
+                "fn decl shape: (fn name (params) ret body)".into(),
+            ));
         }
         let name = atom_string(&list[1])?;
         let params = match &list[2] {
@@ -311,7 +308,9 @@ fn decode_decl(expr: &SExpr) -> Result<Decl, SExprError> {
         })
     } else if is_atom(&list[0], "type") {
         if list.len() != 3 {
-            return Err(SExprError::Invalid("type decl shape: (type name ty)".into()));
+            return Err(SExprError::Invalid(
+                "type decl shape: (type name ty)".into(),
+            ));
         }
         let name = atom_string(&list[1])?;
         let ty = decode_ty(&list[2])?;
@@ -327,7 +326,10 @@ fn decode_decl(expr: &SExpr) -> Result<Decl, SExprError> {
 fn expr_to_sexpr(expr: &Expr) -> SExpr {
     match &expr.kind {
         ExprKind::Lit(lit) => SExpr::List(vec![SExpr::Atom("lit".into()), lit_to_sexpr(lit)]),
-        ExprKind::Var(name) => SExpr::List(vec![SExpr::Atom("var".into()), SExpr::Atom(escape_atom(name))]),
+        ExprKind::Var(name) => SExpr::List(vec![
+            SExpr::Atom("var".into()),
+            SExpr::Atom(escape_atom(name)),
+        ]),
         ExprKind::StringNew { region, value } => SExpr::List(vec![
             SExpr::Atom("string-new".into()),
             SExpr::Atom(escape_atom(region)),
@@ -338,20 +340,30 @@ fn expr_to_sexpr(expr: &Expr) -> SExpr {
             expr_to_sexpr(left),
             expr_to_sexpr(right),
         ]),
-        ExprKind::StringLen(inner) => SExpr::List(vec![SExpr::Atom("string-len".into()), expr_to_sexpr(inner)]),
-        ExprKind::Let { name, value, body, .. } => SExpr::List(vec![
+        ExprKind::StringLen(inner) => {
+            SExpr::List(vec![SExpr::Atom("string-len".into()), expr_to_sexpr(inner)])
+        }
+        ExprKind::Let {
+            name, value, body, ..
+        } => SExpr::List(vec![
             SExpr::Atom("let".into()),
             SExpr::Atom(escape_atom(name)),
             expr_to_sexpr(value),
             expr_to_sexpr(body),
         ]),
-        ExprKind::LetLin { name, value, body, .. } => SExpr::List(vec![
+        ExprKind::LetLin {
+            name, value, body, ..
+        } => SExpr::List(vec![
             SExpr::Atom("letlin".into()),
             SExpr::Atom(escape_atom(name)),
             expr_to_sexpr(value),
             expr_to_sexpr(body),
         ]),
-        ExprKind::Lambda { param, param_ty, body } => SExpr::List(vec![
+        ExprKind::Lambda {
+            param,
+            param_ty,
+            body,
+        } => SExpr::List(vec![
             SExpr::Atom("lambda".into()),
             SExpr::Atom(escape_atom(param)),
             ty_to_sexpr(param_ty),
@@ -379,13 +391,29 @@ fn expr_to_sexpr(expr: &Expr) -> SExpr {
             ty_to_sexpr(ty),
             expr_to_sexpr(value),
         ]),
-        ExprKind::Case { scrutinee, left_var, left_body, right_var, right_body } => SExpr::List(vec![
+        ExprKind::Case {
+            scrutinee,
+            left_var,
+            left_body,
+            right_var,
+            right_body,
+        } => SExpr::List(vec![
             SExpr::Atom("case".into()),
             expr_to_sexpr(scrutinee),
-            SExpr::List(vec![SExpr::Atom(escape_atom(left_var)), expr_to_sexpr(left_body)]),
-            SExpr::List(vec![SExpr::Atom(escape_atom(right_var)), expr_to_sexpr(right_body)]),
+            SExpr::List(vec![
+                SExpr::Atom(escape_atom(left_var)),
+                expr_to_sexpr(left_body),
+            ]),
+            SExpr::List(vec![
+                SExpr::Atom(escape_atom(right_var)),
+                expr_to_sexpr(right_body),
+            ]),
         ]),
-        ExprKind::If { cond, then_branch, else_branch } => SExpr::List(vec![
+        ExprKind::If {
+            cond,
+            then_branch,
+            else_branch,
+        } => SExpr::List(vec![
             SExpr::Atom("if".into()),
             expr_to_sexpr(cond),
             expr_to_sexpr(then_branch),
@@ -396,10 +424,18 @@ fn expr_to_sexpr(expr: &Expr) -> SExpr {
             SExpr::Atom(escape_atom(name)),
             expr_to_sexpr(body),
         ]),
-        ExprKind::Borrow(inner) => SExpr::List(vec![SExpr::Atom("borrow".into()), expr_to_sexpr(inner)]),
-        ExprKind::Deref(inner) => SExpr::List(vec![SExpr::Atom("deref".into()), expr_to_sexpr(inner)]),
-        ExprKind::Drop(inner) => SExpr::List(vec![SExpr::Atom("drop".into()), expr_to_sexpr(inner)]),
-        ExprKind::Copy(inner) => SExpr::List(vec![SExpr::Atom("copy".into()), expr_to_sexpr(inner)]),
+        ExprKind::Borrow(inner) => {
+            SExpr::List(vec![SExpr::Atom("borrow".into()), expr_to_sexpr(inner)])
+        }
+        ExprKind::Deref(inner) => {
+            SExpr::List(vec![SExpr::Atom("deref".into()), expr_to_sexpr(inner)])
+        }
+        ExprKind::Drop(inner) => {
+            SExpr::List(vec![SExpr::Atom("drop".into()), expr_to_sexpr(inner)])
+        }
+        ExprKind::Copy(inner) => {
+            SExpr::List(vec![SExpr::Atom("copy".into()), expr_to_sexpr(inner)])
+        }
         ExprKind::Block(exprs) => SExpr::List({
             let mut items = vec![SExpr::Atom("block".into())];
             items.extend(exprs.iter().map(expr_to_sexpr));
@@ -437,10 +473,7 @@ fn expr_to_sexpr(expr: &Expr) -> SExpr {
             SExpr::Atom(index.to_string()),
         ]),
         ExprKind::FFI { symbol, args } => {
-            let mut elems = vec![
-                SExpr::Atom("ffi".into()),
-                SExpr::Atom(symbol.clone()),
-            ];
+            let mut elems = vec![SExpr::Atom("ffi".into()), SExpr::Atom(symbol.clone())];
             elems.extend(args.iter().map(expr_to_sexpr));
             SExpr::List(elems)
         }
@@ -518,15 +551,17 @@ fn decode_expr(expr: &SExpr) -> Result<Expr, SExprError> {
                 return Err(SExprError::Invalid("(case scr (x e1) (y e2))".into()));
             }
             let left = match &list[2] {
-                SExpr::List(items) if items.len() == 2 => {
-                    (SmolStr::new(atom_string(&items[0])?), decode_expr(&items[1])?)
-                }
+                SExpr::List(items) if items.len() == 2 => (
+                    SmolStr::new(atom_string(&items[0])?),
+                    decode_expr(&items[1])?,
+                ),
                 _ => return Err(SExprError::Invalid("case branch must be (x body)".into())),
             };
             let right = match &list[3] {
-                SExpr::List(items) if items.len() == 2 => {
-                    (SmolStr::new(atom_string(&items[0])?), decode_expr(&items[1])?)
-                }
+                SExpr::List(items) if items.len() == 2 => (
+                    SmolStr::new(atom_string(&items[0])?),
+                    decode_expr(&items[1])?,
+                ),
                 _ => return Err(SExprError::Invalid("case branch must be (x body)".into())),
             };
             ExprKind::Case {
@@ -551,7 +586,10 @@ fn decode_expr(expr: &SExpr) -> Result<Expr, SExprError> {
         "drop" => ExprKind::Drop(Box::new(decode_expr(&list[1])?)),
         "copy" => ExprKind::Copy(Box::new(decode_expr(&list[1])?)),
         "block" => {
-            let exprs = list[1..].iter().map(decode_expr).collect::<Result<Vec<_>, _>>()?;
+            let exprs = list[1..]
+                .iter()
+                .map(decode_expr)
+                .collect::<Result<Vec<_>, _>>()?;
             ExprKind::Block(exprs)
         }
         "binop" => ExprKind::BinOp {
@@ -579,7 +617,10 @@ fn lit_to_sexpr(lit: &Literal) -> SExpr {
         Literal::I64(v) => SExpr::List(vec![SExpr::Atom("i64".into()), SExpr::Atom(v.to_string())]),
         Literal::F32(v) => SExpr::List(vec![SExpr::Atom("f32".into()), SExpr::Atom(v.to_string())]),
         Literal::F64(v) => SExpr::List(vec![SExpr::Atom("f64".into()), SExpr::Atom(v.to_string())]),
-        Literal::String(s) => SExpr::List(vec![SExpr::Atom("string".into()), SExpr::Atom(escape_string(s))]),
+        Literal::String(s) => SExpr::List(vec![
+            SExpr::Atom("string".into()),
+            SExpr::Atom(escape_string(s)),
+        ]),
     }
 }
 
@@ -590,10 +631,26 @@ fn decode_lit(expr: &SExpr) -> Result<Literal, SExprError> {
             let tag = atom_string(&items[0])?;
             match tag.as_str() {
                 "bool" => Ok(Literal::Bool(atom_string(&items[1])? == "true")),
-                "i32" => Ok(Literal::I32(atom_string(&items[1])?.parse().map_err(|_| SExprError::Invalid("bad i32".into()))?)),
-                "i64" => Ok(Literal::I64(atom_string(&items[1])?.parse().map_err(|_| SExprError::Invalid("bad i64".into()))?)),
-                "f32" => Ok(Literal::F32(atom_string(&items[1])?.parse().map_err(|_| SExprError::Invalid("bad f32".into()))?)),
-                "f64" => Ok(Literal::F64(atom_string(&items[1])?.parse().map_err(|_| SExprError::Invalid("bad f64".into()))?)),
+                "i32" => Ok(Literal::I32(
+                    atom_string(&items[1])?
+                        .parse()
+                        .map_err(|_| SExprError::Invalid("bad i32".into()))?,
+                )),
+                "i64" => Ok(Literal::I64(
+                    atom_string(&items[1])?
+                        .parse()
+                        .map_err(|_| SExprError::Invalid("bad i64".into()))?,
+                )),
+                "f32" => Ok(Literal::F32(
+                    atom_string(&items[1])?
+                        .parse()
+                        .map_err(|_| SExprError::Invalid("bad f32".into()))?,
+                )),
+                "f64" => Ok(Literal::F64(
+                    atom_string(&items[1])?
+                        .parse()
+                        .map_err(|_| SExprError::Invalid("bad f64".into()))?,
+                )),
                 "string" => Ok(Literal::String(unescape_string(atom_string(&items[1])?))),
                 _ => Err(SExprError::Invalid("unknown literal".into())),
             }
@@ -604,8 +661,14 @@ fn decode_lit(expr: &SExpr) -> Result<Literal, SExprError> {
 
 fn ty_to_sexpr(ty: &Ty) -> SExpr {
     match ty {
-        Ty::Base(b) => SExpr::List(vec![SExpr::Atom("base".into()), SExpr::Atom(base_to_atom(*b))]),
-        Ty::String(r) => SExpr::List(vec![SExpr::Atom("string".into()), SExpr::Atom(escape_atom(r))]),
+        Ty::Base(b) => SExpr::List(vec![
+            SExpr::Atom("base".into()),
+            SExpr::Atom(base_to_atom(*b)),
+        ]),
+        Ty::String(r) => SExpr::List(vec![
+            SExpr::Atom("string".into()),
+            SExpr::Atom(escape_atom(r)),
+        ]),
         Ty::Ref { linearity, inner } => SExpr::List(vec![
             SExpr::Atom("ref".into()),
             SExpr::Atom(match linearity {
@@ -614,9 +677,21 @@ fn ty_to_sexpr(ty: &Ty) -> SExpr {
             }),
             ty_to_sexpr(inner),
         ]),
-        Ty::Fun { param, ret } => SExpr::List(vec![SExpr::Atom("fun".into()), ty_to_sexpr(param), ty_to_sexpr(ret)]),
-        Ty::Prod { left, right } => SExpr::List(vec![SExpr::Atom("prod".into()), ty_to_sexpr(left), ty_to_sexpr(right)]),
-        Ty::Sum { left, right } => SExpr::List(vec![SExpr::Atom("sum".into()), ty_to_sexpr(left), ty_to_sexpr(right)]),
+        Ty::Fun { param, ret } => SExpr::List(vec![
+            SExpr::Atom("fun".into()),
+            ty_to_sexpr(param),
+            ty_to_sexpr(ret),
+        ]),
+        Ty::Prod { left, right } => SExpr::List(vec![
+            SExpr::Atom("prod".into()),
+            ty_to_sexpr(left),
+            ty_to_sexpr(right),
+        ]),
+        Ty::Sum { left, right } => SExpr::List(vec![
+            SExpr::Atom("sum".into()),
+            ty_to_sexpr(left),
+            ty_to_sexpr(right),
+        ]),
         Ty::Region { name, inner } => SExpr::List(vec![
             SExpr::Atom("region-type".into()),
             SExpr::Atom(escape_atom(name)),
@@ -760,7 +835,10 @@ fn atom_to_unary(expr: &SExpr) -> Result<UnaryOp, SExprError> {
 }
 
 fn escape_atom(atom: &str) -> String {
-    if atom.chars().all(|c| !c.is_whitespace() && c != '(' && c != ')' && c != '"') {
+    if atom
+        .chars()
+        .all(|c| !c.is_whitespace() && c != '(' && c != ')' && c != '"')
+    {
         atom.to_string()
     } else {
         escape_string(atom)

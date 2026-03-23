@@ -1,0 +1,30 @@
+// SPDX-License-Identifier: PMPL-1.0-or-later
+// Copyright (c) 2026 Jonathan D.A. Jewell (hyperpolymath) <j.d.a.jewell@open.ac.uk>
+//
+// Example: Command pattern with undo using linear command tokens.
+//
+// Each executed command returns a linear undo token. The token MUST be
+// either used (to undo) or explicitly discarded. This prevents silent
+// loss of undo history — every action is accounted for.
+
+fn edit_document(doc: &Document) -> i32 {
+    // Execute commands — each returns a linear undo token.
+    let! undo1 = Command.insert(doc, 0, "Hello, ")
+    let! undo2 = Command.insert(doc, 7, "world!")
+    let! undo3 = Command.bold(doc, 0, 5)
+
+    // Check the document state (borrow).
+    let length = Document.length(doc)
+
+    // Decide to undo the bold (consumes undo3).
+    Command.undo(undo3, doc)
+
+    // Keep the inserts — explicitly discard their undo tokens.
+    // This is intentional: we accept these changes as permanent.
+    Command.discard_undo(undo2)
+    Command.discard_undo(undo1)
+
+    // All undo tokens consumed — no dangling undo history.
+    // Forgetting to handle an undo token is a compile error.
+    length
+}

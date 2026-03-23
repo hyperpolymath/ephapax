@@ -1,0 +1,24 @@
+// SPDX-License-Identifier: PMPL-1.0-or-later
+// Copyright (c) 2026 Jonathan D.A. Jewell (hyperpolymath) <j.d.a.jewell@open.ac.uk>
+//
+// Example: Cache entry that can be evicted.
+//
+// Cache entries are affine: they can be read (borrowed), consumed by eviction,
+// or simply dropped when they fall out of scope. There is no obligation to
+// explicitly evict — the entry just becomes unreachable.
+
+fn lookup_user(cache: &Cache, user_id: i32) -> i32 {
+    // Try to get a cached entry. The entry is affine.
+    let entry = Cache.get(cache, user_id)
+
+    // Borrow the entry to read its value.
+    let name = CacheEntry.value(&entry)
+    let name_len = String.len(&name)
+
+    // We could explicitly evict the entry:
+    //   Cache.evict(entry)
+    // But since CacheEntry is affine, we can just let it drop.
+    // The compiler is fine either way.
+
+    name_len
+}

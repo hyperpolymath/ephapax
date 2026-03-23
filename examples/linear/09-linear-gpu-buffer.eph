@@ -1,0 +1,31 @@
+// SPDX-License-Identifier: PMPL-1.0-or-later
+// Copyright (c) 2026 Jonathan D.A. Jewell (hyperpolymath) <j.d.a.jewell@open.ac.uk>
+//
+// Example: GPU buffer allocation with linear types.
+//
+// GPU memory must be explicitly freed — there is no garbage collector on the GPU.
+// Linear types guarantee every allocated buffer is freed exactly once,
+// preventing VRAM leaks and double-free crashes.
+
+fn render_mesh(vertices: &VertexData, indices: &IndexData) -> i32 {
+    // Allocate GPU buffers — linear, MUST be freed.
+    let! vbo = Gpu.alloc_buffer(Buffer.Vertex, 4096)
+    let! ibo = Gpu.alloc_buffer(Buffer.Index, 2048)
+
+    // Upload data to GPU (borrow buffers — does not consume).
+    Gpu.upload(&vbo, vertices)
+    Gpu.upload(&ibo, indices)
+
+    // Bind buffers for rendering (borrow again).
+    Gpu.bind_vertex_buffer(&vbo)
+    Gpu.bind_index_buffer(&ibo)
+
+    // Draw call.
+    let triangles_drawn = Gpu.draw_indexed(&ibo, 0, IndexData.count(indices))
+
+    // Free both buffers — satisfies linear obligations.
+    Gpu.free_buffer(vbo)
+    Gpu.free_buffer(ibo)
+
+    triangles_drawn
+}

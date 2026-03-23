@@ -1,0 +1,29 @@
+// SPDX-License-Identifier: PMPL-1.0-or-later
+// Copyright (c) 2026 Jonathan D.A. Jewell (hyperpolymath) <j.d.a.jewell@open.ac.uk>
+//
+// Example: Weak reference that may become invalid.
+//
+// A weak reference is affine: it does not own the target, so it can be
+// dropped at any time. When the target is freed, the weak ref becomes
+// stale. Code must check validity before use — but cleanup is optional.
+
+fn track_parent_widget(widget: &Widget) -> i32 {
+    // Create a weak reference to the parent — affine, droppable.
+    let weak_parent = Widget.weak_ref(widget)
+
+    // Later, check if the parent still exists.
+    if WeakRef.is_alive(&weak_parent) {
+        // Upgrade to a strong borrow (temporary, scoped).
+        let parent = WeakRef.upgrade(&weak_parent)
+        let width = Widget.width(&parent)
+        let height = Widget.height(&parent)
+
+        // weak_parent drops — no cleanup needed.
+        width * height
+    } else {
+        // Parent was already freed. The weak ref is stale.
+        // Just drop it — affine type, no obligation to "release".
+        0
+    }
+    // weak_parent drops implicitly if not already consumed.
+}

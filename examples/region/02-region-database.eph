@@ -1,0 +1,27 @@
+// SPDX-License-Identifier: PMPL-1.0-or-later
+// Copyright (c) 2026 Jonathan D.A. Jewell (hyperpolymath) <j.d.a.jewell@open.ac.uk>
+//
+// Example: Database connection scoped to a region.
+//
+// The connection and all query results are allocated in region r.
+// When r exits, everything is freed — including the connection.
+// This prevents connection leaks without manual cleanup code.
+
+fn count_active_users() -> i32 {
+    region r:
+        // Connection allocated in region r.
+        let conn = Db.connect@r("postgres://localhost/myapp")
+
+        // Query results also live in region r.
+        let result = Db.query@r(&conn, "SELECT count(*) FROM users WHERE active = true")
+        let count = Result.unwrap_i32(&result)
+
+        // Intermediate work — all temporaries scoped to r.
+        let label = String.new@r("Active users: ")
+        let report = String.concat@r(&label, Result.to_string(&result))
+        IO.println(&report)
+
+        // Return a plain i32 — does not reference region r.
+        count
+    // Region r exits: conn, result, label, report all freed.
+}

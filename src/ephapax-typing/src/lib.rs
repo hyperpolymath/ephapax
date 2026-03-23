@@ -10,7 +10,9 @@
 //!
 //! Based on formal/Typing.v
 
-use ephapax_syntax::{BaseTy, BinOp, Decl, Expr, ExprKind, Literal, Module, RegionName, Ty, UnaryOp, Var};
+use ephapax_syntax::{
+    BaseTy, BinOp, Decl, Expr, ExprKind, Literal, Module, RegionName, Ty, UnaryOp, Var,
+};
 use std::collections::HashMap;
 use thiserror::Error;
 
@@ -98,7 +100,14 @@ impl Context {
     /// Extend context with new binding, tagged with the current region.
     pub fn extend(&mut self, name: Var, ty: Ty) {
         let region = self.regions.last().cloned();
-        self.vars.insert(name, CtxEntry { ty, used: false, region });
+        self.vars.insert(
+            name,
+            CtxEntry {
+                ty,
+                used: false,
+                region,
+            },
+        );
     }
 
     /// Look up variable type
@@ -173,8 +182,16 @@ impl Context {
                     if entry.used != other_entry.used {
                         return Err(TypeError::BranchLinearityMismatchDetailed {
                             var: name.clone(),
-                            then_status: if entry.used { "consumed" } else { "not consumed" },
-                            else_status: if other_entry.used { "consumed" } else { "not consumed" },
+                            then_status: if entry.used {
+                                "consumed"
+                            } else {
+                                "not consumed"
+                            },
+                            else_status: if other_entry.used {
+                                "consumed"
+                            } else {
+                                "not consumed"
+                            },
                         });
                     }
                 }
@@ -835,18 +852,16 @@ impl TypeChecker {
 
         match op {
             // Arithmetic ops return same type
-            BinOp::Add | BinOp::Sub | BinOp::Mul | BinOp::Div | BinOp::Mod => {
-                match &left_ty {
-                    Ty::Base(BaseTy::I32)
-                    | Ty::Base(BaseTy::I64)
-                    | Ty::Base(BaseTy::F32)
-                    | Ty::Base(BaseTy::F64) => Ok(left_ty),
-                    _ => Err(TypeError::TypeMismatch {
-                        expected: Ty::Base(BaseTy::I32),
-                        found: left_ty,
-                    }),
-                }
-            }
+            BinOp::Add | BinOp::Sub | BinOp::Mul | BinOp::Div | BinOp::Mod => match &left_ty {
+                Ty::Base(BaseTy::I32)
+                | Ty::Base(BaseTy::I64)
+                | Ty::Base(BaseTy::F32)
+                | Ty::Base(BaseTy::F64) => Ok(left_ty),
+                _ => Err(TypeError::TypeMismatch {
+                    expected: Ty::Base(BaseTy::I32),
+                    found: left_ty,
+                }),
+            },
             // Comparison ops return Bool
             BinOp::Lt | BinOp::Le | BinOp::Gt | BinOp::Ge | BinOp::Eq | BinOp::Ne => {
                 Ok(Ty::Base(BaseTy::Bool))
@@ -1038,14 +1053,21 @@ pub fn type_check_module_with_mode(module: &Module, mode: Mode) -> Result<(), Ty
 
     // First pass: collect all function signatures
     for decl in &module.decls {
-        if let Decl::Fn { name, params, ret_ty, .. } = decl {
+        if let Decl::Fn {
+            name,
+            params,
+            ret_ty,
+            ..
+        } = decl
+        {
             // Build function type from params and return type
-            let fn_ty = params.iter().rev().fold(ret_ty.clone(), |acc, (_, param_ty)| {
-                Ty::Fun {
+            let fn_ty = params
+                .iter()
+                .rev()
+                .fold(ret_ty.clone(), |acc, (_, param_ty)| Ty::Fun {
                     param: Box::new(param_ty.clone()),
                     ret: Box::new(acc),
-                }
-            });
+                });
             tc.ctx.extend(name.clone(), fn_ty);
         }
     }
@@ -1053,7 +1075,12 @@ pub fn type_check_module_with_mode(module: &Module, mode: Mode) -> Result<(), Ty
     // Second pass: type check each function body
     for decl in &module.decls {
         match decl {
-            Decl::Fn { name: _, params, ret_ty, body } => {
+            Decl::Fn {
+                name: _,
+                params,
+                ret_ty,
+                body,
+            } => {
                 // Create a fresh context for function body with params
                 let saved_ctx = tc.ctx.clone();
 
@@ -1078,7 +1105,9 @@ pub fn type_check_module_with_mode(module: &Module, mode: Mode) -> Result<(), Ty
                         if param_ty.is_linear() {
                             if let Some(entry) = tc.ctx.vars.get(param_name) {
                                 if !entry.used {
-                                    return Err(TypeError::LinearVariableNotConsumed(param_name.clone()));
+                                    return Err(TypeError::LinearVariableNotConsumed(
+                                        param_name.clone(),
+                                    ));
                                 }
                             }
                         }
@@ -1253,9 +1282,9 @@ mod tests {
         tc.ctx.extend("s".into(), Ty::String("r".into()));
 
         // &s - borrow s
-        let borrow_expr = dummy_expr(ExprKind::Borrow(Box::new(dummy_expr(
-            ExprKind::Var("s".into()),
-        ))));
+        let borrow_expr = dummy_expr(ExprKind::Borrow(Box::new(dummy_expr(ExprKind::Var(
+            "s".into(),
+        )))));
         let result = tc.check(&borrow_expr);
         assert!(result.is_ok());
 
@@ -1274,15 +1303,15 @@ mod tests {
         tc.ctx.extend("s".into(), Ty::String("r".into()));
 
         // First borrow
-        let borrow_expr = dummy_expr(ExprKind::Borrow(Box::new(dummy_expr(
-            ExprKind::Var("s".into()),
-        ))));
+        let borrow_expr = dummy_expr(ExprKind::Borrow(Box::new(dummy_expr(ExprKind::Var(
+            "s".into(),
+        )))));
         assert!(tc.check(&borrow_expr).is_ok());
 
         // Then consume
-        let drop_expr = dummy_expr(ExprKind::Drop(Box::new(dummy_expr(
-            ExprKind::Var("s".into()),
-        ))));
+        let drop_expr = dummy_expr(ExprKind::Drop(Box::new(dummy_expr(ExprKind::Var(
+            "s".into(),
+        )))));
         assert!(tc.check(&drop_expr).is_ok());
 
         // Now s should be consumed
@@ -1470,10 +1499,7 @@ mod tests {
             region: "r".into(),
             value: "hello".to_string(),
         });
-        assert!(matches!(
-            tc.check(&expr),
-            Err(TypeError::InactiveRegion(_))
-        ));
+        assert!(matches!(tc.check(&expr), Err(TypeError::InactiveRegion(_))));
     }
 
     // ===== Function/lambda tests =====
@@ -1552,9 +1578,9 @@ mod tests {
         tc.ctx.enter_region("r".into());
         tc.ctx.extend("s".into(), Ty::String("r".into()));
 
-        let expr = dummy_expr(ExprKind::Copy(Box::new(dummy_expr(
-            ExprKind::Var("s".into()),
-        ))));
+        let expr = dummy_expr(ExprKind::Copy(Box::new(dummy_expr(ExprKind::Var(
+            "s".into(),
+        )))));
         assert!(matches!(
             tc.check(&expr),
             Err(TypeError::CannotCopyLinear(_))
@@ -1567,9 +1593,9 @@ mod tests {
         tc.ctx.enter_region("r".into());
         tc.ctx.extend("s".into(), Ty::String("r".into()));
 
-        let expr = dummy_expr(ExprKind::Drop(Box::new(dummy_expr(
-            ExprKind::Var("s".into()),
-        ))));
+        let expr = dummy_expr(ExprKind::Drop(Box::new(dummy_expr(ExprKind::Var(
+            "s".into(),
+        )))));
         assert_eq!(tc.check(&expr).unwrap(), Ty::Base(BaseTy::Unit));
     }
 
@@ -1579,10 +1605,7 @@ mod tests {
         let expr = dummy_expr(ExprKind::Drop(Box::new(dummy_expr(ExprKind::Lit(
             Literal::I32(42),
         )))));
-        assert!(matches!(
-            tc.check(&expr),
-            Err(TypeError::UnnecessaryDrop)
-        ));
+        assert!(matches!(tc.check(&expr), Err(TypeError::UnnecessaryDrop)));
     }
 
     // ===== Module-level type checking =====
@@ -1593,7 +1616,10 @@ mod tests {
             name: "test".into(),
             decls: vec![Decl::Fn {
                 name: "add".into(),
-                params: vec![("a".into(), Ty::Base(BaseTy::I32)), ("b".into(), Ty::Base(BaseTy::I32))],
+                params: vec![
+                    ("a".into(), Ty::Base(BaseTy::I32)),
+                    ("b".into(), Ty::Base(BaseTy::I32)),
+                ],
                 ret_ty: Ty::Base(BaseTy::I32),
                 body: dummy_expr(ExprKind::BinOp {
                     op: BinOp::Add,
@@ -1642,7 +1668,10 @@ mod tests {
         });
 
         // In affine mode, this should PASS (implicit drop allowed)
-        assert!(tc.check(&expr).is_ok(), "Affine mode should allow unconsumed linear variables");
+        assert!(
+            tc.check(&expr).is_ok(),
+            "Affine mode should allow unconsumed linear variables"
+        );
     }
 
     #[test]
@@ -1664,7 +1693,10 @@ mod tests {
 
         // In linear mode, this should FAIL (must consume s)
         assert!(
-            matches!(tc.check(&expr), Err(TypeError::LinearVariableNotConsumed(_))),
+            matches!(
+                tc.check(&expr),
+                Err(TypeError::LinearVariableNotConsumed(_))
+            ),
             "Linear mode should reject unconsumed linear variables"
         );
     }
@@ -1707,7 +1739,7 @@ mod tests {
                 name: "forget".into(),
                 params: vec![("s".into(), Ty::String("r".into()))],
                 ret_ty: Ty::Base(BaseTy::Unit),
-                body: dummy_expr(ExprKind::Lit(Literal::Unit)),  // s not consumed
+                body: dummy_expr(ExprKind::Lit(Literal::Unit)), // s not consumed
             }],
         };
 
@@ -1739,7 +1771,10 @@ mod tests {
         });
 
         // In affine mode, this should PASS
-        assert!(tc.check(&expr).is_ok(), "Affine mode allows unconsumed vars in branches");
+        assert!(
+            tc.check(&expr).is_ok(),
+            "Affine mode allows unconsumed vars in branches"
+        );
     }
 
     #[test]
@@ -1760,7 +1795,10 @@ mod tests {
 
         // In linear mode, this should FAIL (branch disagreement)
         assert!(
-            matches!(tc.check(&expr), Err(TypeError::BranchLinearityMismatchDetailed { .. })),
+            matches!(
+                tc.check(&expr),
+                Err(TypeError::BranchLinearityMismatchDetailed { .. })
+            ),
             "Linear mode requires branch agreement"
         );
     }

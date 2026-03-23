@@ -1,0 +1,30 @@
+// SPDX-License-Identifier: PMPL-1.0-or-later
+// Copyright (c) 2026 Jonathan D.A. Jewell (hyperpolymath) <j.d.a.jewell@open.ac.uk>
+//
+// Example: Event observer that can optionally unsubscribe.
+//
+// An observer subscription is affine: you may explicitly unsubscribe to
+// stop receiving events, or simply let it drop when it goes out of scope.
+// Either way is valid — no obligation to manually clean up.
+
+fn monitor_temperature(bus: &EventBus) -> i32 {
+    // Subscribe — affine, can be dropped or explicitly unsubscribed.
+    let sub = EventBus.subscribe(bus, "sensor.temperature")
+
+    // Read a few events via borrow.
+    let event1 = Subscription.poll(&sub)
+    let temp1 = Event.payload_i32(&event1)
+
+    let event2 = Subscription.poll(&sub)
+    let temp2 = Event.payload_i32(&event2)
+
+    // If temperature is critical, unsubscribe early.
+    if temp2 > 100 {
+        Subscription.unsubscribe(sub)
+        // sub is consumed — cannot poll again.
+        temp2
+    } else {
+        // Let sub drop — the runtime cleans up. Affine allows this.
+        temp1 + temp2
+    }
+}

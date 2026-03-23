@@ -1,0 +1,37 @@
+// SPDX-License-Identifier: PMPL-1.0-or-later
+// Copyright (c) 2026 Jonathan D.A. Jewell (hyperpolymath) <j.d.a.jewell@open.ac.uk>
+//
+// Example: Wrapping a C resource handle with linear types.
+//
+// Raw C handles (file descriptors, sockets, etc.) are integers with no
+// ownership tracking. By wrapping them in a linear binding, Ephapax
+// guarantees the handle is closed exactly once — even across FFI.
+
+// Open a file via POSIX open(), returning a linear file descriptor.
+fn safe_open(path: &String) -> i32 {
+    // 0 = O_RDONLY
+    let! fd = __ffi("open", path, 0)
+    fd
+}
+
+// Read from fd, then close it. Both operations go through FFI,
+// but linearity ensures we never forget to close.
+fn read_and_close(path: &String) -> i32 {
+    // Linear: fd MUST be consumed by close().
+    let! fd = safe_open(path)
+
+    // Allocate a buffer on the stack.
+    let buf_size = 1024
+    let! buf = __ffi("malloc", buf_size)
+
+    // Read into buffer (borrow fd — does not consume).
+    let bytes_read = __ffi("read", &fd, &buf, buf_size)
+
+    // Free the buffer (consumes linear buf).
+    __ffi("free", buf)
+
+    // Close the file descriptor (consumes linear fd).
+    __ffi("close", fd)
+
+    bytes_read
+}

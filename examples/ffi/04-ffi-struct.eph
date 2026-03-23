@@ -1,0 +1,35 @@
+// SPDX-License-Identifier: PMPL-1.0-or-later
+// Copyright (c) 2026 Jonathan D.A. Jewell (hyperpolymath) <j.d.a.jewell@open.ac.uk>
+//
+// Example: Reading and writing C struct fields via FFI.
+//
+// C structs are raw memory with field offsets. Ephapax accesses them
+// through typed FFI calls that specify the struct pointer and field name.
+// The struct pointer itself is linear to ensure proper deallocation.
+
+// Represents: struct Point { int32_t x; int32_t y; int32_t z; };
+fn create_and_modify_point() -> i32 {
+    // Allocate a C struct — linear, must be freed.
+    // sizeof(Point) = 12 bytes (3 x i32).
+    let! point = __ffi("malloc", 12)
+
+    // Write struct fields by byte offset.
+    // x at offset 0, y at offset 4, z at offset 8.
+    __ffi("struct_set_i32", &point, 0, 10)
+    __ffi("struct_set_i32", &point, 4, 20)
+    __ffi("struct_set_i32", &point, 8, 30)
+
+    // Read fields back.
+    let x = __ffi("struct_get_i32", &point, 0)
+    let y = __ffi("struct_get_i32", &point, 4)
+    let z = __ffi("struct_get_i32", &point, 8)
+
+    // Compute magnitude squared.
+    let mag_sq = (x * x) + (y * y) + (z * z)
+
+    // Free the struct — consumes linear pointer.
+    __ffi("free", point)
+
+    // point is consumed — cannot access fields after free.
+    mag_sq
+}

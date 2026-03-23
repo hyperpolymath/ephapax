@@ -114,10 +114,7 @@ impl Registry {
 
     /// Get package directory
     pub fn package_dir(&self, name: &str, version: &str) -> PathBuf {
-        self.root
-            .join("packages")
-            .join(name)
-            .join(version)
+        self.root.join("packages").join(name).join(version)
     }
 
     /// Check if a package version exists in the registry
@@ -182,13 +179,11 @@ impl Registry {
         }
 
         // Sort versions
-        package_info
-            .versions
-            .sort_by(|a, b| {
-                semver::Version::parse(&a.version)
-                    .ok()
-                    .cmp(&semver::Version::parse(&b.version).ok())
-            });
+        package_info.versions.sort_by(|a, b| {
+            semver::Version::parse(&a.version)
+                .ok()
+                .cmp(&semver::Version::parse(&b.version).ok())
+        });
 
         self.save_index()?;
         Ok(())
@@ -257,9 +252,7 @@ fn calculate_dir_checksum(dir: &Path) -> std::io::Result<String> {
     use sha2::{Digest, Sha256};
 
     let mut hasher = Sha256::new();
-    let mut entries: Vec<_> = std::fs::read_dir(dir)?
-        .filter_map(|e| e.ok())
-        .collect();
+    let mut entries: Vec<_> = std::fs::read_dir(dir)?.filter_map(|e| e.ok()).collect();
 
     entries.sort_by_key(|e| e.path());
 

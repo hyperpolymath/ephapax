@@ -62,14 +62,18 @@ impl FreeVarAnalysis {
                 Self::collect(body, free, &mut inner_bound);
             }
 
-            ExprKind::Let { name, value, body, .. } => {
+            ExprKind::Let {
+                name, value, body, ..
+            } => {
                 Self::collect(value, free, bound);
                 let mut inner_bound = bound.clone();
                 inner_bound.insert(name.clone());
                 Self::collect(body, free, &mut inner_bound);
             }
 
-            ExprKind::LetLin { name, value, body, .. } => {
+            ExprKind::LetLin {
+                name, value, body, ..
+            } => {
                 Self::collect(value, free, bound);
                 let mut inner_bound = bound.clone();
                 inner_bound.insert(name.clone());
@@ -81,13 +85,23 @@ impl FreeVarAnalysis {
                 Self::collect(arg, free, bound);
             }
 
-            ExprKind::If { cond, then_branch, else_branch } => {
+            ExprKind::If {
+                cond,
+                then_branch,
+                else_branch,
+            } => {
                 Self::collect(cond, free, bound);
                 Self::collect(then_branch, free, bound);
                 Self::collect(else_branch, free, bound);
             }
 
-            ExprKind::Case { scrutinee, left_var, left_body, right_var, right_body } => {
+            ExprKind::Case {
+                scrutinee,
+                left_var,
+                left_body,
+                right_var,
+                right_body,
+            } => {
                 Self::collect(scrutinee, free, bound);
                 let mut left_bound = bound.clone();
                 left_bound.insert(left_var.clone());
@@ -111,14 +125,12 @@ impl FreeVarAnalysis {
                 Self::collect(inner, free, bound);
             }
 
-            ExprKind::Pair { left, right }
-            | ExprKind::StringConcat { left, right } => {
+            ExprKind::Pair { left, right } | ExprKind::StringConcat { left, right } => {
                 Self::collect(left, free, bound);
                 Self::collect(right, free, bound);
             }
 
-            ExprKind::Inl { value, .. }
-            | ExprKind::Inr { value, .. } => {
+            ExprKind::Inl { value, .. } | ExprKind::Inr { value, .. } => {
                 Self::collect(value, free, bound);
             }
 

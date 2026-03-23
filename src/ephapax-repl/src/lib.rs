@@ -120,12 +120,28 @@ impl Repl {
     }
 
     fn print_banner(&self) {
-        println!("{}", "╔══════════════════════════════════════════════════╗".cyan());
-        println!("{}", "║     Ephapax - Linear Types for Safe Memory       ║".cyan());
-        println!("{}", "║                   v0.1.0                         ║".cyan());
-        println!("{}", "╚══════════════════════════════════════════════════╝".cyan());
+        println!(
+            "{}",
+            "╔══════════════════════════════════════════════════╗".cyan()
+        );
+        println!(
+            "{}",
+            "║     Ephapax - Linear Types for Safe Memory       ║".cyan()
+        );
+        println!(
+            "{}",
+            "║                   v0.1.0                         ║".cyan()
+        );
+        println!(
+            "{}",
+            "╚══════════════════════════════════════════════════╝".cyan()
+        );
         println!();
-        println!("Type {} for help, {} to quit", ":help".green(), ":quit".green());
+        println!(
+            "Type {} for help, {} to quit",
+            ":help".green(),
+            ":quit".green()
+        );
         println!();
     }
 
@@ -176,7 +192,10 @@ impl Repl {
             }
             ":verbose" => {
                 self.config.verbose = !self.config.verbose;
-                println!("Verbose mode: {}", if self.config.verbose { "on" } else { "off" });
+                println!(
+                    "Verbose mode: {}",
+                    if self.config.verbose { "on" } else { "off" }
+                );
                 CommandResult::Continue
             }
             _ => CommandResult::Error(format!("Unknown command: {}", cmd)),
@@ -185,13 +204,48 @@ impl Repl {
 
     fn print_help(&self) {
         println!("{}", "Commands:".yellow().bold());
-        println!("  {}  {:30} {}", ":help".green(), "(:h, :?)".dimmed(), "Show this help");
-        println!("  {}  {:30} {}", ":quit".green(), "(:q, :exit)".dimmed(), "Exit the REPL");
-        println!("  {}  {:30} {}", ":type <expr>".green(), "(:t)".dimmed(), "Show type of expression");
-        println!("  {}  {:30} {}", ":load <file>".green(), "(:l)".dimmed(), "Load a file");
-        println!("  {}  {:30} {}", ":reset".green(), "".dimmed(), "Reset the environment");
-        println!("  {}  {:30} {}", ":tokens <expr>".green(), "".dimmed(), "Show lexer tokens");
-        println!("  {}  {:30} {}", ":verbose".green(), "".dimmed(), "Toggle verbose mode");
+        println!(
+            "  {}  {:30} {}",
+            ":help".green(),
+            "(:h, :?)".dimmed(),
+            "Show this help"
+        );
+        println!(
+            "  {}  {:30} {}",
+            ":quit".green(),
+            "(:q, :exit)".dimmed(),
+            "Exit the REPL"
+        );
+        println!(
+            "  {}  {:30} {}",
+            ":type <expr>".green(),
+            "(:t)".dimmed(),
+            "Show type of expression"
+        );
+        println!(
+            "  {}  {:30} {}",
+            ":load <file>".green(),
+            "(:l)".dimmed(),
+            "Load a file"
+        );
+        println!(
+            "  {}  {:30} {}",
+            ":reset".green(),
+            "".dimmed(),
+            "Reset the environment"
+        );
+        println!(
+            "  {}  {:30} {}",
+            ":tokens <expr>".green(),
+            "".dimmed(),
+            "Show lexer tokens"
+        );
+        println!(
+            "  {}  {:30} {}",
+            ":verbose".green(),
+            "".dimmed(),
+            "Toggle verbose mode"
+        );
         println!();
         println!("{}", "Examples:".yellow().bold());
         println!("  let x = 42 in x");
@@ -283,7 +337,8 @@ impl Repl {
                 match ephapax_typing::type_check_module(&module) {
                     Ok(()) => {
                         self.interpreter.load_module(&module);
-                        println!("{} {} ({} declarations)",
+                        println!(
+                            "{} {} ({} declarations)",
                             "Loaded".green(),
                             filename,
                             module.decls.len()

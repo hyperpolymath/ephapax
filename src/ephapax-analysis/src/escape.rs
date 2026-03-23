@@ -72,13 +72,22 @@ impl EscapeAnalysis {
                 Self::analyze_expr(arg, escaping, true); // Arg always escaping
             }
 
-            ExprKind::If { cond, then_branch, else_branch } => {
+            ExprKind::If {
+                cond,
+                then_branch,
+                else_branch,
+            } => {
                 Self::analyze_expr(cond, escaping, in_escaping_context);
                 Self::analyze_expr(then_branch, escaping, in_escaping_context);
                 Self::analyze_expr(else_branch, escaping, in_escaping_context);
             }
 
-            ExprKind::Case { scrutinee, left_body, right_body, .. } => {
+            ExprKind::Case {
+                scrutinee,
+                left_body,
+                right_body,
+                ..
+            } => {
                 Self::analyze_expr(scrutinee, escaping, in_escaping_context);
                 Self::analyze_expr(left_body, escaping, in_escaping_context);
                 Self::analyze_expr(right_body, escaping, in_escaping_context);

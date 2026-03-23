@@ -38,8 +38,14 @@ impl Backend {
                 for err in errors {
                     diagnostics.push(Diagnostic {
                         range: Range {
-                            start: Position { line: 0, character: 0 },
-                            end: Position { line: 0, character: 0 },
+                            start: Position {
+                                line: 0,
+                                character: 0,
+                            },
+                            end: Position {
+                                line: 0,
+                                character: 0,
+                            },
                         },
                         severity: Some(DiagnosticSeverity::ERROR),
                         code: None,
@@ -59,8 +65,14 @@ impl Backend {
         if let Err(err) = type_check_module_with_mode(&module, Mode::Linear) {
             diagnostics.push(Diagnostic {
                 range: Range {
-                    start: Position { line: 0, character: 0 },
-                    end: Position { line: 0, character: 0 },
+                    start: Position {
+                        line: 0,
+                        character: 0,
+                    },
+                    end: Position {
+                        line: 0,
+                        character: 0,
+                    },
                 },
                 severity: Some(DiagnosticSeverity::ERROR),
                 code: None,
@@ -119,7 +131,9 @@ impl LanguageServer for Backend {
         let text = params.text_document.text;
 
         let diagnostics = self.check_document(&uri, &text).await;
-        self.client.publish_diagnostics(uri, diagnostics, None).await;
+        self.client
+            .publish_diagnostics(uri, diagnostics, None)
+            .await;
     }
 
     async fn did_change(&self, params: DidChangeTextDocumentParams) {
@@ -127,7 +141,9 @@ impl LanguageServer for Backend {
         let text = &params.content_changes[0].text;
 
         let diagnostics = self.check_document(&uri, text).await;
-        self.client.publish_diagnostics(uri, diagnostics, None).await;
+        self.client
+            .publish_diagnostics(uri, diagnostics, None)
+            .await;
     }
 
     async fn did_save(&self, params: DidSaveTextDocumentParams) {
@@ -151,7 +167,8 @@ impl LanguageServer for Backend {
             contents: HoverContents::Markup(MarkupContent {
                 kind: MarkupKind::Markdown,
                 value: "**Ephapax** - Dyadic linear type system for WebAssembly\n\n\
-                        Hover over symbols for type information.".to_string(),
+                        Hover over symbols for type information."
+                    .to_string(),
             }),
             range: None,
         };

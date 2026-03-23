@@ -1,0 +1,27 @@
+// SPDX-License-Identifier: PMPL-1.0-or-later
+// Copyright (c) 2026 Jonathan D.A. Jewell (hyperpolymath) <j.d.a.jewell@open.ac.uk>
+//
+// Example: Mutex lock/unlock as a linear protocol.
+//
+// A mutex guard is a linear value: acquiring the lock returns a guard that
+// MUST be released. This eliminates "forgot to unlock" bugs at compile time.
+// The borrow of the guard provides safe access to the protected data.
+
+fn update_counter(mutex: &Mutex) -> i32 {
+    // Acquire the lock — returns a linear guard.
+    // The guard MUST be released (consumed) before the function exits.
+    let! guard = Mutex.lock(mutex)
+
+    // Borrow the guard to read the protected value.
+    let current = Mutex.read(&guard)
+    let next = current + 1
+
+    // Write through the guard (borrow — does not consume).
+    Mutex.write(&guard, next)
+
+    // Release the lock — consumes the guard.
+    // Forgetting this line would be a compile error.
+    Mutex.unlock(guard)
+
+    next
+}

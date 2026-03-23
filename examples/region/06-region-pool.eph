@@ -1,0 +1,31 @@
+// SPDX-License-Identifier: PMPL-1.0-or-later
+// Copyright (c) 2026 Jonathan D.A. Jewell (hyperpolymath) <j.d.a.jewell@open.ac.uk>
+//
+// Example: Connection pool scoped to a region.
+//
+// The pool and all connections it manages live within a region. When the
+// region exits, every connection is closed and the pool is destroyed.
+// No connection can escape the region — use-after-close is impossible.
+
+fn serve_requests(config: &DbConfig) -> i32 {
+    region pool_scope:
+        // Create pool within region — all connections scoped here.
+        let pool = ConnPool.new@pool_scope(config, 10)
+
+        // Acquire a connection from the pool (borrow pool).
+        let conn1 = ConnPool.acquire@pool_scope(&pool)
+        let result1 = Db.query(&conn1, "SELECT count(*) FROM orders")
+
+        // Return connection to pool.
+        ConnPool.release(&pool, conn1)
+
+        // Acquire another connection.
+        let conn2 = ConnPool.acquire@pool_scope(&pool)
+        let result2 = Db.query(&conn2, "SELECT count(*) FROM users")
+        ConnPool.release(&pool, conn2)
+
+        // Extract plain values to return.
+        result1 + result2
+    // Region exits: pool destroyed, all 10 connections closed.
+    // Even if we forgot to release conn1 or conn2, the region handles it.
+}

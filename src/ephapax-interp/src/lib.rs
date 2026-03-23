@@ -6,7 +6,9 @@
 //! A simple interpreter for debugging and rapid development.
 //! Useful for testing before compiling to WASM.
 
-use ephapax_syntax::{BaseTy, BinOp, Decl, Expr, ExprKind, Literal, Module, RegionName, Ty, UnaryOp, Var};
+use ephapax_syntax::{
+    BaseTy, BinOp, Decl, Expr, ExprKind, Literal, Module, RegionName, Ty, UnaryOp, Var,
+};
 use smol_str::SmolStr;
 use std::collections::HashMap;
 use thiserror::Error;
@@ -60,7 +62,10 @@ pub enum Value {
     I64(i64),
     F32(f32),
     F64(f64),
-    String { data: String, region: RegionName },
+    String {
+        data: String,
+        region: RegionName,
+    },
     Pair(Box<Value>, Box<Value>),
     Tuple(Vec<Value>),
     List(Vec<Value>),
@@ -87,6 +92,7 @@ impl Value {
             Value::String { .. } => "String",
             Value::Pair(_, _) => "Pair",
             Value::Tuple(_) => "Tuple",
+            Value::List(_) => "List",
             Value::Left(_) => "Left",
             Value::Right(_) => "Right",
             Value::Closure { .. } => "Function",
@@ -103,14 +109,20 @@ impl Value {
             Value::Pair(l, r) => l.is_linear() || r.is_linear(),
             // Tuples are linear if any element is linear
             Value::Tuple(elements) => elements.iter().any(|v| v.is_linear()),
+            // Lists are linear if any element is linear
+            Value::List(elements) => elements.iter().any(|v| v.is_linear()),
             // Sum types are linear if either variant type is linear
             Value::Left(v) | Value::Right(v) => v.is_linear(),
             // Closures that capture linear values are linear
             // (Conservative: treat all closures as potentially linear)
             Value::Closure { .. } => false, // Could be refined with capture analysis
             // Base types are unrestricted
-            Value::Unit | Value::Bool(_) | Value::I32(_) | Value::I64(_)
-            | Value::F32(_) | Value::F64(_) => false,
+            Value::Unit
+            | Value::Bool(_)
+            | Value::I32(_)
+            | Value::I64(_)
+            | Value::F32(_)
+            | Value::F64(_) => false,
             // Borrows are second-class (not linear in the sense of consumption)
             Value::Borrow(_) => false,
         }
@@ -131,6 +143,13 @@ impl Value {
                 right: Box::new(r.to_type()),
             },
             Value::Tuple(elements) => Ty::Tuple(elements.iter().map(|v| v.to_type()).collect()),
+            Value::List(elements) => {
+                let elem_ty = elements
+                    .first()
+                    .map(|v| v.to_type())
+                    .unwrap_or(Ty::Base(BaseTy::Unit));
+                Ty::List(Box::new(elem_ty))
+            }
             Value::Left(v) => Ty::Sum {
                 left: Box::new(v.to_type()),
                 right: Box::new(Ty::Base(BaseTy::Unit)),
@@ -168,6 +187,16 @@ impl std::fmt::Display for Value {
                     write!(f, "{}", elem)?;
                 }
                 write!(f, ")")
+            }
+            Value::List(elements) => {
+                write!(f, "[")?;
+                for (i, elem) in elements.iter().enumerate() {
+                    if i > 0 {
+                        write!(f, ", ")?;
+                    }
+                    write!(f, "{}", elem)?;
+                }
+                write!(f, "]")
             }
             Value::Left(v) => write!(f, "inl({})", v),
             Value::Right(v) => write!(f, "inr({})", v),
@@ -251,15 +280,19 @@ impl Interpreter {
     /// ensure the library is trustworthy.
     pub fn load_ffi_library(&mut self, path: &str) -> Result<(), RuntimeError> {
         let lib = unsafe {
-            libloading::Library::new(path)
-                .map_err(|e| RuntimeError::Unimplemented(format!("Failed to load FFI library '{}': {}", path, e)))?
+            libloading::Library::new(path).map_err(|e| {
+                RuntimeError::Unimplemented(format!("Failed to load FFI library '{}': {}", path, e))
+            })?
         };
         self.ffi_libraries.push(lib);
         Ok(())
     }
 
     /// Look up an FFI symbol across all loaded libraries.
-    fn find_ffi_symbol(&self, name: &str) -> Option<libloading::Symbol<unsafe extern "C" fn(i64, i64, i64, i64, i64, i64) -> i64>> {
+    fn find_ffi_symbol(
+        &self,
+        name: &str,
+    ) -> Option<libloading::Symbol<unsafe extern "C" fn(i64, i64, i64, i64, i64, i64) -> i64>> {
         for lib in &self.ffi_libraries {
             if let Ok(sym) = unsafe { lib.get(name.as_bytes()) } {
                 return Some(sym);
@@ -271,11 +304,15 @@ impl Interpreter {
     /// Load a module (register all function definitions)
     pub fn load_module(&mut self, module: &Module) {
         for decl in &module.decls {
-            if let Decl::Fn { name, params, ret_ty, body } = decl {
-                self.functions.insert(
-                    name.clone(),
-                    (params.clone(), ret_ty.clone(), body.clone()),
-                );
+            if let Decl::Fn {
+                name,
+                params,
+                ret_ty,
+                body,
+            } = decl
+            {
+                self.functions
+                    .insert(name.clone(), (params.clone(), ret_ty.clone(), body.clone()));
             }
         }
     }
@@ -288,21 +325,35 @@ impl Interpreter {
             ExprKind::StringNew { region, value } => self.eval_string_new(region, value),
             ExprKind::StringConcat { left, right } => self.eval_string_concat(left, right),
             ExprKind::StringLen(inner) => self.eval_string_len(inner),
-            ExprKind::Let { name, value, body, .. } => self.eval_let(name, value, body),
-            ExprKind::LetLin { name, value, body, .. } => self.eval_let(name, value, body),
-            ExprKind::Lambda { param, param_ty, body } => self.eval_lambda(param, param_ty, body),
+            ExprKind::Let {
+                name, value, body, ..
+            } => self.eval_let(name, value, body),
+            ExprKind::LetLin {
+                name, value, body, ..
+            } => self.eval_let(name, value, body),
+            ExprKind::Lambda {
+                param,
+                param_ty,
+                body,
+            } => self.eval_lambda(param, param_ty, body),
             ExprKind::App { func, arg } => self.eval_app(func, arg),
             ExprKind::Pair { left, right } => self.eval_pair(left, right),
             ExprKind::Fst(inner) => self.eval_fst(inner),
             ExprKind::Snd(inner) => self.eval_snd(inner),
             ExprKind::Inl { value, .. } => self.eval_inl(value),
             ExprKind::Inr { value, .. } => self.eval_inr(value),
-            ExprKind::Case { scrutinee, left_var, left_body, right_var, right_body } => {
-                self.eval_case(scrutinee, left_var, left_body, right_var, right_body)
-            }
-            ExprKind::If { cond, then_branch, else_branch } => {
-                self.eval_if(cond, then_branch, else_branch)
-            }
+            ExprKind::Case {
+                scrutinee,
+                left_var,
+                left_body,
+                right_var,
+                right_body,
+            } => self.eval_case(scrutinee, left_var, left_body, right_var, right_body),
+            ExprKind::If {
+                cond,
+                then_branch,
+                else_branch,
+            } => self.eval_if(cond, then_branch, else_branch),
             ExprKind::Region { name, body } => self.eval_region(name, body),
             ExprKind::Borrow(inner) => self.eval_borrow(inner),
             ExprKind::Deref(inner) => self.eval_deref(inner),
@@ -329,7 +380,10 @@ impl Interpreter {
                         if idx < elements.len() {
                             Ok(elements[idx].clone())
                         } else {
-                            Err(RuntimeError::IndexOutOfBounds { index: idx, length: elements.len() })
+                            Err(RuntimeError::IndexOutOfBounds {
+                                index: idx,
+                                length: elements.len(),
+                            })
                         }
                     }
                     (Value::List(elements), Value::I64(i)) => {
@@ -337,13 +391,16 @@ impl Interpreter {
                         if idx < elements.len() {
                             Ok(elements[idx].clone())
                         } else {
-                            Err(RuntimeError::IndexOutOfBounds { index: idx, length: elements.len() })
+                            Err(RuntimeError::IndexOutOfBounds {
+                                index: idx,
+                                length: elements.len(),
+                            })
                         }
                     }
                     _ => Err(RuntimeError::TypeError {
                         expected: "list and integer".to_string(),
                         found: "non-list or non-integer".to_string(),
-                    })
+                    }),
                 }
             }
             ExprKind::TupleLit(exprs) => {
@@ -361,10 +418,15 @@ impl Interpreter {
                         if *index < values.len() {
                             Ok(values[*index].clone())
                         } else {
-                            Err(RuntimeError::Unimplemented(format!("tuple index {} out of bounds", index)))
+                            Err(RuntimeError::Unimplemented(format!(
+                                "tuple index {} out of bounds",
+                                index
+                            )))
                         }
                     }
-                    _ => Err(RuntimeError::Unimplemented("tuple index on non-tuple".to_string())),
+                    _ => Err(RuntimeError::Unimplemented(
+                        "tuple index on non-tuple".to_string(),
+                    )),
                 }
             }
             ExprKind::FFI { symbol, args } => {
@@ -376,9 +438,10 @@ impl Interpreter {
                     // String literals in FFI context: create Value::String
                     // directly (bypass region requirement)
                     let val = match &arg.kind {
-                        ExprKind::Lit(Literal::String(s)) => {
-                            Value::String { data: s.clone(), region: "ffi".into() }
-                        }
+                        ExprKind::Lit(Literal::String(s)) => Value::String {
+                            data: s.clone(),
+                            region: "ffi".into(),
+                        },
                         _ => self.eval(arg)?,
                     };
                     c_args.push(self.value_to_i64_with_cstrings(&val, &mut cstrings));
@@ -602,8 +665,14 @@ impl Interpreter {
 
         match (left_val, right_val) {
             (
-                Value::String { data: d1, region: r1 },
-                Value::String { data: d2, region: r2 },
+                Value::String {
+                    data: d1,
+                    region: r1,
+                },
+                Value::String {
+                    data: d2,
+                    region: r2,
+                },
             ) => {
                 if r1 != r2 {
                     return Err(RuntimeError::TypeError {
@@ -663,7 +732,9 @@ impl Interpreter {
         let arg_val = self.eval(arg)?;
 
         match func_val {
-            Value::Closure { param, body, env, .. } => {
+            Value::Closure {
+                param, body, env, ..
+            } => {
                 let mut new_env = env;
                 new_env.extend(param, arg_val);
                 let old_env = std::mem::replace(&mut self.env, new_env);
@@ -826,11 +897,21 @@ impl Interpreter {
     /// Temporary C string storage for FFI calls.
     /// Kept alive for the duration of the FFI call to prevent dangling pointers.
     /// Cleared after each FFI call returns.
-    fn value_to_i64_with_cstrings(&self, val: &Value, cstrings: &mut Vec<std::ffi::CString>) -> i64 {
+    fn value_to_i64_with_cstrings(
+        &self,
+        val: &Value,
+        cstrings: &mut Vec<std::ffi::CString>,
+    ) -> i64 {
         match val {
             Value::I32(n) => *n as i64,
             Value::I64(n) => *n,
-            Value::Bool(b) => if *b { 1 } else { 0 },
+            Value::Bool(b) => {
+                if *b {
+                    1
+                } else {
+                    0
+                }
+            }
             Value::F32(f) => *f as i64,
             Value::F64(f) => *f as i64,
             Value::Unit => 0,
@@ -994,9 +1075,9 @@ mod tests {
                     region: "r".into(),
                     value: "hello".into(),
                 })),
-                body: Box::new(dummy_expr(ExprKind::Drop(Box::new(
-                    dummy_expr(ExprKind::Var("s".into()))
-                )))),
+                body: Box::new(dummy_expr(ExprKind::Drop(Box::new(dummy_expr(
+                    ExprKind::Var("s".into()),
+                ))))),
             })),
         });
         let result = interp.eval(&expr).unwrap();

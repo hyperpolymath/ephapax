@@ -1,0 +1,35 @@
+// SPDX-License-Identifier: PMPL-1.0-or-later
+// Copyright (c) 2026 Jonathan D.A. Jewell (hyperpolymath) <j.d.a.jewell@open.ac.uk>
+//
+// Example: Database transaction scoped to a region.
+//
+// The transaction and all its intermediate state live within a region.
+// If anything goes wrong, region exit triggers automatic rollback.
+// Successful paths commit explicitly before the region ends.
+
+fn transfer_inventory(warehouse_a: i32, warehouse_b: i32, qty: i32) -> i32 {
+    region txn_scope:
+        // Open connection and begin transaction — scoped to region.
+        let! conn = Db.connect@txn_scope("postgres://localhost/inventory")
+        let! txn = Db.begin@txn_scope(&conn)
+
+        // Check source warehouse has enough stock.
+        let stock = Db.query_one(&txn, "SELECT qty FROM stock WHERE wh = ?", warehouse_a)
+
+        if stock < qty {
+            // Not enough stock — rollback and close.
+            Db.rollback(txn)
+            Db.close(conn)
+            0
+        } else {
+            // Perform the transfer.
+            Db.execute(&txn, "UPDATE stock SET qty = qty - ? WHERE wh = ?", qty, warehouse_a)
+            Db.execute(&txn, "UPDATE stock SET qty = qty + ? WHERE wh = ?", qty, warehouse_b)
+
+            // Commit and close — linear obligations satisfied.
+            Db.commit(txn)
+            Db.close(conn)
+            qty
+        }
+    // Region exits: any remaining affine temporaries cleaned up.
+}

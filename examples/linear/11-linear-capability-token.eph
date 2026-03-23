@@ -1,0 +1,28 @@
+// SPDX-License-Identifier: PMPL-1.0-or-later
+// Copyright (c) 2026 Jonathan D.A. Jewell (hyperpolymath) <j.d.a.jewell@open.ac.uk>
+//
+// Example: Capability-based security with linear tokens.
+//
+// A capability token grants access to a resource. It is linear: it cannot
+// be duplicated (no privilege escalation) and must be explicitly revoked
+// (no dangling capabilities). Borrowing allows use without consuming.
+
+fn perform_admin_task() -> i32 {
+    // Mint a capability token — linear, must be revoked.
+    let! admin_cap = Capability.grant("admin", "user:delete")
+
+    // Use the capability via borrow — does not consume.
+    let result1 = Admin.delete_user(&admin_cap, 42)
+
+    // Delegate: transfer ownership to a sub-task (consumes admin_cap).
+    let! scoped_cap = Capability.narrow(admin_cap, "user:delete:inactive")
+
+    // Use the narrowed capability.
+    let result2 = Admin.delete_user(&scoped_cap, 99)
+
+    // Revoke — consumes the token, ending all access.
+    Capability.revoke(scoped_cap)
+
+    // Cannot use admin_cap or scoped_cap here — both consumed.
+    result1 + result2
+}

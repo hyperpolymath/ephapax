@@ -1,0 +1,33 @@
+// SPDX-License-Identifier: PMPL-1.0-or-later
+// Copyright (c) 2026 Jonathan D.A. Jewell (hyperpolymath) <j.d.a.jewell@open.ac.uk>
+//
+// Example: Visitor pattern with a linear accumulator.
+//
+// The accumulator is linear: it must flow through every visit call and
+// be consumed at the end. This guarantees no partial traversals — you
+// cannot silently skip a node, because the accumulator type changes
+// at each step and must ultimately be finalized.
+
+fn count_ast_nodes(tree: &AstTree) -> i32 {
+    // Create linear accumulator — must be finalized.
+    let! acc = Visitor.begin(0)
+
+    // Visit each node type — each call consumes and returns the accumulator.
+    let! acc = Visitor.visit_functions(acc, tree)
+    let! acc = Visitor.visit_variables(acc, tree)
+    let! acc = Visitor.visit_literals(acc, tree)
+    let! acc = Visitor.visit_operators(acc, tree)
+
+    // Finalize — consumes the accumulator, returns the plain count.
+    let total = Visitor.finalize(acc)
+
+    // acc is consumed — cannot accidentally visit more nodes.
+    total
+}
+
+// Each visit function increments the count for its node type.
+fn visit_node(acc: &Accumulator, node: &AstNode) -> i32 {
+    let current = Accumulator.value(acc)
+    let children = AstNode.child_count(node)
+    current + 1 + children
+}

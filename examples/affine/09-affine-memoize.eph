@@ -1,0 +1,37 @@
+// SPDX-License-Identifier: PMPL-1.0-or-later
+// Copyright (c) 2026 Jonathan D.A. Jewell (hyperpolymath) <j.d.a.jewell@open.ac.uk>
+//
+// Example: Memoization with evictable cache entries.
+//
+// Cached computation results are affine: they can be used (borrowed),
+// evicted when memory pressure rises, or simply dropped. The cache
+// never holds linear obligations — all entries are safe to discard.
+
+fn fibonacci_memo(n: i32) -> i32 {
+    // Create an affine cache — can be dropped at any time.
+    let cache = MemoCache.new(64)
+
+    // Check for cached result (borrow cache).
+    let cached = MemoCache.lookup(&cache, n)
+
+    if Option.is_some(&cached) {
+        // Cache hit — extract and return. Cache drops at scope end.
+        Option.unwrap(cached)
+    } else {
+        // Cache miss — compute and store.
+        let result = compute_fib(n)
+
+        // Store in cache (borrow cache). Entry is affine — evictable.
+        MemoCache.insert(&cache, n, result)
+
+        // Under memory pressure, we could evict old entries:
+        //   MemoCache.evict_oldest(&cache, 10)
+        // But it is also fine to let the entire cache drop.
+
+        result
+    }
+}
+
+fn compute_fib(n: i32) -> i32 {
+    if n <= 1 { n } else { compute_fib(n - 1) + compute_fib(n - 2) }
+}

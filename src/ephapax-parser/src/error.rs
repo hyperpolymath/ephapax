@@ -66,7 +66,11 @@ pub struct Report {
 }
 
 impl Report {
-    pub fn new(source_name: impl Into<String>, source: impl Into<String>, errors: Vec<ParseError>) -> Self {
+    pub fn new(
+        source_name: impl Into<String>,
+        source: impl Into<String>,
+        errors: Vec<ParseError>,
+    ) -> Self {
         Self {
             source_name: source_name.into(),
             source: source.into(),
@@ -97,20 +101,25 @@ impl Report {
         String::from_utf8(output).unwrap_or_default()
     }
 
-    fn build_report(&self, error: &ParseError) -> AriadneReport<'_, (String, std::ops::Range<usize>)> {
+    fn build_report(
+        &self,
+        error: &ParseError,
+    ) -> AriadneReport<'_, (String, std::ops::Range<usize>)> {
         let span = error.span();
         let range = span.start..span.end;
         let location = (self.source_name.clone(), range.clone());
 
         match error {
-            ParseError::Lexer(msg) => AriadneReport::build(ReportKind::Error, self.source_name.clone(), range.start)
-                .with_message("Lexer error")
-                .with_label(
-                    Label::new(location)
-                        .with_message(msg)
-                        .with_color(Color::Red),
-                )
-                .finish(),
+            ParseError::Lexer(msg) => {
+                AriadneReport::build(ReportKind::Error, self.source_name.clone(), range.start)
+                    .with_message("Lexer error")
+                    .with_label(
+                        Label::new(location)
+                            .with_message(msg)
+                            .with_color(Color::Red),
+                    )
+                    .finish()
+            }
 
             ParseError::Syntax { message, .. } => {
                 AriadneReport::build(ReportKind::Error, self.source_name.clone(), range.start)
@@ -134,16 +143,16 @@ impl Report {
                     .finish()
             }
 
-            ParseError::Expected { expected, found, .. } => {
-                AriadneReport::build(ReportKind::Error, self.source_name.clone(), range.start)
-                    .with_message(format!("Expected {}", expected))
-                    .with_label(
-                        Label::new(location)
-                            .with_message(format!("found {} instead", found))
-                            .with_color(Color::Red),
-                    )
-                    .finish()
-            }
+            ParseError::Expected {
+                expected, found, ..
+            } => AriadneReport::build(ReportKind::Error, self.source_name.clone(), range.start)
+                .with_message(format!("Expected {}", expected))
+                .with_label(
+                    Label::new(location)
+                        .with_message(format!("found {} instead", found))
+                        .with_color(Color::Red),
+                )
+                .finish(),
         }
     }
 

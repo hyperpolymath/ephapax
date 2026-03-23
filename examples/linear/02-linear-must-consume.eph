@@ -1,0 +1,24 @@
+// SPDX-License-Identifier: PMPL-1.0-or-later
+// Copyright (c) 2026 Jonathan D.A. Jewell (hyperpolymath) <j.d.a.jewell@open.ac.uk>
+//
+// Example: File handle that must be closed.
+//
+// File handles are the classic use case for linear types. Without linearity,
+// a programmer can forget to close a file, leaking OS resources. With let!,
+// the compiler guarantees the handle is consumed — here, by File.close().
+
+fn read_config() -> i32 {
+    // Linear: the handle MUST be consumed by File.close().
+    // Forgetting to close would be a compile error.
+    let! handle = File.open("/etc/config.toml")
+
+    // Borrow the handle to read — &handle does not consume it.
+    let contents = File.read(&handle)
+    let line_count = String.line_count(&contents)
+
+    // Consume the handle by closing it. This is the ONLY valid endpoint.
+    File.close(handle)
+
+    // line_count is a plain i32 — no ownership concerns.
+    line_count
+}

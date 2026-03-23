@@ -1,0 +1,12 @@
+// SPDX-License-Identifier: PMPL-1.0-or-later
+// Conformance test: FFI intrinsic with zero, single, and multi arguments.
+// Expected: type-checks successfully in both affine and linear modes.
+
+fn get_time(): I64 =
+    __ffi("clock_gettime")
+
+fn compute(x: I32): I64 =
+    __ffi("abs", x)
+
+fn send_data(fd: I32, buf: I64, len: I32): I64 =
+    __ffi("write", fd, buf, len)

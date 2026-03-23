@@ -1,0 +1,38 @@
+// SPDX-License-Identifier: PMPL-1.0-or-later
+// Copyright (c) 2026 Jonathan D.A. Jewell (hyperpolymath) <j.d.a.jewell@open.ac.uk>
+//
+// Example: Multiple heterogeneous resources in one region.
+//
+// A region can manage resources of different types simultaneously:
+// files, network connections, memory buffers. All are freed together
+// when the region exits, regardless of individual resource types.
+
+fn generate_report(db_url: &String, output_path: &String) -> i32 {
+    region report:
+        // Open multiple resources — all scoped to region 'report'.
+        let! db_conn = Db.connect@report(db_url)
+        let! out_file = File.create@report(output_path)
+        let buffer = Buffer.alloc@report(8192)
+        let! log_file = File.open_append@report("report.log")
+
+        // Query data from database (borrow connection).
+        let rows = Db.query(&db_conn, "SELECT * FROM metrics")
+        let row_count = ResultSet.count(&rows)
+
+        // Format into buffer (borrow buffer and rows).
+        Csv.format_into(&buffer, &rows)
+
+        // Write buffer to output file (borrow both).
+        File.write(&out_file, &buffer)
+
+        // Log the operation (borrow log file).
+        File.write_line(&log_file, "Report generated successfully")
+
+        // Close linear resources explicitly.
+        File.close(log_file)
+        File.close(out_file)
+        Db.close(db_conn)
+
+        row_count
+    // Region exits: buffer (affine) freed. Linear resources already closed.
+}

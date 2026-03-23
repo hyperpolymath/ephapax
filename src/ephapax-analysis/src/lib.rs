@@ -8,7 +8,7 @@ pub mod liveness;
 
 pub use escape::{EscapeAnalysis, EscapeInfo};
 pub use free_vars::{FreeVarAnalysis, FreeVars};
-pub use liveness::{LivenessAnalysis, LiveVars};
+pub use liveness::{LiveVars, LivenessAnalysis};
 
 /// Optimization result: variables that must be captured by closures
 #[derive(Debug, Clone)]

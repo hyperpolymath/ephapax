@@ -1,0 +1,35 @@
+// SPDX-License-Identifier: PMPL-1.0-or-later
+// Copyright (c) 2026 Jonathan D.A. Jewell (hyperpolymath) <j.d.a.jewell@open.ac.uk>
+//
+// Example: Nested regions with independent lifetimes.
+//
+// An inner region can borrow from an outer region (the outer outlives the
+// inner). But inner allocations are freed when the inner region exits,
+// while outer allocations persist until the outer exits.
+
+fn process_batch() -> i32 {
+    region outer:
+        // Config lives for the entire outer scope.
+        let config = Config.load@outer("/etc/app.toml")
+        let batch_size = Config.get_i32(&config, "batch_size")
+        let total = 0
+
+        region inner:
+            // Temporary scratch space — freed when inner exits.
+            let buffer = Buffer.new@inner(batch_size)
+
+            // Borrow config from outer — safe because outer outlives inner.
+            let endpoint = Config.get_str(&config, "endpoint")
+
+            Buffer.fill(&buffer, 0)
+            let chunk_result = Buffer.len(&buffer)
+            chunk_result
+        // inner exits: buffer freed, but config still alive.
+
+        // config is still accessible here in the outer region.
+        let name = Config.get_str(&config, "app_name")
+        let name_len = String.len(&name)
+
+        batch_size + name_len
+    // outer exits: config and all outer allocations freed.
+}

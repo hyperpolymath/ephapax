@@ -1,0 +1,27 @@
+// SPDX-License-Identifier: PMPL-1.0-or-later
+// Copyright (c) 2026 Jonathan D.A. Jewell (hyperpolymath) <j.d.a.jewell@open.ac.uk>
+//
+// Example: Resource with optional cleanup (can drop).
+//
+// Some resources benefit from explicit cleanup but don't require it.
+// A temporary file can be deleted explicitly, or left for the OS to clean up.
+// Affine types model this: use at most once, or drop silently.
+
+fn process_data() -> i32 {
+    // Affine: temp file can be explicitly deleted, or dropped.
+    let tmp = TempFile.create("/tmp/ephapax-work.dat")
+
+    // Write some data (borrow — does not consume).
+    TempFile.write(&tmp, "intermediate results")
+
+    // Read it back.
+    let data = TempFile.read(&tmp)
+    let result = String.len(&data)
+
+    // Explicitly delete the temp file (optional — consumes tmp).
+    // If we omitted this line, the file would remain but the code
+    // would still type-check, because tmp is affine, not linear.
+    TempFile.delete(tmp)
+
+    result
+}

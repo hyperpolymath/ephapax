@@ -1,0 +1,31 @@
+// SPDX-License-Identifier: PMPL-1.0-or-later
+// Copyright (c) 2026 Jonathan D.A. Jewell (hyperpolymath) <j.d.a.jewell@open.ac.uk>
+//
+// Example: Database cursor that must be closed.
+//
+// An open cursor holds server-side resources (memory, locks). If forgotten,
+// it leaks resources until the session times out. Linear types ensure
+// every cursor is explicitly closed after use.
+
+fn count_active_users(conn: &DbConnection) -> i32 {
+    // Open a cursor — linear, MUST be closed.
+    let! cursor = Db.open_cursor(conn, "SELECT id FROM users WHERE active = true")
+
+    // Fetch rows in a loop via borrow.
+    let count = 0
+    let has_next = Cursor.has_next(&cursor)
+
+    // Fetch first batch.
+    let! Pair(row1, cursor2) = Cursor.fetch_next(cursor)
+    let count = count + 1
+
+    // Fetch second batch.
+    let! Pair(row2, cursor3) = Cursor.fetch_next(cursor2)
+    let count = count + 1
+
+    // Close the cursor — consumes it, releases server resources.
+    Cursor.close(cursor3)
+
+    // cursor, cursor2, cursor3 all consumed — no resource leak possible.
+    count
+}

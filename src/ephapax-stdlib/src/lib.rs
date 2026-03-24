@@ -221,39 +221,39 @@ pub const BUILTIN_FUNCTIONS: &[&str] = &[
     "__builtin_region_size",
 ];
 
-/// Create a span for stdlib items (zero-length at position 0)
-fn stdlib_span() -> Span {
+/// Create a span for stdlib items (zero-length at position 0).
+pub fn stdlib_span() -> Span {
     Span::dummy()
 }
 
-/// Helper to create a type variable
-fn type_var(name: &str) -> Ty {
+/// Helper to create a type variable.
+pub fn type_var(name: &str) -> Ty {
     Ty::Var(SmolStr::new(name))
 }
 
-/// Helper to create a base type
-fn base_ty(ty: BaseTy) -> Ty {
+/// Helper to create a base type.
+pub fn base_ty(ty: BaseTy) -> Ty {
     Ty::Base(ty)
 }
 
-/// Helper to create a function type
-fn fun_ty(param: Ty, ret: Ty) -> Ty {
+/// Helper to create a function type.
+pub fn fun_ty(param: Ty, ret: Ty) -> Ty {
     Ty::Fun {
         param: Box::new(param),
         ret: Box::new(ret),
     }
 }
 
-/// Helper to create a product type
-fn prod_ty(left: Ty, right: Ty) -> Ty {
+/// Helper to create a product type.
+pub fn prod_ty(left: Ty, right: Ty) -> Ty {
     Ty::Prod {
         left: Box::new(left),
         right: Box::new(right),
     }
 }
 
-/// Helper to create a sum type
-fn sum_ty(left: Ty, right: Ty) -> Ty {
+/// Helper to create a sum type.
+pub fn sum_ty(left: Ty, right: Ty) -> Ty {
     Ty::Sum {
         left: Box::new(left),
         right: Box::new(right),

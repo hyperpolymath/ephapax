@@ -4,7 +4,7 @@
 //! Linear lists with dynamic resizing
 //!
 //! Memory layout:
-//! ```
+//! ```text
 //! +----------+----------+----------+----------+
 //! | capacity | length   | elem[0]  | elem[1]  | ...
 //! +----------+----------+----------+----------+

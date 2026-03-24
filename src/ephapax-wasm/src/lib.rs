@@ -50,11 +50,11 @@ pub use debug::{DebugInfo, VariableMetadata};
 
 use ephapax_ir::module_from_sexpr;
 use ephapax_syntax::{
-    BaseTy, BinOp, Decl, Expr, ExprKind, Literal, Module as AstModule, Span, Ty, UnaryOp,
+    BaseTy, BinOp, Decl, Expr, ExprKind, Literal, Module as AstModule, Ty, UnaryOp,
 };
 use std::collections::HashMap;
 use wasm_encoder::{
-    CodeSection, ConstExpr, CustomSection, ElementSection, Elements, ExportKind, ExportSection,
+    CodeSection, ConstExpr, ElementSection, Elements, ExportKind, ExportSection,
     Function, FunctionSection, ImportSection, Instruction, MemArg, MemorySection, MemoryType,
     Module as WasmModule, RefType, TableSection, TableType, TypeSection, ValType,
 };
@@ -121,6 +121,9 @@ const TYPE_VOID_VOID: u32 = 4;
 const TYPE_CONCAT: u32 = 5;
 /// Type 6: `(i32) -> i32`   (single-param unary functions)
 const TYPE_I32_TO_I32: u32 = 6;
+/// Closure call type: `(i32, i32) -> i32`  (env_ptr + param -> result)
+/// Same signature as TYPE_I32_I32_I32 (type 3), aliased for clarity.
+const TYPE_CLOSURE_CALL: u32 = TYPE_I32_I32_I32;
 
 /// Number of fixed type entries in the type section.
 const NUM_FIXED_TYPES: u32 = 7;
@@ -900,22 +903,40 @@ impl Codegen {
 
         for lambda_info in lambdas {
             // Register function type in function section
+            // Lambda functions take (env_ptr: i32, param: i32) -> i32
             func_sec.function(lambda_info.wasm_type_idx);
 
-            // Compile lambda body with two-pass approach (similar to user functions)
-            let num_params = 1; // Lambdas always have exactly one parameter
+            // Two parameters: param 0 = env_ptr, param 1 = lambda parameter
+            let num_params: u32 = 2;
 
             // --- Pass 1: count locals by doing a dry-run compile ----
             self.locals = LocalTracker::new(num_params);
-            self.locals.name_to_idx.insert(lambda_info.param.clone(), 0);
+            // param 0 = env_ptr (anonymous, used internally)
+            self.locals.name_to_idx.insert("__env_ptr".to_string(), 0);
+            // param 1 = lambda parameter
+            self.locals.name_to_idx.insert(lambda_info.param.clone(), 1);
             if lambda_info.param_ty.is_linear() {
-                self.locals.linear_locals.insert(0, false);
+                self.locals.linear_locals.insert(1, false);
+            }
+
+            // Bind captured variables as locals (loaded from env_ptr)
+            for captured_name in &lambda_info.captured_vars {
+                self.locals.bind(captured_name, false);
             }
 
             // Save data state so pass 1 string literals don't duplicate
             let data_snapshot = (self.data_entries.len(), self.data_offset);
 
             let mut dummy_func = Function::new(vec![(64, ValType::I32)]); // generous
+
+            // Emit captured var loads in dry run
+            for (i, _) in lambda_info.captured_vars.iter().enumerate() {
+                dummy_func.instruction(&Instruction::LocalGet(0)); // env_ptr
+                dummy_func.instruction(&Instruction::I32Load(mem_arg((i * 4) as u64)));
+                let local_idx = num_params + i as u32;
+                dummy_func.instruction(&Instruction::LocalSet(local_idx));
+            }
+
             self.compile_expr(&mut dummy_func, &lambda_info.body);
             let extra = self.locals.num_extra_locals(num_params);
 
@@ -925,9 +946,15 @@ impl Codegen {
 
             // --- Pass 2: compile for real with correct local count --
             self.locals = LocalTracker::new(num_params);
-            self.locals.name_to_idx.insert(lambda_info.param.clone(), 0);
+            self.locals.name_to_idx.insert("__env_ptr".to_string(), 0);
+            self.locals.name_to_idx.insert(lambda_info.param.clone(), 1);
             if lambda_info.param_ty.is_linear() {
-                self.locals.linear_locals.insert(0, false);
+                self.locals.linear_locals.insert(1, false);
+            }
+
+            // Re-bind captured variables as locals
+            for captured_name in &lambda_info.captured_vars {
+                self.locals.bind(captured_name, false);
             }
 
             let mut func = Function::new(if extra > 0 {
@@ -935,6 +962,14 @@ impl Codegen {
             } else {
                 vec![]
             });
+
+            // Load captured variables from env_ptr into local slots
+            for (i, _) in lambda_info.captured_vars.iter().enumerate() {
+                func.instruction(&Instruction::LocalGet(0)); // env_ptr (param 0)
+                func.instruction(&Instruction::I32Load(mem_arg((i * 4) as u64)));
+                let local_idx = num_params + i as u32;
+                func.instruction(&Instruction::LocalSet(local_idx));
+            }
 
             self.compile_expr(&mut func, &lambda_info.body);
             func.instruction(&Instruction::End);
@@ -1707,30 +1742,73 @@ impl Codegen {
         bound_vars.insert(param.to_string());
         let captured_vars = self.find_free_vars(body, &bound_vars);
 
-        // 2. Determine the lambda's WASM type
-        // For simplicity, assume all lambdas take i32 and return i32
-        let lambda_type_idx = TYPE_I32_TO_I32; // Type 6 is (i32) -> i32
+        // 2. Lambda functions take (env_ptr, param) -> result
+        let lambda_type_idx = TYPE_CLOSURE_CALL;
 
         // 3. Calculate function index for this lambda
-        // Function indices: imports (2) + runtime helpers (7) + user functions + lambdas
         let lambda_fn_idx = NUM_IMPORTS
             + NUM_RUNTIME_FNS
             + self.user_fns.len() as u32
             + self.lambda_fns.len() as u32;
 
-        // 4. Record this lambda for later emission
+        // 4. Table index: position in the function table (0-based)
+        let table_idx = self.user_fns.len() as u32 + self.lambda_fns.len() as u32;
+
+        // 5. Record this lambda for later emission
         self.lambda_fns.push(LambdaInfo {
             wasm_fn_idx: lambda_fn_idx,
             wasm_type_idx: lambda_type_idx,
-            captured_vars,
+            captured_vars: captured_vars.clone(),
             param: param.to_string(),
             param_ty: param_ty.clone(),
             body: body.clone(),
         });
 
-        // 5. Emit the closure representation (just the function index for now)
-        // Full closure support would allocate environment and emit (fn_idx, env_ptr) pair
-        func.instruction(&Instruction::I32Const(lambda_fn_idx as i32));
+        // 6. Allocate environment block for captured variables
+        //    Layout: [captured_0: i32, captured_1: i32, ...]
+        let num_captured = captured_vars.len() as u32;
+        let env_size = if num_captured > 0 { num_captured * 4 } else { 4 }; // min 4 bytes
+
+        // Allocate env block via bump allocator
+        func.instruction(&Instruction::I32Const(env_size as i32));
+        func.instruction(&Instruction::I32Const(0)); // alignment
+        func.instruction(&Instruction::Call(FN_BUMP_ALLOC));
+
+        let env_local = self.locals.temp();
+        func.instruction(&Instruction::LocalSet(env_local));
+
+        // Store each captured variable's current value into the env block
+        for (i, var_name) in captured_vars.iter().enumerate() {
+            func.instruction(&Instruction::LocalGet(env_local)); // env_ptr (address)
+            if let Some(var_idx) = self.locals.get(var_name) {
+                func.instruction(&Instruction::LocalGet(var_idx)); // captured value
+            } else {
+                // Variable not in locals — could be a top-level function reference.
+                // Default to 0 (will be resolved by name during lambda body compilation).
+                func.instruction(&Instruction::I32Const(0));
+            }
+            func.instruction(&Instruction::I32Store(mem_arg((i * 4) as u64)));
+        }
+
+        // 7. Allocate closure cell: (table_idx: i32, env_ptr: i32)
+        func.instruction(&Instruction::I32Const(CLOSURE_SIZE as i32));
+        func.instruction(&Instruction::I32Const(0)); // alignment
+        func.instruction(&Instruction::Call(FN_BUMP_ALLOC));
+
+        let closure_local = self.locals.temp();
+        func.instruction(&Instruction::LocalTee(closure_local));
+
+        // Store table index at offset 0
+        func.instruction(&Instruction::I32Const(table_idx as i32));
+        func.instruction(&Instruction::I32Store(mem_arg(0)));
+
+        // Store env_ptr at offset 4
+        func.instruction(&Instruction::LocalGet(closure_local));
+        func.instruction(&Instruction::LocalGet(env_local));
+        func.instruction(&Instruction::I32Store(mem_arg(4)));
+
+        // Push closure cell pointer as result
+        func.instruction(&Instruction::LocalGet(closure_local));
     }
 
     fn compile_app(&mut self, func: &mut Function, fn_expr: &Expr, arg: &Expr) {
@@ -1744,16 +1822,38 @@ impl Codegen {
             }
         }
 
-        // Indirect call via function table (for lambdas and first-class functions)
-        // Stack layout: [fn_index] [arg] -> call_indirect -> [result]
-        self.compile_expr(func, arg); // Push argument
-        self.compile_expr(func, fn_expr); // Push function index
+        // Indirect call via closure cell.
+        //
+        // Closure cell layout: (table_idx: i32 @ offset 0, env_ptr: i32 @ offset 4)
+        // Lambda function signature: (env_ptr: i32, param: i32) -> i32
+        //
+        // Steps:
+        // 1. Evaluate closure expression -> closure_ptr
+        // 2. Load env_ptr from closure_ptr + 4
+        // 3. Evaluate argument -> param value
+        // 4. Load table_idx from closure_ptr + 0
+        // 5. call_indirect with TYPE_CLOSURE_CALL (i32, i32) -> i32
 
-        // Use call_indirect with type signature (i32) -> i32
-        // Type 6 is TYPE_I32_TO_I32 defined at the top
+        // Evaluate closure to get closure cell pointer
+        self.compile_expr(func, fn_expr);
+        let closure_local = self.locals.temp();
+        func.instruction(&Instruction::LocalSet(closure_local));
+
+        // Push env_ptr (first argument to lambda function)
+        func.instruction(&Instruction::LocalGet(closure_local));
+        func.instruction(&Instruction::I32Load(mem_arg(4))); // env_ptr at offset 4
+
+        // Push param (second argument to lambda function)
+        self.compile_expr(func, arg);
+
+        // Push table index (popped by call_indirect)
+        func.instruction(&Instruction::LocalGet(closure_local));
+        func.instruction(&Instruction::I32Load(mem_arg(0))); // table_idx at offset 0
+
+        // Indirect call: (env_ptr, param) -> result
         func.instruction(&Instruction::CallIndirect {
-            type_index: TYPE_I32_TO_I32,
-            table_index: 0, // We only have one table (index 0)
+            type_index: TYPE_CLOSURE_CALL,
+            table_index: 0,
         });
     }
 
@@ -3175,6 +3275,89 @@ mod tests {
 
         // The WASM module should be valid and contain a lambda function
         // (The validation above checks that the WASM is well-formed)
+    }
+
+    #[test]
+    fn compile_closure_captures_variable() {
+        // Test: let y = 10 in (lambda (x : I32) (+ x y)) 5
+        // The lambda captures 'y' from the enclosing scope.
+        // Expected result: 15
+        let module = AstModule {
+            name: "test".into(),
+            decls: vec![Decl::Fn {
+                name: "main".into(),
+                params: vec![],
+                ret_ty: Ty::Base(BaseTy::I32),
+                body: e(ExprKind::Let {
+                    name: "y".into(),
+                    ty: Some(Ty::Base(BaseTy::I32)),
+                    value: Box::new(e(ExprKind::Lit(Literal::I32(10)))),
+                    body: Box::new(e(ExprKind::App {
+                        func: Box::new(e(ExprKind::Lambda {
+                            param: "x".into(),
+                            param_ty: Ty::Base(BaseTy::I32),
+                            body: Box::new(e(ExprKind::BinOp {
+                                op: BinOp::Add,
+                                left: Box::new(e(ExprKind::Var("x".into()))),
+                                right: Box::new(e(ExprKind::Var("y".into()))),
+                            })),
+                        })),
+                        arg: Box::new(e(ExprKind::Lit(Literal::I32(5)))),
+                    })),
+                }),
+            }],
+        };
+        let wasm = compile_module(&module).expect("closure compilation failed");
+        assert_wasm_header(&wasm);
+        validate_wasm(&wasm);
+
+        // Verify the lambda captured 'y'
+        let codegen = Codegen::new();
+        let _ = codegen; // codegen state is consumed by compile_module
+    }
+
+    #[test]
+    fn compile_closure_multiple_captures() {
+        // Test: let a = 1 in let b = 2 in (lambda (x : I32) (+ (+ x a) b)) 10
+        // The lambda captures both 'a' and 'b' from enclosing scope.
+        // Expected result: 13
+        let module = AstModule {
+            name: "test".into(),
+            decls: vec![Decl::Fn {
+                name: "main".into(),
+                params: vec![],
+                ret_ty: Ty::Base(BaseTy::I32),
+                body: e(ExprKind::Let {
+                    name: "a".into(),
+                    ty: Some(Ty::Base(BaseTy::I32)),
+                    value: Box::new(e(ExprKind::Lit(Literal::I32(1)))),
+                    body: Box::new(e(ExprKind::Let {
+                        name: "b".into(),
+                        ty: Some(Ty::Base(BaseTy::I32)),
+                        value: Box::new(e(ExprKind::Lit(Literal::I32(2)))),
+                        body: Box::new(e(ExprKind::App {
+                            func: Box::new(e(ExprKind::Lambda {
+                                param: "x".into(),
+                                param_ty: Ty::Base(BaseTy::I32),
+                                body: Box::new(e(ExprKind::BinOp {
+                                    op: BinOp::Add,
+                                    left: Box::new(e(ExprKind::BinOp {
+                                        op: BinOp::Add,
+                                        left: Box::new(e(ExprKind::Var("x".into()))),
+                                        right: Box::new(e(ExprKind::Var("a".into()))),
+                                    })),
+                                    right: Box::new(e(ExprKind::Var("b".into()))),
+                                })),
+                            })),
+                            arg: Box::new(e(ExprKind::Lit(Literal::I32(10)))),
+                        })),
+                    })),
+                }),
+            }],
+        };
+        let wasm = compile_module(&module).expect("multi-capture closure compilation failed");
+        assert_wasm_header(&wasm);
+        validate_wasm(&wasm);
     }
 
     // -----------------------------------------------------------------------

@@ -289,10 +289,10 @@ impl Interpreter {
     }
 
     /// Look up an FFI symbol across all loaded libraries.
-    fn find_ffi_symbol(
-        &self,
+    fn find_ffi_symbol<'a>(
+        &'a self,
         name: &str,
-    ) -> Option<libloading::Symbol<unsafe extern "C" fn(i64, i64, i64, i64, i64, i64) -> i64>> {
+    ) -> Option<libloading::Symbol<'a, unsafe extern "C" fn(i64, i64, i64, i64, i64, i64) -> i64>> {
         for lib in &self.ffi_libraries {
             if let Ok(sym) = unsafe { lib.get(name.as_bytes()) } {
                 return Some(sym);

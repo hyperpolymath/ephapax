@@ -442,22 +442,22 @@ mod tests {
 
     #[test]
     fn test_eval_expr() {
-        let mut repl = Repl::new().unwrap();
-        let result = repl.eval_expr("42").unwrap();
+        let mut repl = Repl::new().expect("REPL should initialize");
+        let result = repl.eval_expr("42").expect("eval should succeed");
         assert!(matches!(result, Value::I32(42)));
     }
 
     #[test]
     fn test_eval_let() {
-        let mut repl = Repl::new().unwrap();
-        let result = repl.eval_expr("let x = 1 in x").unwrap();
+        let mut repl = Repl::new().expect("REPL should initialize");
+        let result = repl.eval_expr("let x = 1 in x").expect("eval should succeed");
         assert!(matches!(result, Value::I32(1)));
     }
 
     #[test]
     fn test_eval_if() {
-        let mut repl = Repl::new().unwrap();
-        let result = repl.eval_expr("if true then 42 else 0").unwrap();
+        let mut repl = Repl::new().expect("REPL should initialize");
+        let result = repl.eval_expr("if true then 42 else 0").expect("eval should succeed");
         assert!(matches!(result, Value::I32(42)));
     }
 }

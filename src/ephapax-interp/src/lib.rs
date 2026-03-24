@@ -1006,7 +1006,7 @@ mod tests {
     fn test_eval_literal() {
         let mut interp = Interpreter::new();
         let expr = dummy_expr(ExprKind::Lit(Literal::I32(42)));
-        let result = interp.eval(&expr).unwrap();
+        let result = interp.eval(&expr).expect("eval should succeed");
         assert!(matches!(result, Value::I32(42)));
     }
 
@@ -1018,7 +1018,7 @@ mod tests {
             then_branch: Box::new(dummy_expr(ExprKind::Lit(Literal::I32(1)))),
             else_branch: Box::new(dummy_expr(ExprKind::Lit(Literal::I32(2)))),
         });
-        let result = interp.eval(&expr).unwrap();
+        let result = interp.eval(&expr).expect("eval should succeed");
         assert!(matches!(result, Value::I32(1)));
     }
 
@@ -1031,7 +1031,7 @@ mod tests {
             value: Box::new(dummy_expr(ExprKind::Lit(Literal::I32(42)))),
             body: Box::new(dummy_expr(ExprKind::Var("x".into()))),
         });
-        let result = interp.eval(&expr).unwrap();
+        let result = interp.eval(&expr).expect("eval should succeed");
         assert!(matches!(result, Value::I32(42)));
     }
 
@@ -1047,7 +1047,7 @@ mod tests {
             func: Box::new(lambda),
             arg: Box::new(dummy_expr(ExprKind::Lit(Literal::I32(42)))),
         });
-        let result = interp.eval(&app).unwrap();
+        let result = interp.eval(&app).expect("eval should succeed");
         assert!(matches!(result, Value::I32(42)));
     }
 
@@ -1059,7 +1059,7 @@ mod tests {
             right: Box::new(dummy_expr(ExprKind::Lit(Literal::I32(2)))),
         });
         let fst = dummy_expr(ExprKind::Fst(Box::new(pair)));
-        let result = interp.eval(&fst).unwrap();
+        let result = interp.eval(&fst).expect("eval should succeed");
         assert!(matches!(result, Value::I32(1)));
     }
 
@@ -1080,7 +1080,7 @@ mod tests {
                 ))))),
             })),
         });
-        let result = interp.eval(&expr).unwrap();
+        let result = interp.eval(&expr).expect("eval should succeed");
         assert!(matches!(result, Value::Unit));
     }
 }

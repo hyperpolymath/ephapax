@@ -1,0 +1,675 @@
+(* SPDX-License-Identifier: PMPL-1.0-or-later *)
+(* SPDX-FileCopyrightText: 2026 Jonathan D.A. Jewell *)
+(*
+ * Ephapax v2 Grammar Specification
+ * ================================
+ *
+ * Complete grammar covering: modules, generics, comptime meta plane,
+ * traits, algebraic effects, contracts, FFI capabilities, visibility,
+ * annotations, iterators, and pattern matching.
+ *
+ * Architecture:
+ *   SURFACE GRAMMAR (this file) → desugar → CORE CALCULUS (existing)
+ *
+ * The core calculus (binary sums, case, inl/inr, let/let!, regions)
+ * remains unchanged. Everything here desugars into it.
+ *
+ * Two planes:
+ *   DATA PLANE  — runtime, linear/affine, regions, effects
+ *   META PLANE  — compile-time, total, pure, unrestricted
+ *
+ * The meta plane (comptime) can observe types and generate code.
+ * It cannot reference runtime values or violate linearity.
+ * Harvard separation: meta plane output is validated by the type checker.
+ *
+ * Status: DRAFT — design document, not yet implemented.
+ *)
+
+
+(* ================================================================ *)
+(* 1. TOP LEVEL                                                      *)
+(* ================================================================ *)
+
+(* A source file is a module. *)
+source_file  = { module_header } , { import } , { top_decl } ;
+
+module_header = "module" , module_path , [ capability_decl ] ;
+
+module_path  = IDENT , { "." , IDENT } ;
+
+(* ================================================================ *)
+(* 2. MODULES AND IMPORTS                                            *)
+(* ================================================================ *)
+
+import       = "import" , import_spec , "from" , STRING ;
+
+import_spec  = IDENT                                 (* import Foo from "foo" *)
+             | "{" , IDENT , { "," , IDENT } , "}"   (* import { a, b } from "foo" *)
+             | "*" , "as" , IDENT                     (* import * as Foo from "foo" *)
+             ;
+
+(* Re-export: make imported names visible to importers of this module *)
+reexport     = "pub" , import ;
+
+(* ================================================================ *)
+(* 3. VISIBILITY                                                     *)
+(* ================================================================ *)
+
+(* Default: private to module. `pub` makes visible to importers. *)
+visibility   = [ "pub" ] ;
+
+(* ================================================================ *)
+(* 4. ANNOTATIONS                                                    *)
+(* ================================================================ *)
+
+(* Annotations are compile-time metadata on declarations.            *)
+(* The comptime meta plane processes them.                           *)
+
+annotation   = "@" , IDENT , [ "(" , annotation_args , ")" ] ;
+annotation_args = annotation_arg , { "," , annotation_arg } ;
+annotation_arg  = IDENT | STRING | INTEGER | annotation ;
+
+(* Common annotations:
+ *   @inline          — inline this function at call sites
+ *   @noinline        — never inline
+ *   @tail_recursive  — verify tail recursion (comptime-checked)
+ *   @no_alloc        — verify no allocation (comptime-checked)
+ *   @repr(C)         — C-compatible memory layout
+ *   @repr(packed)    — no padding
+ *   @deprecated(msg) — emit warning on use
+ *   @comptime        — execute at compile time
+ *   @reflectable     — generate runtime TypeDesc
+ *   @derive(Eq, Show) — generate trait impls via comptime
+ *   @pure            — no side effects (comptime-verified)
+ *   @total           — always terminates (comptime-verified)
+ *)
+
+(* ================================================================ *)
+(* 5. DECLARATIONS                                                   *)
+(* ================================================================ *)
+
+top_decl     = { annotation } , visibility , decl_body ;
+
+decl_body    = fn_decl
+             | data_decl
+             | type_decl
+             | trait_decl
+             | impl_decl
+             | effect_decl
+             | handler_decl
+             | comptime_decl
+             ;
+
+(* --- 5a. Functions --- *)
+
+fn_decl      = "fn" , IDENT , [ type_params ] ,
+               "(" , [ param_list ] , ")" , ":" , ty ,
+               [ where_clause ] ,
+               [ contract_block ] ,
+               [ effect_annotation ] ,
+               "=" , expr ;
+
+type_params  = "[" , type_param , { "," , type_param } , "]" ;
+type_param   = IDENT , [ ":" , trait_bound ] ;
+
+trait_bound  = CTOR_IDENT , { "+" , CTOR_IDENT } ;
+(* e.g. [a: Eq + Show]  means  a must implement Eq and Show *)
+
+param_list   = param , { "," , param } ;
+param        = IDENT , ":" , ty ;
+
+where_clause = "where" , constraint , { "," , constraint } ;
+constraint   = IDENT , ":" , trait_bound ;
+(* where clause allows complex bounds that don't fit in type_params *)
+
+(* --- 5b. Data types --- *)
+
+data_decl    = "data" , CTOR_IDENT , [ type_params ] , "=" ,
+               [ "|" ] , data_variant , { "|" , data_variant } ;
+
+data_variant = CTOR_IDENT , [ "(" , ty_list , ")" ] ;
+
+ty_list      = ty , { "," , ty } ;
+
+(* --- 5c. Type aliases --- *)
+
+type_decl    = "type" , IDENT , [ type_params ] , "=" , ty ;
+
+(* --- 5d. Traits --- *)
+
+trait_decl   = "trait" , CTOR_IDENT , "(" , type_param , ")" ,
+               [ ":" , trait_bound ] ,  (* supertrait bounds *)
+               "=" , { trait_item } , "end" ;
+
+trait_item   = { annotation } , trait_fn_sig ;
+
+trait_fn_sig = "fn" , IDENT , [ type_params ] ,
+               "(" , [ param_list ] , ")" , ":" , ty ,
+               [ "=" , expr ]  (* default implementation *)
+               ;
+
+(* --- 5e. Trait implementations --- *)
+
+impl_decl    = "impl" , CTOR_IDENT , "(" , ty , ")" ,
+               [ where_clause ] ,
+               "=" , { impl_item } , "end" ;
+
+impl_item    = { annotation } , fn_decl ;
+
+(* --- 5f. Effects --- *)
+
+effect_decl  = "effect" , CTOR_IDENT , [ type_params ] , "=" ,
+               { effect_op } , "end" ;
+
+effect_op    = "fn" , IDENT , [ type_params ] ,
+               "(" , [ param_list ] , ")" , ":" , ty ;
+
+(* --- 5g. Effect handlers --- *)
+
+handler_decl = "handler" , IDENT , [ type_params ] ,
+               "for" , CTOR_IDENT , [ type_params ] ,
+               "=" , { handler_clause } , "end" ;
+
+handler_clause = "fn" , IDENT , "(" , [ param_list ] , ")" ,
+                 [ "," , "resume" , ":" , ty ] ,
+                 ":" , ty , "=" , expr ;
+(* `resume` is the delimited continuation — calling it continues
+ * the computation that performed the effect operation. *)
+
+(* --- 5h. Comptime declarations (meta plane) --- *)
+
+comptime_decl = "@comptime" , "{" , { comptime_item } , "}" ;
+
+comptime_item = comptime_fn | comptime_let ;
+
+comptime_fn  = "fn" , IDENT ,
+               "(" , [ comptime_param_list ] , ")" , ":" , comptime_ty ,
+               "=" , comptime_expr ;
+
+comptime_param_list = comptime_param , { "," , comptime_param } ;
+comptime_param      = IDENT , ":" , comptime_ty ;
+
+comptime_let = "let" , IDENT , "=" , comptime_expr ;
+
+(* ================================================================ *)
+(* 6. CONTRACTS                                                      *)
+(* ================================================================ *)
+
+(* Contracts are pre/post conditions and invariants.                 *)
+(* Static contracts are verified at comptime.                        *)
+(* Dynamic contracts emit runtime checks (erasable in release).      *)
+
+contract_block = { contract_clause } ;
+
+contract_clause = "requires" , expr           (* precondition *)
+                | "ensures" , result_expr     (* postcondition *)
+                | "invariant" , expr          (* maintained through body *)
+                ;
+
+(* In ensures clauses, `result` refers to the return value *)
+result_expr  = expr ;
+
+(* ================================================================ *)
+(* 7. FFI CAPABILITIES                                               *)
+(* ================================================================ *)
+
+(* Module-level capability declaration restricts what FFI can do.    *)
+(* Comptime-verified: if a module declares capabilities, every       *)
+(* __ffi call must fit within them.                                  *)
+
+capability_decl = "capabilities" , ":" ,
+                  "[" , capability , { "," , capability } , "]" ;
+
+capability   = "memory_read"       (* can read from raw memory *)
+             | "memory_write"      (* can write to raw memory *)
+             | "io"                (* can perform I/O *)
+             | "network"           (* can access network *)
+             | "filesystem"        (* can access filesystem *)
+             | "process"           (* can spawn/signal processes *)
+             | "ffi_unrestricted"  (* no restrictions — escape hatch *)
+             | IDENT               (* user-defined capability *)
+             ;
+
+(* FFI calls carry capability requirements *)
+ffi_expr     = "__ffi" , [ capability_annotation ] ,
+               "(" , STRING , { "," , expr } , ")" ;
+
+capability_annotation = "@capabilities" ,
+                        "(" , capability , { "," , capability } , ")" ;
+
+(* ================================================================ *)
+(* 8. TYPES                                                          *)
+(* ================================================================ *)
+
+ty           = effect_ty ;
+
+(* Effect annotation on function types: a -> b with IO + State(s) *)
+effect_ty    = fun_ty , [ "with" , effect_row ] ;
+
+effect_row   = effect_ref , { "+" , effect_ref } ;
+effect_ref   = CTOR_IDENT , [ "(" , ty_list , ")" ] ;
+
+fun_ty       = sum_ty , [ "->" , ty ] ;
+
+sum_ty       = prod_ty , { "+" , prod_ty } ;
+
+prod_ty      = type_atom , { "*" , type_atom } ;
+
+type_atom    = base_ty
+             | string_ty
+             | borrow_ty
+             | list_ty
+             | tuple_ty
+             | named_ty
+             | type_var
+             | "(" , ty , ")"
+             ;
+
+base_ty      = "()" | "Bool" | "I32" | "I64" | "F32" | "F64" ;
+
+string_ty    = "String" , [ "@" , IDENT ] ;
+
+borrow_ty    = "&" , type_atom ;
+
+list_ty      = "[" , ty , "]" ;
+
+tuple_ty     = "(" , ty , "," , ty , { "," , ty } , ")" ;
+
+(* Named type application: Option(I32), Result(String@r, Error) *)
+(* Also bare names for nullary types: Color, Unit *)
+named_ty     = CTOR_IDENT , [ "(" , ty_list , ")" ] ;
+
+type_var     = IDENT ;
+
+(* ================================================================ *)
+(* 9. EXPRESSIONS                                                    *)
+(* ================================================================ *)
+
+expr         = let_expr
+             | let_lin_expr
+             | lambda_expr
+             | if_expr
+             | match_expr
+             | region_expr
+             | case_expr
+             | for_expr
+             | handle_expr
+             | perform_expr
+             | or_expr
+             ;
+
+(* --- Bindings --- *)
+
+let_expr     = "let" , pattern , [ ":" , ty ] , "=" , expr , "in" , expr ;
+
+let_lin_expr = "let!" , pattern , [ ":" , ty ] , "=" , expr , "in" , expr ;
+
+(* Note: let now accepts patterns, not just identifiers.
+ * let (a, b) = pair in ...
+ * let! Some(x) = opt in ...  (partial — must be exhaustive or in match) *)
+
+(* --- Functions --- *)
+
+lambda_expr  = "fn" , [ type_params ] ,
+               "(" , [ param_list ] , ")" ,
+               [ ":" , ty ] ,
+               [ effect_annotation ] ,
+               "->" , expr ;
+
+effect_annotation = "with" , effect_row ;
+
+(* --- Control flow --- *)
+
+if_expr      = "if" , expr , "then" , expr , "else" , expr ;
+
+(* --- Pattern matching --- *)
+
+match_expr   = "match" , expr , "of" ,
+               [ "|" ] , match_arm , { "|" , match_arm } ,
+               "end" ;
+
+match_arm    = pattern , [ "if" , expr ] , "=>" , expr ;
+
+(* --- Regions --- *)
+
+region_expr  = "region" , IDENT , "{" , expr , "}" ;
+
+(* --- Binary case (core — still valid for expert use) --- *)
+
+case_expr    = "case" , expr , "of" ,
+               "inl" , "(" , IDENT , ")" , "->" , expr ,
+               "inr" , "(" , IDENT , ")" , "->" , expr ,
+               "end" ;
+
+(* --- Iterators --- *)
+
+for_expr     = "for" , pattern , "in" , expr , "do" , expr , "end" ;
+(* Desugars to: Iterable.fold(collection, init, fn(acc, x) -> body)
+ * Requires: the collection type implements Iterable trait.
+ * Linear safety: the iterator consumes the collection (or borrows it). *)
+
+(* --- Effects --- *)
+
+(* Perform an effect operation *)
+perform_expr = "perform" , IDENT , [ "(" , [ expr_list ] , ")" ] ;
+
+(* Handle effects with a handler *)
+handle_expr  = "handle" , expr , "with" , handler_ref ,
+               [ "(" , [ expr_list ] , ")" ] ;
+
+handler_ref  = IDENT                     (* named handler *)
+             | "{" , { handler_arm } , "}" ;  (* inline handler *)
+
+handler_arm  = "|" , IDENT , "(" , [ param_list ] , ")" ,
+               [ "," , "resume" ] , "=>" , expr ;
+
+(* ================================================================ *)
+(* 10. PATTERNS                                                      *)
+(* ================================================================ *)
+
+pattern      = constructor_pattern
+             | pair_pattern
+             | tuple_pattern
+             | wildcard_pattern
+             | literal_pattern
+             | borrow_pattern
+             | var_pattern
+             | "(" , pattern , ")"
+             ;
+
+constructor_pattern = CTOR_IDENT , [ "(" , pattern_list , ")" ] ;
+
+pair_pattern    = "(" , pattern , "," , pattern , ")" ;
+tuple_pattern   = "(" , pattern , "," , pattern , { "," , pattern } , ")" ;
+wildcard_pattern = "_" ;
+literal_pattern  = literal ;
+borrow_pattern   = "&" , pattern ;
+var_pattern      = IDENT ;
+
+pattern_list = pattern , { "," , pattern } ;
+
+(* ================================================================ *)
+(* 11. BINARY AND UNARY OPERATORS                                    *)
+(* ================================================================ *)
+
+or_expr      = and_expr , { "||" , and_expr } ;
+and_expr     = eq_expr , { "&&" , eq_expr } ;
+eq_expr      = cmp_expr , { ( "==" | "!=" ) , cmp_expr } ;
+cmp_expr     = add_expr , { ( "<" | "<=" | ">" | ">=" ) , add_expr } ;
+add_expr     = mul_expr , { ( "+" | "-" ) , mul_expr } ;
+mul_expr     = concat_expr , { ( "*" | "/" | "%" ) , concat_expr } ;
+concat_expr  = unary_expr , { "++" , unary_expr } ;
+
+unary_expr   = "!" , unary_expr
+             | "-" , unary_expr
+             | postfix_expr
+             ;
+
+postfix_expr = atom_expr , { postfix_op } ;
+
+postfix_op   = call_op | index_op | member_op | type_app_op ;
+call_op      = "(" , [ expr_list ] , ")" ;
+index_op     = "[" , expr , "]" ;
+member_op    = "." , ( INTEGER | IDENT ) ;
+type_app_op  = "[" , ty_list , "]" ;
+(* Type application: identity[I32](42) — explicit type argument *)
+
+(* ================================================================ *)
+(* 12. ATOMIC EXPRESSIONS                                            *)
+(* ================================================================ *)
+
+atom_expr    = ffi_expr
+             | string_method
+             | inl_expr
+             | inr_expr
+             | borrow_expr
+             | deref_expr
+             | drop_expr
+             | copy_expr
+             | construct_expr
+             | list_literal
+             | paren_or_pair
+             | block_expr
+             | comptime_splice
+             | type_desc_expr
+             | literal
+             | variable
+             ;
+
+string_method = "String" , "." , IDENT , [ "@" , IDENT ] ,
+                "(" , [ expr_list ] , ")" ;
+
+inl_expr     = "inl" , "[" , ty , "]" , "(" , expr , ")" ;
+inr_expr     = "inr" , "[" , ty , "]" , "(" , expr , ")" ;
+
+borrow_expr  = "&" , unary_expr ;
+deref_expr   = "*" , unary_expr ;
+drop_expr    = "drop" , "(" , expr , ")" ;
+copy_expr    = "copy" , "(" , expr , ")" ;
+
+(* Named constructor: Some(42), None, Ok(value) *)
+construct_expr = CTOR_IDENT , [ "(" , [ expr_list ] , ")" ] ;
+
+list_literal = "[" , [ expr , { "," , expr } ] , "]" ;
+
+paren_or_pair = "(" , [ expr , { "," , expr } ] , ")" ;
+
+block_expr   = "{" , { expr , ";" } , expr , "}" ;
+
+(* Splice comptime result into runtime code *)
+comptime_splice = "@splice" , "(" , comptime_expr , ")" ;
+
+(* Runtime type descriptor (unrestricted value, Harvard-safe) *)
+type_desc_expr = "@type_desc_of" , "(" , ty , ")" ;
+
+expr_list    = expr , { "," , expr } ;
+
+variable     = IDENT ;
+
+literal      = "()" | BOOLEAN | FLOAT | INTEGER | STRING ;
+
+(* ================================================================ *)
+(* 13. COMPTIME EXPRESSIONS (META PLANE)                             *)
+(* ================================================================ *)
+
+(* Comptime expressions are total and pure by definition.            *)
+(* They can inspect types and generate surface AST.                  *)
+(* They CANNOT reference runtime values.                             *)
+(* Their output is validated by the type checker (Harvard guarantee). *)
+
+comptime_ty   = "Type"           (* reified type *)
+              | "TypeDesc"       (* runtime type descriptor *)
+              | "SurfaceDecl"    (* surface AST declaration *)
+              | "SurfaceExpr"    (* surface AST expression *)
+              | "List" , "(" , comptime_ty , ")"
+              | "Bool"
+              | "I32"
+              | "String"
+              | IDENT
+              ;
+
+comptime_expr = comptime_intrinsic
+              | comptime_match
+              | comptime_if
+              | comptime_let_in
+              | comptime_call
+              | comptime_list
+              | comptime_literal
+              | IDENT
+              ;
+
+comptime_intrinsic = "@type_desc_of" , "(" , ty , ")"
+                   | "@fields_of" , "(" , ty , ")"
+                   | "@constructors_of" , "(" , ty , ")"
+                   | "@constructor_count" , "(" , ty , ")"
+                   | "@is_linear" , "(" , ty , ")"
+                   | "@is_region_bound" , "(" , ty , ")"
+                   | "@type_name" , "(" , ty , ")"
+                   | "@has_trait" , "(" , ty , "," , CTOR_IDENT , ")"
+                   | "@effect_set" , "(" , ty , ")"
+                   | "@emit_decl" , "(" , comptime_expr , ")"
+                   | "@emit_expr" , "(" , comptime_expr , ")"
+                   | "@error" , "(" , STRING , ")"  (* compile error *)
+                   | "@warning" , "(" , STRING , ")" (* compile warning *)
+                   ;
+
+comptime_match = "match" , comptime_expr , "of" ,
+                 { "|" , comptime_pattern , "=>" , comptime_expr } ,
+                 "end" ;
+
+comptime_pattern = CTOR_IDENT , [ "(" , comptime_pattern_list , ")" ]
+                 | "_"
+                 | IDENT
+                 | comptime_literal
+                 ;
+
+comptime_pattern_list = comptime_pattern , { "," , comptime_pattern } ;
+
+comptime_if  = "if" , comptime_expr , "then" , comptime_expr ,
+               "else" , comptime_expr ;
+
+comptime_let_in = "let" , IDENT , "=" , comptime_expr , "in" , comptime_expr ;
+
+comptime_call = IDENT , "(" , [ comptime_expr , { "," , comptime_expr } ] , ")" ;
+
+comptime_list = "[" , [ comptime_expr , { "," , comptime_expr } ] , "]" ;
+
+comptime_literal = INTEGER | STRING | BOOLEAN | "()" ;
+
+(* ================================================================ *)
+(* 14. TERMINALS                                                     *)
+(* ================================================================ *)
+
+(* Lowercase identifier: variables, functions, type variables *)
+IDENT        = LOWER_ALPHA , { ALPHA_NUM | "_" } ;
+
+(* Uppercase identifier: constructors, type names, trait names *)
+CTOR_IDENT   = UPPER_ALPHA , { ALPHA_NUM | "_" } ;
+
+INTEGER      = DIGIT , { DIGIT } ;
+FLOAT        = DIGIT , { DIGIT } , "." , DIGIT , { DIGIT } ;
+BOOLEAN      = "true" | "false" ;
+STRING       = '"' , { CHAR } , '"' ;
+
+LOWER_ALPHA  = "a" | ... | "z" | "_" ;
+UPPER_ALPHA  = "A" | ... | "Z" ;
+ALPHA_NUM    = LOWER_ALPHA | UPPER_ALPHA | DIGIT ;
+DIGIT        = "0" | ... | "9" ;
+CHAR         = (* any character except unescaped '"' *) ;
+
+(* ================================================================ *)
+(* 15. KEYWORDS                                                      *)
+(* ================================================================ *)
+
+(* Reserved words that cannot be used as IDENT:
+ *
+ *   module import from pub
+ *   fn let let! in type data
+ *   trait impl effect handler
+ *   if then else match of end case
+ *   for do
+ *   inl inr region
+ *   drop copy
+ *   handle perform with where
+ *   requires ensures invariant
+ *   capabilities
+ *   true false
+ *   Bool I32 I64 F32 F64 String
+ *)
+
+(* ================================================================ *)
+(* 16. WHITESPACE AND COMMENTS                                       *)
+(* ================================================================ *)
+
+WHITESPACE   = " " | "\t" | "\n" | "\r" ;
+LINE_COMMENT = "//" , { NOT_NEWLINE } ;
+BLOCK_COMMENT = "/*" , { NOT_STAR_SLASH } , "*/" ;
+
+(* Doc comments generate documentation *)
+DOC_COMMENT  = "///" , { NOT_NEWLINE } ;
+
+
+(* ================================================================ *)
+(* APPENDIX A: DESUGARING TARGETS                                    *)
+(* ================================================================ *)
+
+(* Each surface feature desugars to the core calculus:
+ *
+ * | Surface                | Core                              |
+ * |------------------------|-----------------------------------|
+ * | data T = A | B(x)      | type T = () + x  (binary sums)   |
+ * | match e of ...          | nested case/inl/inr              |
+ * | Construct(args)         | inl/inr chains                   |
+ * | Named(T1, T2)           | substituted binary sum type      |
+ * | fn f[a](x: a): a       | monomorphised or Λa. ...         |
+ * | trait T(a) = ...        | @derive → comptime generation    |
+ * |                        | polymorphic → dictionary records  |
+ * | for x in xs do e end   | fold/recursion                   |
+ * | perform Op(args)       | effect operation call             |
+ * | handle e with h        | handler application               |
+ * | requires P             | if !P then abort else ...         |
+ * | ensures P              | let result = ... in assert(P)     |
+ * | @comptime { ... }      | run at compile time, splice result|
+ * | @derive(Eq)            | comptime-generated impl block     |
+ * | pub fn ...              | (visibility checked, then erased) |
+ * | @inline fn ...          | (inlining directive, then erased) |
+ * | capabilities: [...]     | (comptime-verified, then erased)  |
+ *)
+
+
+(* ================================================================ *)
+(* APPENDIX B: LINEAR SAFETY INVARIANTS                              *)
+(* ================================================================ *)
+
+(* These invariants must hold across ALL features:
+ *
+ * 1. CONSUMPTION: let! bindings are consumed exactly once.
+ *    - match arms on linear values must be exhaustive
+ *    - for-loops on linear collections consume the collection
+ *    - effect handlers cannot duplicate linear continuations
+ *
+ * 2. REGIONS: values referencing region r cannot escape r.
+ *    - closures capturing region-bound values are region-scoped
+ *    - effect handlers cannot leak region-bound values via resume
+ *
+ * 3. COMPTIME SEPARATION (Harvard):
+ *    - @comptime blocks cannot reference runtime values
+ *    - TypeDesc is unrestricted (freely copyable)
+ *    - @splice output is validated by the type checker
+ *    - comptime functions are total and pure
+ *
+ * 4. EFFECTS:
+ *    - pure functions (no effect annotation) cannot perform effects
+ *    - effect handlers must handle all operations in the effect
+ *    - linear values in effectful computations: one-shot continuations
+ *      only (no multi-shot resume with linear captures)
+ *
+ * 5. CAPABILITIES:
+ *    - __ffi calls must satisfy module capability declarations
+ *    - capability checking is comptime (zero runtime cost)
+ *    - ffi_unrestricted is an explicit escape hatch
+ *)
+
+
+(* ================================================================ *)
+(* APPENDIX C: INTERACTION MATRIX                                    *)
+(* ================================================================ *)
+
+(* How features interact with linear types:
+ *
+ * | Feature        | Linear interaction                        |
+ * |----------------|-------------------------------------------|
+ * | Generics       | [a] is unrestricted by default.           |
+ * |                | [a: Linear] opts into linear semantics.   |
+ * | Traits         | Trait methods on linear types must use &   |
+ * |                | (borrow) or consume and return.           |
+ * | Effects        | perform consumes linear args.             |
+ * |                | resume is one-shot if captures linear.    |
+ * | Contracts      | requires/ensures borrow (&) to inspect.  |
+ * | For-loops      | Iterator consumes or borrows collection.  |
+ * | Comptime       | Cannot reference linear runtime values.   |
+ * | FFI            | Linear values passed to FFI are consumed. |
+ * | Patterns       | Each pattern variable binds linearly.     |
+ * |                | Wildcards on linear values = implicit drop |
+ * |                | (affine) or error (linear discipline).    |
+ *)

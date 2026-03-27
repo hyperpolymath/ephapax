@@ -1217,24 +1217,61 @@ Theorem preservation :
     exists G'' G_out, R; G'' |- e' : T -| G_out.
 Proof.
   intros R G e T G' mu rho mu' rho' e' Htype Hstep Henv.
-  (* By induction on the typing derivation, inverting the step for
-     each expression form *)
-  induction Htype; inversion Hstep; subst.
+  (* Induction on typing, inversion on step.
+     The weakened statement (exists G'' G_out) makes most cases straightforward:
+     - Value reductions: the result is typed by a sub-derivation
+     - Congruence: IH gives typed sub-result, reconstruct outer rule
+     We use generalize dependent to handle Rocq 9.1.1 variable renaming. *)
+  generalize dependent e'.
+  generalize dependent rho'.
+  generalize dependent mu'.
+  generalize dependent mu.
+  generalize dependent rho.
+  induction Htype; intros rho Henv mu mu' rho' e' Hstep;
+    inversion Hstep; subst.
 
-  (* All preservation cases — use match goal for Rocq 9.1.1 compatibility *)
   (* T_Var_Lin, S_Var *)
-  - destruct (Henv x T false H eq_refl) as [v' [Hlookup' Htyped]].
+  - destruct (Henv x T false H eq_refl) as [v' [Hlk Hty]].
     match goal with
-    | [ Hlk : env_lookup _ _ = Some ?V |- _ ] =>
-        rewrite Hlk in Hlookup'; injection Hlookup'; intros; subst;
-        exists G, G; apply Htyped
+    | [ Heq : env_lookup _ _ = Some _ |- _ ] =>
+        rewrite Heq in Hlk; injection Hlk; intros; subst;
+        exists G, G; apply Hty
     end.
 
-  (* T_Var_Unr, S_Var *)
-  - admit. (* needs env_typed to cover unrestricted used vars *)
+  (* T_Var_Unr, S_Var — env_typed only covers u=false, but u could be true.
+     For unrestricted types, the variable may be reused. We need env_typed
+     to also cover used unrestricted variables. Deferred. *)
+  - admit.
 
-  (* All remaining cases *)
-  all: admit. (* remaining cases need IH threading + context reconstruction *)
+  (* For all remaining cases, the key patterns are:
+     1. Sub-expression typing directly gives the result (value reductions)
+     2. IH on sub-step + reconstruct outer typing rule (congruence)
+     3. Region changes (deferred — requires region weakening)
+
+     We handle the value reduction cases first, then try IH for congruence. *)
+
+  (* Value reduction cases: the result is already typed by a sub-derivation *)
+  (* T_Let, S_Let_Val: result is e2, typed by Htype2 *)
+  all: try (match goal with
+    | [ Hty2 : _; ctx_extend ?G' ?X ?T1 |- ?E2 : ?T2 -| _ |- _ ] =>
+        exists (ctx_extend G' X T1), _; exact Hty2
+    end).
+
+  (* T_If, S_If_True/False: result is e2 or e3, typed directly *)
+  all: try (match goal with
+    | [ Hty : _; ?G |- ?E : ?T -| ?G' |- context[?E] ] =>
+        exists G, G'; exact Hty
+    end).
+
+  (* Congruence: IH gives sub-result, reconstruct *)
+  all: try (match goal with
+    | [ IH : forall _ _, env_typed _ _ _ -> forall _ _ _ _, _ -> exists _ _, _ |- _ ] =>
+        edestruct IH as [?G'' [?Gout ?Hty']]; try eassumption;
+        eexists _, _; econstructor; eassumption
+    end).
+
+  (* Anything remaining *)
+  all: admit.
 Admitted.
 (* DUST NOTE: Preservation proof outline is complete for the key cases:
    - S_Var: uses env_typed to get well-typed val_to_expr ✓

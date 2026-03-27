@@ -1119,18 +1119,16 @@ Proof.
     { (* e1 steps *)
       right. exists m1, R1, r1, (EStringConcat e1' e2).
       apply S_StringConcat_Step1. exact Hs1. }
-  (* T_StringLen: premise types EBorrow e, so we invert to get ctx_lookup,
-     then use env_consistent for the step, wrapped in S_StringLen_Step. *)
+  (* T_StringLen: premise is T_Borrow(EVar x). Inversion gives
+     ctx_lookup G x = Some (TString r, false). Step via S_Var. *)
   - right.
+    (* T_StringLen has premise: R; G |- EBorrow (EVar x) : TBorrow (TString r) -| G'
+       Invert the T_Borrow sub-derivation to get ctx_lookup. *)
     inversion Htype; subst.
-    match goal with
-    | [ Hlk : ctx_lookup _ _ = Some (_, _) |- _ ] =>
-        destruct (Hec _ _ _ Hlk) as [rv Hlookup];
-        exists mu, R, rho, (EStringLen (val_to_expr rv));
-        apply S_StringLen_Step;
-        (* Inner step on borrow's subexpression — same var_of_expr issue *)
-        admit
-    end.
+    (* After inversion, we should have a sub-hypothesis from T_Borrow.
+       The T_Borrow gives: ctx_lookup G x = Some (TString r, false).
+       Use env_consistent to get runtime value, then step. *)
+    admit. (* Will close once we identify the hypothesis name from inversion *)
   (* T_Let *) - simpl in Helv. destruct Helv as [H1 H2].
     destruct (IHHtype1 mu rho Hec H1) as [Hv | [m1 [R1 [r1 [e1' Hs]]]]].
     + right. exists mu, R, (env_extend rho x (expr_to_val e1)), e2.
@@ -1202,25 +1200,12 @@ Proof.
     + right. exists m1, R1, r1, (EIf e1' e2 e3). apply S_If_Step. exact Hs1.
   (* T_Region *) - right. exists mu, (r :: R), rho, (ERegion r e).
     constructor. exact H.
-  (* T_Borrow: T_Borrow premise is ctx_lookup G (var_of_expr e) = Some (T, false).
-     For EVar x, var_of_expr gives x; env_consistent gives runtime value; S_Var + S_Borrow_Step.
-     For other forms, var_of_expr gives "" — if ctx_lookup G "" succeeds, same approach.
-     For value forms, S_Borrow_Val applies directly. *)
-  (* T_Borrow: premise is ctx_lookup G (var_of_expr e) = Some (T, false).
-     We get a runtime value from env_consistent, then step the inner expression
-     via S_Var applied to var_of_expr e, wrapped in S_Borrow_Step. *)
+  (* T_Borrow: now requires EVar x. H : ctx_lookup G x = Some (T, false).
+     env_consistent gives runtime value, S_Var steps, S_Borrow_Step wraps. *)
   - right.
-    destruct (Hec _ _ _ H) as [rv Hlookup].
+    destruct (Hec x T false H) as [rv Hlookup].
     exists mu, R, rho, (EBorrow (val_to_expr rv)).
-    apply S_Borrow_Step.
-    (* Need: (mu, R, rho, e) -->> (mu, R, rho, val_to_expr rv)
-       We have: env_lookup rho (var_of_expr e) = Some rv
-       But S_Var needs e = EVar x and env_lookup rho x = Some rv.
-       If e = EVar x, var_of_expr e = x and this works.
-       If e ≠ EVar x, var_of_expr e = "" and we need a step for e.
-       This case is deferred — in practice, T_Borrow is only applied
-       to EVar expressions (the borrow syntax &x). *)
-    admit.
+    apply S_Borrow_Step. apply S_Var. exact Hlookup.
   (* T_Drop *) - simpl in Helv.
     destruct (IHHtype mu rho Hec Helv) as [Hv | [m1 [R1 [r1 [e' Hs]]]]].
     + right. destruct T; simpl in H; try discriminate.

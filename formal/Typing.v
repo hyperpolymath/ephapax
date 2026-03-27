@@ -20,13 +20,7 @@ Import ListNotations.
 
 Require Import Syntax.
 
-(** ** Helper: extract variable from simple expressions *)
-
-Definition var_of_expr (e : expr) : var :=
-  match e with
-  | EVar x => x
-  | _ => ""%string  (* Fallback - real impl would be partial *)
-  end.
+(* var_of_expr removed: T_Borrow now directly requires EVar x. *)
 
 (** ** Linear Typing Judgement *)
 
@@ -166,10 +160,11 @@ Inductive has_type : region_env -> ctx -> expr -> ty -> ctx -> Prop :=
 
   (** ===== Borrowing ===== *)
 
-  (** Create a borrow: does not consume the resource *)
-  | T_Borrow : forall R G e T,
-      ctx_lookup G (var_of_expr e) = Some (T, false) ->
-      R; G |- EBorrow e : TBorrow T -| G
+  (** Create a borrow: the sub-expression must be a variable.
+      Borrowing looks up the variable without consuming it. *)
+  | T_Borrow : forall R G x T,
+      ctx_lookup G x = Some (T, false) ->
+      R; G |- EBorrow (EVar x) : TBorrow T -| G
 
   (** ===== Explicit Resource Management ===== *)
 

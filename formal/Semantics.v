@@ -32,6 +32,8 @@ Require Import Coq.Strings.String.
 Require Import Coq.Lists.List.
 Require Import Coq.Arith.Arith.
 Require Import Coq.Bool.Bool.
+Require Import Lia.
+Require Import Program.Equality.
 Import ListNotations.
 
 Require Import Syntax.
@@ -78,8 +80,10 @@ Definition env_extend (rho : env) (x : var) (v : runtime_val) : env :=
 
 (** ** Memory Operations *)
 
-Fixpoint mem_read (mu : mem) (l : loc) : option mem_cell :=
+Definition mem_read (mu : mem) (l : loc) : option mem_cell :=
   nth_error mu l.
+(* Make mem_read unfold during simpl — needed for proof automation *)
+Arguments mem_read / _ _.
 
 Fixpoint mem_write (mu : mem) (l : loc) (c : mem_cell) : mem :=
   match mu, l with
@@ -368,10 +372,16 @@ Qed.
 Lemma val_to_expr_is_value :
   forall v, is_value (val_to_expr v).
 Proof.
-  induction v; simpl; try constructor.
-  - (* RPair *) constructor; assumption.
-  - (* RInl *) constructor; assumption.
-  - (* RInr *) constructor; assumption.
+  induction v; simpl.
+  - (* RUnit *) constructor.
+  - (* RBool *) constructor.
+  - (* RI32 *) constructor.
+  - (* RLoc *) constructor.
+  - (* RClosure *) constructor.
+  - (* RPair *) apply VPair; assumption.
+  - (* RInl *) apply VInl; assumption.
+  - (* RInr *) apply VInr; assumption.
+  - (* RBorrow *) constructor.
 Qed.
 
 (** ** Runtime Consistency *)
@@ -485,8 +495,7 @@ Proof.
         -- simpl in Hread. discriminate.
         -- simpl in Hread. eapply IHmu'. exact Hread.
       * destruct l.
-        -- simpl in Hread. injection Hread as Hcell.
-           injection Hcell as Hr Hs.
+        -- simpl in Hread. injection Hread as Hr Hs.
            rewrite Hr in Heq. rewrite String.eqb_refl in Heq. discriminate.
         -- simpl in Hread. eapply IHmu'. exact Hread.
     + destruct l.
@@ -512,8 +521,12 @@ Lemma values_dont_step :
     forall mu R rho mu' R' rho' e',
       ~ ((mu, R, rho, v) -->> (mu', R', rho', e')).
 Proof.
-  intros v Hval. induction Hval; intros mu R rho0 mu' R' rho' e' Hstep;
-    inversion Hstep.
+  intros v Hval.
+  induction Hval; intros mu R rho0 mu' R' rho' e' Hstep;
+    inversion Hstep; subst;
+    try (eapply IHHval1; eassumption);
+    try (eapply IHHval2; eassumption);
+    try (eapply IHHval; eassumption).
 Qed.
 
 (** mem_write preserves reads at different locations *)
@@ -533,10 +546,7 @@ Proof.
       * simpl. reflexivity.
       * simpl. apply IHmu'.
         -- intro H. apply Hneq. f_equal. exact H.
-        -- simpl in Hlt. apply Nat.lt_succ_r in Hlt.
-           destruct (Nat.lt_ge_cases l' (length mu')) as [Hlt' | Hge].
-           ++ exact Hlt'.
-           ++ apply Nat.succ_lt_mono in Hlt. exact Hlt.
+        -- simpl in Hlt. lia.
 Qed.
 
 (** ERegion expressions are never values *)
@@ -553,11 +563,10 @@ Lemma value_multi_step_refl :
     mu = mu' /\ R = R' /\ rho = rho' /\ v = v'.
 Proof.
   intros v mu R rho mu' R' rho' v' Hval Hms.
-  inversion Hms as [c Heq | c1 c2 c3 Hstep Hms' Heq1 Heq3].
-  - inversion Heq. auto.
-  - exfalso.
-    inversion Heq1; subst.
-    eapply values_dont_step; eauto.
+  dependent induction Hms.
+  - auto.
+  - destruct c2 as [[[mu2 R2] rho2] e2].
+    exfalso. eapply values_dont_step; eauto.
 Qed.
 
 (** mem_free_region preserves memory length *)
@@ -588,16 +597,19 @@ Proof.
   intros G. induction G as [| [[z Tz] uz] G' IHG']; intros x y T u Hlookup.
   - simpl in Hlookup. discriminate.
   - simpl in Hlookup.
-    destruct (String.eqb x z) eqn:Hxz; simpl in Hlookup;
-      destruct (String.eqb y z) eqn:Hyz.
-    + (* x = z, y = z *) injection Hlookup as HT Hu. subst.
-      exists uz. simpl. rewrite Hyz. reflexivity.
-    + (* x = z, y ≠ z *) apply IHG' in Hlookup. destruct Hlookup as [u' Hlookup].
-      exists u'. simpl. rewrite Hyz. exact Hlookup.
-    + (* x ≠ z, y = z *) injection Hlookup as HT Hu. subst.
-      exists uz. simpl. rewrite Hyz. reflexivity.
-    + (* x ≠ z, y ≠ z *) apply IHG' in Hlookup. destruct Hlookup as [u' Hlookup].
-      exists u'. simpl. rewrite Hyz. exact Hlookup.
+    destruct (String.eqb x z) eqn:Hxz.
+    + (* x = z: ctx_mark_used replaces uz with true, rest unchanged *)
+      simpl in Hlookup. destruct (String.eqb y z) eqn:Hyz.
+      * (* y = z *) injection Hlookup. intros. subst.
+        exists uz. simpl. rewrite Hyz. reflexivity.
+      * (* y ≠ z: lookup goes into G' unchanged *)
+        exists u. simpl. rewrite Hyz. exact Hlookup.
+    + (* x ≠ z *)
+      simpl in Hlookup. destruct (String.eqb y z) eqn:Hyz.
+      * (* y = z *) exists u. simpl. rewrite Hyz. exact Hlookup.
+      * (* y ≠ z *)
+        destruct (IHG' x y T u Hlookup) as [u' Hu'].
+        exists u'. simpl. rewrite Hyz. exact Hu'.
 Qed.
 
 (** env_consistent is preserved through ctx_mark_used *)
@@ -608,8 +620,8 @@ Lemma env_consistent_mark_used :
 Proof.
   intros rho G x Hec. unfold env_consistent in *.
   intros y T u Hlookup.
-  apply ctx_lookup_mark_used in Hlookup. destruct Hlookup as [u' Hlookup].
-  exact (Hec y T u' Hlookup).
+  destruct (ctx_lookup_mark_used G x y T u Hlookup) as [u' Hu'].
+  exact (Hec y T u' Hu').
 Qed.
 
 (** env_consistent is preserved through context threading: if G' has
@@ -671,12 +683,14 @@ Proof.
   - (* T_Unit *) exists T0, u0. exact Hlookup.
   - (* T_Bool *) exists T0, u0. exact Hlookup.
   - (* T_I32 *) exists T0, u0. exact Hlookup.
-  - (* T_Loc *) exists T0, u0. exact Hlookup.
   (* Variable rules *)
   - (* T_Var_Lin: G' = ctx_mark_used G x *)
-    apply ctx_lookup_mark_used in Hlookup. exact Hlookup.
+    destruct (ctx_lookup_mark_used G x x0 T0 u0 Hlookup) as [u' Hu'].
+    exists T0, u'. exact Hu'.
   - (* T_Var_Unr: G' = G *)
     exists T0, u0. exact Hlookup.
+  (* Location and string rules: G' = G *)
+  - (* T_Loc *) exists T0, u0. exact Hlookup.
   (* String rules *)
   - (* T_StringNew: G' = G *)
     exists T0, u0. exact Hlookup.
@@ -810,7 +824,7 @@ Proof.
   - (* S_Region_Exit *) right. split.
     + assumption.
     + exists mu. reflexivity.
-  - (* S_Region_Step *) left. exists e'. reflexivity.
+  - (* S_Region_Step *) left. eexists. reflexivity.
 Qed.
 
 (** Core lemma: any multi-step from ERegion to a value goes through
@@ -898,7 +912,10 @@ Lemma expr_to_val_locs_valid :
     val_locs_valid mu (expr_to_val v).
 Proof.
   intros mu v Hval.
-  induction Hval; simpl; intros Hlocs; try exact I.
+  induction Hval; simpl; intros Hlocs.
+  - (* VUnit *) exact I.
+  - (* VBool *) exact I.
+  - (* VI32 *) exact I.
   - (* VLam *) exact I.
   - (* VPair *)
     destruct Hlocs as [H1 H2].
@@ -941,10 +958,7 @@ Theorem memory_safety :
     (forall x v, env_lookup rho' x = Some v -> val_locs_valid mu' v).
 Proof.
   intros mu R rho e mu' R' rho' e' Hstep Henv_mu Henv_mu' Hexpr.
-  induction Hstep; intros x0 v0 Hlookup.
-
-  (* ===== Env-preserving rules (rho' = rho): use Henv_mu' directly ===== *)
-  - (* S_Var *)            exact (Henv_mu' x0 v0 Hlookup).
+  induction Hstep; intros x0 v0 Hlookup; try exact (Henv_mu' x0 v0 Hlookup).
   - (* S_StringNew *)      exact (Henv_mu' x0 v0 Hlookup).
   - (* S_StringConcat *)   exact (Henv_mu' x0 v0 Hlookup).
   - (* S_StringConcat_Step1 *)

@@ -15,6 +15,7 @@ categories.workspace = true
 
 [dependencies]
 ephapax-syntax = { workspace = true }
+ephapax-surface = { path = "../ephapax-surface" }
 ariadne = { workspace = true }
 smol_str = { workspace = true }
 thiserror = { workspace = true }

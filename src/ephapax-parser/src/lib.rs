@@ -21,8 +21,10 @@ use pest_derive::Parser;
 use smol_str::SmolStr;
 
 pub mod error;
+pub mod surface;
 
 pub use error::{ParseError, Report};
+pub use surface::{parse_surface_module, parse_surface_expr};
 
 #[derive(Parser)]
 #[grammar = "ephapax.pest"]

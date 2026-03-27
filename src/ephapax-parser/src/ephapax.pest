@@ -13,7 +13,7 @@ expression_only = { SOI ~ expression ~ EOI }
 // Declarations
 // ============================================================================
 
-declaration = { fn_decl | type_decl }
+declaration = { data_decl | fn_decl | type_decl }
 
 fn_decl = {
     "fn" ~ identifier ~ "(" ~ param_list? ~ ")" ~ ":" ~ ty ~ "=" ~ expression
@@ -26,6 +26,19 @@ param = { identifier ~ ":" ~ ty }
 type_decl = {
     "type" ~ identifier ~ "=" ~ (sum_type_def | record_type_def | ty)
 }
+
+// Data type declaration: data Option(a) = None | Some(a)
+data_decl = {
+    "data" ~ constructor_name ~ type_params? ~ "=" ~ "|"? ~ data_variant ~ ("|" ~ data_variant)*
+}
+
+type_params = { "(" ~ identifier ~ ("," ~ identifier)* ~ ")" }
+
+data_variant = { constructor_name ~ ("(" ~ ty_list? ~ ")")? }
+ty_list = { ty ~ ("," ~ ty)* }
+
+// Constructor names start with uppercase
+constructor_name = @{ ASCII_ALPHA_UPPER ~ (ASCII_ALPHANUMERIC | "_")* }
 
 sum_type_def = { "|"? ~ sum_variant ~ ("|" ~ sum_variant)* }
 sum_variant = { identifier ~ ("(" ~ ty ~ ")")? }
@@ -48,8 +61,12 @@ type_atom = {
     | list_ty
     | product_ty
     | record_ty
+    | named_ty
     | type_var
 }
+
+// Named type application: Option(I32), Result(String@r, Error)
+named_ty = { constructor_name ~ "(" ~ ty_list ~ ")" }
 
 record_ty = { "{" ~ record_field ~ ("," ~ record_field)* ~ "}" }
 
@@ -76,9 +93,35 @@ expression = {
     | lambda_expr
     | if_expr
     | region_expr
+    | match_expr
     | case_expr
     | or_expr
 }
+
+// Pattern matching: match x of | None => 0 | Some(v) => v end
+match_expr = {
+    "match" ~ expression ~ "of"
+    ~ "|"? ~ match_arm ~ ("|" ~ match_arm)*
+    ~ "end"
+}
+
+match_arm = { pattern ~ ("if" ~ expression)? ~ "=>" ~ expression }
+
+pattern = {
+    constructor_pattern
+    | pair_pattern
+    | wildcard_pattern
+    | literal_pattern
+    | var_pattern
+}
+
+constructor_pattern = { constructor_name ~ ("(" ~ pattern_list? ~ ")")? }
+pair_pattern = { "(" ~ pattern ~ "," ~ pattern ~ ")" }
+wildcard_pattern = { "_" }
+literal_pattern = { literal }
+var_pattern = { identifier }
+
+pattern_list = { pattern ~ ("," ~ pattern)* }
 
 let_expr = {
     "let" ~ identifier ~ (":" ~ ty)? ~ "=" ~ expression ~ "in" ~ expression
@@ -161,12 +204,16 @@ atom_expr = {
     | borrow_expr
     | drop_expr
     | copy_expr
+    | construct_expr
     | record_literal
     | list_literal
     | paren_or_pair
     | literal
     | variable
 }
+
+// Named constructor: Some(42), None, Ok(value)
+construct_expr = { constructor_name ~ ("(" ~ expr_list? ~ ")")? }
 
 // FFI call: __ffi("symbol_name", arg1, arg2, ...)
 // Calls a C ABI function from a linked shared library.
@@ -230,7 +277,8 @@ identifier = @{
 keyword = {
     "let" | "let!" | "in" | "fn" | "if" | "then" | "else"
     | "region" | "case" | "of" | "inl" | "inr" | "end"
-    | "drop" | "copy" | "type" | "true" | "false"
+    | "drop" | "copy" | "type" | "data" | "match"
+    | "true" | "false"
     | "Bool" | "I32" | "I64" | "F32" | "F64" | "String"
 }
 

@@ -1,0 +1,19 @@
+# SPDX-License-Identifier: PMPL-1.0-or-later
+# SPDX-FileCopyrightText: 2026 Jonathan D.A. Jewell
+
+[package]
+name = "ephapax-surface"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+description = "Surface AST for ephapax — rich syntax layer (data, match, patterns) that desugars to the verified core"
+keywords = ["ast", "pattern-matching", "algebraic-data-types", "surface-syntax"]
+categories = ["compilers", "parser-implementations"]
+
+[dependencies]
+ephapax-syntax = { path = "../ephapax-syntax" }
+serde = { version = "1", features = ["derive"] }
+smol_str = { version = "0.3", features = ["serde"] }

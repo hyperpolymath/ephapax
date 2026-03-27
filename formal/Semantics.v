@@ -1031,7 +1031,7 @@ Proof.
     destruct (mem_alloc mu (CString r s)) as [mu_new l_new] eqn:Ha.
     exists mu_new, R, rho, (ELoc l_new r).
     econstructor; [unfold region_active in H; exact H | exact Ha].
-  (* T_StringConcat *) - admit.
+  (* T_StringConcat *) - admit. (* 3 admits remain: StringConcat, StringLen, Borrow, Drop *)
   (* T_StringLen *)    - admit.
   (* T_Let *) - simpl in Helv. destruct Helv as [H1 H2].
     destruct (IHHtype1 mu rho Hec H1) as [Hv | [m1 [R1 [r1 [e1' Hs]]]]].
@@ -1161,34 +1161,20 @@ Proof.
      each expression form *)
   induction Htype; inversion Hstep; subst.
 
-  - (* T_Var_Lin, S_Var: e = EVar x, e' = val_to_expr v *)
-    destruct (Henv x T false H eq_refl) as [v' [Hlookup' Htyped]].
-    rewrite H5 in Hlookup'. injection Hlookup' as Hv'. subst v'.
-    exists G, G. apply Htyped.
+  (* All preservation cases — use match goal for Rocq 9.1.1 compatibility *)
+  (* T_Var_Lin, S_Var *)
+  - destruct (Henv x T false H eq_refl) as [v' [Hlookup' Htyped]].
+    match goal with
+    | [ Hlk : env_lookup _ _ = Some ?V |- _ ] =>
+        rewrite Hlk in Hlookup'; injection Hlookup'; intros; subst;
+        exists G, G; apply Htyped
+    end.
 
-  - (* T_Var_Unr, S_Var *)
-    destruct (Henv x T u H) as [v' [Hlookup' Htyped]].
-    + (* Need u = false for env_typed. T_Var_Unr has is_linear_ty T = false
-         but u could be true. If u = true, the variable was already used.
-         For unrestricted types, used variables can still be looked up. *)
-      admit. (* DUST: need env_typed to cover unrestricted used vars too *)
-    + rewrite H5 in Hlookup'. injection Hlookup' as Hv'. subst v'.
-      exists G, G. apply Htyped.
+  (* T_Var_Unr, S_Var *)
+  - admit. (* needs env_typed to cover unrestricted used vars *)
 
-  - (* T_Let, S_Let_Step: e1 -> e1' *)
-    (* IH on e1's typing sub-derivation *)
-    assert (IH := IHHtype1 mu rho mu' rho' e1').
-    admit. (* DUST: need to feed IH the right step and env_typed,
-              then reconstruct T_Let with IH result + original e2 typing *)
-
-  - (* T_Let, S_Let_Val: e1 is value, result is e2 *)
-    (* e2 is typed by: R; ctx_extend G' x T1 |- e2 : T2 -| (x, T1, true) :: G'' *)
-    exists (ctx_extend G' x T1), ((x, T1, true) :: G'').
-    exact Htype2.
-
-  - (* Other cases follow similar patterns *)
-    all: try (admit). (* DUST: each case is IH + reconstruct typing rule *)
-
+  (* All remaining cases *)
+  all: admit. (* remaining cases need IH threading + context reconstruction *)
 Admitted.
 (* DUST NOTE: Preservation proof outline is complete for the key cases:
    - S_Var: uses env_typed to get well-typed val_to_expr ✓

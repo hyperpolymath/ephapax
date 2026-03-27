@@ -1316,27 +1316,24 @@ Proof.
 
      We handle the value reduction cases first, then try IH for congruence. *)
 
-  (* Value reduction cases: the result is already typed by a sub-derivation *)
-  (* T_Let, S_Let_Val: result is e2, typed by Htype2 *)
-  all: try (match goal with
-    | [ Hty2 : _; ctx_extend ?G' ?X ?T1 |- ?E2 : ?T2 -| _ |- _ ] =>
-        exists (ctx_extend G' X T1), _; exact Hty2
+  (* Strategy for remaining cases:
+     1. Try to find an existing has_type hypothesis that directly types e'
+     2. Try to use an IH to get typed sub-result, then reconstruct
+     3. Admit the rest *)
+
+  (* Direct sub-derivation: e' is typed by an existing hypothesis *)
+  all: try (eexists _, _; eassumption).
+
+  (* Congruence: use IH *)
+  all: try (
+    match goal with
+    | [ IH : forall _ _, _ -> forall _ _ _ _, _ -> _,
+        Hs : (_, _, _, _) -->> (_, _, _, _) |- _ ] =>
+        let G1 := fresh "G1" in let G2 := fresh "G2" in let Ht := fresh "Ht" in
+        destruct (IH _ _ Henv _ _ _ _ Hs) as [G1 [G2 Ht]];
+        eexists _, _; econstructor; exact Ht
     end).
 
-  (* T_If, S_If_True/False: result is e2 or e3, typed directly *)
-  all: try (match goal with
-    | [ Hty : _; ?G |- ?E : ?T -| ?G' |- context[?E] ] =>
-        exists G, G'; exact Hty
-    end).
-
-  (* Congruence: IH gives sub-result, reconstruct *)
-  all: try (match goal with
-    | [ IH : forall _ _, env_typed _ _ _ -> forall _ _ _ _, _ -> exists _ _, _ |- _ ] =>
-        edestruct IH as [?G'' [?Gout ?Hty']]; try eassumption;
-        eexists _, _; econstructor; eassumption
-    end).
-
-  (* Anything remaining *)
   all: admit.
 Admitted.
 (* DUST NOTE: Preservation proof outline is complete for the key cases:

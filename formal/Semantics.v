@@ -992,7 +992,28 @@ Proof.
     try exact (Henv_mu' x0 v0 Hlookup);
     try solve_congruence;
     try solve_env_extend.
-Admitted. (* TEMP: Ltac handles most cases; remaining goals need manual inspection *)
+  (* Remaining goals after Ltac: env-extending cases where solve_env_extend
+     didn't match. Handle them explicitly. *)
+  all: try (
+    unfold env_extend in Hlookup; simpl in Hlookup;
+    match type of Hlookup with
+    | context[String.eqb ?A ?B] =>
+        destruct (String.eqb A B) eqn:?;
+        [ inversion Hlookup; subst;
+          apply expr_to_val_locs_valid; [assumption |];
+          simpl in *;
+          first [ match goal with | [H2: _ /\ _ |- _] => destruct H2; assumption end
+                | assumption ]
+        | exact (Henv_mu' _ _ Hlookup) ]
+    end).
+  (* Any remaining goals: try assumption or env_mu' *)
+  all: try assumption.
+  all: try exact (Henv_mu' _ _ Hlookup).
+  all: try (eapply Henv_mu'; eassumption).
+  all: try (simpl in Hexpr; destruct Hexpr; assumption).
+  all: try (simpl in Hexpr; destruct Hexpr as [? ?]; assumption).
+  all: try (simpl in Hexpr; destruct Hexpr as [? [? ?]]; assumption).
+Admitted. (* Close to Qed — few remaining goals from edge cases *)
 (* TODO: After Ltac handles all env-preserving and congruence cases,
    manually close the remaining env-extending cases (Let_Val, LetLin_Val,
    App_Fun, Case_Inl, Case_Inr) using solve_env_extend or direct proof. *)

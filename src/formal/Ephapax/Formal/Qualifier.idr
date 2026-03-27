@@ -161,12 +161,26 @@ data LinearConsistent : Context -> Context -> Type where
 ||| We state this as: the split of a context with respect to a binding x
 ||| is determined solely by x's qualifier and the sub-expression in which
 ||| x appears. Other bindings' qualifiers are irrelevant.
+||| Non-Diminishment: a linear binding cannot be dropped in any split.
+|||
+||| Proof: by the ABSENCE of a `SplitLinDrop` constructor.
+||| If we assume a split where a linear binding is in the full context
+||| but in neither sub-context, we derive a contradiction by induction
+||| on the split — every constructor either places the binding left,
+||| right, or (for affine only) drops it. Linear has no drop option.
+|||
+||| We encode this as: for any split, every linear binding in the full
+||| context appears in either the left or right sub-context.
+||| Witness that a linear binding was preserved in a split (not dropped).
 public export
-nonDiminishmentStatement : Type
-nonDiminishmentStatement =
-  -- For any context containing binding x with qualifier q,
-  -- the valid placements of x in a split depend only on q.
-  -- This is witnessed by the Split constructors: SplitLinL/SplitLinR
-  -- for q = Linear, SplitAffL/SplitAffR/SplitAffDrop for q = Affine.
-  -- No constructor inspects other bindings' qualifiers.
-  ()  -- The proof is structural (by construction of Split).
+data LinearPreserved : Split (MkBinding n Linear t :: rest) left right -> Type where
+  PreservedLeft  : LinearPreserved (SplitLinL s)
+  PreservedRight : LinearPreserved (SplitLinR s)
+
+||| Every split of a linear-headed context preserves the linear binding.
+||| This is total: SplitLinL and SplitLinR are the only constructors that
+||| match a Linear head. There is no SplitLinDrop.
+public export
+nonDiminishment : (s : Split (MkBinding n Linear t :: rest) left right) -> LinearPreserved s
+nonDiminishment (SplitLinL _) = PreservedLeft
+nonDiminishment (SplitLinR _) = PreservedRight

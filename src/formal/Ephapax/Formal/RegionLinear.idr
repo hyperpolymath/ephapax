@@ -25,6 +25,7 @@
 
 module Ephapax.Formal.RegionLinear
 
+import Data.So
 import Ephapax.Formal.Region
 import Ephapax.Formal.Qualifier
 
@@ -92,46 +93,30 @@ data CannotEscape : (r : RegionId) -> (ctx : RegionContext) -> Type where
 ||| The region constraint is qualifier-agnostic.
 
 --------------------------------------------------------------------------------
--- Region Block Typing Rule
+-- NoRegionInType (must be before RegionBlock)
 --------------------------------------------------------------------------------
 
-||| A region block introduces a region, executes a body, and exits the region.
-|||
-||| `RegionBlock r body result` models:
-|||   region r:
-|||     <body>        -- bindings in r are alive
-|||   <result>        -- bindings in r are dead; only the result survives
-|||
-||| The typing rule requires:
-||| 1. All linear bindings in r are consumed within the body.
-||| 2. All affine bindings in r are either consumed or implicitly dropped.
-||| 3. The result type does NOT mention region r (no escape).
+||| Witness that a type is NOT a Scoped type.
 public export
-data RegionBlock : Type where
-  MkRegionBlock :
-    (r : RegionId)
-    -> (bodyCtx : RegionContext)        -- bindings available in body
-    -> (resultType : Type)              -- type of the value produced
-    -> {auto 0 noEscape : NoRegionInType r resultType}
-    -> {auto 0 linearsConsumed : AllLinearsConsumed r bodyCtx}
-    -> RegionBlock
+data NotScoped : Type -> Type where
+  NSUnit   : NotScoped ()
+  NSNat    : NotScoped Nat
+  NSInt    : NotScoped Int
+  NSString : NotScoped String
+  NSBool   : NotScoped Bool
+  NSPair   : NotScoped a -> NotScoped b -> NotScoped (a, b)
+  NSList   : NotScoped a -> NotScoped (List a)
 
 ||| The result type of a region block must not reference region r.
-|||
-||| This is the type-level encoding of "the return value escapes the
-||| region, therefore it cannot be allocated in the region."
-|||
-||| In practice: `result` must be either:
-||| - A plain value type (Int, String, Bool) — always OK
-||| - A Scoped s a where s ≠ r — OK, different region
-||| - NOT a Scoped r a — this would escape r
 public export
 data NoRegionInType : RegionId -> Type -> Type where
-  ||| Primitive types never reference a region.
-  PlainType : NoRegionInType r a
-  ||| A scoped type in a DIFFERENT region is OK.
+  PlainType : NotScoped a -> NoRegionInType r a
   DifferentRegion : {auto 0 notSame : So (not (s == r))}
                   -> NoRegionInType r (Scoped s a)
+
+--------------------------------------------------------------------------------
+-- AllLinearsConsumed (must be before RegionBlock)
+--------------------------------------------------------------------------------
 
 ||| All linear bindings in region r must be consumed before r exits.
 |||
@@ -160,44 +145,44 @@ data AllLinearsConsumed : RegionId -> RegionContext -> Type where
            -> AllLinearsConsumed r (b :: rest)
 
 --------------------------------------------------------------------------------
+-- Region Block Typing Rule
+--------------------------------------------------------------------------------
+
+||| A region block with escape + consumption proofs.
+public export
+data RegionBlock : Type where
+  MkRegionBlock :
+    (r : RegionId)
+    -> (bodyCtx : RegionContext)
+    -> (resultType : Type)
+    -> (0 noEscape : NoRegionInType r resultType)
+    -> (0 linearsConsumed : AllLinearsConsumed r bodyCtx)
+    -> RegionBlock
+
+--------------------------------------------------------------------------------
 -- Theorem: No Escape (Both Modes)
 --------------------------------------------------------------------------------
 
-||| THEOREM (No Escape):
+||| No Escape (weakened form): for a SPECIFIC region (with known name/depth),
+||| Scoped r a cannot satisfy NoRegionInType r.
 |||
-||| In a well-typed Ephapax program, a value allocated in region r
-||| cannot appear in any expression that outlives r.
+||| The general proof requires decidable equality on RegionId to show
+||| r == r = True. We prove the structural guarantee instead: the only
+||| way to construct NoRegionInType r (Scoped s a) is DifferentRegion,
+||| which requires s /= r. For s = r, there is no valid construction.
 |||
-||| This holds for BOTH affine and linear bindings, because:
-||| 1. The NoRegionInType constraint on the result type prevents the
-|||    value from being returned out of the region block.
-||| 2. This constraint is qualifier-agnostic (it checks the type, not
-|||    the qualifier).
-|||
-||| The proof is by construction: RegionBlock requires NoRegionInType,
-||| which excludes Scoped r a from the result type. Any attempt to
-||| return a Scoped r value from a `region r:` block is rejected
-||| by the type checker because NoRegionInType r (Scoped r a) has
-||| no valid constructor.
-|||
-||| Note: We state this at the type level rather than as a runtime
-||| property. The "proof" is that the ill-typed program cannot be
-||| constructed in Idris2 — the RegionBlock type literally cannot
-||| hold a value whose result type references r.
-public export
-noEscapeTheorem : Type
-noEscapeTheorem =
-  -- For all region IDs r and types a:
-  -- There is no value of type NoRegionInType r (Scoped r a).
-  -- This is witnessed by the constructors of NoRegionInType:
-  -- PlainType applies to non-Scoped types.
-  -- DifferentRegion requires s ≠ r.
-  -- There is no constructor for the case s = r.
-  --
-  -- Therefore: Scoped r a CANNOT be a result type of region r.
-  -- Therefore: values in region r CANNOT escape.
-  -- QED.
-  ()
+||| This is witnessed by the type: NoRegionInType r (Scoped r a) has
+||| no valid constructor (PlainType needs NotScoped which excludes Scoped,
+||| DifferentRegion needs not (r == r) which is False when r = r).
+-- No Escape is guaranteed structurally:
+-- 1. PlainType needs NotScoped — Scoped has no NotScoped instance
+-- 2. DifferentRegion needs So (not (s == r)) — uninhabited when s = r
+--
+-- A concrete proof for specific regions:
+-- For MkRegion "x" 0, (MkRegion "x" 0 == MkRegion "x" 0) reduces to True,
+-- not True = False, So False is uninhabited.
+-- The general proof requires decidable equality + So False uninhabitedness,
+-- which Idris2 cannot resolve for universally quantified RegionId.
 
 --------------------------------------------------------------------------------
 -- Theorem: Region Safety
@@ -222,14 +207,22 @@ noEscapeTheorem =
 ||| (3) The region's arena allocator frees all memory in bulk at exit.
 |||     No individual deallocation occurs. Since values can't escape
 |||     (by No Escape), no dangling references exist after the free.
+||| Region Safety: a well-formed RegionBlock guarantees no value escapes.
+|||
+||| Given a RegionBlock with region r, the result type is proved to
+||| not reference r (via noEscape : NoRegionInType r resultType).
+||| This means any Scoped r value CANNOT appear in the result.
+|||
+||| This is a direct consequence of RegionBlock's type: it carries
+||| the NoRegionInType proof as a field. We extract it as evidence.
+-- Region Safety: a well-formed RegionBlock carries NoRegionInType proof.
+-- This is 0-quantity since the proof fields are erased.
 public export
-regionSafetyTheorem : Type
-regionSafetyTheorem =
-  -- This is a meta-theorem combining:
-  -- - Linear Safety (from Qualifier.idr / the paper's Theorem 5.2)
-  -- - No Escape (from this module)
-  -- - The structural semantics of `region r:` blocks
-  ()
+0 regionSafetyExtract :
+  (r : RegionId) -> (ctx : RegionContext) -> (t : Type) ->
+  (0 ne : NoRegionInType r t) -> (0 lc : AllLinearsConsumed r ctx) ->
+  NoRegionInType r t
+regionSafetyExtract r ctx t ne lc = ne
 
 --------------------------------------------------------------------------------
 -- Theorem: No Garbage Collection Required
@@ -267,17 +260,24 @@ regionSafetyTheorem =
 ||| - Cyclone: uses existential types with runtime checks. Ephapax
 |||   uses dependent types with compile-time proofs.
 ||| - Linear Haskell: still uses GC underneath. Ephapax doesn't.
+||| No GC Required: a well-formed RegionBlock guarantees deterministic
+||| memory reclamation without garbage collection.
+|||
+||| The proof is the conjunction of RegionBlock's two fields:
+||| 1. NoRegionInType r resultType — no value escapes (so no dangling refs)
+||| 2. AllLinearsConsumed r bodyCtx — all linear resources handled
+|||
+||| Together with the structural guarantee that region blocks are
+||| lexically scoped (LIFO), this means every allocation is freed
+||| at a statically known program point.
+-- No GC: a RegionBlock carries both proofs (no escape + all linears consumed).
+-- 0-quantity since the proof fields are erased.
 public export
-noGCTheorem : Type
-noGCTheorem =
-  -- The proof is the conjunction of:
-  -- 1. Every allocation is Scoped r a for some r.
-  -- 2. Every r has a block exit point.
-  -- 3. NoRegionInType prevents escape.
-  -- 4. AllLinearsConsumed ensures resource cleanup.
-  -- 5. Arena deallocation at exit frees all memory.
-  -- Therefore: all memory is freed, deterministically, at compile-time-known points.
-  ()
+0 noGCExtract :
+  (r : RegionId) -> (ctx : RegionContext) -> (t : Type) ->
+  (0 ne : NoRegionInType r t) -> (0 lc : AllLinearsConsumed r ctx) ->
+  (NoRegionInType r t, AllLinearsConsumed r ctx)
+noGCExtract r ctx t ne lc = (ne, lc)
 
 --------------------------------------------------------------------------------
 -- The Orthogonality Lemma
@@ -297,16 +297,22 @@ noGCTheorem =
 ||| Formally: CannotEscape r ctx holds iff CannotEscape r ctx' holds,
 ||| where ctx' is ctx with all qualifiers flipped. (The constructors
 ||| CEEmpty, CEOther, CEBound do not inspect rbQual.)
+||| Qualifier-Region Orthogonality: changing a binding's qualifier does
+||| not affect whether CannotEscape holds.
+|||
+||| Proof: CannotEscape constructors (CEEmpty, CEOther, CEBound) only
+||| inspect rbRegion, never rbQual. So flipping the qualifier preserves
+||| the proof structure identically.
+|||
+||| We express this as: CannotEscape is preserved under qualifier change
+||| for the head binding.
 public export
-orthogonalityLemma : Type
-orthogonalityLemma =
-  -- By inspection of CannotEscape constructors:
-  -- CEEmpty: no bindings, no qualifier to inspect.
-  -- CEOther: checks (rbRegion b == r), not rbQual.
-  -- CEBound: checks (rbRegion b == r), not rbQual.
-  -- Therefore: the escape constraint is qualifier-independent.
-  -- QED.
-  ()
+orthogonalityLemma :
+  (r : RegionId) -> (b : RegionBinding) -> (q : Qual) -> (ctx : RegionContext) ->
+  CannotEscape r (b :: ctx) ->
+  CannotEscape r (MkRB (rbName b) q (rbRegion b) (rbType b) :: ctx)
+orthogonalityLemma r b q ctx (CEOther rest) = CEOther rest
+orthogonalityLemma r b q ctx (CEBound rest) = CEBound rest
 
 --------------------------------------------------------------------------------
 -- Summary: What Region-Linear Fusion Gives Us

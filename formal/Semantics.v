@@ -714,7 +714,8 @@ Proof.
          appear in G''. By the typing rule structure, ctx_extend adds x
          at the head, and the output has x at the head too. If the input G
          already had x, it would still be in G''. *)
-      apply String.eqb_eq in Hx0x. subst x0.
+      (* x0 = x: use the head lookup via IH chain *)
+      (* The eqb=true tells us the variable names match. Use head lookup. *)
       (* If x is in G'', use IH for e2: x is in (x,T1,true)::G'' *)
       assert (Hlookup2: ctx_lookup ((x, T1, true) :: G'') x = Some (T1, true)).
       { simpl. rewrite String.eqb_refl. reflexivity. }
@@ -740,25 +741,31 @@ Proof.
          at some deeper position. We need to thread through both IHs.
          Let's use a different approach: lookup in (x,T1,true)::G'' at
          the deeper position gives us the SAME result as G'' *)
-      (* For now, use admit — this case requires showing that if x
-         appears in G'', it must have been in G originally *)
+      (* x0 = x and ctx_lookup G'' x = Some (T0, u0).
+         Thread through IH for e2: lookup in G'' tail ->
+         lookup in (x,T1,true)::G'' -> lookup in ctx_extend G' x T1.
+         The x<>x case of the result is a lookup in G'.
+         Then IH for e1: lookup in G' -> lookup in G. *)
+      (* x0 = x: use head lookup (always succeeds), thread through IH chain *)
+      (* x0 = x: need ctx_lookup_extend_tail helper lemma *)
       admit.
     + (* x0 <> x: straightforward *)
-      assert (Hlookup_full: ctx_lookup ((x, T1, true) :: G'') x0 = Some (T0, u0)).
+      assert (Hlf: ctx_lookup ((x, T1, true) :: G'') x0 = Some (T0, u0)).
       { simpl. rewrite Hx0x. exact Hlookup. }
-      apply IHHtype2 in Hlookup_full.
-      destruct Hlookup_full as [T0' [u0' Hlookup']].
-      simpl in Hlookup'. rewrite Hx0x in Hlookup'.
-      apply IHHtype1 in Hlookup'. exact Hlookup'.
+      apply IHHtype2 in Hlf.
+      destruct Hlf as [Tb [ub Hb]].
+      simpl in Hb. rewrite Hx0x in Hb.
+      apply IHHtype1 in Hb. exact Hb.
   - (* T_LetLin: same structure as T_Let *)
     destruct (String.eqb x0 x) eqn:Hx0x.
-    + admit. (* Same x0=x case as T_Let *)
-    + assert (Hlookup_full: ctx_lookup ((x, T1, true) :: G'') x0 = Some (T0, u0)).
+    + (* x0 = x: need ctx_lookup_extend_tail helper lemma *)
+      admit.
+    + assert (Hlf: ctx_lookup ((x, T1, true) :: G'') x0 = Some (T0, u0)).
       { simpl. rewrite Hx0x. exact Hlookup. }
-      apply IHHtype2 in Hlookup_full.
-      destruct Hlookup_full as [T0' [u0' Hlookup']].
-      simpl in Hlookup'. rewrite Hx0x in Hlookup'.
-      apply IHHtype1 in Hlookup'. exact Hlookup'.
+      apply IHHtype2 in Hlf.
+      destruct Hlf as [Tb [ub Hb]].
+      simpl in Hb. rewrite Hx0x in Hb.
+      apply IHHtype1 in Hb. exact Hb.
   - (* T_Lam: G' = G *)
     exists T0, u0. exact Hlookup.
   - (* T_App *)
@@ -781,13 +788,14 @@ Proof.
     (* Use left branch (IHHtype2) — the right branch would also work since
        both produce the same G_final. *)
     destruct (String.eqb x0 x1) eqn:Hx0x1.
-    + admit. (* Same x0=x case as T_Let *)
-    + assert (Hlookup_full: ctx_lookup ((x1, T1, true) :: G_final) x0 = Some (T0, u0)).
+    + (* x0 = x1: need ctx_lookup_extend_tail helper *)
+      admit.
+    + assert (Hlf: ctx_lookup ((x1, T1, true) :: G_final) x0 = Some (T0, u0)).
       { simpl. rewrite Hx0x1. exact Hlookup. }
-      apply IHHtype2 in Hlookup_full.
-      destruct Hlookup_full as [T0' [u0' Hlookup']].
-      simpl in Hlookup'. rewrite Hx0x1 in Hlookup'.
-      apply IHHtype1 in Hlookup'. exact Hlookup'.
+      apply IHHtype2 in Hlf.
+      destruct Hlf as [Tb [ub Hb]].
+      simpl in Hb. rewrite Hx0x1 in Hb.
+      apply IHHtype1 in Hb. exact Hb.
   - (* T_If *)
     apply IHHtype2 in Hlookup. destruct Hlookup as [T0' [u0' Hlookup']].
     apply IHHtype1 in Hlookup'. exact Hlookup'.
@@ -1013,7 +1021,18 @@ Proof.
   all: try (simpl in Hexpr; destruct Hexpr; assumption).
   all: try (simpl in Hexpr; destruct Hexpr as [? ?]; assumption).
   all: try (simpl in Hexpr; destruct Hexpr as [? [? ?]]; assumption).
-Admitted. (* Close to Qed — few remaining goals from edge cases *)
+  (* Congruence cases where IH has 4 universals *)
+  all: try (
+    match goal with
+    | [ IH : forall _ _ _ _, _ -> _ -> _ -> _ -> _ -> _ |- _ ] =>
+        eapply IH; try eassumption;
+        simpl in *;
+        first [ match goal with | [H2: _ /\ _ |- _] => destruct H2; assumption end
+              | assumption ]
+    end).
+  all: try assumption.
+  all: try (eapply Henv_mu'; eassumption).
+Admitted. (* 1-2 remaining goals need interactive Coq debugging *)
 (* TODO: After Ltac handles all env-preserving and congruence cases,
    manually close the remaining env-extending cases (Let_Val, LetLin_Val,
    App_Fun, Case_Inl, Case_Inr) using solve_env_extend or direct proof. *)

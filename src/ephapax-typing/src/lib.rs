@@ -13,6 +13,10 @@
 //! semantics in Typing.v and the Orthogonality Lemma in RegionLinear.idr.
 //!
 //! Based on formal/Typing.v
+//!
+//! See [`discipline`] module for the complete rules reference.
+
+pub mod discipline;
 
 use ephapax_syntax::{
     BaseTy, BinOp, Decl, Expr, ExprKind, Literal, Module, RegionName, Ty, UnaryOp, Var,

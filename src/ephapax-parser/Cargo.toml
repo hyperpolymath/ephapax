@@ -23,3 +23,5 @@ pest = "2.7"
 pest_derive = "2.7"
 
 [dev-dependencies]
+ephapax-desugar = { path = "../ephapax-desugar" }
+ephapax-typing = { path = "../ephapax-typing" }

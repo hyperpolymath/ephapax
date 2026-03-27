@@ -18,3 +18,7 @@ ephapax-syntax = { path = "../ephapax-syntax" }
 ephapax-surface = { path = "../ephapax-surface" }
 thiserror = "2"
 smol_str = "0.3"
+
+[dev-dependencies]
+ephapax-parser = { path = "../ephapax-parser" }
+ephapax-typing = { path = "../ephapax-typing" }

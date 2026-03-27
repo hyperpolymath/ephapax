@@ -19,6 +19,8 @@ ephapax-syntax.workspace = true
 ephapax-ir.workspace = true
 ephapax-lexer.workspace = true
 ephapax-parser.workspace = true
+ephapax-surface = { path = "../ephapax-surface" }
+ephapax-desugar = { path = "../ephapax-desugar" }
 ephapax-typing.workspace = true
 ephapax-wasm.workspace = true
 ephapax-interp.workspace = true

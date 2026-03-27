@@ -65,8 +65,9 @@ type_atom = {
     | type_var
 }
 
-// Named type application: Option(I32), Result(String@r, Error)
-named_ty = { constructor_name ~ "(" ~ ty_list ~ ")" }
+// Named type application: Option(I32), Result(String@r, Error), Color
+// Nullary named types (no parens) are also valid: Color, Unit, etc.
+named_ty = { constructor_name ~ ("(" ~ ty_list ~ ")")? }
 
 record_ty = { "{" ~ record_field ~ ("," ~ record_field)* ~ "}" }
 

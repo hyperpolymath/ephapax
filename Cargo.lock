@@ -354,17 +354,31 @@ dependencies = [
  "ariadne",
  "clap",
  "colored",
+ "ephapax-desugar",
  "ephapax-interp",
  "ephapax-ir",
  "ephapax-lexer",
  "ephapax-package",
  "ephapax-parser",
  "ephapax-repl",
+ "ephapax-surface",
  "ephapax-syntax",
  "ephapax-typing",
  "ephapax-wasm",
  "serde_json",
  "smol_str",
+]
+
+[[package]]
+name = "ephapax-desugar"
+version = "0.1.0"
+dependencies = [
+ "ephapax-parser",
+ "ephapax-surface",
+ "ephapax-syntax",
+ "ephapax-typing",
+ "smol_str",
+ "thiserror",
 ]
 
 [[package]]
@@ -395,6 +409,14 @@ version = "0.1.0"
 dependencies = [
  "logos",
  "smol_str",
+ "thiserror",
+]
+
+[[package]]
+name = "ephapax-linear"
+version = "0.1.0"
+dependencies = [
+ "ephapax-syntax",
  "thiserror",
 ]
 
@@ -435,7 +457,10 @@ name = "ephapax-parser"
 version = "0.1.0"
 dependencies = [
  "ariadne",
+ "ephapax-desugar",
+ "ephapax-surface",
  "ephapax-syntax",
+ "ephapax-typing",
  "pest",
  "pest_derive",
  "smol_str",
@@ -465,6 +490,15 @@ name = "ephapax-stdlib"
 version = "0.1.0"
 dependencies = [
  "ephapax-syntax",
+ "smol_str",
+]
+
+[[package]]
+name = "ephapax-surface"
+version = "0.1.0"
+dependencies = [
+ "ephapax-syntax",
+ "serde",
  "smol_str",
 ]
 

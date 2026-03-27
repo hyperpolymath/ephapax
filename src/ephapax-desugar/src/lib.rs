@@ -1427,4 +1427,121 @@ mod tests {
             );
         }
     }
+
+    // --- Integration: parse → desugar → type check ---
+
+    #[test]
+    fn integration_desugar_typecheck_no_parser() {
+        use ephapax_typing::type_check_module;
+
+        // Build surface AST directly, skip parser
+        let module = SurfaceModule {
+            name: "test".into(),
+            decls: vec![
+                SurfaceDecl::Data(DataDecl {
+                    name: "Option".into(),
+                    params: vec!["a".into()],
+                    constructors: vec![
+                        ConstructorDef { name: "None".into(), fields: vec![] },
+                        ConstructorDef { name: "Some".into(), fields: vec![SurfaceTy::Var("a".into())] },
+                    ],
+                    span: Span::dummy(),
+                }),
+                SurfaceDecl::Fn {
+                    name: "test".into(),
+                    params: vec![("opt".into(), SurfaceTy::Named {
+                        name: "Option".into(),
+                        args: vec![SurfaceTy::Base(BaseTy::I32)],
+                    })],
+                    ret_ty: SurfaceTy::Base(BaseTy::I32),
+                    body: SurfaceExpr::dummy(SurfaceExprKind::Match {
+                        scrutinee: Box::new(SurfaceExpr::dummy(SurfaceExprKind::Var("opt".into()))),
+                        arms: vec![
+                            MatchArm {
+                                pattern: Pattern::Constructor { ctor: "None".into(), args: vec![] },
+                                guard: None,
+                                body: SurfaceExpr::dummy(SurfaceExprKind::Lit(Literal::I32(0))),
+                            },
+                            MatchArm {
+                                pattern: Pattern::Constructor { ctor: "Some".into(), args: vec![Pattern::Var("v".into())] },
+                                guard: None,
+                                body: SurfaceExpr::dummy(SurfaceExprKind::Var("v".into())),
+                            },
+                        ],
+                    }),
+                },
+            ],
+        };
+
+        let core = desugar(&module).unwrap();
+        assert_eq!(core.decls.len(), 1);
+
+        let result = type_check_module(&core);
+        assert!(result.is_ok(), "type check should pass: {:?}", result.err());
+    }
+
+    #[test]
+    fn integration_match_desugar_debug() {
+        // Debug: check what the desugarer produces for a match
+        let module = SurfaceModule {
+            name: "test".into(),
+            decls: vec![
+                SurfaceDecl::Data(DataDecl {
+                    name: "Option".into(),
+                    params: vec!["a".into()],
+                    constructors: vec![
+                        ConstructorDef { name: "None".into(), fields: vec![] },
+                        ConstructorDef { name: "Some".into(), fields: vec![SurfaceTy::Var("a".into())] },
+                    ],
+                    span: Span::dummy(),
+                }),
+                SurfaceDecl::Fn {
+                    name: "test".into(),
+                    params: vec![("opt".into(), SurfaceTy::Named {
+                        name: "Option".into(),
+                        args: vec![SurfaceTy::Base(BaseTy::I32)],
+                    })],
+                    ret_ty: SurfaceTy::Base(BaseTy::I32),
+                    body: SurfaceExpr::dummy(SurfaceExprKind::Match {
+                        scrutinee: Box::new(SurfaceExpr::dummy(SurfaceExprKind::Var("opt".into()))),
+                        arms: vec![
+                            MatchArm {
+                                pattern: Pattern::Constructor { ctor: "None".into(), args: vec![] },
+                                guard: None,
+                                body: SurfaceExpr::dummy(SurfaceExprKind::Lit(Literal::I32(0))),
+                            },
+                            MatchArm {
+                                pattern: Pattern::Constructor { ctor: "Some".into(), args: vec![Pattern::Var("v".into())] },
+                                guard: None,
+                                body: SurfaceExpr::dummy(SurfaceExprKind::Var("v".into())),
+                            },
+                        ],
+                    }),
+                },
+            ],
+        };
+
+        let core = desugar(&module).unwrap();
+
+        // Print desugared core for debugging
+        assert_eq!(core.decls.len(), 1);
+        if let Decl::Fn { body, .. } = &core.decls[0] {
+            // Should be a Case expression
+            if let ExprKind::Case { left_body, right_body, left_var, right_var, .. } = &body.kind {
+                // Left body (None arm) should just be I32(0)
+                assert!(
+                    matches!(left_body.kind, ExprKind::Lit(Literal::I32(0))),
+                    "None arm should be literal 0, got: {:?}",
+                    left_body.kind
+                );
+                // Right body (Some arm) should be: let v = right_var in v
+                // Actually since fresh_var_for_arm returns "v" for Some(v),
+                // the right_var IS "v" and the body should just reference it
+                // Verify structure
+                let _ = (left_var, right_var);
+            } else {
+                panic!("expected Case, got: {:?}", body.kind);
+            }
+        }
+    }
 }

@@ -1169,22 +1169,25 @@ fn parse_type_atom(pair: pest::iterators::Pair<Rule>) -> Result<SurfaceTy, Parse
 }
 
 fn parse_base_ty(pair: pest::iterators::Pair<Rule>) -> Result<SurfaceTy, ParseError> {
-    let inner = pair
-        .into_inner()
-        .next()
-        .map(|p| p.as_str().to_string())
-        .unwrap_or_default();
+    // base_ty = { unit_ty | "Bool" | "I32" | "I64" | "F32" | "F64" }
+    // Literal string matches ("Bool", "I32", etc.) don't have inner children
+    // in pest, so we check the pair's text directly.
+    let text = pair.as_str().trim();
 
-    match inner.as_str() {
-        "()" | "" => Ok(SurfaceTy::Base(BaseTy::Unit)),
+    match text {
+        "()" => Ok(SurfaceTy::Base(BaseTy::Unit)),
         "Bool" => Ok(SurfaceTy::Base(BaseTy::Bool)),
         "I32" => Ok(SurfaceTy::Base(BaseTy::I32)),
         "I64" => Ok(SurfaceTy::Base(BaseTy::I64)),
         "F32" => Ok(SurfaceTy::Base(BaseTy::F32)),
         "F64" => Ok(SurfaceTy::Base(BaseTy::F64)),
         _ => {
-            // base_ty matched but text doesn't match any — check the pair text
-            Ok(SurfaceTy::Base(BaseTy::Unit))
+            // Check inner (for unit_ty rule)
+            if pair.into_inner().any(|p| p.as_rule() == Rule::unit_ty) {
+                Ok(SurfaceTy::Base(BaseTy::Unit))
+            } else {
+                Ok(SurfaceTy::Base(BaseTy::Unit))
+            }
         }
     }
 }
@@ -1309,5 +1312,26 @@ mod tests {
         assert_eq!(module.decls.len(), 2);
         assert!(matches!(&module.decls[0], SurfaceDecl::Data(_)));
         assert!(matches!(&module.decls[1], SurfaceDecl::Fn { .. }));
+    }
+
+    #[test]
+    fn parse_and_desugar_eph_file() {
+        let source = r#"
+data Option(a) = None | Some(a)
+
+fn test(opt: Option(I32)): I32 =
+    match opt of
+    | None => 0
+    | Some(v) => v
+    end
+"#;
+        let surface = parse_surface_module(source, "test").unwrap();
+        assert_eq!(surface.decls.len(), 2);
+
+        let core = ephapax_desugar::desugar(&surface).unwrap();
+        assert_eq!(core.decls.len(), 1); // data consumed, only fn remains
+
+        let result = ephapax_typing::type_check_module(&core);
+        assert!(result.is_ok(), "type check failed: {:?}", result.err());
     }
 }

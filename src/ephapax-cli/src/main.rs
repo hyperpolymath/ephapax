@@ -11,9 +11,10 @@ use clap::{Parser, Subcommand};
 use colored::Colorize;
 use ephapax_interp::Interpreter;
 use ephapax_lexer::Lexer;
-use ephapax_parser::{parse, parse_module};
+use ephapax_parser::{parse, parse_module, parse_surface_module};
 use ephapax_repl::Repl;
 use ephapax_typing::type_check_module;
+use ephapax_desugar::desugar;
 // AST dump support (sexpr + json output)
 #[allow(unused_imports)]
 use ephapax_ir;
@@ -312,15 +313,38 @@ fn check_files(files: &[PathBuf], _mode_str: &str, verbose: bool) -> Result<(), 
 
         let filename = path.to_str().unwrap_or("input");
 
-        // Parse
-        let module = match parse_module(&content, filename) {
-            Ok(m) => m,
-            Err(parse_errors) => {
-                for error in &parse_errors {
-                    report_parse_error(filename, &content, error);
+        // Parse → Desugar → Type check
+        // Try surface parser first (supports data/match/constructors).
+        // Falls back to core parser if surface parsing fails.
+        let module = match parse_surface_module(&content, filename) {
+            Ok(surface_module) => {
+                // Desugar surface → core
+                match desugar(&surface_module) {
+                    Ok(core) => core,
+                    Err(e) => {
+                        eprintln!(
+                            "{} {} desugar error: {}",
+                            "✗".red(),
+                            path.display(),
+                            e
+                        );
+                        errors += 1;
+                        continue;
+                    }
                 }
-                errors += 1;
-                continue;
+            }
+            Err(_) => {
+                // Fallback to core parser (for files without surface syntax)
+                match parse_module(&content, filename) {
+                    Ok(m) => m,
+                    Err(parse_errors) => {
+                        for error in &parse_errors {
+                            report_parse_error(filename, &content, error);
+                        }
+                        errors += 1;
+                        continue;
+                    }
+                }
             }
         };
 
@@ -375,13 +399,21 @@ fn compile_file(
 
     // The mode_str parameter is accepted but ignored — dyadic property is per-binding.
 
-    // Parse
-    let module = parse_module(&content, filename).map_err(|errors| {
-        for error in &errors {
-            report_parse_error(filename, &content, error);
+    // Parse → Desugar
+    let module = match parse_surface_module(&content, filename) {
+        Ok(surface_module) => {
+            desugar(&surface_module).map_err(|e| format!("Desugar error: {}", e))?
         }
-        format!("{} parse error(s)", errors.len())
-    })?;
+        Err(_) => {
+            // Fallback to core parser
+            parse_module(&content, filename).map_err(|errors| {
+                for error in &errors {
+                    report_parse_error(filename, &content, error);
+                }
+                format!("{} parse error(s)", errors.len())
+            })?
+        }
+    };
 
     if verbose {
         println!("{} Parsed {} declarations", "✓".green(), module.decls.len());

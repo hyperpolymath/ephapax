@@ -1,0 +1,20 @@
+// Example: Pattern matching with data types
+// This uses the surface syntax (data, match, constructors)
+// which desugars to the verified core calculus (binary sums, case).
+
+data Option(a) = None | Some(a)
+
+fn unwrap_or(opt: Option(I32), default: I32): I32 =
+    match opt of
+    | None => default
+    | Some(v) => v
+    end
+
+data Color = Red | Green | Blue
+
+fn color_value(c: Color): I32 =
+    match c of
+    | Red => 1
+    | Green => 2
+    | Blue => 3
+    end

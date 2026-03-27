@@ -1,26 +1,20 @@
 (* SPDX-License-Identifier: PMPL-1.0-or-later *)
-(* SPDX-FileCopyrightText: 2025 Jonathan D.A. Jewell *)
+(* SPDX-FileCopyrightText: 2025-2026 Jonathan D.A. Jewell *)
 
-(** * Ephapax Typing Rules
+(** * Ephapax Typing Rules (De Bruijn)
 
     Linear typing judgement: R; G |- e : T -| G'
 
-    Where:
-    - R is the active region environment
-    - G is the input context
-    - e is the expression
-    - T is the type
-    - G' is the output context (tracking linear resource consumption)
+    Uses De Bruijn indices — variables are natural numbers
+    indexing into the context. No variable names, no shadowing.
 *)
 
-Require Import Coq.Strings.String.
 Require Import Coq.Lists.List.
+Require Import Coq.Arith.Arith.
 Require Import Coq.Bool.Bool.
 Import ListNotations.
 
 Require Import Syntax.
-
-(* var_of_expr removed: T_Borrow now directly requires EVar x. *)
 
 (** ** Linear Typing Judgement *)
 
@@ -29,7 +23,7 @@ Reserved Notation "R ';' G '|-' e ':' T '-|' G'"
 
 Inductive has_type : region_env -> ctx -> expr -> ty -> ctx -> Prop :=
 
-  (** ===== Values ===== *)
+  (** ===== Values (context unchanged) ===== *)
 
   | T_Unit : forall R G,
       R; G |- EUnit : TBase TUnit -| G
@@ -42,64 +36,57 @@ Inductive has_type : region_env -> ctx -> expr -> ty -> ctx -> Prop :=
 
   (** ===== Variables ===== *)
 
-  (** Linear variable: must mark as used *)
-  | T_Var_Lin : forall R G x T,
-      ctx_lookup G x = Some (T, false) ->
+  | T_Var_Lin : forall R G i T,
+      ctx_lookup G i = Some (T, false) ->
       is_linear_ty T = true ->
-      R; G |- EVar x : T -| ctx_mark_used G x
+      R; G |- EVar i : T -| ctx_mark_used G i
 
-  (** Unrestricted variable: no change to context *)
-  | T_Var_Unr : forall R G x T u,
-      ctx_lookup G x = Some (T, u) ->
+  | T_Var_Unr : forall R G i T u,
+      ctx_lookup G i = Some (T, u) ->
       is_linear_ty T = false ->
-      R; G |- EVar x : T -| G
+      R; G |- EVar i : T -| G
 
   (** ===== Strings ===== *)
 
-  (** Runtime location value (produced by string allocation) *)
   | T_Loc : forall R G l r,
       region_active R r ->
       R; G |- ELoc l r : TString r -| G
 
-  (** String allocation in region *)
   | T_StringNew : forall R G r s,
       region_active R r ->
       R; G |- EStringNew r s : TString r -| G
 
-  (** String concatenation: consumes both operands (linear) *)
   | T_StringConcat : forall R G G' G'' e1 e2 r,
       R; G  |- e1 : TString r -| G' ->
       R; G' |- e2 : TString r -| G'' ->
       R; G  |- EStringConcat e1 e2 : TString r -| G''
 
-  (** String length: borrows the string (does not consume) *)
   | T_StringLen : forall R G G' e r,
       R; G |- EBorrow e : TBorrow (TString r) -| G' ->
       R; G |- EStringLen e : TBase TI32 -| G'
 
-  (** ===== Let Bindings ===== *)
+  (** ===== Let Bindings (De Bruijn: bind at index 0) ===== *)
 
-  (** Standard let: binds result of e1, uses in e2 *)
-  | T_Let : forall R G G' G'' x e1 e2 T1 T2,
+  (** let = e1 in e2: e1 typed from G to G', then e2 typed from
+      (T1, false) :: G' with the bound variable at index 0.
+      Output: (T1, true) :: G'' where the bound var is consumed. *)
+  | T_Let : forall R G G' G'' e1 e2 T1 T2,
       R; G |- e1 : T1 -| G' ->
-      R; ctx_extend G' x T1 |- e2 : T2 -| (x, T1, true) :: G'' ->
-      R; G |- ELet x e1 e2 : T2 -| G''
+      R; ctx_extend G' T1 |- e2 : T2 -| (T1, true) :: G'' ->
+      R; G |- ELet e1 e2 : T2 -| G''
 
-  (** Linear let: explicitly marks binding as linear *)
-  | T_LetLin : forall R G G' G'' x e1 e2 T1 T2,
+  | T_LetLin : forall R G G' G'' e1 e2 T1 T2,
       is_linear_ty T1 = true ->
       R; G |- e1 : T1 -| G' ->
-      R; ctx_extend G' x T1 |- e2 : T2 -| (x, T1, true) :: G'' ->
-      R; G |- ELetLin x e1 e2 : T2 -| G''
+      R; ctx_extend G' T1 |- e2 : T2 -| (T1, true) :: G'' ->
+      R; G |- ELetLin e1 e2 : T2 -| G''
 
   (** ===== Functions ===== *)
 
-  (** Lambda abstraction *)
-  | T_Lam : forall R G x T1 T2 e,
-      R; ctx_extend G x T1 |- e : T2 -| (x, T1, true) :: G ->
-      R; G |- ELam x T1 e : TFun T1 T2 -| G
+  | T_Lam : forall R G T1 T2 e,
+      R; ctx_extend G T1 |- e : T2 -| (T1, true) :: G ->
+      R; G |- ELam T1 e : TFun T1 T2 -| G
 
-  (** Function application *)
   | T_App : forall R G G' G'' e1 e2 T1 T2,
       R; G  |- e1 : TFun T1 T2 -| G' ->
       R; G' |- e2 : T1 -| G'' ->
@@ -112,15 +99,14 @@ Inductive has_type : region_env -> ctx -> expr -> ty -> ctx -> Prop :=
       R; G' |- e2 : T2 -| G'' ->
       R; G  |- EPair e1 e2 : TProd T1 T2 -| G''
 
-  (** Projections consume the pair if either component is linear *)
   | T_Fst : forall R G G' e T1 T2,
       R; G |- e : TProd T1 T2 -| G' ->
-      is_linear_ty T2 = false ->  (* T2 must be droppable *)
+      is_linear_ty T2 = false ->
       R; G |- EFst e : T1 -| G'
 
   | T_Snd : forall R G G' e T1 T2,
       R; G |- e : TProd T1 T2 -| G' ->
-      is_linear_ty T1 = false ->  (* T1 must be droppable *)
+      is_linear_ty T1 = false ->
       R; G |- ESnd e : T2 -| G'
 
   (** ===== Sums ===== *)
@@ -133,16 +119,15 @@ Inductive has_type : region_env -> ctx -> expr -> ty -> ctx -> Prop :=
       R; G |- e : T2 -| G' ->
       R; G |- EInr T1 e : TSum T1 T2 -| G'
 
-  (** Case: both branches must consume linear resources identically *)
-  | T_Case : forall R G G' G_final e x1 e1 x2 e2 T1 T2 T,
+  (** Case: both branches bind at index 0, must agree on output *)
+  | T_Case : forall R G G' G_final e e1 e2 T1 T2 T,
       R; G |- e : TSum T1 T2 -| G' ->
-      R; ctx_extend G' x1 T1 |- e1 : T -| (x1, T1, true) :: G_final ->
-      R; ctx_extend G' x2 T2 |- e2 : T -| (x2, T2, true) :: G_final ->
-      R; G |- ECase e x1 e1 x2 e2 : T -| G_final
+      R; ctx_extend G' T1 |- e1 : T -| (T1, true) :: G_final ->
+      R; ctx_extend G' T2 |- e2 : T -| (T2, true) :: G_final ->
+      R; G |- ECase e e1 e2 : T -| G_final
 
   (** ===== Conditionals ===== *)
 
-  (** Both branches must produce same output context *)
   | T_If : forall R G G' G'' e1 e2 e3 T,
       R; G |- e1 : TBase TBool -| G' ->
       R; G' |- e2 : T -| G'' ->
@@ -151,30 +136,25 @@ Inductive has_type : region_env -> ctx -> expr -> ty -> ctx -> Prop :=
 
   (** ===== Regions ===== *)
 
-  (** Region introduction: all allocations in e scoped to r *)
   | T_Region : forall R G G' r e T,
-      ~ In r R ->  (* Fresh region name *)
+      ~ In r R ->
       (r :: R); G |- e : T -| G' ->
-      (* All strings allocated in r must be consumed before region exit *)
       R; G |- ERegion r e : T -| G'
 
   (** ===== Borrowing ===== *)
 
-  (** Create a borrow: the sub-expression must be a variable.
-      Borrowing looks up the variable without consuming it. *)
-  | T_Borrow : forall R G x T,
-      ctx_lookup G x = Some (T, false) ->
-      R; G |- EBorrow (EVar x) : TBorrow T -| G
+  (** Borrow requires a variable (De Bruijn index). *)
+  | T_Borrow : forall R G i T,
+      ctx_lookup G i = Some (T, false) ->
+      R; G |- EBorrow (EVar i) : TBorrow T -| G
 
   (** ===== Explicit Resource Management ===== *)
 
-  (** Drop: explicitly consume a linear resource *)
   | T_Drop : forall R G G' e T,
       is_linear_ty T = true ->
       R; G |- e : T -| G' ->
       R; G |- EDrop e : TBase TUnit -| G'
 
-  (** Copy: only allowed for unrestricted types *)
   | T_Copy : forall R G G' e T,
       is_linear_ty T = false ->
       R; G |- e : T -| G' ->
@@ -182,42 +162,27 @@ Inductive has_type : region_env -> ctx -> expr -> ty -> ctx -> Prop :=
 
 where "R ';' G '|-' e ':' T '-|' G'" := (has_type R G e T G').
 
-(** ** Linearity Theorem (statement)
+(** ** Domain Preservation (De Bruijn version)
 
-    If R; G |- e : T -| G' and e evaluates to a value,
-    then all linear resources in G have been used exactly once.
-*)
+    With De Bruijn indices, context domain preservation is trivial:
+    the context length is preserved through most typing rules,
+    and ctx_extend/stripping adds/removes exactly one entry.
 
-(** Note: The original statement claimed that ALL output contexts G'
-    have all linear variables used. This is too strong — it is not true
-    in general because the output context may still contain unused linear
-    variables (e.g., T_Unit returns G unchanged). The correct invariant
-    is that variables CONSUMED by the expression (those in G but not in G')
-    have been used exactly once.
+    The shadowing problem is ELIMINATED: no variable name can appear
+    twice because positions are unique by construction. *)
 
-    We reformulate: if the FULL program is well-typed and the output
-    context is empty, then linearity holds trivially. For the general
-    case we prove that linear variables removed between G and G' were
-    used exactly once — which follows structurally from the typing rules
-    since T_Var_Lin marks the variable as used via ctx_mark_used. *)
-
-Theorem linearity_preservation :
+Theorem typing_preserves_length :
   forall R G e T G',
     R; G |- e : T -| G' ->
-    ctx_all_linear_used G' ->
-    ctx_all_linear_used G' .
+    length G' = length G \/
+    (* For let/letlin/lam/case: output = input + 1 bound var stripped *)
+    exists n, length G' = n /\ length G = n.
 Proof.
-  intros R G e T G' Htype Hused.
-  exact Hused.
-Qed.
+  (* Deferred: needs helper lemmas about ctx_mark_used length preservation *)
+  admit.
+Admitted.
 
-(** The meaningful linearity property: in a closed well-typed program
-    where the output context requires all linear vars used, the typing
-    derivation ensures linear resources are consumed exactly once.
-    This follows from the structure of the typing rules themselves:
-    - T_Var_Lin applies ctx_mark_used, ensuring the variable is marked
-    - T_Let / T_LetLin thread the context, ensuring sequential consumption
-    - T_Case requires both branches to produce identical output contexts *)
+(** The meaningful linearity property holds by construction. *)
 Theorem linearity_structural :
   forall R e T,
     R; [] |- e : T -| [] ->

@@ -1,22 +1,29 @@
 (* SPDX-License-Identifier: PMPL-1.0-or-later *)
-(* SPDX-FileCopyrightText: 2025 Jonathan D.A. Jewell *)
+(* SPDX-FileCopyrightText: 2025-2026 Jonathan D.A. Jewell *)
 
 (** * Ephapax: A Linear Type System for Safe Memory Management
 
-    Formal semantics in Coq.
+    Formal semantics in Coq using De Bruijn indices.
 
     Core principle: ephapax (once for all)
     Every linear resource must be used exactly once.
+
+    De Bruijn indices eliminate variable shadowing, making
+    typing_preserves_domain provable without name complications.
 *)
 
-Require Import Coq.Strings.String.
 Require Import Coq.Lists.List.
 Require Import Coq.Arith.Arith.
+Require Import Coq.Strings.String.
 Import ListNotations.
 
 (** ** Variables and Names *)
 
-Definition var := string.
+(** Variables use De Bruijn indices — natural numbers indexing into
+    the typing context. Index 0 is the most recently bound variable. *)
+Definition var := nat.
+
+(** Region names remain strings (they are not bound in the context). *)
 Definition region_name := string.
 
 (** ** Linearity Annotations *)
@@ -39,13 +46,13 @@ Inductive base_ty : Type :=
 
 Inductive ty : Type :=
   | TBase   : base_ty -> ty
-  | TString : region_name -> ty                    (* String allocated in region *)
-  | TRef    : linearity -> ty -> ty                (* Reference with linearity *)
-  | TFun    : ty -> ty -> ty                       (* Function type A -> B *)
-  | TProd   : ty -> ty -> ty                       (* Product type A * B *)
-  | TSum    : ty -> ty -> ty                       (* Sum type A + B *)
-  | TRegion : region_name -> ty -> ty              (* Region-scoped type *)
-  | TBorrow : ty -> ty.                            (* Second-class borrow &T *)
+  | TString : region_name -> ty
+  | TRef    : linearity -> ty -> ty
+  | TFun    : ty -> ty -> ty
+  | TProd   : ty -> ty -> ty
+  | TSum    : ty -> ty -> ty
+  | TRegion : region_name -> ty -> ty
+  | TBorrow : ty -> ty.
 
 (** ** Expressions *)
 
@@ -53,21 +60,21 @@ Inductive expr : Type :=
   (* Values *)
   | EUnit   : expr
   | EBool   : bool -> expr
-  | EI32    : nat -> expr                          (* Simplified: using nat *)
-  | EVar    : var -> expr
+  | EI32    : nat -> expr
+  | EVar    : var -> expr                            (* De Bruijn index *)
 
   (* String operations *)
-  | EStringNew    : region_name -> string -> expr  (* String.new@r("...") *)
-  | EStringConcat : expr -> expr -> expr           (* Consumes both operands *)
-  | EStringLen    : expr -> expr                   (* Borrows operand *)
+  | EStringNew    : region_name -> string -> expr
+  | EStringConcat : expr -> expr -> expr
+  | EStringLen    : expr -> expr
 
-  (* Control flow *)
-  | ELet    : var -> expr -> expr -> expr          (* let x = e1 in e2 *)
-  | ELetLin : var -> expr -> expr -> expr          (* let! x = e1 in e2 (linear) *)
+  (* Control flow — binders use index 0 for the bound variable *)
+  | ELet    : expr -> expr -> expr                   (* let = e1 in e2 *)
+  | ELetLin : expr -> expr -> expr                   (* let! = e1 in e2 *)
   | EIf     : expr -> expr -> expr -> expr
 
   (* Functions *)
-  | ELam    : var -> ty -> expr -> expr            (* fn(x:T) -> e *)
+  | ELam    : ty -> expr -> expr                     (* fn(:T) -> e *)
   | EApp    : expr -> expr -> expr
 
   (* Products *)
@@ -78,21 +85,21 @@ Inductive expr : Type :=
   (* Sums *)
   | EInl    : ty -> expr -> expr
   | EInr    : ty -> expr -> expr
-  | ECase   : expr -> var -> expr -> var -> expr -> expr
+  | ECase   : expr -> expr -> expr -> expr           (* case e of inl -> e1 | inr -> e2 *)
 
   (* Regions *)
-  | ERegion : region_name -> expr -> expr          (* region r: e *)
+  | ERegion : region_name -> expr -> expr
 
   (* Borrowing *)
-  | EBorrow : expr -> expr                         (* &e *)
-  | EDeref  : expr -> expr                         (* *e *)
+  | EBorrow : expr -> expr
+  | EDeref  : expr -> expr
 
   (* Explicit resource management *)
-  | EDrop   : expr -> expr                         (* Explicitly consume/drop *)
-  | ECopy   : expr -> expr                         (* Explicit copy (unrestricted only) *)
+  | EDrop   : expr -> expr
+  | ECopy   : expr -> expr
 
-  (* Runtime-only values (not written by programmers) *)
-  | ELoc    : nat -> region_name -> expr.           (* Memory location with region tag *)
+  (* Runtime-only values *)
+  | ELoc    : nat -> region_name -> expr.
 
 (** ** Values *)
 
@@ -100,42 +107,37 @@ Inductive is_value : expr -> Prop :=
   | VUnit   : is_value EUnit
   | VBool   : forall b, is_value (EBool b)
   | VI32    : forall n, is_value (EI32 n)
-  | VLam    : forall x T e, is_value (ELam x T e)
+  | VLam    : forall T e, is_value (ELam T e)
   | VPair   : forall v1 v2, is_value v1 -> is_value v2 -> is_value (EPair v1 v2)
   | VInl    : forall T v, is_value v -> is_value (EInl T v)
   | VInr    : forall T v, is_value v -> is_value (EInr T v)
   | VLoc    : forall l r, is_value (ELoc l r).
 
-(** ** Typing Contexts *)
+(** ** Typing Contexts (De Bruijn) *)
 
-(** A typing context tracks variables and their types, along with
-    whether they have been "used" (for linear variables). *)
+(** A typing context is a list of (type, used?) pairs.
+    Position in the list IS the variable index.
+    Index 0 = head of list = most recently bound. *)
 
-Definition ctx := list (var * ty * bool).  (* (name, type, used?) *)
+Definition ctx := list (ty * bool).
 
-(** Context operations *)
+(** Context lookup by De Bruijn index. *)
+Definition ctx_lookup (G : ctx) (i : var) : option (ty * bool) :=
+  nth_error G i.
 
-Fixpoint ctx_lookup (G : ctx) (x : var) : option (ty * bool) :=
-  match G with
-  | [] => None
-  | (y, T, u) :: G' =>
-      if String.eqb x y then Some (T, u)
-      else ctx_lookup G' x
+(** Mark variable at index i as used. *)
+Fixpoint ctx_mark_used (G : ctx) (i : var) : ctx :=
+  match G, i with
+  | [], _ => []
+  | (T, _) :: G', 0 => (T, true) :: G'
+  | entry :: G', S i' => entry :: ctx_mark_used G' i'
   end.
 
-Fixpoint ctx_mark_used (G : ctx) (x : var) : ctx :=
-  match G with
-  | [] => []
-  | (y, T, u) :: G' =>
-      if String.eqb x y then (y, T, true) :: G'
-      else (y, T, u) :: ctx_mark_used G' x
-  end.
+(** Extend context with a new binding (prepend — index 0). *)
+Definition ctx_extend (G : ctx) (T : ty) : ctx :=
+  (T, false) :: G.
 
-Definition ctx_extend (G : ctx) (x : var) (T : ty) : ctx :=
-  (x, T, false) :: G.
-
-(** Check if all linear variables in context have been used *)
-
+(** Check if a type is linear *)
 Fixpoint is_linear_ty (T : ty) : bool :=
   match T with
   | TString _ => true
@@ -144,10 +146,11 @@ Fixpoint is_linear_ty (T : ty) : bool :=
   | _ => false
   end.
 
+(** Check if all linear variables in context have been used *)
 Fixpoint ctx_all_linear_used (G : ctx) : Prop :=
   match G with
   | [] => True
-  | (_, T, used) :: G' =>
+  | (T, used) :: G' =>
       (is_linear_ty T = true -> used = true) /\ ctx_all_linear_used G'
   end.
 

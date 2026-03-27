@@ -67,15 +67,42 @@ pub enum TypeError {
     AnnotationMismatch { declared: Ty, actual: Ty },
 }
 
+/// How a binding was introduced — determines the substructural discipline.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BindingForm {
+    /// `let x = ...` — affine discipline: use at most once, implicit drop OK.
+    Let,
+    /// `let! x = ...` — linear discipline: use exactly once, no implicit drop.
+    LetBang,
+    /// Function parameter — linear discipline if type is linear, affine otherwise.
+    Param,
+}
+
 /// Typing context entry
 #[derive(Debug, Clone)]
 struct CtxEntry {
     ty: Ty,
     used: bool,
+    /// How this binding was introduced — `let` (affine) vs `let!` (linear).
+    binding_form: BindingForm,
     /// Which region this variable was bound in (None = top-level / no region).
     /// Used by the region-linear fusion to track which variables belong to
     /// which region, so we can check AllLinearsConsumed at region exit.
     region: Option<RegionName>,
+}
+
+impl CtxEntry {
+    /// Whether this binding demands exactly-once consumption.
+    /// - `let!`: ALWAYS demands consumption (the whole point of let!)
+    /// - `let`: NEVER demands (affine — implicit drop is allowed)
+    /// - param: demands if the type is linear
+    fn demands_consumption(&self) -> bool {
+        match self.binding_form {
+            BindingForm::LetBang => true,
+            BindingForm::Let => false,
+            BindingForm::Param => self.ty.is_linear(),
+        }
+    }
 }
 
 /// Typing context: tracks variables and their usage
@@ -92,14 +119,15 @@ impl Context {
         Self::default()
     }
 
-    /// Extend context with new binding, tagged with the current region.
-    pub fn extend(&mut self, name: Var, ty: Ty) {
+    /// Extend context with new binding, tagged with the current region and binding form.
+    pub fn extend(&mut self, name: Var, ty: Ty, binding_form: BindingForm) {
         let region = self.regions.last().cloned();
         self.vars.insert(
             name,
             CtxEntry {
                 ty,
                 used: false,
+                binding_form,
                 region,
             },
         );
@@ -123,11 +151,13 @@ impl Context {
         }
     }
 
-    /// Check all linear variables have been consumed.
-    /// `let!` bindings MUST be used exactly once — this is the dyadic contract.
-    pub fn check_all_linear_used(&self) -> Result<(), TypeError> {
+    /// Check all bindings that demand consumption have been consumed.
+    /// - `let!` bindings: ALWAYS must be consumed (linear discipline)
+    /// - `let` bindings: NEVER must be consumed (affine — implicit drop OK)
+    /// - params: must be consumed if the type is linear
+    pub fn check_all_consumed(&self) -> Result<(), TypeError> {
         for (name, entry) in &self.vars {
-            if entry.ty.is_linear() && !entry.used {
+            if entry.demands_consumption() && !entry.used {
                 return Err(TypeError::LinearVariableNotConsumed(name.clone()));
             }
         }
@@ -159,10 +189,12 @@ impl Context {
     /// Both branches must consume exactly the same set of linear variables.
     /// Returns Ok(()) if they agree, or an error indicating which variable differs.
     pub fn check_branch_agreement(&self, other: &Context) -> Result<(), TypeError> {
-        // Check all variables in self
+        // Check all variables that demand consumption (let! and linear params).
+        // Affine (let) bindings don't need branch agreement — one branch can
+        // consume while the other implicitly drops.
         for (name, entry) in &self.vars {
-            if !entry.ty.is_linear() {
-                continue; // Only check linear variables
+            if !entry.demands_consumption() {
+                continue; // Affine bindings don't need branch agreement
             }
 
             match other.vars.get(name) {
@@ -355,28 +387,23 @@ impl TypeChecker {
             }
         }
 
-        self.ctx.extend(name.clone(), value_ty.clone());
+        self.ctx.extend(name.clone(), value_ty.clone(), BindingForm::Let);
         let body_ty = self.check(body)?;
 
-        // `let` bindings of linear types still get linearity checks —
-        // the binding form (`let` vs `let!`) determines syntax, but
-        // the TYPE determines whether exactly-once consumption is required.
-        if let Some(entry) = self.ctx.vars.get(name) {
-            if entry.ty.is_linear() && !entry.used {
-                return Err(TypeError::LinearVariableNotConsumed(name.clone()));
-            }
-        }
+        // `let` is AFFINE — unconsumed bindings are allowed (implicit drop).
+        // No consumption check here. The affine discipline permits weakening.
 
         Ok(body_ty)
     }
 
     fn check_lambda(&mut self, param: &Var, param_ty: &Ty, body: &Expr) -> Result<Ty, TypeError> {
-        self.ctx.extend(param.clone(), param_ty.clone());
+        self.ctx.extend(param.clone(), param_ty.clone(), BindingForm::Param);
         let body_ty = self.check(body)?;
 
-        // Linear params must be consumed in the body
+        // Params use demands_consumption(): linear types must be consumed,
+        // unrestricted types can be dropped.
         if let Some(entry) = self.ctx.vars.get(param) {
-            if entry.ty.is_linear() && !entry.used {
+            if entry.demands_consumption() && !entry.used {
                 return Err(TypeError::LinearVariableNotConsumed(param.clone()));
             }
         }
@@ -496,25 +523,25 @@ impl TypeChecker {
             });
         }
 
-        // === Rule 2: AllLinearsConsumed ===
-        // All LINEAR variables bound in this region must have been consumed.
-        // AFFINE variables are implicitly dropped — the arena handles cleanup.
-        // This is the qualifier-specific part of region exit.
+        // === Rule 2: Consumption at region exit ===
+        // Only bindings that DEMAND consumption (let!, linear params) must
+        // have been consumed. Affine (let) bindings are implicitly dropped —
+        // the region's arena deallocator frees the memory.
         for (var_name, entry) in &self.ctx.vars {
             // Only check variables that belong to THIS region
             if entry.region.as_ref() != Some(name) {
                 continue;
             }
 
-            // Linear variables MUST be consumed
-            if entry.ty.is_linear() && !entry.used {
+            // Only check bindings that demand consumption
+            if entry.demands_consumption() && !entry.used {
                 let var = var_name.clone();
                 let region = name.clone();
                 self.ctx.exit_region();
                 return Err(TypeError::RegionLinearNotConsumed { var, region });
             }
 
-            // Affine variables: no check needed — implicit drop is fine.
+            // Affine (let) bindings: no error — implicit drop is fine.
             // The region's arena deallocator frees the memory.
         }
 
@@ -615,12 +642,14 @@ impl TypeChecker {
             }
         }
 
-        self.ctx.extend(name.clone(), value_ty.clone());
+        self.ctx.extend(name.clone(), value_ty.clone(), BindingForm::LetBang);
         let body_ty = self.check(body)?;
 
-        // let! bindings MUST be consumed — this is the whole point
+        // let! bindings MUST be consumed — regardless of type.
+        // This is the linear discipline: even I32 bound with let! must be used.
+        // The programmer opted into exactly-once by choosing let!.
         if let Some(entry) = self.ctx.vars.get(name) {
-            if entry.ty.is_linear() && !entry.used {
+            if !entry.used {
                 return Err(TypeError::LinearVariableNotConsumed(name.clone()));
             }
         }
@@ -717,13 +746,14 @@ impl TypeChecker {
                 // Snapshot context after scrutinee - both branches start from here
                 let ctx_after_scrutinee = self.ctx.snapshot();
 
-                // Check left branch
-                self.ctx.extend(left_var.clone(), *left.clone());
+                // Check left branch — case bindings follow Param discipline
+                // (linear types must be consumed, unrestricted can be dropped)
+                self.ctx.extend(left_var.clone(), *left.clone(), BindingForm::Param);
                 let left_result_ty = self.check(left_body)?;
 
-                // Linear branch variable must be consumed
+                // Check consumption based on binding discipline
                 if let Some(entry) = self.ctx.vars.get(left_var) {
-                    if entry.ty.is_linear() && !entry.used {
+                    if entry.demands_consumption() && !entry.used {
                         return Err(TypeError::LinearVariableNotConsumed(left_var.clone()));
                     }
                 }
@@ -736,12 +766,12 @@ impl TypeChecker {
                 self.ctx = ctx_after_scrutinee;
 
                 // Check right branch
-                self.ctx.extend(right_var.clone(), *right.clone());
+                self.ctx.extend(right_var.clone(), *right.clone(), BindingForm::Param);
                 let right_result_ty = self.check(right_body)?;
 
-                // Linear branch variable must be consumed
+                // Check consumption based on binding discipline
                 if let Some(entry) = self.ctx.vars.get(right_var) {
-                    if entry.ty.is_linear() && !entry.used {
+                    if entry.demands_consumption() && !entry.used {
                         return Err(TypeError::LinearVariableNotConsumed(right_var.clone()));
                     }
                 }
@@ -1059,7 +1089,7 @@ pub fn type_check_module(module: &Module) -> Result<(), TypeError> {
                     param: Box::new(param_ty.clone()),
                     ret: Box::new(acc),
                 });
-            tc.ctx.extend(name.clone(), fn_ty);
+            tc.ctx.extend(name.clone(), fn_ty, BindingForm::Let);
         }
     }
 
@@ -1076,7 +1106,7 @@ pub fn type_check_module(module: &Module) -> Result<(), TypeError> {
                 let saved_ctx = tc.ctx.clone();
 
                 for (param_name, param_ty) in params {
-                    tc.ctx.extend(param_name.clone(), param_ty.clone());
+                    tc.ctx.extend(param_name.clone(), param_ty.clone(), BindingForm::Param);
                 }
 
                 // Type check the body
@@ -1090,15 +1120,13 @@ pub fn type_check_module(module: &Module) -> Result<(), TypeError> {
                     });
                 }
 
-                // All linear params must be consumed — no exceptions
-                for (param_name, param_ty) in params {
-                    if param_ty.is_linear() {
-                        if let Some(entry) = tc.ctx.vars.get(param_name) {
-                            if !entry.used {
-                                return Err(TypeError::LinearVariableNotConsumed(
-                                    param_name.clone(),
-                                ));
-                            }
+                // Params that demand consumption must be consumed
+                for (param_name, _param_ty) in params {
+                    if let Some(entry) = tc.ctx.vars.get(param_name) {
+                        if entry.demands_consumption() && !entry.used {
+                            return Err(TypeError::LinearVariableNotConsumed(
+                                param_name.clone(),
+                            ));
                         }
                     }
                 }
@@ -1146,7 +1174,7 @@ mod tests {
     fn test_linear_variable_reuse() {
         let mut tc = TypeChecker::new();
         tc.ctx.enter_region("r".into());
-        tc.ctx.extend("s".into(), Ty::String("r".into()));
+        tc.ctx.extend("s".into(), Ty::String("r".into()), BindingForm::LetBang);
 
         // First use - OK
         let var = dummy_expr(ExprKind::Var("s".into()));
@@ -1166,7 +1194,7 @@ mod tests {
         // Both branches consume s - should pass
         let mut tc = TypeChecker::new();
         tc.ctx.enter_region("r".into());
-        tc.ctx.extend("s".into(), Ty::String("r".into()));
+        tc.ctx.extend("s".into(), Ty::String("r".into()), BindingForm::LetBang);
 
         let expr = dummy_expr(ExprKind::If {
             cond: Box::new(dummy_expr(ExprKind::Lit(Literal::Bool(true)))),
@@ -1187,7 +1215,7 @@ mod tests {
         // Neither branch consumes s - should pass (s unconsumed error later)
         let mut tc = TypeChecker::new();
         tc.ctx.enter_region("r".into());
-        tc.ctx.extend("s".into(), Ty::String("r".into()));
+        tc.ctx.extend("s".into(), Ty::String("r".into()), BindingForm::LetBang);
 
         let expr = dummy_expr(ExprKind::If {
             cond: Box::new(dummy_expr(ExprKind::Lit(Literal::Bool(true)))),
@@ -1205,7 +1233,7 @@ mod tests {
         // then-branch consumes s, else-branch does not - should FAIL
         let mut tc = TypeChecker::new();
         tc.ctx.enter_region("r".into());
-        tc.ctx.extend("s".into(), Ty::String("r".into()));
+        tc.ctx.extend("s".into(), Ty::String("r".into()), BindingForm::LetBang);
 
         let expr = dummy_expr(ExprKind::If {
             cond: Box::new(dummy_expr(ExprKind::Lit(Literal::Bool(true)))),
@@ -1232,7 +1260,7 @@ mod tests {
         // then-branch does not consume s, else-branch does - should FAIL
         let mut tc = TypeChecker::new();
         tc.ctx.enter_region("r".into());
-        tc.ctx.extend("s".into(), Ty::String("r".into()));
+        tc.ctx.extend("s".into(), Ty::String("r".into()), BindingForm::LetBang);
 
         let expr = dummy_expr(ExprKind::If {
             cond: Box::new(dummy_expr(ExprKind::Lit(Literal::Bool(true)))),
@@ -1258,7 +1286,7 @@ mod tests {
         // Borrowing a variable should not consume it
         let mut tc = TypeChecker::new();
         tc.ctx.enter_region("r".into());
-        tc.ctx.extend("s".into(), Ty::String("r".into()));
+        tc.ctx.extend("s".into(), Ty::String("r".into()), BindingForm::LetBang);
 
         // &s - borrow s
         let borrow_expr = dummy_expr(ExprKind::Borrow(Box::new(dummy_expr(ExprKind::Var(
@@ -1279,7 +1307,7 @@ mod tests {
         // Borrow s for len, then consume s - should pass
         let mut tc = TypeChecker::new();
         tc.ctx.enter_region("r".into());
-        tc.ctx.extend("s".into(), Ty::String("r".into()));
+        tc.ctx.extend("s".into(), Ty::String("r".into()), BindingForm::LetBang);
 
         // First borrow
         let borrow_expr = dummy_expr(ExprKind::Borrow(Box::new(dummy_expr(ExprKind::Var(
@@ -1378,7 +1406,7 @@ mod tests {
         // fst (1, s) where s is linear — can't discard linear second component
         let mut tc = TypeChecker::new();
         tc.ctx.enter_region("r".into());
-        tc.ctx.extend("s".into(), Ty::String("r".into()));
+        tc.ctx.extend("s".into(), Ty::String("r".into()), BindingForm::LetBang);
 
         let expr = dummy_expr(ExprKind::Fst(Box::new(dummy_expr(ExprKind::Pair {
             left: Box::new(dummy_expr(ExprKind::Lit(Literal::I32(1)))),
@@ -1555,7 +1583,7 @@ mod tests {
     fn test_copy_linear_rejected() {
         let mut tc = TypeChecker::new();
         tc.ctx.enter_region("r".into());
-        tc.ctx.extend("s".into(), Ty::String("r".into()));
+        tc.ctx.extend("s".into(), Ty::String("r".into()), BindingForm::LetBang);
 
         let expr = dummy_expr(ExprKind::Copy(Box::new(dummy_expr(ExprKind::Var(
             "s".into(),
@@ -1570,7 +1598,7 @@ mod tests {
     fn test_drop_linear_ok() {
         let mut tc = TypeChecker::new();
         tc.ctx.enter_region("r".into());
-        tc.ctx.extend("s".into(), Ty::String("r".into()));
+        tc.ctx.extend("s".into(), Ty::String("r".into()), BindingForm::LetBang);
 
         let expr = dummy_expr(ExprKind::Drop(Box::new(dummy_expr(ExprKind::Var(
             "s".into(),
@@ -1634,12 +1662,12 @@ mod tests {
     // There is no flag to weaken this.
 
     #[test]
-    fn test_linear_binding_rejects_unconsumed() {
-        // let! binding NOT consumed — must be rejected
+    fn test_let_bang_rejects_unconsumed() {
+        // let! binding NOT consumed — must be rejected (linear discipline)
         let mut tc = TypeChecker::new();
         tc.ctx.enter_region("r".into());
 
-        let expr = dummy_expr(ExprKind::Let {
+        let expr = dummy_expr(ExprKind::LetLin {
             name: "s".into(),
             ty: None,
             value: Box::new(dummy_expr(ExprKind::StringNew {
@@ -1650,13 +1678,59 @@ mod tests {
             body: Box::new(dummy_expr(ExprKind::Lit(Literal::Unit))),
         });
 
-        // Must FAIL — linear type not consumed
+        // Must FAIL — let! demands exactly-once consumption
         assert!(
             matches!(
                 tc.check(&expr),
                 Err(TypeError::LinearVariableNotConsumed(_))
             ),
-            "Unconsumed linear variable must be rejected"
+            "let! unconsumed must be rejected"
+        );
+    }
+
+    #[test]
+    fn test_let_allows_unconsumed_linear() {
+        // let binding of linear type NOT consumed — must be ACCEPTED (affine)
+        let mut tc = TypeChecker::new();
+        tc.ctx.enter_region("r".into());
+
+        let expr = dummy_expr(ExprKind::Let {
+            name: "s".into(),
+            ty: None,
+            value: Box::new(dummy_expr(ExprKind::StringNew {
+                region: "r".into(),
+                value: "hello".to_string(),
+            })),
+            // s is NOT consumed — affine discipline allows this
+            body: Box::new(dummy_expr(ExprKind::Lit(Literal::Unit))),
+        });
+
+        // Must PASS — let is affine, implicit drop is allowed
+        assert!(
+            tc.check(&expr).is_ok(),
+            "let (affine) should allow unconsumed linear values"
+        );
+    }
+
+    #[test]
+    fn test_let_bang_rejects_unconsumed_unrestricted() {
+        // let! binding of I32 (unrestricted type) NOT consumed — still rejected
+        // let! opts into linear discipline regardless of type
+        let mut tc = TypeChecker::new();
+
+        let expr = dummy_expr(ExprKind::LetLin {
+            name: "x".into(),
+            ty: None,
+            value: Box::new(dummy_expr(ExprKind::Lit(Literal::I32(42)))),
+            body: Box::new(dummy_expr(ExprKind::Lit(Literal::Unit))),
+        });
+
+        assert!(
+            matches!(
+                tc.check(&expr),
+                Err(TypeError::LinearVariableNotConsumed(_))
+            ),
+            "let! of unrestricted type must still reject unconsumed"
         );
     }
 
@@ -1665,7 +1739,7 @@ mod tests {
         // Linear variable used twice — must be rejected
         let mut tc = TypeChecker::new();
         tc.ctx.enter_region("r".into());
-        tc.ctx.extend("s".into(), Ty::String("r".into()));
+        tc.ctx.extend("s".into(), Ty::String("r".into()), BindingForm::LetBang);
 
         // First use - OK
         let var1 = dummy_expr(ExprKind::Var("s".into()));
@@ -1703,7 +1777,7 @@ mod tests {
         // Branches disagree on consuming a linear variable — must be rejected
         let mut tc = TypeChecker::new();
         tc.ctx.enter_region("r".into());
-        tc.ctx.extend("s".into(), Ty::String("r".into()));
+        tc.ctx.extend("s".into(), Ty::String("r".into()), BindingForm::LetBang);
 
         let expr = dummy_expr(ExprKind::If {
             cond: Box::new(dummy_expr(ExprKind::Lit(Literal::Bool(true)))),

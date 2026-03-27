@@ -1031,8 +1031,19 @@ Proof.
     destruct (mem_alloc mu (CString r s)) as [mu_new l_new] eqn:Ha.
     exists mu_new, R, rho, (ELoc l_new r).
     econstructor; [unfold region_active in H; exact H | exact Ha].
-  (* T_StringConcat *) - admit. (* 3 admits remain: StringConcat, StringLen, Borrow, Drop *)
-  (* T_StringLen *)    - admit.
+  (* T_StringConcat *) - admit. (* Complex IH case — defer to focused session *)
+  (* T_StringLen: premise types EBorrow e, so we invert to get ctx_lookup,
+     then use env_consistent for the step, wrapped in S_StringLen_Step. *)
+  - right.
+    inversion Htype; subst.
+    match goal with
+    | [ Hlk : ctx_lookup _ _ = Some (_, _) |- _ ] =>
+        destruct (Hec _ _ _ Hlk) as [rv Hlookup];
+        exists mu, R, rho, (EStringLen (val_to_expr rv));
+        apply S_StringLen_Step;
+        (* Inner step on borrow's subexpression — same var_of_expr issue *)
+        admit
+    end.
   (* T_Let *) - simpl in Helv. destruct Helv as [H1 H2].
     destruct (IHHtype1 mu rho Hec H1) as [Hv | [m1 [R1 [r1 [e1' Hs]]]]].
     + right. exists mu, R, (env_extend rho x (expr_to_val e1)), e2.
@@ -1104,8 +1115,36 @@ Proof.
     + right. exists m1, R1, r1, (EIf e1' e2 e3). apply S_If_Step. exact Hs1.
   (* T_Region *) - right. exists mu, (r :: R), rho, (ERegion r e).
     constructor. exact H.
-  (* T_Borrow *)  - admit.
-  (* T_Drop *) - admit.
+  (* T_Borrow: T_Borrow premise is ctx_lookup G (var_of_expr e) = Some (T, false).
+     For EVar x, var_of_expr gives x; env_consistent gives runtime value; S_Var + S_Borrow_Step.
+     For other forms, var_of_expr gives "" — if ctx_lookup G "" succeeds, same approach.
+     For value forms, S_Borrow_Val applies directly. *)
+  (* T_Borrow: premise is ctx_lookup G (var_of_expr e) = Some (T, false).
+     We get a runtime value from env_consistent, then step the inner expression
+     via S_Var applied to var_of_expr e, wrapped in S_Borrow_Step. *)
+  - right.
+    destruct (Hec _ _ _ H) as [rv Hlookup].
+    exists mu, R, rho, (EBorrow (val_to_expr rv)).
+    apply S_Borrow_Step.
+    (* Need: (mu, R, rho, e) -->> (mu, R, rho, val_to_expr rv)
+       We have: env_lookup rho (var_of_expr e) = Some rv
+       But S_Var needs e = EVar x and env_lookup rho x = Some rv.
+       If e = EVar x, var_of_expr e = x and this works.
+       If e ≠ EVar x, var_of_expr e = "" and we need a step for e.
+       This case is deferred — in practice, T_Borrow is only applied
+       to EVar expressions (the borrow syntax &x). *)
+    admit.
+  (* T_Drop *) - simpl in Helv.
+    destruct (IHHtype mu rho Hec Helv) as [Hv | [m1 [R1 [r1 [e' Hs]]]]].
+    + right. destruct T; simpl in H; try discriminate.
+      * (* TString: canonical forms gives ELoc *)
+        destruct (canonical_forms_string _ _ _ _ _ Htype Hv) as [l Hl].
+        subst e. exists (mem_write mu l CFree), R, rho, EUnit. apply S_Drop.
+      * (* TRef Lin: vacuously impossible *)
+        exfalso. inversion Hv; subst; inversion Htype; subst; try discriminate; try congruence.
+      * (* TRegion: is_linear_ty recurses — same approach *)
+        exfalso. inversion Hv; subst; inversion Htype; subst; try discriminate; try congruence.
+    + right. exists m1, R1, r1, (EDrop e'). apply S_Drop_Step. exact Hs.
   (* T_Copy *) - simpl in Helv.
     destruct (IHHtype mu rho Hec Helv) as [Hv | [m1 [R1 [r1 [e' Hs]]]]].
     + right. exists mu, R, rho, (EPair e e). constructor. exact Hv.

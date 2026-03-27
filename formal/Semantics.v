@@ -1096,10 +1096,29 @@ Proof.
     econstructor; [unfold region_active in H; exact H | exact Ha].
   (* T_StringConcat *) - simpl in Helv. destruct Helv as [He1 He2].
     destruct (IHHtype1 mu rho Hec He1) as [Hv1 | [m1 [R1 [r1 [e1' Hs1]]]]].
-    + admit. (* StringConcat e1-value: needs interactive Coq to debug goal structure *)
-    + (* e1 steps *)
+    { (* e1 is value *)
+      assert (Hec': env_consistent rho G').
+      { eapply env_consistent_weaken. exact Hec.
+        intros x' T' u' Hl'. eapply typing_preserves_domain; eauto. }
+      destruct (IHHtype2 mu rho Hec' He2) as [Hv2 | [m2 [R2 [r2 [e2' Hs2]]]]].
+      - (* Both values *)
+        destruct (canonical_forms_string _ _ _ _ _ Htype1 Hv1) as [l1 Hl1].
+        destruct (canonical_forms_string _ _ _ _ _ Htype2 Hv2) as [l2 Hl2].
+        subst e1 e2. simpl in He1, He2.
+        destruct He1 as [s1 Hr1]. destruct He2 as [s2 Hr2]. right.
+        set (mf := mem_write (mem_write mu l1 CFree) l2 CFree).
+        destruct (mem_alloc mf (CString r (s1 ++ s2))) as [mn ln] eqn:Ha.
+        exists mn, R, rho, (ELoc ln r).
+        apply S_StringConcat with (s1:=s1) (s2:=s2).
+        { exact Hr1. }
+        { exact Hr2. }
+        { unfold mf. exact Ha. }
+      - (* e2 steps *)
+        right. exists m2, R2, r2, (EStringConcat e1 e2').
+        apply S_StringConcat_Step2; assumption. }
+    { (* e1 steps *)
       right. exists m1, R1, r1, (EStringConcat e1' e2).
-      apply S_StringConcat_Step1. exact Hs1.
+      apply S_StringConcat_Step1. exact Hs1. }
   (* T_StringLen: premise types EBorrow e, so we invert to get ctx_lookup,
      then use env_consistent for the step, wrapped in S_StringLen_Step. *)
   - right.

@@ -18,6 +18,7 @@ members = [
     "src/ephapax-lsp",
     "src/ephapax-package",
     "src/ephapax-analysis",
+    "ephapax-linear",
     # "src/ephapax-vram-cache",  # Disabled: requires ephapax-proven repo
 ]
 

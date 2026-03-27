@@ -1,14 +1,43 @@
-# Ephapax Linear Toolchain
+# ephapax-linear
 
-This directory is the fresh start you requested for the My Language family in an **ephapax linear** workflow. The old workspace is archived at `~/my-lang-archive`. Here’s the new scaffold:
+Standalone linear/affine discipline checker for the Ephapax language.
 
-- `grammar/` – place the canonical Solo (and subsequent dialect) grammars here.
-- `docs/` – research, roadmap, and dialect specs.
-- `src/` – parser/toolchain code skeleton (to be built in the ephapax linear style you prefer).
+## Dual Grammars
 
-Next actions:
-1. Copy the Solo v1.0 grammar into `grammar/solo-v1-grammar.ebnf` (or a linear version if desired).
-2. Build the parser pipeline in the language/framework you choose (we can start with the ephapax linear parser module inside `src/`).
-3. Re-use the artifacts from the archive `~/my-lang-archive` as reference while rewriting semantics, typing, and runtime pieces.
+This crate implements two **focused substructural grammars** — two views of the same ephapax syntax, each enforcing a different structural discipline:
 
-Let me know how you want to proceed with the new ephapax linear parser (language, style, core modules), and I’ll scaffold the remaining structure accordingly.
+| Property | Linear Grammar | Affine Grammar |
+|----------|---------------|----------------|
+| Exchange | Yes | Yes |
+| Weakening | **No** (must consume) | **Yes** (implicit drop) |
+| Contraction | **No** (single use) | **No** (single use) |
+| `let!` | Exactly-once | Exactly-once (linear island) |
+| `let` | Unrestricted types only | Any type |
+| `drop(e)` | **Forbidden** | Permitted |
+| Branch agreement | **Required** | Not required |
+| Region exit | Must consume | Implicit drop (warns) |
+
+## Dyadic Design
+
+Ephapax is **dyadic** — both disciplines coexist per-program. `let!` always means linear, `let` always means affine. There is no global mode.
+
+## Usage
+
+```rust
+use ephapax_linear::{check_expr, Discipline};
+
+// Check under linear discipline
+check_expr(&expr, Discipline::Linear)?;
+
+// Check under affine discipline
+check_expr(&expr, Discipline::Affine)?;
+```
+
+## Grammar Specifications
+
+- `grammar/linear.ebnf` — Linear focused grammar (EBNF)
+- `grammar/affine.ebnf` — Affine focused grammar (EBNF)
+
+## License
+
+SPDX-License-Identifier: PMPL-1.0-or-later

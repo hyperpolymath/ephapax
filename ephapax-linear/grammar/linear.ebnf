@@ -1,0 +1,186 @@
+(* SPDX-License-Identifier: PMPL-1.0-or-later *)
+(* SPDX-FileCopyrightText: 2026 Jonathan D.A. Jewell *)
+(*
+ * Ephapax Linear Grammar — Focused Syntax for Linear Discipline
+ *
+ * This grammar is a FOCUSING of the ephapax syntax under the linear
+ * structural rule: NO weakening, NO contraction. Every linear binding
+ * must be consumed exactly once. There is no implicit drop.
+ *
+ * Structural properties:
+ *   - Exchange:     YES (reordering permitted)
+ *   - Weakening:    NO  (every linear binding MUST be consumed)
+ *   - Contraction:  NO  (no linear binding may be used twice)
+ *
+ * The key syntactic restriction: `let!` bindings introduce linear
+ * resources that MUST appear exactly once in the body. Branches
+ * MUST agree on linear consumption. Region exit MUST consume all
+ * region-bound linear values.
+ *)
+
+(* ================================================================ *)
+(* Top-level                                                         *)
+(* ================================================================ *)
+
+module       = { decl } ;
+decl         = fn_decl | type_decl ;
+
+fn_decl      = "fn" , IDENT , "(" , param_list , ")" , ":" , ty ,
+               "=" , lin_expr ;
+
+type_decl    = "type" , IDENT , "=" , ty ;
+
+param_list   = [ param , { "," , param } ] ;
+param        = IDENT , ":" , ty ;
+
+(* ================================================================ *)
+(* Linear Expressions                                                *)
+(*                                                                   *)
+(* Every subexpression must satisfy:                                  *)
+(*   - Each linear variable appears EXACTLY ONCE in its scope        *)
+(*   - Branches MUST agree on which linear variables are consumed    *)
+(*   - Region exit MUST have consumed all region-bound linears       *)
+(*   - `drop` is FORBIDDEN (no implicit or explicit weakening)       *)
+(* ================================================================ *)
+
+lin_expr     = let_lin_expr       (* let! x = e1 in e2 — linear binding *)
+             | let_expr           (* let x = e1 in e2 — only for unrestricted values *)
+             | lambda_expr
+             | app_expr
+             | pair_expr
+             | fst_expr
+             | snd_expr
+             | inl_expr
+             | inr_expr
+             | case_expr
+             | if_expr
+             | region_expr
+             | borrow_expr
+             | deref_expr
+             | copy_expr          (* copy(e) — unrestricted values only *)
+             | block_expr
+             | ffi_expr
+             | binop_expr
+             | unop_expr
+             | string_new_expr
+             | string_concat_expr
+             | string_len_expr
+             | list_lit_expr
+             | list_index_expr
+             | tuple_lit_expr
+             | tuple_index_expr
+             | literal
+             | IDENT ;
+             (* NOTE: drop_expr is ABSENT — no weakening in linear grammar *)
+
+(* --- Bindings --- *)
+
+(* let! introduces a LINEAR binding — body MUST consume x exactly once *)
+let_lin_expr = "let!" , IDENT , [ ":" , ty ] , "=" , lin_expr ,
+               "in" , lin_body_consuming ;
+
+(* let introduces an UNRESTRICTED binding — value MUST NOT be linear *)
+(* In the linear grammar, `let` is restricted to unrestricted types. *)
+(* A linear value MUST use `let!`. *)
+let_expr     = "let" , IDENT , [ ":" , ty ] , "=" , lin_expr ,
+               "in" , lin_expr ;
+
+(* A consuming body: an expression where every in-scope linear
+   variable from the enclosing let! is consumed exactly once. *)
+lin_body_consuming = lin_expr ;
+
+(* --- Functions --- *)
+
+lambda_expr  = "fn" , "(" , IDENT , ":" , ty , ")" , "->" , lin_expr ;
+app_expr     = lin_expr , lin_expr ;
+
+(* --- Products --- *)
+(* Pair construction consumes both arguments linearly *)
+pair_expr    = "(" , lin_expr , "," , lin_expr , ")" ;
+fst_expr     = lin_expr , ".0" ;
+snd_expr     = lin_expr , ".1" ;
+
+(* --- Sums --- *)
+inl_expr     = "inl" , "[" , ty , "]" , lin_expr ;
+inr_expr     = "inr" , "[" , ty , "]" , lin_expr ;
+
+(* Case: both branches MUST consume the same set of linear variables *)
+case_expr    = "case" , lin_expr , "of" ,
+               "inl" , IDENT , "=>" , lin_expr ,
+               "|" ,
+               "inr" , IDENT , "=>" , lin_expr ;
+
+(* --- Control flow --- *)
+(* Both branches MUST agree on linear variable consumption *)
+if_expr      = "if" , lin_expr ,
+               "then" , lin_expr ,
+               "else" , lin_expr ;
+
+(* --- Regions --- *)
+(* Region exit: ALL linear values bound to region r MUST be consumed
+   before the region closes. No region-referencing value may escape. *)
+region_expr  = "region" , IDENT , "{" , lin_expr , "}" ;
+
+(* --- Borrowing --- *)
+(* Borrows are second-class: they don't consume the linear value *)
+borrow_expr  = "&" , lin_expr ;
+deref_expr   = "*" , lin_expr ;
+
+(* --- Copy (unrestricted only) --- *)
+copy_expr    = "copy" , "(" , lin_expr , ")" ;
+
+(* --- Block --- *)
+(* Final expression in block inherits linear obligations *)
+block_expr   = "{" , { lin_expr , ";" } , lin_expr , "}" ;
+
+(* --- FFI --- *)
+ffi_expr     = "__ffi" , "(" , STRING , { "," , lin_expr } , ")" ;
+
+(* --- Operators --- *)
+binop_expr   = lin_expr , binop , lin_expr ;
+unop_expr    = unop , lin_expr ;
+binop        = "+" | "-" | "*" | "/" | "%" | "<" | "<=" | ">" | ">="
+             | "==" | "!=" | "&&" | "||" ;
+unop         = "!" | "-" ;
+
+(* --- Strings --- *)
+string_new_expr    = "String.new@" , IDENT , "(" , STRING , ")" ;
+string_concat_expr = lin_expr , "++" , lin_expr ;
+string_len_expr    = "String.len" , "(" , lin_expr , ")" ;
+
+(* --- Collections --- *)
+list_lit_expr   = "[" , [ lin_expr , { "," , lin_expr } ] , "]" ;
+list_index_expr = lin_expr , "[" , lin_expr , "]" ;
+tuple_lit_expr  = "(" , lin_expr , { "," , lin_expr } , ")" ;
+tuple_index_expr = lin_expr , "." , NATURAL ;
+
+(* ================================================================ *)
+(* Types                                                             *)
+(* ================================================================ *)
+
+ty           = base_ty | string_ty | ref_ty | fun_ty | prod_ty
+             | sum_ty | region_ty | borrow_ty | list_ty | tuple_ty
+             | var_ty ;
+
+base_ty      = "()" | "Bool" | "I32" | "I64" | "F32" | "F64" ;
+string_ty    = "String@" , IDENT ;
+ref_ty       = "lin" , ty | "un" , ty ;
+fun_ty       = ty , "->" , ty ;
+prod_ty      = ty , "*" , ty ;
+sum_ty       = ty , "+" , ty ;
+region_ty    = "Region" , IDENT , ty ;
+borrow_ty    = "&" , ty ;
+list_ty      = "[" , ty , "]" ;
+tuple_ty     = "(" , ty , { "," , ty } , ")" ;
+var_ty       = IDENT ;
+
+(* ================================================================ *)
+(* Terminals                                                         *)
+(* ================================================================ *)
+
+IDENT        = LETTER , { LETTER | DIGIT | "_" } ;
+NATURAL      = DIGIT , { DIGIT } ;
+STRING       = '"' , { CHAR } , '"' ;
+LETTER       = "a" | ... | "z" | "A" | ... | "Z" | "_" ;
+DIGIT        = "0" | ... | "9" ;
+CHAR         = (* any character except unescaped '"' *) ;

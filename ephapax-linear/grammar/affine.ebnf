@@ -1,0 +1,200 @@
+(* SPDX-License-Identifier: PMPL-1.0-or-later *)
+(* SPDX-FileCopyrightText: 2026 Jonathan D.A. Jewell *)
+(*
+ * Ephapax Affine Grammar — Focused Syntax for Affine Discipline
+ *
+ * This grammar is a FOCUSING of the ephapax syntax under the affine
+ * structural rule: weakening IS permitted, contraction is NOT.
+ * Affine bindings may be used at most once — unused values are
+ * implicitly dropped at scope exit.
+ *
+ * Structural properties:
+ *   - Exchange:     YES (reordering permitted)
+ *   - Weakening:    YES (unused bindings are implicitly dropped)
+ *   - Contraction:  NO  (no binding may be used twice)
+ *
+ * The key syntactic difference from the linear grammar:
+ *   - `let` bindings may introduce values of ANY type (including
+ *     linear types), and the body is NOT required to consume them.
+ *   - `drop(e)` is a valid expression (explicit weakening).
+ *   - Branches are NOT required to agree on consumption — one branch
+ *     may consume a value while the other implicitly drops it.
+ *   - Region exit implicitly drops unconsumed region-bound values
+ *     (with a WARNING for non-memory resources — see item 6).
+ *)
+
+(* ================================================================ *)
+(* Top-level                                                         *)
+(* ================================================================ *)
+
+module       = { decl } ;
+decl         = fn_decl | type_decl ;
+
+fn_decl      = "fn" , IDENT , "(" , param_list , ")" , ":" , ty ,
+               "=" , aff_expr ;
+
+type_decl    = "type" , IDENT , "=" , ty ;
+
+param_list   = [ param , { "," , param } ] ;
+param        = IDENT , ":" , ty ;
+
+(* ================================================================ *)
+(* Affine Expressions                                                *)
+(*                                                                   *)
+(* Every subexpression must satisfy:                                  *)
+(*   - Each binding is used AT MOST ONCE (no contraction)            *)
+(*   - Unused bindings are implicitly dropped (weakening OK)         *)
+(*   - Branches MAY disagree on consumption                          *)
+(*   - Region exit MAY leave unconsumed values (implicit drop)       *)
+(*   - `drop(e)` is PERMITTED (explicit weakening)                   *)
+(* ================================================================ *)
+
+aff_expr     = let_expr           (* let x = e1 in e2 — affine binding, any type *)
+             | let_lin_expr       (* let! x = e1 in e2 — still valid, opts INTO linear *)
+             | lambda_expr
+             | app_expr
+             | pair_expr
+             | fst_expr
+             | snd_expr
+             | inl_expr
+             | inr_expr
+             | case_expr
+             | if_expr
+             | region_expr
+             | borrow_expr
+             | deref_expr
+             | drop_expr          (* PRESENT — explicit weakening allowed *)
+             | copy_expr
+             | block_expr
+             | ffi_expr
+             | binop_expr
+             | unop_expr
+             | string_new_expr
+             | string_concat_expr
+             | string_len_expr
+             | list_lit_expr
+             | list_index_expr
+             | tuple_lit_expr
+             | tuple_index_expr
+             | literal
+             | IDENT ;
+
+(* --- Bindings --- *)
+
+(* let introduces an AFFINE binding — body may or may not consume x.
+   Unlike the linear grammar, `let` accepts values of ANY type,
+   including linear types. Unconsumed values are implicitly dropped
+   at scope exit. *)
+let_expr     = "let" , IDENT , [ ":" , ty ] , "=" , aff_expr ,
+               "in" , aff_expr ;
+
+(* let! is still valid in affine grammar — it opts a binding INTO
+   the linear discipline within an otherwise affine context.
+   Body MUST consume x exactly once (linear island in affine sea). *)
+let_lin_expr = "let!" , IDENT , [ ":" , ty ] , "=" , aff_expr ,
+               "in" , aff_body_consuming ;
+
+(* When inside a let! body, linear consumption is required *)
+aff_body_consuming = aff_expr ;
+
+(* --- Functions --- *)
+
+lambda_expr  = "fn" , "(" , IDENT , ":" , ty , ")" , "->" , aff_expr ;
+app_expr     = aff_expr , aff_expr ;
+
+(* --- Products --- *)
+pair_expr    = "(" , aff_expr , "," , aff_expr , ")" ;
+fst_expr     = aff_expr , ".0" ;
+snd_expr     = aff_expr , ".1" ;
+
+(* --- Sums --- *)
+inl_expr     = "inl" , "[" , ty , "]" , aff_expr ;
+inr_expr     = "inr" , "[" , ty , "]" , aff_expr ;
+
+(* Case: branches are NOT required to agree on consumption.
+   One branch may consume a linear value while the other drops it.
+   This is the key relaxation vs the linear grammar. *)
+case_expr    = "case" , aff_expr , "of" ,
+               "inl" , IDENT , "=>" , aff_expr ,
+               "|" ,
+               "inr" , IDENT , "=>" , aff_expr ;
+
+(* --- Control flow --- *)
+(* Branches MAY disagree on consumption — unconsumed values are
+   implicitly dropped in the branch that doesn't use them. *)
+if_expr      = "if" , aff_expr ,
+               "then" , aff_expr ,
+               "else" , aff_expr ;
+
+(* --- Regions --- *)
+(* Region exit: unconsumed region-bound values are implicitly dropped.
+   Memory is reclaimed when the region is deallocated. Non-memory
+   resources (file handles, locks) SHOULD emit a lint warning. *)
+region_expr  = "region" , IDENT , "{" , aff_expr , "}" ;
+
+(* --- Borrowing --- *)
+borrow_expr  = "&" , aff_expr ;
+deref_expr   = "*" , aff_expr ;
+
+(* --- Drop (explicit weakening) --- *)
+(* `drop(e)` explicitly discards a value. In affine grammar this is
+   valid syntax; in linear grammar it is forbidden. *)
+drop_expr    = "drop" , "(" , aff_expr , ")" ;
+
+(* --- Copy (unrestricted only) --- *)
+copy_expr    = "copy" , "(" , aff_expr , ")" ;
+
+(* --- Block --- *)
+block_expr   = "{" , { aff_expr , ";" } , aff_expr , "}" ;
+
+(* --- FFI --- *)
+ffi_expr     = "__ffi" , "(" , STRING , { "," , aff_expr } , ")" ;
+
+(* --- Operators --- *)
+binop_expr   = aff_expr , binop , aff_expr ;
+unop_expr    = unop , aff_expr ;
+binop        = "+" | "-" | "*" | "/" | "%" | "<" | "<=" | ">" | ">="
+             | "==" | "!=" | "&&" | "||" ;
+unop         = "!" | "-" ;
+
+(* --- Strings --- *)
+string_new_expr    = "String.new@" , IDENT , "(" , STRING , ")" ;
+string_concat_expr = aff_expr , "++" , aff_expr ;
+string_len_expr    = "String.len" , "(" , aff_expr , ")" ;
+
+(* --- Collections --- *)
+list_lit_expr   = "[" , [ aff_expr , { "," , aff_expr } ] , "]" ;
+list_index_expr = aff_expr , "[" , aff_expr , "]" ;
+tuple_lit_expr  = "(" , aff_expr , { "," , aff_expr } , ")" ;
+tuple_index_expr = aff_expr , "." , NATURAL ;
+
+(* ================================================================ *)
+(* Types                                                             *)
+(* ================================================================ *)
+
+ty           = base_ty | string_ty | ref_ty | fun_ty | prod_ty
+             | sum_ty | region_ty | borrow_ty | list_ty | tuple_ty
+             | var_ty ;
+
+base_ty      = "()" | "Bool" | "I32" | "I64" | "F32" | "F64" ;
+string_ty    = "String@" , IDENT ;
+ref_ty       = "lin" , ty | "un" , ty ;
+fun_ty       = ty , "->" , ty ;
+prod_ty      = ty , "*" , ty ;
+sum_ty       = ty , "+" , ty ;
+region_ty    = "Region" , IDENT , ty ;
+borrow_ty    = "&" , ty ;
+list_ty      = "[" , ty , "]" ;
+tuple_ty     = "(" , ty , { "," , ty } , ")" ;
+var_ty       = IDENT ;
+
+(* ================================================================ *)
+(* Terminals                                                         *)
+(* ================================================================ *)
+
+IDENT        = LETTER , { LETTER | DIGIT | "_" } ;
+NATURAL      = DIGIT , { DIGIT } ;
+STRING       = '"' , { CHAR } , '"' ;
+LETTER       = "a" | ... | "z" | "A" | ... | "Z" | "_" ;
+DIGIT        = "0" | ... | "9" ;
+CHAR         = (* any character except unescaped '"' *) ;

@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: PMPL-1.0-or-later
-# SPDX-FileCopyrightText: 2025 Jonathan D.A. Jewell
+# SPDX-FileCopyrightText: 2026 Jonathan D.A. Jewell
 
 [package]
 name = "ephapax-linear"
@@ -9,10 +9,12 @@ rust-version = "1.83"
 license = "PMPL-1.0-or-later"
 authors = ["Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk>"]
 repository = "https://github.com/hyperpolymath/ephapax"
-description = "Solo dialect linear types parser, type checker, and interpreter for ephapax"
-keywords = ["linear-types", "parser", "affine", "memory-safety"]
+description = "Standalone linear/affine discipline checker for ephapax — dual grammars with full substructural focusing"
+keywords = ["linear-types", "affine-types", "substructural", "type-checker"]
 categories = ["compilers", "parser-implementations"]
 
 [dependencies]
+ephapax-syntax = { path = "../src/ephapax-syntax" }
+thiserror = "2"
 
 [dev-dependencies]

@@ -13,7 +13,7 @@
 
 use ephapax_parser::parse_module;
 use ephapax_syntax::{Decl, Expr, ExprKind, Module, Span, Ty};
-use ephapax_typing::{type_check_module_with_mode, Mode};
+use ephapax_typing::type_check_module;
 use std::collections::HashMap;
 use std::sync::Mutex;
 use tower_lsp::jsonrpc::Result;
@@ -87,7 +87,7 @@ impl Backend {
                 module_opt = Some(module.clone());
 
                 // Type-check (try linear mode first, then affine)
-                if let Err(err) = type_check_module_with_mode(&module, Mode::Linear) {
+                if let Err(err) = type_check_module(&module) {
                     let span = extract_error_span(&err);
                     diagnostics.push(Diagnostic {
                         range: span_to_range(text, span),

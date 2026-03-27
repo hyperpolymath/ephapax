@@ -2,11 +2,15 @@
 // SPDX-License-Identifier: PMPL-1.0-or-later
 // SPDX-FileCopyrightText: 2025 Jonathan D.A. Jewell
 
-//! Ephapax Type Checker (Dyadic: Affine + Linear modes)
+//! Ephapax Type Checker (Dyadic Design)
 //!
-//! Implements typing rules for BOTH affine and linear modes:
-//! - **Affine mode**: Values used ≤1 time (can be dropped implicitly)
-//! - **Linear mode**: Values used exactly 1 time (must be consumed)
+//! Implements the dyadic type system where BOTH qualifiers coexist per-program:
+//! - **`let` (affine)**: Values used ≤1 time (can be dropped implicitly)
+//! - **`let!` (linear)**: Values used exactly 1 time (must be consumed)
+//!
+//! The dyadic property is per-binding, not a global mode. `let!` always means
+//! exactly-once — there is no flag to weaken it. This matches the formal
+//! semantics in Typing.v and the Orthogonality Lemma in RegionLinear.idr.
 //!
 //! Based on formal/Typing.v
 
@@ -15,15 +19,6 @@ use ephapax_syntax::{
 };
 use std::collections::HashMap;
 use thiserror::Error;
-
-/// Type checking mode (dyadic design)
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Mode {
-    /// Affine mode: values used ≤1 time (permissive, allows implicit drops)
-    Affine,
-    /// Linear mode: values used exactly 1 time (strict, no implicit drops)
-    Linear,
-}
 
 /// Type checking errors
 #[derive(Error, Debug, Clone, PartialEq)]
@@ -128,16 +123,9 @@ impl Context {
         }
     }
 
-    /// Check all linear variables have been used (mode-aware)
-    /// - In Linear mode: MUST consume all linear variables
-    /// - In Affine mode: CAN leave linear variables unconsumed (implicit drop)
-    pub fn check_all_linear_used(&self, mode: Mode) -> Result<(), TypeError> {
-        // In affine mode, unconsumed variables are allowed (implicit drop)
-        if mode == Mode::Affine {
-            return Ok(());
-        }
-
-        // In linear mode, all linear variables MUST be consumed
+    /// Check all linear variables have been consumed.
+    /// `let!` bindings MUST be used exactly once — this is the dyadic contract.
+    pub fn check_all_linear_used(&self) -> Result<(), TypeError> {
         for (name, entry) in &self.vars {
             if entry.ty.is_linear() && !entry.used {
                 return Err(TypeError::LinearVariableNotConsumed(name.clone()));
@@ -229,31 +217,15 @@ impl Context {
 /// Type checker state
 pub struct TypeChecker {
     ctx: Context,
-    mode: Mode,
 }
 
 impl TypeChecker {
-    /// Create a new type checker in the specified mode
-    pub fn new_with_mode(mode: Mode) -> Self {
+    /// Create a new type checker.
+    /// The dyadic property is per-binding (`let` vs `let!`), not a global mode.
+    pub fn new() -> Self {
         Self {
             ctx: Context::new(),
-            mode,
         }
-    }
-
-    /// Create a new type checker in linear mode (strict, default)
-    pub fn new() -> Self {
-        Self::new_with_mode(Mode::Linear)
-    }
-
-    /// Get the current checking mode
-    pub fn mode(&self) -> Mode {
-        self.mode
-    }
-
-    /// Set the checking mode
-    pub fn set_mode(&mut self, mode: Mode) {
-        self.mode = mode;
     }
 
     /// Type check an expression
@@ -386,13 +358,12 @@ impl TypeChecker {
         self.ctx.extend(name.clone(), value_ty.clone());
         let body_ty = self.check(body)?;
 
-        // In Linear mode: linear variable MUST be consumed
-        // In Affine mode: linear variable CAN be unconsumed (implicit drop OK)
-        if self.mode == Mode::Linear {
-            if let Some(entry) = self.ctx.vars.get(name) {
-                if entry.ty.is_linear() && !entry.used {
-                    return Err(TypeError::LinearVariableNotConsumed(name.clone()));
-                }
+        // `let` bindings of linear types still get linearity checks —
+        // the binding form (`let` vs `let!`) determines syntax, but
+        // the TYPE determines whether exactly-once consumption is required.
+        if let Some(entry) = self.ctx.vars.get(name) {
+            if entry.ty.is_linear() && !entry.used {
+                return Err(TypeError::LinearVariableNotConsumed(name.clone()));
             }
         }
 
@@ -403,12 +374,10 @@ impl TypeChecker {
         self.ctx.extend(param.clone(), param_ty.clone());
         let body_ty = self.check(body)?;
 
-        // Check linear param was consumed (mode-aware)
-        if self.mode == Mode::Linear {
-            if let Some(entry) = self.ctx.vars.get(param) {
-                if entry.ty.is_linear() && !entry.used {
-                    return Err(TypeError::LinearVariableNotConsumed(param.clone()));
-                }
+        // Linear params must be consumed in the body
+        if let Some(entry) = self.ctx.vars.get(param) {
+            if entry.ty.is_linear() && !entry.used {
+                return Err(TypeError::LinearVariableNotConsumed(param.clone()));
             }
         }
 
@@ -649,12 +618,10 @@ impl TypeChecker {
         self.ctx.extend(name.clone(), value_ty.clone());
         let body_ty = self.check(body)?;
 
-        // Ensure linear variable was consumed (mode-aware)
-        if self.mode == Mode::Linear {
-            if let Some(entry) = self.ctx.vars.get(name) {
-                if entry.ty.is_linear() && !entry.used {
-                    return Err(TypeError::LinearVariableNotConsumed(name.clone()));
-                }
+        // let! bindings MUST be consumed — this is the whole point
+        if let Some(entry) = self.ctx.vars.get(name) {
+            if entry.ty.is_linear() && !entry.used {
+                return Err(TypeError::LinearVariableNotConsumed(name.clone()));
             }
         }
 
@@ -754,12 +721,10 @@ impl TypeChecker {
                 self.ctx.extend(left_var.clone(), *left.clone());
                 let left_result_ty = self.check(left_body)?;
 
-                // Check linear branch variable was consumed (mode-aware)
-                if self.mode == Mode::Linear {
-                    if let Some(entry) = self.ctx.vars.get(left_var) {
-                        if entry.ty.is_linear() && !entry.used {
-                            return Err(TypeError::LinearVariableNotConsumed(left_var.clone()));
-                        }
+                // Linear branch variable must be consumed
+                if let Some(entry) = self.ctx.vars.get(left_var) {
+                    if entry.ty.is_linear() && !entry.used {
+                        return Err(TypeError::LinearVariableNotConsumed(left_var.clone()));
                     }
                 }
 
@@ -774,12 +739,10 @@ impl TypeChecker {
                 self.ctx.extend(right_var.clone(), *right.clone());
                 let right_result_ty = self.check(right_body)?;
 
-                // Check linear branch variable was consumed (mode-aware)
-                if self.mode == Mode::Linear {
-                    if let Some(entry) = self.ctx.vars.get(right_var) {
-                        if entry.ty.is_linear() && !entry.used {
-                            return Err(TypeError::LinearVariableNotConsumed(right_var.clone()));
-                        }
+                // Linear branch variable must be consumed
+                if let Some(entry) = self.ctx.vars.get(right_var) {
+                    if entry.ty.is_linear() && !entry.used {
+                        return Err(TypeError::LinearVariableNotConsumed(right_var.clone()));
                     }
                 }
 
@@ -1047,9 +1010,37 @@ impl Default for TypeChecker {
     }
 }
 
-/// Type check an entire module (mode-aware)
-pub fn type_check_module_with_mode(module: &Module, mode: Mode) -> Result<(), TypeError> {
-    let mut tc = TypeChecker::new_with_mode(mode);
+// Re-export for backward compatibility during migration.
+// These will be removed once all downstream crates are updated.
+/// Deprecated: The dyadic property is per-binding, not a global mode.
+/// This type exists only for backward compatibility and will be removed.
+#[deprecated(note = "Mode removed: dyadic property is per-binding (let vs let!), not a global switch")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Mode {
+    /// Linear (the only real mode — kept for migration)
+    Linear,
+}
+
+/// Deprecated: Use `type_check_module` directly.
+#[deprecated(note = "Use type_check_module() — Mode parameter removed")]
+#[allow(deprecated)]
+pub fn type_check_module_with_mode(module: &Module, _mode: Mode) -> Result<(), TypeError> {
+    type_check_module(module)
+}
+
+/// Deprecated: Use `type_check_expr` directly.
+#[deprecated(note = "Use type_check_expr() — Mode parameter removed")]
+#[allow(deprecated)]
+pub fn type_check_expr_with_mode(expr: &Expr, _mode: Mode) -> Result<Ty, TypeError> {
+    type_check_expr(expr)
+}
+
+/// Type check an entire module.
+///
+/// The dyadic property is per-binding: `let` is affine, `let!` is linear.
+/// There is no global mode — `let!` always means exactly-once consumption.
+pub fn type_check_module(module: &Module) -> Result<(), TypeError> {
+    let mut tc = TypeChecker::new();
 
     // First pass: collect all function signatures
     for decl in &module.decls {
@@ -1099,16 +1090,14 @@ pub fn type_check_module_with_mode(module: &Module, mode: Mode) -> Result<(), Ty
                     });
                 }
 
-                // Check all linear params were consumed (mode-aware)
-                if mode == Mode::Linear {
-                    for (param_name, param_ty) in params {
-                        if param_ty.is_linear() {
-                            if let Some(entry) = tc.ctx.vars.get(param_name) {
-                                if !entry.used {
-                                    return Err(TypeError::LinearVariableNotConsumed(
-                                        param_name.clone(),
-                                    ));
-                                }
+                // All linear params must be consumed — no exceptions
+                for (param_name, param_ty) in params {
+                    if param_ty.is_linear() {
+                        if let Some(entry) = tc.ctx.vars.get(param_name) {
+                            if !entry.used {
+                                return Err(TypeError::LinearVariableNotConsumed(
+                                    param_name.clone(),
+                                ));
                             }
                         }
                     }
@@ -1126,23 +1115,13 @@ pub fn type_check_module_with_mode(module: &Module, mode: Mode) -> Result<(), Ty
     Ok(())
 }
 
-/// Type check an entire module (defaults to Linear mode)
-pub fn type_check_module(module: &Module) -> Result<(), TypeError> {
-    type_check_module_with_mode(module, Mode::Linear)
-}
-
-/// Type check a single expression with specified mode
-pub fn type_check_expr_with_mode(expr: &Expr, mode: Mode) -> Result<Ty, TypeError> {
-    let mut tc = TypeChecker::new_with_mode(mode);
+/// Type check a single expression.
+pub fn type_check_expr(expr: &Expr) -> Result<Ty, TypeError> {
+    let mut tc = TypeChecker::new();
     tc.check(expr)
 }
 
-/// Type check a single expression (defaults to Linear mode)
-pub fn type_check_expr(expr: &Expr) -> Result<Ty, TypeError> {
-    type_check_expr_with_mode(expr, Mode::Linear)
-}
-
-/// Type check a single expression (alias for type_check_expr)
+/// Type check a single expression (alias for type_check_expr).
 pub fn type_check(expr: &Expr) -> Result<Ty, TypeError> {
     type_check_expr(expr)
 }
@@ -1648,12 +1627,16 @@ mod tests {
         ));
     }
 
-    // ===== DYADIC DESIGN: Affine vs. Linear Mode Tests =====
+    // ===== DYADIC DESIGN: let (affine) vs let! (linear) Tests =====
+    //
+    // The dyadic property is PER-BINDING, not a global mode.
+    // `let!` always means exactly-once. `let` means at-most-once.
+    // There is no flag to weaken this.
 
     #[test]
-    fn test_affine_mode_allows_unconsumed_linear() {
-        // In AFFINE mode: unconsumed linear variables are OK (implicit drop)
-        let mut tc = TypeChecker::new_with_mode(Mode::Affine);
+    fn test_linear_binding_rejects_unconsumed() {
+        // let! binding NOT consumed — must be rejected
+        let mut tc = TypeChecker::new();
         tc.ctx.enter_region("r".into());
 
         let expr = dummy_expr(ExprKind::Let {
@@ -1663,48 +1646,24 @@ mod tests {
                 region: "r".into(),
                 value: "hello".to_string(),
             })),
-            // s is NOT consumed in body - just return unit
+            // s is NOT consumed in body
             body: Box::new(dummy_expr(ExprKind::Lit(Literal::Unit))),
         });
 
-        // In affine mode, this should PASS (implicit drop allowed)
-        assert!(
-            tc.check(&expr).is_ok(),
-            "Affine mode should allow unconsumed linear variables"
-        );
-    }
-
-    #[test]
-    fn test_linear_mode_rejects_unconsumed_linear() {
-        // In LINEAR mode: unconsumed linear variables are ERROR
-        let mut tc = TypeChecker::new_with_mode(Mode::Linear);
-        tc.ctx.enter_region("r".into());
-
-        let expr = dummy_expr(ExprKind::Let {
-            name: "s".into(),
-            ty: None,
-            value: Box::new(dummy_expr(ExprKind::StringNew {
-                region: "r".into(),
-                value: "hello".to_string(),
-            })),
-            // s is NOT consumed in body - just return unit
-            body: Box::new(dummy_expr(ExprKind::Lit(Literal::Unit))),
-        });
-
-        // In linear mode, this should FAIL (must consume s)
+        // Must FAIL — linear type not consumed
         assert!(
             matches!(
                 tc.check(&expr),
                 Err(TypeError::LinearVariableNotConsumed(_))
             ),
-            "Linear mode should reject unconsumed linear variables"
+            "Unconsumed linear variable must be rejected"
         );
     }
 
     #[test]
-    fn test_affine_mode_still_rejects_double_use() {
-        // AFFINE mode: can drop, but still can't use twice
-        let mut tc = TypeChecker::new_with_mode(Mode::Affine);
+    fn test_linear_rejects_double_use() {
+        // Linear variable used twice — must be rejected
+        let mut tc = TypeChecker::new();
         tc.ctx.enter_region("r".into());
         tc.ctx.extend("s".into(), Ty::String("r".into()));
 
@@ -1712,27 +1671,17 @@ mod tests {
         let var1 = dummy_expr(ExprKind::Var("s".into()));
         assert!(tc.check(&var1).is_ok());
 
-        // Second use - Error (even in affine mode!)
+        // Second use - Error
         let var2 = dummy_expr(ExprKind::Var("s".into()));
         assert!(
             matches!(tc.check(&var2), Err(TypeError::LinearVariableReused(_))),
-            "Affine mode should still reject double use"
+            "Double use of linear variable must be rejected"
         );
     }
 
     #[test]
-    fn test_mode_switching() {
-        // Test that we can switch modes
-        let mut tc = TypeChecker::new_with_mode(Mode::Linear);
-        assert_eq!(tc.mode(), Mode::Linear);
-
-        tc.set_mode(Mode::Affine);
-        assert_eq!(tc.mode(), Mode::Affine);
-    }
-
-    #[test]
-    fn test_module_affine_mode() {
-        // Module with function that doesn't consume linear param
+    fn test_module_rejects_unconsumed_linear_param() {
+        // Function with linear param that isn't consumed — must be rejected
         let module = Module {
             name: "test".into(),
             decls: vec![Decl::Fn {
@@ -1743,44 +1692,16 @@ mod tests {
             }],
         };
 
-        // Should FAIL in linear mode
         assert!(
-            type_check_module_with_mode(&module, Mode::Linear).is_err(),
-            "Linear mode should reject unconsumed param"
-        );
-
-        // Should PASS in affine mode
-        assert!(
-            type_check_module_with_mode(&module, Mode::Affine).is_ok(),
-            "Affine mode should allow unconsumed param"
+            type_check_module(&module).is_err(),
+            "Unconsumed linear param must be rejected"
         );
     }
 
     #[test]
-    fn test_affine_mode_if_branch_can_not_consume() {
-        // In affine mode, branches don't HAVE to consume linear vars
-        let mut tc = TypeChecker::new_with_mode(Mode::Affine);
-        tc.ctx.enter_region("r".into());
-        tc.ctx.extend("s".into(), Ty::String("r".into()));
-
-        let expr = dummy_expr(ExprKind::If {
-            cond: Box::new(dummy_expr(ExprKind::Lit(Literal::Bool(true)))),
-            // Neither branch consumes s
-            then_branch: Box::new(dummy_expr(ExprKind::Lit(Literal::I32(1)))),
-            else_branch: Box::new(dummy_expr(ExprKind::Lit(Literal::I32(2)))),
-        });
-
-        // In affine mode, this should PASS
-        assert!(
-            tc.check(&expr).is_ok(),
-            "Affine mode allows unconsumed vars in branches"
-        );
-    }
-
-    #[test]
-    fn test_linear_mode_if_branch_must_agree() {
-        // In linear mode, both branches must agree on consumption
-        let mut tc = TypeChecker::new_with_mode(Mode::Linear);
+    fn test_if_branches_must_agree_on_linear_consumption() {
+        // Branches disagree on consuming a linear variable — must be rejected
+        let mut tc = TypeChecker::new();
         tc.ctx.enter_region("r".into());
         tc.ctx.extend("s".into(), Ty::String("r".into()));
 
@@ -1793,13 +1714,12 @@ mod tests {
             else_branch: Box::new(dummy_expr(ExprKind::Lit(Literal::Unit))),
         });
 
-        // In linear mode, this should FAIL (branch disagreement)
         assert!(
             matches!(
                 tc.check(&expr),
                 Err(TypeError::BranchLinearityMismatchDetailed { .. })
             ),
-            "Linear mode requires branch agreement"
+            "Branch disagreement on linear consumption must be rejected"
         );
     }
 

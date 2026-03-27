@@ -13,7 +13,7 @@ use ephapax_interp::Interpreter;
 use ephapax_lexer::Lexer;
 use ephapax_parser::{parse, parse_module};
 use ephapax_repl::Repl;
-use ephapax_typing::{type_check_module, type_check_module_with_mode, Mode as TypingMode};
+use ephapax_typing::type_check_module;
 // AST dump support (sexpr + json output)
 #[allow(unused_imports)]
 use ephapax_ir;
@@ -293,18 +293,9 @@ fn run_file(path: &PathBuf, ffi_libs: &[String], verbose: bool) -> Result<(), St
     }
 }
 
-fn check_files(files: &[PathBuf], mode_str: &str, verbose: bool) -> Result<(), String> {
-    // Parse mode argument
-    let mode = match mode_str.to_lowercase().as_str() {
-        "linear" => TypingMode::Linear,
-        "affine" => TypingMode::Affine,
-        _ => {
-            return Err(format!(
-                "Invalid mode '{}'. Must be 'linear' or 'affine'",
-                mode_str
-            ));
-        }
-    };
+fn check_files(files: &[PathBuf], _mode_str: &str, verbose: bool) -> Result<(), String> {
+    // The dyadic property is per-binding (let vs let!), not a global mode.
+    // The mode_str parameter is accepted but ignored for backward compatibility.
 
     let mut errors = 0;
     let mut checked = 0;
@@ -333,8 +324,8 @@ fn check_files(files: &[PathBuf], mode_str: &str, verbose: bool) -> Result<(), S
             }
         };
 
-        // Type check with specified mode
-        match type_check_module_with_mode(&module, mode) {
+        // Type check
+        match type_check_module(&module) {
             Ok(()) => {
                 if verbose {
                     println!(
@@ -374,7 +365,7 @@ fn compile_file(
     output: Option<PathBuf>,
     opt_level: u8,
     debug: bool,
-    mode_str: &str,
+    _mode_str: &str,
     verbose: bool,
 ) -> Result<(), String> {
     let content =
@@ -382,17 +373,7 @@ fn compile_file(
 
     let filename = path.to_str().unwrap_or("input");
 
-    // Parse mode
-    let mode = match mode_str.to_lowercase().as_str() {
-        "linear" => TypingMode::Linear,
-        "affine" => TypingMode::Affine,
-        _ => {
-            return Err(format!(
-                "Invalid mode '{}'. Must be 'linear' or 'affine'",
-                mode_str
-            ));
-        }
-    };
+    // The mode_str parameter is accepted but ignored — dyadic property is per-binding.
 
     // Parse
     let module = parse_module(&content, filename).map_err(|errors| {
@@ -406,28 +387,22 @@ fn compile_file(
         println!("{} Parsed {} declarations", "✓".green(), module.decls.len());
     }
 
-    // Type check with mode
-    type_check_module_with_mode(&module, mode).map_err(|e| {
+    // Type check
+    type_check_module(&module).map_err(|e| {
         report_type_error(filename, &content, &e);
         format!("Type error: {}", e)
     })?;
 
     if verbose {
-        println!("{} Type check passed ({} mode)", "✓".green(), mode_str);
+        println!("{} Type check passed", "✓".green());
     }
-
-    // Convert typing mode to codegen mode
-    let codegen_mode = match mode {
-        TypingMode::Linear => ephapax_wasm::Mode::Linear,
-        TypingMode::Affine => ephapax_wasm::Mode::Affine,
-    };
 
     // Compile to WASM (with or without debug info)
     let wasm_bytes = if debug {
-        ephapax_wasm::compile_module_with_debug(&module, codegen_mode, filename)
+        ephapax_wasm::compile_module(&module)
             .map_err(|e| format!("Codegen error: {}", e))?
     } else {
-        ephapax_wasm::compile_module_with_mode(&module, codegen_mode)
+        ephapax_wasm::compile_module(&module)
             .map_err(|e| format!("Codegen error: {}", e))?
     };
 
@@ -461,7 +436,7 @@ fn compile_file(
     // Write source map if debug enabled
     if debug {
         let source_map =
-            ephapax_wasm::generate_source_map_for_module(&module, codegen_mode, filename)
+            ephapax_wasm::generate_source_map_for_module(&module, filename)
                 .map_err(|e| format!("Source map generation error: {}", e))?;
 
         let map_path = output_path.with_extension("wasm.map");

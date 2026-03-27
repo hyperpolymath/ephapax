@@ -129,18 +129,19 @@ const TYPE_CLOSURE_CALL: u32 = TYPE_I32_I32_I32;
 const NUM_FIXED_TYPES: u32 = 7;
 
 // ---------------------------------------------------------------------------
-// Compilation mode (dyadic design)
+// Compilation mode (deprecated — dyadic property is per-binding)
 // ---------------------------------------------------------------------------
 
-/// Compilation mode for dyadic type system
+/// Deprecated: The dyadic property is per-binding (`let` vs `let!`), not a
+/// global mode. This enum exists for backward compatibility only.
+#[deprecated(note = "Mode removed: dyadic property is per-binding (let vs let!), not a global switch")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Mode {
-    /// Affine mode: use ≤1 time (implicit drops allowed)
-    Affine,
-    /// Linear mode: use exactly 1 time (no implicit drops)
+    /// Linear (the only real mode)
     Linear,
 }
 
+#[allow(deprecated)]
 impl Default for Mode {
     fn default() -> Self {
         Mode::Linear
@@ -402,10 +403,7 @@ impl Codegen {
 
     /// Enable debug information generation
     pub fn enable_debug(&mut self, file_path: String) {
-        let mode_str = match self.mode {
-            Mode::Affine => "affine".to_string(),
-            Mode::Linear => "linear".to_string(),
-        };
+        let mode_str = "linear".to_string();
 
         self.debug_info = Some(DebugInfo {
             file_path,
@@ -1590,14 +1588,8 @@ impl Codegen {
         //
         // In both modes, the type checker has already validated correctness,
         // so we don't need runtime enforcement here. This is a static property.
-        if is_linear && self.mode == Mode::Affine {
-            if let Some(&consumed) = self.locals.linear_locals.get(&local_idx) {
-                if !consumed {
-                    // In affine mode, unconsumed linear values are allowed.
-                    // The WASM runtime will handle cleanup via region exit.
-                }
-            }
-        }
+        // Linear values are always enforced by the type checker.
+        // No runtime mode check needed — the dyadic property is per-binding.
     }
 
     /// Find free variables in an expression.
@@ -2263,24 +2255,18 @@ pub fn compile_sexpr_module(sexpr: &str) -> Result<Vec<u8>, String> {
     codegen.compile_sexpr_module(sexpr)
 }
 
-/// Compile an entire Ephapax [`AstModule`] to WebAssembly with specified mode.
-pub fn compile_module_with_mode(module: &AstModule, mode: Mode) -> Result<Vec<u8>, CodegenError> {
-    let mut codegen = Codegen::new_with_mode(mode);
-    codegen.compile_ast_module(module)
-}
-
-/// Compile an entire Ephapax [`AstModule`] to WebAssembly (defaults to Linear mode).
+/// Compile an entire Ephapax [`AstModule`] to WebAssembly.
 pub fn compile_module(module: &AstModule) -> Result<Vec<u8>, CodegenError> {
-    compile_module_with_mode(module, Mode::Linear)
+    let mut codegen = Codegen::new();
+    codegen.compile_ast_module(module)
 }
 
 /// Compile an Ephapax module with debug information enabled
 pub fn compile_module_with_debug(
     module: &AstModule,
-    mode: Mode,
     file_path: &str,
 ) -> Result<Vec<u8>, CodegenError> {
-    let mut codegen = Codegen::new_with_mode(mode);
+    let mut codegen = Codegen::new();
     codegen.enable_debug(file_path.to_string());
     codegen.compile_ast_module(module)
 }
@@ -2288,10 +2274,9 @@ pub fn compile_module_with_debug(
 /// Generate source map for a compiled module
 pub fn generate_source_map_for_module(
     module: &AstModule,
-    mode: Mode,
     file_path: &str,
 ) -> Result<String, CodegenError> {
-    let mut codegen = Codegen::new_with_mode(mode);
+    let mut codegen = Codegen::new();
     codegen.enable_debug(file_path.to_string());
 
     // Compile to populate debug info
@@ -2303,6 +2288,14 @@ pub fn generate_source_map_for_module(
     } else {
         Err(CodegenError("Debug info not enabled".to_string()))
     }
+
+}
+
+/// Deprecated: Use `compile_module` directly.
+#[deprecated(note = "Use compile_module() — Mode parameter removed")]
+#[allow(deprecated)]
+pub fn compile_module_with_mode(module: &AstModule, _mode: Mode) -> Result<Vec<u8>, CodegenError> {
+    compile_module(module)
 }
 
 // ===========================================================================

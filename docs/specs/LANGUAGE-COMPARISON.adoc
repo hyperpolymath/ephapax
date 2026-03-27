@@ -1,0 +1,233 @@
+// SPDX-License-Identifier: PMPL-1.0-or-later
+= Ephapax Language Comparison
+Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk>
+:toc:
+:toclevels: 3
+:icons: font
+:source-highlighter: rouge
+
+== Overview
+
+This document compares Ephapax v2 against established languages across four
+quality attributes: dependability, security, performance, and versatility.
+
+Ephapax's unique contribution is the *triple combination* of linear/affine types,
+typed algebraic effects, and region-based memory — with a Harvard-separated
+compile-time meta plane. No other active language has this.
+
+== Quality Scores (1-10)
+
+[cols="2,1,1,1,1,1,1,1,1,1,1,1",options="header"]
+|===
+| Quality | Ephapax | Rust | Haskell | Koka | Idris 2 | ATS2 | Clean | OCaml 5 | Zig | Ada/SPARK | Lean 4
+
+| Dependability | 8 | 7 | 6 | 5 | 10 | 9 | 5 | 5 | 3 | 9 | 10
+| Security | 7 | 7 | 5 | 4 | 6 | 7 | 4 | 4 | 4 | 8 | 5
+| Performance | 7 | 9 | 4 | 7 | 4 | 8 | 5 | 6 | 10 | 7 | 5
+| Versatility | 7 | 9 | 8 | 6 | 7 | 4 | 4 | 8 | 7 | 6 | 7
+|===
+
+=== Score Rationale (Ephapax)
+
+* *Dependability 8*: Linear+affine+regions+contracts+typed effects. Loses 2
+  points: Coq proofs incomplete (progress/preservation Admitted), no dependent types.
+* *Security 7*: FFI capabilities, linearity prevents resource leaks, Harvard comptime.
+  Loses points: no information flow tracking, no capability-based security beyond FFI.
+* *Performance 7*: Regions (bump alloc, no GC), linear enables in-place mutation, WASM.
+  Loses points: no native backend, no SIMD, less mature optimisation than Rust/Zig.
+* *Versatility 7*: ADTs, effects, traits, comptime, modules. Loses points: no ecosystem,
+  no dependent types, immature tooling.
+
+== Feature Matrix
+
+[cols="3,1,1,1,1,1,1,1,1,1,1,1",options="header"]
+|===
+| Feature | Ephapax | Rust | Haskell | Koka | Idris 2 | ATS2 | Clean | OCaml 5 | Zig | Ada/SPARK | Lean 4
+
+| Linear types | Yes | No | Partial | No | Yes (QTT) | Yes | No | No | No | No | Encodable
+| Affine types | Yes | Yes | No | No | Via QTT | Yes | Uniqueness | No | No | No | Encodable
+| *Both per-binding* | *Yes* | No | No | No | No | No | No | No | No | No | No
+| Typed effects | Yes | No | Library | Yes | No | No | No | Untyped | No | No | No
+| Effect inference | No | N/A | N/A | Yes | N/A | N/A | N/A | N/A | N/A | N/A | N/A
+| GC-free | Yes | Yes | No | Yes | Backend | Yes | No | No | Yes | Yes | Yes
+| Regions | Yes | No | No | No | No | Optional | No | No | No | No | No
+| Dependent types | No | No | Approx | No | Full | Limited | No | No | No | No | Full
+| Contracts | Yes | No | No | No | Provable | No | No | No | No | Yes (SMT) | Provable
+| Comptime meta | Harvard | Proc macros | TH | No | Elab refl | Templates | Generic | PPX | Deep | Generics | Macros+elab
+| Type introspect | Yes | No | Yes (TH) | No | Yes | No | No | No | Yes | No | Yes
+| Traits | Yes | Yes | Typeclasses | No | Interfaces | No | Classes | Proposed | No | Tagged | Typeclasses
+| ML functors | No | No | No | No | No | No | Def/impl | Yes | No | Generic pkg | No
+| WASM target | Yes | Yes | Via GHCJS | No | No | No | No | No | Yes | No | No
+|===
+
+== What Ephapax Uniquely Offers
+
+These combinations exist in no other active language:
+
+=== 1. Dyadic Linear+Affine Per-Binding
+
+[source,ephapax]
+----
+let  x = value in ...   // affine: use at most once, implicit drop OK
+let! x = value in ...   // linear: use exactly once, no implicit drop
+----
+
+Idris 2 has QTT (0/1/omega quantities) which is more general but more complex.
+Rust has affine (ownership) but not linear (values can always be dropped via `Drop`).
+Nobody else has both disciplines selectable per-binding with this simplicity.
+
+=== 2. Typed Algebraic Effects + Linear Types
+
+[source,ephapax]
+----
+effect State(s) =
+    fn get(): s
+    fn put(new: s): ()
+end
+
+// One-shot continuations when captures are linear
+handle computation with
+| get(), resume(once) => resume(current_state)
+end
+----
+
+Koka has typed effects but no substructural types.
+Idris 2 has substructural types but no algebraic effects.
+The one-shot continuation guarantee for linear captures is a genuine research
+contribution — it prevents linearity laundering through multi-shot resume.
+
+=== 3. Regions + Linear Types + Typed Effects (Triple Combination)
+
+* *Regions* handle memory (scoped allocation, bulk free at exit)
+* *Linearity* handles resources (file handles, locks — exactly-once consumption)
+* *Effects* handle side effects (IO, state, exceptions — tracked in types)
+
+Each covers a different concern. They compose because:
+
+* Region-bound values cannot be passed to effect operations (prevents escape)
+* Linear captures force one-shot resume (prevents duplication)
+* Affine bindings are implicitly dropped at region exit (memory safety)
+
+=== 4. Harvard-Separated Compile-Time Meta Plane
+
+[source,ephapax]
+----
+@comptime {
+    fn derive_show(T: Type): SurfaceDecl = ...
+}
+----
+
+The meta plane is provably total and pure. It *cannot* reference runtime linear
+values (Harvard separation). Generated code is validated by the type checker.
+Zig's comptime is more powerful but has no separation guarantee.
+
+=== 5. Observe-or-Consume Trait Categories
+
+Trait methods on linear types naturally stratify:
+
+* *Observation traits* — borrow only (`fn inspect(x: &a)`)
+* *Transformation traits* — consume and return (`fn transform(x: a): a`)
+
+The trait bound `[a: Inspect + Transform]` tells the caller exactly what
+ownership cost the function demands. No other language makes this a first-class
+design pattern.
+
+=== 6. Automatic Purity Certification via Effect Inference
+
+Functions without a `with` clause are pure. Combined with comptime, this means
+any pure function is automatically eligible for compile-time evaluation — no
+annotation required.
+
+== Where Ephapax Offers Nothing
+
+[cols="1,2,2",options="header"]
+|===
+| Gap | Who Fills It | Impact
+
+| Dependent types | Idris 2, Lean 4, Agda | Cannot prove arbitrary properties
+| Effect inference | Koka | Must annotate effects explicitly
+| Mature ecosystem | Rust, Haskell, OCaml | No libraries, no production users
+| Native backend | Rust, Zig, C | WASM only
+| Multicore/parallelism | OCaml 5, Rust, Go | No concurrency primitives
+| ML functors | OCaml | Module system less expressive
+| Hot code reload | Erlang/Elixir | No runtime code loading
+|===
+
+== Per-Language Detailed Comparison
+
+=== Rust
+
+*Substructural types*: Affine only (ownership = move semantics, `Drop` trait allows
+implicit destruction). No linear types — Rust cannot express "must be consumed."
+
+*Effects*: None. Side effects are invisible in the type system.
+
+*Memory*: Ownership + borrow checker + lifetimes. No GC.
+
+*Where Rust is better*: More mature (decade of production use), native backend,
+SIMD, async/await, richer ecosystem.
+
+*Where Ephapax is better*: Linear types (not just affine), typed effects, regions
+(simpler than lifetimes for scoped allocation), contracts, Harvard comptime.
+
+=== Haskell (GHC)
+
+*Substructural types*: Linear Haskell (GHC 9.0+) adds multiplicity on function
+arrows only. No affine types. No per-binding granularity.
+
+*Effects*: Monadic. No native algebraic effects (libraries only).
+
+*Memory*: GC.
+
+*Where Haskell is better*: More mature typeclasses, Template Haskell, lazy
+evaluation (different paradigm), vast library ecosystem.
+
+*Where Ephapax is better*: Per-binding linearity, typed algebraic effects (not
+monadic), no GC, contracts, Harvard comptime.
+
+=== Koka
+
+*Substructural types*: None.
+
+*Effects*: First-class typed algebraic effects with full inference. Koka's flagship.
+
+*Memory*: Perceus reference counting.
+
+*Where Koka is better*: Effect inference (ephapax requires explicit annotations),
+more mature effect system, FBIP optimisation.
+
+*Where Ephapax is better*: Linear+affine types, regions (no per-object RC overhead),
+contracts, comptime, traits.
+
+=== Idris 2
+
+*Substructural types*: Full QTT (0/1/omega quantities). Strictly more expressive
+than Ephapax's two-level system.
+
+*Effects*: Indexed monads (no algebraic effects).
+
+*Memory*: Reference counting (RefC backend) or GC (Chez Scheme backend).
+
+*Where Idris 2 is better*: Dependent types (proves arbitrary theorems),
+QTT subsumes linear+affine, elaborator reflection.
+
+*Where Ephapax is better*: Typed algebraic effects, regions (no GC/RC),
+simpler mental model (let/let! vs quantity annotations), contracts as
+separate concept from types.
+
+NOTE: Per standing policy, when Idris 2 proofs conflict with Ephapax linear
+types, Idris 2 always wins.
+
+=== Ada/SPARK
+
+*Substructural types*: None.
+
+*Effects*: SPARK Global/Depends aspects (annotation-based, not type-tracked).
+
+*Memory*: Stack allocation default, access types for heap.
+
+*Where Ada/SPARK is better*: Most mature industrial contract system (decades,
+SMT-solver-backed). DO-178C certified. SPARK can prove absence of runtime errors.
+
+*Where Ephapax is better*: Linear+affine types, algebraic effects, regions,
+comptime meta plane, pattern matching.

@@ -1,22 +1,90 @@
 // SPDX-License-Identifier: PMPL-1.0-or-later
-= Ephapax — Show Me The Receipts
+= Ephapax -- Show Me The Receipts
 :toc:
+:toclevels: 3
 :icons: font
 
 The README makes claims. This file backs them up.
 
 [quote, README]
 ____
-A dyadic language - one part affine, the other linear - as a type system with safe memory management targeting WebAssembly.
+A dyadic language -- one part affine, the other linear -- as a type system
+with safe memory management targeting WebAssembly.
 ____
+
+== Claim: Dyadic Type System
+
+*Evidence*: The type checker (`src/ephapax-typing/src/lib.rs`) tracks
+`BindingForm` per context entry:
+
+* `BindingForm::Let` -- affine discipline, `demands_consumption()` returns `false`
+* `BindingForm::LetBang` -- linear discipline, `demands_consumption()` returns `true`
+* `BindingForm::Param` -- follows type linearity
+
+Tests `test_let_allows_unconsumed_linear` and `test_let_bang_rejects_unconsumed`
+verify the distinction. `test_let_bang_rejects_unconsumed_unrestricted` proves
+that `let!` enforces exactly-once even for unrestricted types like `I32`.
+
+== Claim: Two-Layer AST (Surface + Core)
+
+*Evidence*: Two separate crates:
+
+* `src/ephapax-surface/` -- Surface AST with `DataDecl`, `Match`, `Construct`, `Pattern`, `SurfaceTy::Named`
+* `src/ephapax-syntax/` -- Core AST with binary sums, `case`/`inl`/`inr`
+* `src/ephapax-desugar/` -- Transforms surface to core
+
+The Coq formal proofs (`formal/`) reason about the core AST only. New surface
+features (pattern matching, named constructors) never invalidate the proofs.
+
+Test `integration_desugar_typecheck_no_parser` in `ephapax-desugar` verifies the
+full pipeline: surface AST -> desugar -> core AST -> type check.
+
+== Claim: Pattern Matching Desugars to Binary Sums
+
+*Evidence*: `src/ephapax-desugar/src/lib.rs` implements:
+
+* `data Option(a) = None | Some(a)` -> type `() + a` (right-nested binary sums)
+* `None` -> `inl(())`, `Some(x)` -> `inr(x)` (constructor injection chains)
+* `match ... of` -> nested `case`/`inl`/`inr` (case tree generation)
+
+Tests: `desugar_option_i32`, `desugar_color_green`, `desugar_color_blue`,
+`desugar_match_color` (verifies nested case for 3-variant match),
+`desugar_non_exhaustive_match` (rejects incomplete patterns).
+
+== Claim: Dual Substructural Grammars
+
+*Evidence*: `ephapax-linear/` contains two EBNF grammar specifications:
+
+* `grammar/linear.ebnf` -- no weakening, no contraction, branch agreement required
+* `grammar/affine.ebnf` -- weakening OK, no contraction, branches may disagree
+
+`LinearChecker` and `AffineChecker` in Rust enforce these grammars. 14 tests
+demonstrate where they diverge on identical programs (e.g.
+`linear_rejects_unconsumed_let_bang` vs `affine_allows_unconsumed_let`).
+
+== Claim: Region-Based Memory
+
+*Evidence*: `check_region` in `src/ephapax-typing/src/lib.rs` enforces:
+
+1. *NoRegionInType* -- return type must not reference the region (no escape)
+2. *Consumption at region exit* -- only bindings that `demands_consumption()` must
+   be consumed; affine bindings are implicitly dropped
+
+Test `test_region_non_escaping` verifies escape detection.
+Test `test_region_string_allocation` verifies in-region allocation.
 
 == Technology Choices
 
 [cols="1,2"]
 |===
-| Technology | Learn More
+| Technology | Why
 
-| **Rust** | https://www.rust-lang.org
+| *Rust* | Compiler implementation language
+| *Pest (PEG)* | Parser generator -- surface + core grammars
+| *WASM* | Compilation target -- portable, sandboxed, near-native
+| *Coq* | Formal proofs of core calculus soundness
+| *Idris 2* | ABI definitions with dependent type proofs
+| *Zig* | FFI implementation (C-compatible, cross-compilation)
 |===
 
 == File Map
@@ -25,11 +93,43 @@ ____
 |===
 | Path | What's There
 
-| `src/` | Source code
-| `lib/` | Library code
-| `test(s)/` | Test suite
+| `src/ephapax-syntax/` | Core AST (minimal, Coq-proven)
+| `src/ephapax-surface/` | Surface AST (data, match, patterns)
+| `src/ephapax-desugar/` | Surface -> Core transformation
+| `src/ephapax-typing/` | Dyadic type checker (let/let!/BindingForm)
+| `src/ephapax-parser/` | PEG parser (core + surface module)
+| `src/ephapax-wasm/` | WASM code generator with closure conversion
+| `src/ephapax-runtime/` | no_std WASM runtime with regions
+| `src/ephapax-interp/` | Tree-walking interpreter
+| `src/ephapax-cli/` | Command-line interface
+| `src/ephapax-lsp/` | Language server (completion, diagnostics)
+| `src/ephapax-analysis/` | Escape analysis, free vars, liveness
+| `src/ephapax-stdlib/` | Standard library (Prelude, Region, IO)
+| `ephapax-linear/` | Dual discipline checker (linear + affine grammars)
+| `formal/` | Coq proofs (Typing.v, progress/preservation)
+| `idris2/` | Idris 2 ABI definitions
+| `spec/` | Language specification (v2 grammar, specs)
+| `docs/specs/` | Design decisions, language comparison
+| `examples/` | Example programs (pattern_matching.eph)
+| `conformance/` | Conformance test suite (valid/invalid programs)
 |===
+
+== Test Evidence
+
+229 tests across 19 crates, 0 failures. Key test categories:
+
+* *Type checker dyadic tests*: let vs let! semantics, branch agreement, region exit
+* *Desugar tests*: constructor encoding, match desugaring, exhaustiveness
+* *Parser tests*: surface syntax (data, match, constructors, named types)
+* *Discipline tests*: linear vs affine checker divergence
+* *Integration tests*: parse -> desugar -> typecheck end-to-end
+
+== Design Documents
+
+* `spec/ephapax-v2-grammar.ebnf` -- Complete v2 grammar (modules, generics, effects, traits, comptime, contracts)
+* `docs/specs/DESIGN-DECISIONS.adoc` -- 17 ADRs with rationale
+* `docs/specs/LANGUAGE-COMPARISON.adoc` -- Comparison against 10 languages
 
 == Questions?
 
-Open an issue or reach out directly — happy to explain anything in more detail.
+Open an issue or reach out directly.

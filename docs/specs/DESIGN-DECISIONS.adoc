@@ -1,0 +1,308 @@
+// SPDX-License-Identifier: PMPL-1.0-or-later
+= Ephapax Design Decisions
+Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk>
+:toc:
+:toclevels: 3
+:icons: font
+:source-highlighter: rouge
+
+== Overview
+
+This document records the key design decisions for Ephapax v2, their
+rationale, and the alternatives considered. Each decision is dated
+and marked as ACCEPTED, PROPOSED, or SUPERSEDED.
+
+== Architecture
+
+=== ADR-001: Two-Layer AST (Surface + Core)
+*Status*: ACCEPTED (2026-03-27)
+
+*Decision*: The compiler has two AST layers:
+
+* *Surface AST* (`ephapax-surface`): User-facing syntax including `data`
+  declarations, `match` expressions, named constructors, patterns,
+  named type application.
+* *Core AST* (`ephapax-syntax`): Minimal calculus with binary sums,
+  `case`/`inl`/`inr`, `let`/`let!`, regions. This is what the Coq
+  formal proofs reason about.
+
+*Rationale*: New surface features (pattern matching, modules, etc.)
+never invalidate the formal proofs. The WASM codegen only handles the
+small core. Desugaring (`ephapax-desugar`) transforms surface to core.
+
+*Alternatives considered*:
+
+* Single AST — rejected because every new feature would require
+  re-proving soundness and extending codegen.
+* Three layers (surface + typed + core) — considered but premature.
+  Can be added later if needed.
+
+=== ADR-002: Dyadic Type System (let vs let!)
+*Status*: ACCEPTED (2026-03-27)
+
+*Decision*: The substructural discipline is per-binding, not per-type
+or per-module:
+
+* `let x = e` — *affine*: use at most once, implicit drop OK.
+* `let! x = e` — *linear*: use exactly once, no implicit drop.
+
+The type checker tracks `BindingForm` (Let/LetBang/Param) in context
+entries. `demands_consumption()` encodes the rule.
+
+*Rationale*: A global mode (Affine vs Linear) was the original design
+but contradicted the formal semantics. Per-binding granularity lets
+the programmer choose the discipline at each binding site. `let!`
+is opt-in strictness — you ask the compiler to verify exactly-once use.
+
+*Key consequence*: `let! x: I32 = 42 in ()` is an error even though
+I32 is not a "linear type". The `let!` form opts into linear discipline
+for any type.
+
+=== ADR-003: No Global Mode
+*Status*: ACCEPTED (2026-03-27)
+
+*Decision*: Removed the `Mode` enum from the type checker. There is no
+`--linear` vs `--affine` flag.
+
+*Rationale*: The mode was a compile-time switch that made all bindings
+behave the same way. This is wrong — the dyadic property means both
+disciplines coexist in every program.
+
+== Type System
+
+=== ADR-004: Default-Linear Generics
+*Status*: ACCEPTED (2026-03-27)
+
+*Decision*: Generic type parameters default to linear discipline:
+
+[source,ephapax]
+----
+fn identity[a](x: a): a = x        // a is linear (default)
+fn const[a, b: Affine](x: a, y: b): a = x  // b must opt out
+----
+
+*Rationale*: If a function works under the most restrictive discipline
+(linear), it automatically works for less restrictive types too:
+`Linear ⊂ Affine ⊂ Unrestricted`. Default-linear means generic code
+is compatible with ALL types. Default-unrestricted would make generic
+code incompatible with linear types.
+
+*Alternatives considered*:
+
+* Default unrestricted — rejected because generic code and linear code
+  become separate worlds that don't interact.
+* Default affine — close runner-up. Rejected because `let!` users
+  expect generic functions to preserve exactly-once semantics.
+
+=== ADR-005: No Mutable Borrows (&mut)
+*Status*: ACCEPTED (2026-03-27)
+
+*Decision*: Ephapax has read-only borrows (`&`) only. No `&mut`.
+
+*Rationale*:
+
+1. Linear ownership already guarantees uniqueness. The compiler can
+   optimise consume-and-reproduce to in-place mutation (Clean-style).
+2. Regions handle allocation. Bump allocation within a region means
+   consume-and-reproduce doesn't create GC pressure.
+3. No `&mut` means no aliasing complexity. Rust's borrow checker
+   exists to track `&` vs `&mut` aliasing — without `&mut`, this
+   entire problem disappears.
+4. FFI handles the escape hatch for C APIs needing mutable pointers.
+5. Surface sugar (e.g. `update x with f`) can desugar to consume-and-reproduce.
+
+=== ADR-006: Observe-or-Consume Trait Categories
+*Status*: ACCEPTED (2026-03-27)
+
+*Decision*: Trait methods on linear types must either borrow (observe)
+or consume and return (transform). This naturally creates two trait
+categories.
+
+*Rationale*: This is not a limitation — it's information at the
+interface level. A trait bound like `[a: Inspect + Transform]` tells
+the caller exactly what ownership cost the function demands.
+
+Built-in derivations generate the correct category:
+`@derive(Eq)` generates borrowing methods,
+`@derive(Map)` generates consuming methods.
+
+== Effects
+
+=== ADR-007: Typed Algebraic Effects (Not Monadic)
+*Status*: ACCEPTED (2026-03-27)
+
+*Decision*: Effects are tracked via algebraic effect declarations and
+handlers, not monads.
+
+*Rationale*: Monadic effects require transformer stacks and `lift`
+boilerplate. Algebraic effects compose naturally and desugar to
+delimited continuations.
+
+=== ADR-008: Explicit Effect Annotations (No Inference)
+*Status*: ACCEPTED (2026-03-27)
+
+*Decision*: Functions must explicitly declare effects with `with E`.
+No `with` clause means pure. Effect variables must be introduced in
+the type parameter list.
+
+*Rationale*: Types default restrictive (linear), effects should be
+explicit for symmetry and clarity. Full inference (Koka-style) may be
+added later as an ergonomic improvement without changing the grammar.
+
+*Trade-off*: More verbose than Koka. But unambiguous — a reader always
+knows what effects a function can perform.
+
+=== ADR-009: One-Shot Continuations for Linear Safety
+*Status*: ACCEPTED (2026-03-27)
+
+*Decision*: Effect handler continuations that capture linear values are
+restricted to one-shot (`resume(once)`). Multi-shot resume is a type
+error when linear values are in scope.
+
+*Rationale*: Multi-shot resume would duplicate linear values — calling
+`resume` twice re-executes code that consumes a linear value, violating
+the exactly-once contract. This is "linearity laundering."
+
+*Grammar*:
+[source,ephapax]
+----
+handle comp() with
+| choose(), resume(once) => ...    // safe with linear captures
+| choose(), resume(multi) => ...   // ERROR if linear captures exist
+end
+----
+
+=== ADR-010: Effects Cannot Leak Region-Bound Values
+*Status*: ACCEPTED (2026-03-27)
+
+*Decision*: Effect operations cannot pass region-bound values to handlers
+outside the region. Use borrows instead.
+
+*Rationale*: If a value referencing region `r` is passed to a handler
+outside `r`, the handler holds a dangling reference after `r` closes.
+The type checker prevents this by checking that effect operation arguments
+don't reference regions the handler might outlive.
+
+== Contracts
+
+=== ADR-011: old(expr) in Postconditions
+*Status*: ACCEPTED (2026-03-27)
+
+*Decision*: `ensures` clauses can use `old(expr)` to reference values
+from before the function body executed.
+
+*Rationale*: Linear values are consumed by the function body, so
+`ensures` cannot reference them directly. `old(expr)` evaluates before
+the body, capturing the result as an unrestricted snapshot.
+
+*Inspired by*: Eiffel (`old`), Dafny (`old`), SPARK (`'Old`).
+
+== Compile-Time
+
+=== ADR-012: Harvard-Separated Comptime
+*Status*: ACCEPTED (2026-03-27)
+
+*Decision*: The compile-time meta plane is architecturally separated from
+the runtime data plane. Comptime code:
+
+* Is total and pure (no effects, always terminates)
+* Cannot reference runtime values (Harvard separation)
+* Can inspect types and generate surface AST
+* Generated code is validated by the type checker
+
+*Rationale*: This prevents comptime from violating linearity. The meta
+plane observes the type structure but cannot create aliases, consume
+values, or bypass the type system.
+
+*Inspired by*: Julia-the-Viper (JTV) and 007 Agent Meta-Language Harvard
+architecture. TANGLE's addition blocks and Harvard blocks.
+
+=== ADR-013: Built-In Derivations
+*Status*: ACCEPTED (2026-03-27)
+
+*Decision*: The compiler has built-in derivation for fundamental traits
+(Eq, Ord, Show, Hash, Clone, Serialize). `@derive` via comptime is the
+extensibility mechanism for user-defined derivations.
+
+*Rationale*: Requiring comptime for basic traits adds unnecessary
+complexity for common cases. Built-in derivation ensures correctness
+and provides good examples for users.
+
+== Grammar
+
+=== ADR-014: Module Paths Use Slashes
+*Status*: ACCEPTED (2026-03-27)
+
+*Decision*: `module std/collections/list`, not dots.
+
+*Rationale*: Zero parsing impact (no ambiguity with division since
+module paths only appear after `module`/`import` keywords). Transparent
+mapping to file system paths.
+
+=== ADR-015: No For-Loops
+*Status*: ACCEPTED (2026-03-27)
+
+*Decision*: No `for` syntax. Use recursion + `fold` + `@tail_recursive`.
+
+*Rationale*: `for` is imperative baggage that doesn't fit the
+linear/functional foundation. The compiler recognises tail-recursive
+accumulation patterns and compiles to efficient WASM loops. `for`
+may be added as surface sugar in a future version once effects make
+side-effectful iteration expressible.
+
+=== ADR-016: No Homoiconicity, No Reflection
+*Status*: ACCEPTED (2026-03-27)
+
+*Decision*: Ephapax is not homoiconic or reflective. These capabilities
+belong to JTV (Julia-the-Viper) via Harvard block injection.
+
+*Rationale*: Homoiconicity + linear types is treacherous (is quoted code
+linear or unrestricted?). Reflection that could duplicate linear values
+breaks soundness. The comptime meta plane provides controlled type
+introspection without these risks.
+
+== Interaction Matrix
+
+=== ADR-017: Effect Variable Asymmetry
+*Status*: ACCEPTED (2026-03-27)
+
+*Decision*: Type variables default restrictive (linear). Effect
+annotations default to pure (no `with` clause). This is asymmetric
+by design.
+
+*Rationale*: Types and effects form a dual. Types constrain what values
+CAN be (restrictive default = safe). Effects constrain what computations
+DO (pure default = composable). The defaults point in opposite
+directions because the lattices point in opposite directions.
+
+=== Soundness Invariants
+
+The following invariants must hold across ALL features:
+
+1. *Consumption*: `let!` bindings consumed exactly once.
+   `let` bindings consumed at most once.
+2. *Regions*: Values referencing region `r` cannot escape `r`.
+3. *Comptime*: Meta plane cannot reference runtime values (Harvard).
+4. *Effects*: One-shot resume when linear captures exist.
+   Region-bound values cannot be passed to effect operations.
+5. *Contracts*: `old(expr)` borrows before consumption.
+6. *Traits*: Borrowing traits cannot consume. Consuming traits must return.
+
+=== Interaction Matrix Status
+
+[cols="1,1,2",options="header"]
+|===
+| Interaction | Sound? | Notes
+
+| Generics x Regions | Yes | Type carries region name, checker verifies scope
+| Generics x Effects | Yes | Effect variables explicit
+| Generics x Linear | Yes | Default-linear = works with all types
+| Effects x Regions | Yes | Region-bound values can't enter effect ops
+| Effects x Linear | Yes | One-shot resume for linear captures
+| Contracts x Linear | Yes | old(expr) borrows before consumption
+| Traits x Linear | Yes | Observe-or-consume categories
+| Comptime x Linear | Yes | Harvard separation
+| Comptime x Effects | Yes | Comptime is pure, auto-gates eligibility
+| Patterns x Affine | Yes | Case vars use Param, linear types demand consumption
+| Modules x All | Yes | Name scoping only
+|===

@@ -168,13 +168,36 @@ effect_op    = "fn" , IDENT , [ type_params ] ,
 
 handler_decl = "handler" , IDENT , [ type_params ] ,
                "for" , CTOR_IDENT , [ type_params ] ,
+               [ "with" , "(" , param_list , ")" ] ,  (* handler-local state *)
                "=" , { handler_clause } , "end" ;
 
-handler_clause = "fn" , IDENT , "(" , [ param_list ] , ")" ,
-                 [ "," , "resume" , ":" , ty ] ,
-                 ":" , ty , "=" , expr ;
-(* `resume` is the delimited continuation — calling it continues
- * the computation that performed the effect operation. *)
+handler_clause = return_clause
+               | op_clause
+               | finally_clause
+               ;
+
+(* What to do when the handled computation returns normally *)
+return_clause = "return" , "(" , IDENT , ")" , "=>" , expr ;
+
+(* Handler for an effect operation *)
+op_clause     = "|" , IDENT , "(" , [ param_list ] , ")" ,
+                [ "," , resume_binding ] ,
+                "=>" , expr ;
+
+(* resume is the delimited continuation. resume_mode constrains
+ * whether it can be called once or multiple times.
+ * - once:  one-shot, safe with linear captures (REQUIRED when
+ *          the continuation captures linear values)
+ * - multi: multi-shot, type error if linear captures exist
+ * - omitted: compiler infers from captures *)
+resume_binding = "resume" , [ "(" , resume_mode , ")" ] ;
+resume_mode    = "once" | "multi" ;
+
+(* Cleanup when continuation is discarded without resuming.
+ * CRITICAL for linear safety: if a handler doesn't call resume,
+ * any linear values captured by the continuation must be consumed.
+ * The finally clause handles this. *)
+finally_clause = "finally" , "=>" , expr ;
 
 (* --- 5h. Comptime declarations (meta plane) --- *)
 
@@ -206,8 +229,13 @@ contract_clause = "requires" , expr           (* precondition *)
                 | "invariant" , expr          (* maintained through body *)
                 ;
 
-(* In ensures clauses, `result` refers to the return value *)
+(* In ensures clauses, `result` refers to the return value.
+ * `old(expr)` evaluates expr BEFORE the function body, capturing
+ * the result as an unrestricted snapshot. This is needed because
+ * linear values are consumed by the body and cannot be referenced
+ * in ensures directly. old() implicitly borrows. *)
 result_expr  = expr ;
+old_expr     = "old" , "(" , expr , ")" ;
 
 (* ================================================================ *)
 (* 7. FFI CAPABILITIES                                               *)
@@ -246,7 +274,15 @@ ty           = effect_ty ;
 (* Effect annotation on function types: a -> b with IO + State(s) *)
 effect_ty    = fun_ty , [ "with" , effect_row ] ;
 
-effect_row   = effect_ref , { "+" , effect_ref } ;
+(* Effect rows support both concrete effects and effect variables.
+ * Effect variables are introduced in type_params and allow
+ * polymorphism over effects:
+ *   fn map[a, b, E: Effect](f: a -> b with E, xs: List(a)): List(b) with E
+ * No `with` clause = pure (no effects). *)
+effect_row   = effect_ref , { "+" , effect_ref }
+             | IDENT                                  (* effect variable *)
+             | effect_ref , { "+" , effect_ref } , "+" , IDENT  (* concrete + variable *)
+             ;
 effect_ref   = CTOR_IDENT , [ "(" , ty_list , ")" ] ;
 
 fun_ty       = sum_ty , [ "->" , ty ] ;
@@ -292,11 +328,13 @@ expr         = let_expr
              | match_expr
              | region_expr
              | case_expr
-             | for_expr
              | handle_expr
              | perform_expr
              | or_expr
              ;
+(* NOTE: No for-loops. Use recursion + fold + @tail_recursive.
+ * The compiler recognises tail-recursive patterns and compiles
+ * to efficient WASM loops. See ADR-015. *)
 
 (* --- Bindings --- *)
 
@@ -341,27 +379,32 @@ case_expr    = "case" , expr , "of" ,
                "inr" , "(" , IDENT , ")" , "->" , expr ,
                "end" ;
 
-(* --- Iterators --- *)
-
-for_expr     = "for" , pattern , "in" , expr , "do" , expr , "end" ;
-(* Desugars to: Iterable.fold(collection, init, fn(acc, x) -> body)
- * Requires: the collection type implements Iterable trait.
- * Linear safety: the iterator consumes the collection (or borrows it). *)
-
 (* --- Effects --- *)
 
-(* Perform an effect operation *)
+(* Perform an effect operation.
+ * REGION SAFETY: arguments must not reference regions that the handler
+ * might outlive. Use borrows (&) for region-bound values. *)
 perform_expr = "perform" , IDENT , [ "(" , [ expr_list ] , ")" ] ;
 
-(* Handle effects with a handler *)
-handle_expr  = "handle" , expr , "with" , handler_ref ,
-               [ "(" , [ expr_list ] , ")" ] ;
+(* Handle effects with a handler.
+ * handle_mode: "shallow" handles first occurrence only (default: deep).
+ * handler_state: optional handler-local state.
+ * The handler body contains return, operation, and finally clauses. *)
+handle_expr  = "handle" , [ handle_mode ] , expr , "with" ,
+               handler_ref , "end" ;
 
-handler_ref  = IDENT                     (* named handler *)
-             | "{" , { handler_arm } , "}" ;  (* inline handler *)
+handle_mode  = "shallow" ;   (* default: deep — handle all occurrences *)
 
-handler_arm  = "|" , IDENT , "(" , [ param_list ] , ")" ,
-               [ "," , "resume" ] , "=>" , expr ;
+handler_ref  = IDENT                         (* named handler *)
+             | [ "(" , param_list , ")" ] ,  (* handler-local state *)
+               { inline_handler_clause }     (* inline handler *)
+             ;
+
+inline_handler_clause = return_clause | inline_op_clause | finally_clause ;
+
+inline_op_clause = "|" , IDENT , "(" , [ param_list ] , ")" ,
+                   [ "," , resume_binding ] ,
+                   "=>" , expr ;
 
 (* ================================================================ *)
 (* 10. PATTERNS                                                      *)
@@ -567,7 +610,7 @@ CHAR         = (* any character except unescaped '"' *) ;
  *   fn let let! in type data
  *   trait impl effect handler
  *   if then else match of end case
- *   for do
+ *   old shallow finally return resume once multi
  *   inl inr region
  *   drop copy
  *   handle perform with where
@@ -604,11 +647,12 @@ DOC_COMMENT  = "///" , { NOT_NEWLINE } ;
  * | fn f[a](x: a): a       | monomorphised or Λa. ...         |
  * | trait T(a) = ...        | @derive → comptime generation    |
  * |                        | polymorphic → dictionary records  |
- * | for x in xs do e end   | fold/recursion                   |
+ * | (no for-loops)          | recursion + fold + @tail_recursive|
  * | perform Op(args)       | effect operation call             |
  * | handle e with h        | handler application               |
  * | requires P             | if !P then abort else ...         |
  * | ensures P              | let result = ... in assert(P)     |
+ * | old(expr)              | evaluated before body, borrows     |
  * | @comptime { ... }      | run at compile time, splice result|
  * | @derive(Eq)            | comptime-generated impl block     |
  * | pub fn ...              | (visibility checked, then erased) |
@@ -623,14 +667,19 @@ DOC_COMMENT  = "///" , { NOT_NEWLINE } ;
 
 (* These invariants must hold across ALL features:
  *
- * 1. CONSUMPTION: let! bindings are consumed exactly once.
+ * 1. CONSUMPTION (dyadic):
+ *    - let! bindings are consumed exactly once (linear discipline)
+ *    - let bindings are consumed at most once (affine — implicit drop OK)
  *    - match arms on linear values must be exhaustive
- *    - for-loops on linear collections consume the collection
- *    - effect handlers cannot duplicate linear continuations
+ *    - effect handlers: resume(once) when continuation captures linear values
+ *    - finally clause must consume captured linears if resume not called
  *
- * 2. REGIONS: values referencing region r cannot escape r.
+ * 2. REGIONS:
+ *    - values referencing region r cannot escape r (NoRegionInType)
  *    - closures capturing region-bound values are region-scoped
- *    - effect handlers cannot leak region-bound values via resume
+ *    - effect operations CANNOT pass region-bound values to handlers
+ *      outside the region (prevents dangling references)
+ *    - use borrows (&) for region-bound values in effect operations
  *
  * 3. COMPTIME SEPARATION (Harvard):
  *    - @comptime blocks cannot reference runtime values
@@ -639,15 +688,28 @@ DOC_COMMENT  = "///" , { NOT_NEWLINE } ;
  *    - comptime functions are total and pure
  *
  * 4. EFFECTS:
- *    - pure functions (no effect annotation) cannot perform effects
+ *    - no `with` clause = pure (no effects)
  *    - effect handlers must handle all operations in the effect
- *    - linear values in effectful computations: one-shot continuations
- *      only (no multi-shot resume with linear captures)
+ *    - resume(once): one-shot, required when linear captures exist
+ *    - resume(multi): multi-shot, type error if linear captures exist
+ *    - finally clause: runs when continuation discarded, must clean up
+ *    - effect variables must be explicit (no implicit effect polymorphism)
  *
- * 5. CAPABILITIES:
+ * 5. CONTRACTS:
+ *    - requires: evaluated before body, borrows arguments
+ *    - ensures: evaluated after body, can reference `result` and `old(expr)`
+ *    - old(expr): borrows before consumption, captures as unrestricted
+ *    - invariant: maintained across body execution
+ *
+ * 6. CAPABILITIES:
  *    - __ffi calls must satisfy module capability declarations
  *    - capability checking is comptime (zero runtime cost)
  *    - ffi_unrestricted is an explicit escape hatch
+ *
+ * 7. GENERICS:
+ *    - [a] defaults to linear (most restrictive = compatible with all types)
+ *    - [a: Affine] opts into affine (can drop)
+ *    - [a: Unrestricted] opts into unrestricted (can copy and drop)
  *)
 
 
@@ -655,21 +717,31 @@ DOC_COMMENT  = "///" , { NOT_NEWLINE } ;
 (* APPENDIX C: INTERACTION MATRIX                                    *)
 (* ================================================================ *)
 
-(* How features interact with linear types:
+(* How features interact with linear/affine types:
  *
- * | Feature        | Linear interaction                        |
+ * | Feature        | Linear (let!) interaction                 |
  * |----------------|-------------------------------------------|
- * | Generics       | [a] is unrestricted by default.           |
- * |                | [a: Linear] opts into linear semantics.   |
- * | Traits         | Trait methods on linear types must use &   |
- * |                | (borrow) or consume and return.           |
+ * | Generics       | [a] defaults to linear (most restrictive).|
+ * |                | Generic code works with ALL types.        |
+ * |                | [a: Affine] or [a: Unrestricted] opt out. |
+ * | Traits         | Observe traits borrow (&). Transform      |
+ * |                | traits consume and return. Trait bound     |
+ * |                | documents ownership cost.                  |
  * | Effects        | perform consumes linear args.             |
- * |                | resume is one-shot if captures linear.    |
- * | Contracts      | requires/ensures borrow (&) to inspect.  |
- * | For-loops      | Iterator consumes or borrows collection.  |
+ * |                | resume(once) when continuation captures   |
+ * |                | linear values (prevents laundering).      |
+ * |                | finally clause for cleanup on discard.    |
+ * |                | Region-bound values: borrow, don't pass.  |
+ * | Contracts      | requires borrows (&) to inspect.         |
+ * |                | ensures uses old(expr) for pre-state.    |
  * | Comptime       | Cannot reference linear runtime values.   |
+ * |                | Harvard separation guarantees this.       |
  * | FFI            | Linear values passed to FFI are consumed. |
- * | Patterns       | Each pattern variable binds linearly.     |
- * |                | Wildcards on linear values = implicit drop |
- * |                | (affine) or error (linear discipline).    |
+ * |                | Capabilities restrict what FFI can do.    |
+ * | Patterns       | Case vars use Param discipline.           |
+ * |                | Linear types demand consumption.          |
+ * |                | Wildcards on let!-bound = error.          |
+ * |                | Wildcards on let-bound = implicit drop.   |
+ * | Modules        | Name scoping only. No interaction with    |
+ * |                | linearity, regions, or effects.           |
  *)

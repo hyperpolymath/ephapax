@@ -1,0 +1,20 @@
+# SPDX-License-Identifier: PMPL-1.0-or-later
+# SPDX-FileCopyrightText: 2026 Jonathan D.A. Jewell
+
+[package]
+name = "ephapax-desugar"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+description = "Desugaring pass for ephapax — transforms surface AST (data, match, patterns) to verified core AST (binary sums, case)"
+keywords = ["compiler", "desugaring", "pattern-matching", "algebraic-data-types"]
+categories = ["compilers"]
+
+[dependencies]
+ephapax-syntax = { path = "../ephapax-syntax" }
+ephapax-surface = { path = "../ephapax-surface" }
+thiserror = "2"
+smol_str = "0.3"

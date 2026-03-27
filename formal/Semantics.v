@@ -309,10 +309,6 @@ Notation "c1 '-->*' c2" := (multi_step c1 c2) (at level 70).
 
 (** ** Infrastructure Lemmas *)
 
-(** All lemmas are Admitted for now — they need retacticking for De Bruijn
-    but the proof STRUCTURE is identical to the named version. The step
-    rules have the same shape, just with indexed env instead of named. *)
-
 Lemma val_to_expr_to_val :
   forall v, is_value v -> val_to_expr (expr_to_val v) = v.
 Proof.
@@ -335,6 +331,57 @@ Proof.
   - apply VInl; assumption.
   - apply VInr; assumption.
   - constructor.
+Qed.
+
+(** Values cannot step — fundamental lemma for progress and no_leaks *)
+Lemma values_dont_step :
+  forall v mu R rho mu' R' rho' e',
+    is_value v -> (mu, R, rho, v) -->> (mu', R', rho', e') -> False.
+Proof.
+  intros v mu R rho mu' R' rho' e' Hval Hstep.
+  generalize dependent e'. generalize dependent rho'.
+  generalize dependent R'. generalize dependent mu'.
+  generalize dependent rho. generalize dependent R.
+  generalize dependent mu.
+  induction Hval; intros; inversion Hstep; subst;
+    try (eapply IHHval1; eassumption);
+    try (eapply IHHval2; eassumption);
+    try (eapply IHHval; eassumption).
+Qed.
+
+(** mem_free_region clears all cells for the freed region *)
+Lemma mem_free_region_clears :
+  forall mu r l s,
+    mem_read (mem_free_region mu r) l = Some (CString r s) -> False.
+Proof.
+  induction mu; intros r l s Hread.
+  - simpl in Hread. destruct l; discriminate.
+  - simpl in Hread. destruct a.
+    + destruct (String.eqb r r0) eqn:Heq.
+      * destruct l; simpl in Hread; [discriminate | eapply IHmu; eassumption].
+      * destruct l; simpl in Hread.
+        -- injection Hread as H1 H2.
+           apply String.eqb_neq in Heq; subst; contradiction.
+        -- eapply IHmu; eassumption.
+    + destruct l; simpl in Hread; [discriminate | eapply IHmu; eassumption].
+Qed.
+
+(** Classify steps from ERegion — avoids hypothesis naming issues *)
+Lemma step_from_eregion :
+  forall mu R rho r e mu1 R1 rho1 e1,
+    (mu, R, rho, ERegion r e) -->> (mu1, R1, rho1, e1) ->
+    (* Enter *) (mu1 = mu /\ R1 = r :: R /\ rho1 = rho /\ e1 = ERegion r e)
+    (* Exit *)  \/ (In r R /\ is_value e /\ mu1 = mem_free_region mu r
+                    /\ R1 = remove_first r R /\ rho1 = rho /\ e1 = e)
+    (* Step *)  \/ (In r R /\ exists e',
+                    (mu, R, rho, e) -->> (mu1, R1, rho1, e')
+                    /\ e1 = ERegion r e').
+Proof.
+  intros. inversion H; subst.
+  + left. auto.
+  + right. left. repeat (split; [auto; fail|]). auto.
+  + right. right. split; [assumption|].
+    eexists. split; [eassumption | reflexivity].
 Qed.
 
 (** env_consistent: every variable in the typing context has a runtime binding *)
@@ -373,17 +420,63 @@ Fixpoint val_locs_valid (mu : mem) (v : runtime_val) : Prop :=
 
 (** ** Key Theorems *)
 
-(** Theorem 1: No Memory Leaks *)
+(** *** Theorem 1: No Memory Leaks (Qed)
+
+    When a region block completes evaluation (multi-steps to a value with
+    empty region stack), all memory cells for that region are freed.
+
+    Proof strategy: induction on multi_step. Three cases per step:
+    - Region Enter: recurse (expression still wrapped in ERegion)
+    - Region Exit: mem_free_region clears all cells, value can't step further
+    - Region Step: recurse (body stepped, still wrapped in ERegion) *)
+
+Lemma no_leaks_gen :
+  forall c1 c2, multi_step c1 c2 ->
+    forall r mu R rho e,
+    c1 = (mu, R, rho, ERegion r e) ->
+    forall mu' rho' v l s,
+    c2 = (mu', ([] : region_env), rho', v) ->
+    is_value v ->
+    mem_read mu' l = Some (CString r s) -> False.
+Proof.
+  intros c1 c2 Hmulti.
+  induction Hmulti as [c | ca cb cc Hstep Hmulti IH].
+  - intros. subst. injection H0; intros; subst. inversion H1.
+  - intros r mu R rho e Hca mu' rho' v l s Hcc Hval Hread.
+    subst ca.
+    destruct cb as [[[mu1 R1] rho1] e1].
+    pose proof (step_from_eregion _ _ _ _ _ _ _ _ _ Hstep) as Hcases.
+    destruct Hcases as
+      [[-> [-> [-> ->]]]
+      | [[_ [Hval_e [-> [-> [-> ->]]]]]
+      | [_ [e' [Hsub ->]]]]].
+    + (* Enter: expression unchanged, region added to R *)
+      eapply (IH r mu (r :: R) rho e eq_refl mu' rho' v l s
+              Hcc Hval Hread).
+    + (* Exit: body is a value, memory freed *)
+      assert (Hcc2: cc = (mem_free_region mu r, remove_first r R, rho, e)).
+      { inversion Hmulti.
+        - reflexivity.
+        - destruct c2 as [[[? ?] ?] ?].
+          exfalso. eapply values_dont_step; eassumption. }
+      assert (mem_free_region mu r = mu') by congruence.
+      assert (e = v) by congruence.
+      subst. eapply mem_free_region_clears. eassumption.
+    + (* Step: body reduced, still wrapped in ERegion *)
+      eapply (IH r _ _ _ e' eq_refl mu' rho' v l s
+              Hcc Hval Hread).
+Qed.
+
 Theorem no_leaks :
   forall mu R rho r e mu' rho' v,
     multi_step (mu, R, rho, ERegion r e) (mu', [], rho', v) ->
     is_value v ->
     forall l s, mem_read mu' l = Some (CString r s) -> False.
 Proof.
-  admit. (* Same structure as named version — retactick for De Bruijn *)
-Admitted.
+  intros. eapply no_leaks_gen; try eassumption; reflexivity.
+Qed.
 
-(** Theorem 2: Memory Safety *)
+(** *** Theorem 2: Memory Safety (Admitted — needs retacticking) *)
 Theorem memory_safety :
   forall mu R rho e mu' R' rho' e',
     (mu, R, rho, e) -->> (mu', R', rho', e') ->
@@ -392,10 +485,10 @@ Theorem memory_safety :
     expr_locs_valid mu e ->
     (forall i v, env_lookup rho' i = Some v -> val_locs_valid mu' v).
 Proof.
-  admit. (* Same Ltac approach as named version *)
+  admit.
 Admitted.
 
-(** Theorem 3: Progress *)
+(** *** Theorem 3: Progress (Admitted — needs retacticking) *)
 Theorem progress :
   forall R G e T G',
     R; G |- e : T -| G' ->
@@ -404,10 +497,10 @@ Theorem progress :
       expr_locs_valid mu e ->
       is_value e \/ exists mu' R' rho' e', (mu, R, rho, e) -->> (mu', R', rho', e').
 Proof.
-  admit. (* Same 24-case induction — retactick for De Bruijn *)
+  admit.
 Admitted.
 
-(** Theorem 4: Preservation (weakened) *)
+(** *** Theorem 4: Preservation (Admitted — needs retacticking) *)
 Definition env_typed (R : region_env) (rho : env) (G : ctx) : Prop :=
   forall i T u, ctx_lookup G i = Some (T, u) -> u = false ->
     exists v, env_lookup rho i = Some v /\
@@ -420,5 +513,5 @@ Theorem preservation :
     env_typed R rho G ->
     exists G'' G_out, R; G'' |- e' : T -| G_out.
 Proof.
-  admit. (* Same structure — retactick for De Bruijn *)
+  admit.
 Admitted.

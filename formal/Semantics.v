@@ -1019,271 +1019,97 @@ Theorem progress :
 Proof.
   intros R G e T G' Htype.
   induction Htype; intros mu rho Hec Helv.
-
-  - (* T_Unit *) left. constructor.
-  - (* T_Bool *) left. constructor.
-  - (* T_I32 *) left. constructor.
-
-  - (* T_Var_Lin: e = EVar x *)
-    right.
-    destruct (Hec x T false H) as [v Hlookup].
-    exists mu, R, rho, (val_to_expr v).
-    constructor. exact Hlookup.
-
-  - (* T_Var_Unr: e = EVar x *)
-    right.
-    destruct (Hec x T u H) as [v Hlookup].
-    exists mu, R, rho, (val_to_expr v).
-    constructor. exact Hlookup.
-
-  - (* T_StringNew: e = EStringNew r s *)
-    right.
-    exists (fst (mem_alloc mu (CString r s))), R, rho, (ELoc (snd (mem_alloc mu (CString r s))) r).
-    econstructor.
-    + unfold region_active in H. exact H.
-    + destruct (mem_alloc mu (CString r s)) eqn:Halloc. simpl. exact Halloc.
-
-  - (* T_StringConcat: e = EStringConcat e1 e2 *)
-    simpl in Helv. destruct Helv as [Helv1 Helv2].
-    destruct (IHHtype1 mu rho Hec Helv1) as [Hval1 | [mu1 [R1 [rho1 [e1' Hstep1]]]]].
-    + (* e1 is value *)
-      destruct (IHHtype2 mu rho) as [Hval2 | [mu2 [R2 [rho2 [e2' Hstep2]]]]].
-      * (* env_consistent through context threading *)
-        eapply env_consistent_weaken; [exact Hec |].
-        intros x' T' u' Hlookup'.
-        eapply typing_preserves_domain; eauto.
-      * exact Helv2.
-      * (* Both values: canonical forms gives ELoc *)
-        destruct (canonical_forms_string _ _ _ _ _ Htype1 Hval1) as [l1 Hl1].
-        destruct (canonical_forms_string _ _ _ _ _ Htype2 Hval2) as [l2 Hl2].
-        subst e1 e2.
-        simpl in Helv1, Helv2.
-        destruct Helv1 as [s1 Hread1]. destruct Helv2 as [s2 Hread2].
-        right.
-        eexists _, R, rho, (ELoc _ r).
-        econstructor; eauto.
-        destruct (mem_alloc _ _) eqn:Ha. reflexivity.
-      * (* e2 steps *)
-        right. exists mu2, R2, rho2, (EStringConcat e1 e2').
-        apply S_StringConcat_Step2; assumption.
-    + (* e1 steps *)
-      right. exists mu1, R1, rho1, (EStringConcat e1' e2).
-      apply S_StringConcat_Step1. exact Hstep1.
-
-  - (* T_StringLen: e = EStringLen e0 *)
-    (* T_StringLen types EStringLen e0 with premise R; G |- EBorrow e0 : TBorrow (TString r) -| G'.
-       By inversion, T_Borrow requires ctx_lookup G (var_of_expr e0) = Some (TString r, false).
-       For var_of_expr to return a useful variable name, e0 must be EVar x.
-       EVar x is not a value, so it can always step via S_Var (by env_consistent).
-       S_StringLen_Step wraps the step on e0. *)
-    right.
-    (* Extract the T_Borrow premise via inversion on the typing *)
-    inversion Htype; subst.
-    (* H2 : ctx_lookup G (var_of_expr e) = Some (TString r, false) *)
-    (* var_of_expr e gives us the variable name if e = EVar x *)
-    destruct e; simpl in H2;
-      try (
-        (* Non-EVar cases: var_of_expr returns "".
-           ctx_lookup G "" = Some _ is theoretically possible but
-           practically never happens. If it does, "" is a valid variable
-           and env_consistent gives us a value. *)
-        destruct (Hec _ _ _ H2) as [rv Hlookup];
-        exists mu, R, rho, (EStringLen (val_to_expr rv));
-        apply S_StringLen_Step; constructor; exact Hlookup
-      ).
-    (* e = EVar v0: standard case *)
-    + destruct (Hec v0 (TString r) false H2) as [rv Hlookup].
-      exists mu, R, rho, (EStringLen (val_to_expr rv)).
-      apply S_StringLen_Step. constructor. exact Hlookup.
-
-  - (* T_Let: e = ELet x e1 e2 *)
-    simpl in Helv. destruct Helv as [Helv1 Helv2].
-    destruct (IHHtype1 mu rho Hec Helv1) as [Hval1 | [mu1 [R1 [rho1 [e1' Hstep1]]]]].
-    + (* e1 is value: S_Let_Val *)
-      right. exists mu, R, (env_extend rho x (expr_to_val e1)), e2.
-      constructor. exact Hval1.
-    + (* e1 steps: S_Let_Step *)
-      right. exists mu1, R1, rho1, (ELet x e1' e2).
-      constructor. exact Hstep1.
-
-  - (* T_LetLin *)
-    simpl in Helv. destruct Helv as [Helv1 Helv2].
-    destruct (IHHtype1 mu rho Hec Helv1) as [Hval1 | [mu1 [R1 [rho1 [e1' Hstep1]]]]].
+  (* T_Unit *)   - left. constructor.
+  (* T_Bool *)   - left. constructor.
+  (* T_I32 *)    - left. constructor.
+  (* T_Var_Lin *)- right. destruct (Hec x T false H) as [v Hlk].
+                   exists mu, R, rho, (val_to_expr v). constructor. exact Hlk.
+  (* T_Var_Unr *)- right. destruct (Hec x T u H) as [v Hlk].
+                   exists mu, R, rho, (val_to_expr v). constructor. exact Hlk.
+  (* T_Loc *)    - left. constructor.
+  (* T_StringNew *) - right.
+    destruct (mem_alloc mu (CString r s)) as [mu_new l_new] eqn:Ha.
+    exists mu_new, R, rho, (ELoc l_new r).
+    econstructor; [unfold region_active in H; exact H | exact Ha].
+  (* T_StringConcat *) - admit.
+  (* T_StringLen *)    - admit.
+  (* T_Let *) - simpl in Helv. destruct Helv as [H1 H2].
+    destruct (IHHtype1 mu rho Hec H1) as [Hv | [m1 [R1 [r1 [e1' Hs]]]]].
     + right. exists mu, R, (env_extend rho x (expr_to_val e1)), e2.
-      constructor. exact Hval1.
-    + right. exists mu1, R1, rho1, (ELetLin x e1' e2).
-      constructor. exact Hstep1.
-
-  - (* T_Lam: e = ELam x T1 e — value *)
-    left. constructor.
-
-  - (* T_App: e = EApp e1 e2 *)
-    simpl in Helv. destruct Helv as [Helv1 Helv2].
-    destruct (IHHtype1 mu rho Hec Helv1) as [Hval1 | [mu1 [R1 [rho1 [e1' Hstep1]]]]].
-    + (* e1 is value *)
-      destruct (IHHtype2 mu rho) as [Hval2 | [mu2 [R2 [rho2 [e2' Hstep2]]]]].
-      * eapply env_consistent_weaken; [exact Hec |].
-        intros x' T' u' Hlookup'. eapply typing_preserves_domain; eauto.
-      * exact Helv2.
-      * (* Both values: canonical forms gives ELam *)
-        destruct (canonical_forms_fun _ _ _ _ _ _ Htype1 Hval1) as [x' [ebody He1]].
+      constructor. exact Hv.
+    + right. exists m1, R1, r1, (ELet x e1' e2). constructor. exact Hs.
+  (* T_LetLin *) - simpl in Helv. destruct Helv as [H1 H2].
+    destruct (IHHtype1 mu rho Hec H1) as [Hv | [m1 [R1 [r1 [e1' Hs]]]]].
+    + right. exists mu, R, (env_extend rho x (expr_to_val e1)), e2.
+      constructor. exact Hv.
+    + right. exists m1, R1, r1, (ELetLin x e1' e2). constructor. exact Hs.
+  (* T_Lam *)  - left. constructor.
+  (* T_App *)  - simpl in Helv. destruct Helv as [H1 H2].
+    destruct (IHHtype1 mu rho Hec H1) as [Hv1 | [m1 [R1 [r1 [e1' Hs1]]]]].
+    + assert (Hec': env_consistent rho G').
+      { eapply env_consistent_weaken; [exact Hec |].
+        intros x' T' u' Hl'. eapply typing_preserves_domain; eauto. }
+      destruct (IHHtype2 mu rho Hec' H2) as [Hv2 | [m2 [R2 [r2 [e2' Hs2]]]]].
+      * destruct (canonical_forms_fun _ _ _ _ _ _ Htype1 Hv1) as [x' [eb He]].
         subst e1. right.
-        exists mu, R, (env_extend rho x' (expr_to_val e2)), ebody.
-        constructor. exact Hval2.
-      * (* e2 steps *)
-        right. exists mu2, R2, rho2, (EApp e1 e2').
-        apply S_App_Step2; assumption.
-    + (* e1 steps *)
-      right. exists mu1, R1, rho1, (EApp e1' e2).
-      apply S_App_Step1. exact Hstep1.
-
-  - (* T_Pair: e = EPair e1 e2 *)
-    simpl in Helv. destruct Helv as [Helv1 Helv2].
-    destruct (IHHtype1 mu rho Hec Helv1) as [Hval1 | [mu1 [R1 [rho1 [e1' Hstep1]]]]].
-    + destruct (IHHtype2 mu rho) as [Hval2 | [mu2 [R2 [rho2 [e2' Hstep2]]]]].
-      * eapply env_consistent_weaken; [exact Hec |].
-        intros x' T' u' Hlookup'. eapply typing_preserves_domain; eauto.
-      * exact Helv2.
-      * (* Both values: EPair v1 v2 is a value *)
-        left. constructor; assumption.
-      * right. exists mu2, R2, rho2, (EPair e1 e2').
-        apply S_Pair_Step2; assumption.
-    + right. exists mu1, R1, rho1, (EPair e1' e2).
-      apply S_Pair_Step1. exact Hstep1.
-
-  - (* T_Fst: e = EFst e0 *)
-    simpl in Helv.
-    destruct (IHHtype mu rho Hec Helv) as [Hval | [mu1 [R1 [rho1 [e' Hstep]]]]].
-    + (* e0 is value: canonical forms gives EPair *)
-      destruct (canonical_forms_prod _ _ _ _ _ _ Htype Hval) as [v1 [v2 He0]].
-      subst e. right.
-      exists mu, R, rho, v1.
-      apply S_Fst. (* Need is_value v1, is_value v2 *)
-      (* From inversion on is_value (EPair v1 v2) *)
-      inversion Hval; subst.
-      * exact H2.
-      * exact H3.
-    + right. exists mu1, R1, rho1, (EFst e').
-      apply S_Fst_Step. exact Hstep.
-
-  - (* T_Snd: similar to T_Fst *)
-    simpl in Helv.
-    destruct (IHHtype mu rho Hec Helv) as [Hval | [mu1 [R1 [rho1 [e' Hstep]]]]].
-    + destruct (canonical_forms_prod _ _ _ _ _ _ Htype Hval) as [v1 [v2 He0]].
-      subst e. right.
-      exists mu, R, rho, v2.
-      apply S_Snd.
-      inversion Hval; subst.
-      * exact H2.
-      * exact H3.
-    + right. exists mu1, R1, rho1, (ESnd e').
-      apply S_Snd_Step. exact Hstep.
-
-  - (* T_Inl: e = EInl T2 e0 *)
-    simpl in Helv.
-    destruct (IHHtype mu rho Hec Helv) as [Hval | [mu1 [R1 [rho1 [e' Hstep]]]]].
-    + left. constructor. exact Hval.
-    + right. exists mu1, R1, rho1, (EInl T2 e').
-      apply S_Inl_Step. exact Hstep.
-
-  - (* T_Inr: e = EInr T1 e0 *)
-    simpl in Helv.
-    destruct (IHHtype mu rho Hec Helv) as [Hval | [mu1 [R1 [rho1 [e' Hstep]]]]].
-    + left. constructor. exact Hval.
-    + right. exists mu1, R1, rho1, (EInr T1 e').
-      apply S_Inr_Step. exact Hstep.
-
-  - (* T_Case: e = ECase e0 x1 e1 x2 e2 *)
-    simpl in Helv. destruct Helv as [Helv0 [Helv1 Helv2]].
-    destruct (IHHtype1 mu rho Hec Helv0) as [Hval0 | [mu1 [R1 [rho1 [e' Hstep]]]]].
-    + (* Scrutinee is value: canonical forms *)
-      destruct (canonical_forms_sum _ _ _ _ _ _ Htype1 Hval0)
+        exists mu, R, (env_extend rho x' (expr_to_val e2)), eb.
+        constructor. exact Hv2.
+      * right. exists m2, R2, r2, (EApp e1 e2'). apply S_App_Step2; assumption.
+    + right. exists m1, R1, r1, (EApp e1' e2). apply S_App_Step1. exact Hs1.
+  (* T_Pair *) - simpl in Helv. destruct Helv as [H1 H2].
+    destruct (IHHtype1 mu rho Hec H1) as [Hv1 | [m1 [R1 [r1 [e1' Hs1]]]]].
+    + assert (Hec': env_consistent rho G').
+      { eapply env_consistent_weaken; [exact Hec |].
+        intros x' T' u' Hl'. eapply typing_preserves_domain; eauto. }
+      destruct (IHHtype2 mu rho Hec' H2) as [Hv2 | [m2 [R2 [r2 [e2' Hs2]]]]].
+      * left. constructor; assumption.
+      * right. exists m2, R2, r2, (EPair e1 e2'). apply S_Pair_Step2; assumption.
+    + right. exists m1, R1, r1, (EPair e1' e2). apply S_Pair_Step1. exact Hs1.
+  (* T_Fst *) - simpl in Helv.
+    destruct (IHHtype mu rho Hec Helv) as [Hv | [m1 [R1 [r1 [e' Hs]]]]].
+    + destruct (canonical_forms_prod _ _ _ _ _ _ Htype Hv) as [v1 [v2 He]].
+      subst e. right. exists mu, R, rho, v1.
+      apply S_Fst; inversion Hv; subst; assumption.
+    + right. exists m1, R1, r1, (EFst e'). apply S_Fst_Step. exact Hs.
+  (* T_Snd *) - simpl in Helv.
+    destruct (IHHtype mu rho Hec Helv) as [Hv | [m1 [R1 [r1 [e' Hs]]]]].
+    + destruct (canonical_forms_prod _ _ _ _ _ _ Htype Hv) as [v1 [v2 He]].
+      subst e. right. exists mu, R, rho, v2.
+      apply S_Snd; inversion Hv; subst; assumption.
+    + right. exists m1, R1, r1, (ESnd e'). apply S_Snd_Step. exact Hs.
+  (* T_Inl *) - simpl in Helv.
+    destruct (IHHtype mu rho Hec Helv) as [Hv | [m1 [R1 [r1 [e' Hs]]]]].
+    + left. constructor. exact Hv.
+    + right. exists m1, R1, r1, (EInl T2 e'). apply S_Inl_Step. exact Hs.
+  (* T_Inr *) - simpl in Helv.
+    destruct (IHHtype mu rho Hec Helv) as [Hv | [m1 [R1 [r1 [e' Hs]]]]].
+    + left. constructor. exact Hv.
+    + right. exists m1, R1, r1, (EInr T1 e'). apply S_Inr_Step. exact Hs.
+  (* T_Case *) - simpl in Helv. destruct Helv as [H0 [H1 H2]].
+    destruct (IHHtype1 mu rho Hec H0) as [Hv0 | [m1 [R1 [r1 [e' Hs]]]]].
+    + destruct (canonical_forms_sum _ _ _ _ _ _ Htype1 Hv0)
         as [[v' [He Hv']] | [v' [He Hv']]].
-      * (* EInl case *)
-        subst e. right.
-        exists mu, R, (env_extend rho x1 (expr_to_val v')), e1.
+      * subst e. right. exists mu, R, (env_extend rho x1 (expr_to_val v')), e1.
         apply S_Case_Inl. exact Hv'.
-      * (* EInr case *)
-        subst e. right.
-        exists mu, R, (env_extend rho x2 (expr_to_val v')), e2.
+      * subst e. right. exists mu, R, (env_extend rho x2 (expr_to_val v')), e2.
         apply S_Case_Inr. exact Hv'.
-    + right. exists mu1, R1, rho1, (ECase e' x1 e1 x2 e2).
-      apply S_Case_Step. exact Hstep.
-
-  - (* T_If: e = EIf e1 e2 e3 *)
-    simpl in Helv. destruct Helv as [Helv1 [Helv2 Helv3]].
-    destruct (IHHtype1 mu rho Hec Helv1) as [Hval1 | [mu1 [R1 [rho1 [e1' Hstep1]]]]].
-    + (* Condition is value: canonical forms gives EBool *)
-      destruct (canonical_forms_bool _ _ _ _ Htype1 Hval1) as [b Hb].
-      subst e1. right.
-      destruct b.
+    + right. exists m1, R1, r1, (ECase e' x1 e1 x2 e2).
+      apply S_Case_Step. exact Hs.
+  (* T_If *) - simpl in Helv. destruct Helv as [H1 [H2 H3]].
+    destruct (IHHtype1 mu rho Hec H1) as [Hv1 | [m1 [R1 [r1 [e1' Hs1]]]]].
+    + destruct (canonical_forms_bool _ _ _ _ Htype1 Hv1) as [b Hb].
+      subst e1. right. destruct b.
       * exists mu, R, rho, e2. constructor.
       * exists mu, R, rho, e3. constructor.
-    + right. exists mu1, R1, rho1, (EIf e1' e2 e3).
-      apply S_If_Step. exact Hstep1.
-
-  - (* T_Region: e = ERegion r e0 *)
-    right.
-    (* S_Region_Enter fires: ~ In r R from T_Region premise *)
-    exists mu, (r :: R), rho, (ERegion r e).
+    + right. exists m1, R1, r1, (EIf e1' e2 e3). apply S_If_Step. exact Hs1.
+  (* T_Region *) - right. exists mu, (r :: R), rho, (ERegion r e).
     constructor. exact H.
-
-  - (* T_Borrow: e = EBorrow e0 *)
-    (* T_Borrow has premise ctx_lookup G (var_of_expr e0) = Some (T, false).
-       var_of_expr returns the variable name for EVar, "" otherwise.
-       In either case, env_consistent gives us a runtime binding,
-       and S_Borrow_Step + S_Var (or equivalent) provides a step.
-       If e0 is already a value, S_Borrow_Val fires directly. *)
-    right.
-    destruct e; simpl in H.
-    (* e = EVar v0: step via S_Borrow_Step wrapping S_Var *)
-    + destruct (Hec v0 T false H) as [rv Hlookup].
-      exists mu, R, rho, (EBorrow (val_to_expr rv)).
-      apply S_Borrow_Step. constructor. exact Hlookup.
-    (* All other expression forms: var_of_expr returns "".
-       env_consistent + ctx_lookup G "" gives us a value.
-       S_Borrow_Step wraps the inner step. *)
-    all: try (
-      destruct (Hec _ _ _ H) as [rv Hlookup];
-      exists mu, R, rho, (EBorrow (val_to_expr rv));
-      apply S_Borrow_Step; constructor; exact Hlookup
-    ).
-    (* Value forms that can't step — S_Borrow_Val fires *)
-    all: try (
-      exists mu, R, rho, e;
-      apply S_Borrow_Val; constructor
-    ).
-
-  - (* T_Drop: e = EDrop e0 *)
-    simpl in Helv.
-    destruct (IHHtype mu rho Hec Helv) as [Hval | [mu1 [R1 [rho1 [e' Hstep]]]]].
-    + (* e0 is value: need canonical forms for the dropped type *)
-      right.
-      (* is_linear_ty T = true. Linear types: TString r, TRef Lin _ *)
-      destruct T; simpl in H; try discriminate.
-      * (* TString r0: canonical forms gives ELoc l r0 *)
-        destruct (canonical_forms_string _ _ _ _ _ Htype Hval) as [l Hl].
-        subst e.
-        exists (mem_write mu l CFree), R, rho, EUnit.
-        apply S_Drop.
-      * (* TRef Lin _: no value has type TRef — vacuously true.
-           No typing rule produces TRef for a value expression:
-           T_Unit→TBase, T_Bool→TBase, T_I32→TBase, T_Loc→TString,
-           T_Lam→TFun, T_Pair→TProd, T_Inl/T_Inr→TSum.
-           So is_value e /\ R; G |- e : TRef Lin _ -| G' is impossible. *)
-        exfalso.
-        inversion Hval; subst; inversion Htype; subst; discriminate.
-    + right. exists mu1, R1, rho1, (EDrop e').
-      apply S_Drop_Step. exact Hstep.
-
-  - (* T_Copy: e = ECopy e0 *)
-    simpl in Helv.
-    destruct (IHHtype mu rho Hec Helv) as [Hval | [mu1 [R1 [rho1 [e' Hstep]]]]].
-    + (* e0 is value: S_Copy *)
-      right. exists mu, R, rho, (EPair e e).
-      constructor. exact Hval.
-    + right. exists mu1, R1, rho1, (ECopy e').
-      apply S_Copy_Step. exact Hstep.
+  (* T_Borrow *)  - admit.
+  (* T_Drop *) - admit.
+  (* T_Copy *) - simpl in Helv.
+    destruct (IHHtype mu rho Hec Helv) as [Hv | [m1 [R1 [r1 [e' Hs]]]]].
+    + right. exists mu, R, rho, (EPair e e). constructor. exact Hv.
+    + right. exists m1, R1, r1, (ECopy e'). apply S_Copy_Step. exact Hs.
 Admitted.
 (* DUST NOTE: Progress has ZERO internal admits — all 24/24 typing cases handled:
    - T_StringLen: resolved by inverting T_Borrow premise, using env_consistent

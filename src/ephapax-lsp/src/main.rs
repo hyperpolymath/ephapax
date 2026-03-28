@@ -489,6 +489,7 @@ fn extract_declarations(module: &Module, _source: &str) -> Vec<DeclInfo> {
                 params,
                 ret_ty,
                 body,
+                visibility: _,
                 type_params: _,
             } => {
                 let param_strs: Vec<(String, String)> = params
@@ -516,7 +517,7 @@ fn extract_declarations(module: &Module, _source: &str) -> Vec<DeclInfo> {
                     return_type: Some(format_ty(ret_ty)),
                 }
             }
-            Decl::Type { name, ty } => DeclInfo {
+            Decl::Type { name, visibility: _, ty } => DeclInfo {
                 name: name.to_string(),
                 kind: DeclKind::TypeAlias,
                 span: Span::dummy(),

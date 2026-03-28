@@ -20,6 +20,7 @@ pub mod discipline;
 
 use ephapax_syntax::{
     BaseTy, BinOp, Decl, Expr, ExprKind, Literal, Module, RegionName, Span, Ty, UnaryOp, Var,
+    Visibility,
 };
 use std::collections::HashMap;
 use std::fmt;
@@ -1210,12 +1211,143 @@ pub fn type_check_expr_with_mode(expr: &Expr, _mode: Mode) -> Result<Ty, Spanned
     type_check_expr(expr)
 }
 
-/// Type check an entire module.
+/// Type check an entire module (standalone, no imports).
 ///
 /// The dyadic property is per-binding: `let` is affine, `let!` is linear.
 pub fn type_check_module(module: &Module) -> Result<(), SpannedTypeError> {
     let mut tc = TypeChecker::new();
+    type_check_module_inner(&mut tc, module)
+}
 
+/// Registry of type-checked modules for cross-module resolution.
+///
+/// After a module is type-checked, its public declarations are registered
+/// here so that dependent modules can import them.
+#[derive(Debug, Default)]
+pub struct ModuleRegistry {
+    /// Module name -> list of (decl_name, type, visibility).
+    modules: HashMap<Var, Vec<(Var, Ty, Visibility)>>,
+}
+
+impl ModuleRegistry {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Register a module's declarations after type checking.
+    pub fn register(&mut self, module: &Module) {
+        let mut entries = Vec::new();
+        for decl in &module.decls {
+            match decl {
+                Decl::Fn {
+                    name,
+                    visibility,
+                    type_params,
+                    params,
+                    ret_ty,
+                    ..
+                } => {
+                    let fn_ty = params
+                        .iter()
+                        .rev()
+                        .fold(ret_ty.clone(), |acc, (_, param_ty)| Ty::Fun {
+                            param: Box::new(param_ty.clone()),
+                            ret: Box::new(acc),
+                        });
+                    let poly_ty =
+                        type_params.iter().rev().fold(fn_ty, |acc, tv| Ty::ForAll {
+                            var: tv.clone(),
+                            body: Box::new(acc),
+                        });
+                    entries.push((name.clone(), poly_ty, *visibility));
+                }
+                Decl::Type {
+                    name, visibility, ty,
+                } => {
+                    entries.push((name.clone(), ty.clone(), *visibility));
+                }
+            }
+        }
+        self.modules.insert(module.name.clone(), entries);
+    }
+
+    /// Look up a public name from a registered module.
+    pub fn lookup(&self, module_name: &Var, decl_name: &Var) -> Option<&Ty> {
+        self.modules.get(module_name).and_then(|entries| {
+            entries.iter().find_map(|(name, ty, vis)| {
+                if name == decl_name && *vis == Visibility::Public {
+                    Some(ty)
+                } else {
+                    None
+                }
+            })
+        })
+    }
+
+    /// Get all public names from a module.
+    pub fn public_names(&self, module_name: &Var) -> Vec<(Var, Ty)> {
+        self.modules
+            .get(module_name)
+            .map(|entries| {
+                entries
+                    .iter()
+                    .filter(|(_, _, vis)| *vis == Visibility::Public)
+                    .map(|(name, ty, _)| (name.clone(), ty.clone()))
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+}
+
+/// Type check a module with access to a registry of previously checked modules.
+///
+/// Imports are resolved against the registry. After successful checking,
+/// the module is automatically registered.
+pub fn type_check_module_with_registry(
+    module: &Module,
+    registry: &mut ModuleRegistry,
+) -> Result<(), SpannedTypeError> {
+    let mut tc = TypeChecker::new();
+
+    // Resolve imports: bring imported names into scope
+    for import in &module.imports {
+        if import.names.is_empty() {
+            // Import all public names
+            for (name, ty) in registry.public_names(&import.module) {
+                tc.ctx.extend(name, ty, BindingForm::Let);
+            }
+        } else {
+            // Import specific names
+            for name in &import.names {
+                if let Some(ty) = registry.lookup(&import.module, name) {
+                    tc.ctx.extend(name.clone(), ty.clone(), BindingForm::Let);
+                } else {
+                    // Import resolution error — use dummy span since Import has no span
+                    return Err(SpannedTypeError {
+                        error: TypeError::UnboundVariable(
+                            Var::from(format!("{}::{}", import.module, name)),
+                        ),
+                        span: Span::dummy(),
+                    });
+                }
+            }
+        }
+    }
+
+    // Delegate to regular module checking (which handles signatures + bodies)
+    type_check_module_inner(&mut tc, module)?;
+
+    // Register this module's declarations for dependents
+    registry.register(module);
+
+    Ok(())
+}
+
+/// Internal module checking logic shared by single-module and registry paths.
+fn type_check_module_inner(
+    tc: &mut TypeChecker,
+    module: &Module,
+) -> Result<(), SpannedTypeError> {
     // First pass: collect all function signatures
     for decl in &module.decls {
         if let Decl::Fn {
@@ -1226,7 +1358,6 @@ pub fn type_check_module(module: &Module) -> Result<(), SpannedTypeError> {
             ..
         } = decl
         {
-            // Build the monomorphic function type
             let fn_ty = params
                 .iter()
                 .rev()
@@ -1234,7 +1365,6 @@ pub fn type_check_module(module: &Module) -> Result<(), SpannedTypeError> {
                     param: Box::new(param_ty.clone()),
                     ret: Box::new(acc),
                 });
-            // Wrap in ForAll for each type parameter (outermost first)
             let poly_ty = type_params.iter().rev().fold(fn_ty, |acc, tv| Ty::ForAll {
                 var: tv.clone(),
                 body: Box::new(acc),
@@ -1249,6 +1379,7 @@ pub fn type_check_module(module: &Module) -> Result<(), SpannedTypeError> {
             Decl::Fn {
                 name: _,
                 type_params: _,
+                visibility: _,
                 params,
                 ret_ty,
                 body,
@@ -1277,14 +1408,10 @@ pub fn type_check_module(module: &Module) -> Result<(), SpannedTypeError> {
                 }
 
                 tc.ctx = saved_ctx;
-                // Reset unification state between functions so unif vars
-                // from one function don't leak into the next.
                 tc.next_unif = saved_unif;
                 tc.unif_solutions.clear();
             }
-            Decl::Type { .. } => {
-                // Type aliases don't need runtime checking
-            }
+            Decl::Type { .. } => {}
         }
     }
 
@@ -1305,7 +1432,7 @@ pub fn type_check(expr: &Expr) -> Result<Ty, SpannedTypeError> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ephapax_syntax::Span;
+    use ephapax_syntax::{Span, Visibility};
 
     fn dummy_expr(kind: ExprKind) -> Expr {
         Expr::new(kind, Span::dummy())
@@ -1745,8 +1872,10 @@ mod tests {
     fn test_module_basic() {
         let module = Module {
             name: "test".into(),
+            imports: vec![],
             decls: vec![Decl::Fn {
                 name: "add".into(),
+                visibility: Visibility::Private,
                 type_params: vec![],
                 params: vec![
                     ("a".into(), Ty::Base(BaseTy::I32)),
@@ -1767,8 +1896,10 @@ mod tests {
     fn test_module_return_type_mismatch() {
         let module = Module {
             name: "test".into(),
+            imports: vec![],
             decls: vec![Decl::Fn {
                 name: "bad".into(),
+                visibility: Visibility::Private,
                 type_params: vec![],
                 params: vec![],
                 ret_ty: Ty::Base(BaseTy::Bool),
@@ -1872,8 +2003,10 @@ mod tests {
     fn test_module_rejects_unconsumed_linear_param() {
         let module = Module {
             name: "test".into(),
+            imports: vec![],
             decls: vec![Decl::Fn {
                 name: "forget".into(),
+                visibility: Visibility::Private,
                 type_params: vec![],
                 params: vec![("s".into(), Ty::String("r".into()))],
                 ret_ty: Ty::Base(BaseTy::Unit),
@@ -1971,8 +2104,10 @@ mod tests {
         // fn identity<T>(x: T) : T = x
         let module = Module {
             name: "test".into(),
+            imports: vec![],
             decls: vec![Decl::Fn {
                 name: "identity".into(),
+                visibility: Visibility::Private,
                 type_params: vec!["T".into()],
                 params: vec![("x".into(), Ty::Var("T".into()))],
                 ret_ty: Ty::Var("T".into()),
@@ -1988,9 +2123,11 @@ mod tests {
         // fn main() : I32 = identity(42)
         let module = Module {
             name: "test".into(),
+            imports: vec![],
             decls: vec![
                 Decl::Fn {
                     name: "identity".into(),
+                    visibility: Visibility::Private,
                     type_params: vec!["T".into()],
                     params: vec![("x".into(), Ty::Var("T".into()))],
                     ret_ty: Ty::Var("T".into()),
@@ -1998,6 +2135,7 @@ mod tests {
                 },
                 Decl::Fn {
                     name: "main".into(),
+                    visibility: Visibility::Private,
                     type_params: vec![],
                     params: vec![],
                     ret_ty: Ty::Base(BaseTy::I32),
@@ -2017,9 +2155,11 @@ mod tests {
         // fn main() : Bool = identity(true)
         let module = Module {
             name: "test".into(),
+            imports: vec![],
             decls: vec![
                 Decl::Fn {
                     name: "identity".into(),
+                    visibility: Visibility::Private,
                     type_params: vec!["T".into()],
                     params: vec![("x".into(), Ty::Var("T".into()))],
                     ret_ty: Ty::Var("T".into()),
@@ -2027,6 +2167,7 @@ mod tests {
                 },
                 Decl::Fn {
                     name: "main".into(),
+                    visibility: Visibility::Private,
                     type_params: vec![],
                     params: vec![],
                     ret_ty: Ty::Base(BaseTy::Bool),
@@ -2046,9 +2187,11 @@ mod tests {
         // fn main() : Bool = identity(42)  — returns I32, not Bool
         let module = Module {
             name: "test".into(),
+            imports: vec![],
             decls: vec![
                 Decl::Fn {
                     name: "identity".into(),
+                    visibility: Visibility::Private,
                     type_params: vec!["T".into()],
                     params: vec![("x".into(), Ty::Var("T".into()))],
                     ret_ty: Ty::Var("T".into()),
@@ -2056,6 +2199,7 @@ mod tests {
                 },
                 Decl::Fn {
                     name: "main".into(),
+                    visibility: Visibility::Private,
                     type_params: vec![],
                     params: vec![],
                     ret_ty: Ty::Base(BaseTy::Bool),
@@ -2075,9 +2219,11 @@ mod tests {
         // fn main() : I32 = const_fn(42, true)
         let module = Module {
             name: "test".into(),
+            imports: vec![],
             decls: vec![
                 Decl::Fn {
                     name: "const_fn".into(),
+                    visibility: Visibility::Private,
                     type_params: vec!["A".into(), "B".into()],
                     params: vec![
                         ("x".into(), Ty::Var("A".into())),
@@ -2092,6 +2238,7 @@ mod tests {
                 },
                 Decl::Fn {
                     name: "main".into(),
+                    visibility: Visibility::Private,
                     type_params: vec![],
                     params: vec![],
                     ret_ty: Ty::Base(BaseTy::I32),
@@ -2118,9 +2265,11 @@ mod tests {
         //   a
         let module = Module {
             name: "test".into(),
+            imports: vec![],
             decls: vec![
                 Decl::Fn {
                     name: "identity".into(),
+                    visibility: Visibility::Private,
                     type_params: vec!["T".into()],
                     params: vec![("x".into(), Ty::Var("T".into()))],
                     ret_ty: Ty::Var("T".into()),
@@ -2128,6 +2277,7 @@ mod tests {
                 },
                 Decl::Fn {
                     name: "main".into(),
+                    visibility: Visibility::Private,
                     type_params: vec![],
                     params: vec![],
                     ret_ty: Ty::Base(BaseTy::I32),
@@ -2201,5 +2351,142 @@ mod tests {
             }
             other => panic!("Expected Fun, got {:?}", other),
         }
+    }
+
+    // ===== MODULE SYSTEM Tests =====
+
+    #[test]
+    fn test_cross_module_import() {
+        use ephapax_syntax::Import;
+
+        // Module "lib": pub fn double(x: I32) : I32 = x + x
+        let lib_module = Module {
+            name: "lib".into(),
+            imports: vec![],
+            decls: vec![Decl::Fn {
+                name: "double".into(),
+                visibility: Visibility::Public,
+                type_params: vec![],
+                params: vec![("x".into(), Ty::Base(BaseTy::I32))],
+                ret_ty: Ty::Base(BaseTy::I32),
+                body: dummy_expr(ExprKind::BinOp {
+                    op: BinOp::Add,
+                    left: Box::new(dummy_expr(ExprKind::Var("x".into()))),
+                    right: Box::new(dummy_expr(ExprKind::Var("x".into()))),
+                }),
+            }],
+        };
+
+        // Module "main": import lib; fn main() : I32 = double(21)
+        let main_module = Module {
+            name: "main".into(),
+            imports: vec![Import {
+                module: "lib".into(),
+                names: vec![],
+            }],
+            decls: vec![Decl::Fn {
+                name: "main".into(),
+                visibility: Visibility::Private,
+                type_params: vec![],
+                params: vec![],
+                ret_ty: Ty::Base(BaseTy::I32),
+                body: dummy_expr(ExprKind::App {
+                    func: Box::new(dummy_expr(ExprKind::Var("double".into()))),
+                    arg: Box::new(dummy_expr(ExprKind::Lit(Literal::I32(21)))),
+                }),
+            }],
+        };
+
+        let mut registry = ModuleRegistry::new();
+
+        // Type check lib first
+        type_check_module_with_registry(&lib_module, &mut registry).unwrap();
+
+        // Type check main — imports double from lib
+        type_check_module_with_registry(&main_module, &mut registry).unwrap();
+    }
+
+    #[test]
+    fn test_private_not_importable() {
+        use ephapax_syntax::Import;
+
+        // Module "lib": fn secret(x: I32) : I32 = x  (PRIVATE)
+        let lib_module = Module {
+            name: "lib".into(),
+            imports: vec![],
+            decls: vec![Decl::Fn {
+                name: "secret".into(),
+                visibility: Visibility::Private,
+                type_params: vec![],
+                params: vec![("x".into(), Ty::Base(BaseTy::I32))],
+                ret_ty: Ty::Base(BaseTy::I32),
+                body: dummy_expr(ExprKind::Var("x".into())),
+            }],
+        };
+
+        // Module "main": import lib (secret)  — should fail
+        let main_module = Module {
+            name: "main".into(),
+            imports: vec![Import {
+                module: "lib".into(),
+                names: vec!["secret".into()],
+            }],
+            decls: vec![Decl::Fn {
+                name: "main".into(),
+                visibility: Visibility::Private,
+                type_params: vec![],
+                params: vec![],
+                ret_ty: Ty::Base(BaseTy::I32),
+                body: dummy_expr(ExprKind::Lit(Literal::I32(0))),
+            }],
+        };
+
+        let mut registry = ModuleRegistry::new();
+        type_check_module_with_registry(&lib_module, &mut registry).unwrap();
+        // Should fail — "secret" is private
+        assert!(type_check_module_with_registry(&main_module, &mut registry).is_err());
+    }
+
+    #[test]
+    fn test_import_generic_function() {
+        use ephapax_syntax::Import;
+
+        // Module "lib": pub fn identity<T>(x: T) : T = x
+        let lib_module = Module {
+            name: "lib".into(),
+            imports: vec![],
+            decls: vec![Decl::Fn {
+                name: "identity".into(),
+                visibility: Visibility::Public,
+                type_params: vec!["T".into()],
+                params: vec![("x".into(), Ty::Var("T".into()))],
+                ret_ty: Ty::Var("T".into()),
+                body: dummy_expr(ExprKind::Var("x".into())),
+            }],
+        };
+
+        // Module "main": import lib; fn main() : Bool = identity(true)
+        let main_module = Module {
+            name: "main".into(),
+            imports: vec![Import {
+                module: "lib".into(),
+                names: vec![],
+            }],
+            decls: vec![Decl::Fn {
+                name: "main".into(),
+                visibility: Visibility::Private,
+                type_params: vec![],
+                params: vec![],
+                ret_ty: Ty::Base(BaseTy::Bool),
+                body: dummy_expr(ExprKind::App {
+                    func: Box::new(dummy_expr(ExprKind::Var("identity".into()))),
+                    arg: Box::new(dummy_expr(ExprKind::Lit(Literal::Bool(true)))),
+                }),
+            }],
+        };
+
+        let mut registry = ModuleRegistry::new();
+        type_check_module_with_registry(&lib_module, &mut registry).unwrap();
+        type_check_module_with_registry(&main_module, &mut registry).unwrap();
     }
 }

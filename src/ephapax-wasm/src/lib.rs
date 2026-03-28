@@ -2284,7 +2284,7 @@ pub fn generate_source_map_for_module(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ephapax_syntax::{BaseTy, Span, Ty};
+    use ephapax_syntax::{BaseTy, Span, Ty, Visibility};
 
     // -----------------------------------------------------------------------
     // WASM validation helper
@@ -2813,8 +2813,10 @@ mod tests {
         // fn identity(x: I32) -> I32 = x
         let module = AstModule {
             name: "test".into(),
+            imports: vec![],
             decls: vec![Decl::Fn {
                 name: "identity".into(),
+                visibility: Visibility::Private,
                 type_params: vec![],
                 params: vec![("x".into(), Ty::Base(BaseTy::I32))],
                 ret_ty: Ty::Base(BaseTy::I32),
@@ -2831,8 +2833,10 @@ mod tests {
         // fn add(a: I32, b: I32) -> I32 = a + b
         let module = AstModule {
             name: "test".into(),
+            imports: vec![],
             decls: vec![Decl::Fn {
                 name: "add".into(),
+                visibility: Visibility::Private,
                 type_params: vec![],
                 params: vec![
                     ("a".into(), Ty::Base(BaseTy::I32)),
@@ -2856,8 +2860,10 @@ mod tests {
         // fn main() -> I32 = 42
         let module = AstModule {
             name: "test".into(),
+            imports: vec![],
             decls: vec![Decl::Fn {
                 name: "main".into(),
+                visibility: Visibility::Private,
                 type_params: vec![],
                 params: vec![],
                 ret_ty: Ty::Base(BaseTy::I32),
@@ -2875,9 +2881,11 @@ mod tests {
         // fn main() -> I32 = 21
         let module = AstModule {
             name: "test".into(),
+            imports: vec![],
             decls: vec![
                 Decl::Fn {
                     name: "double".into(),
+                    visibility: Visibility::Private,
                     type_params: vec![],
                     params: vec![("x".into(), Ty::Base(BaseTy::I32))],
                     ret_ty: Ty::Base(BaseTy::I32),
@@ -2889,6 +2897,7 @@ mod tests {
                 },
                 Decl::Fn {
                     name: "main".into(),
+                    visibility: Visibility::Private,
                     type_params: vec![],
                     params: vec![],
                     ret_ty: Ty::Base(BaseTy::I32),
@@ -2906,8 +2915,10 @@ mod tests {
         // fn abs(x: I32) -> I32 = if (x < 0) then (0 - x) else x
         let module = AstModule {
             name: "test".into(),
+            imports: vec![],
             decls: vec![Decl::Fn {
                 name: "abs".into(),
+                visibility: Visibility::Private,
                 type_params: vec![],
                 params: vec![("x".into(), Ty::Base(BaseTy::I32))],
                 ret_ty: Ty::Base(BaseTy::I32),
@@ -2936,8 +2947,10 @@ mod tests {
         // fn compute(a: I32) -> I32 = let b = a * 2 in b + 1
         let module = AstModule {
             name: "test".into(),
+            imports: vec![],
             decls: vec![Decl::Fn {
                 name: "compute".into(),
+                visibility: Visibility::Private,
                 type_params: vec![],
                 params: vec![("a".into(), Ty::Base(BaseTy::I32))],
                 ret_ty: Ty::Base(BaseTy::I32),
@@ -2968,9 +2981,11 @@ mod tests {
         // fn main() -> I32 = double(21)
         let module = AstModule {
             name: "test".into(),
+            imports: vec![],
             decls: vec![
                 Decl::Fn {
                     name: "double".into(),
+                    visibility: Visibility::Private,
                     type_params: vec![],
                     params: vec![("x".into(), Ty::Base(BaseTy::I32))],
                     ret_ty: Ty::Base(BaseTy::I32),
@@ -2982,6 +2997,7 @@ mod tests {
                 },
                 Decl::Fn {
                     name: "main".into(),
+                    visibility: Visibility::Private,
                     type_params: vec![],
                     params: vec![],
                     ret_ty: Ty::Base(BaseTy::I32),
@@ -3002,8 +3018,10 @@ mod tests {
         // fn is_positive(x: I32) -> Bool = x > 0
         let module = AstModule {
             name: "test".into(),
+            imports: vec![],
             decls: vec![Decl::Fn {
                 name: "is_positive".into(),
+                visibility: Visibility::Private,
                 type_params: vec![],
                 params: vec![("x".into(), Ty::Base(BaseTy::I32))],
                 ret_ty: Ty::Base(BaseTy::Bool),
@@ -3023,6 +3041,7 @@ mod tests {
     fn compile_module_empty() {
         let module = AstModule {
             name: "empty".into(),
+            imports: vec![],
             decls: vec![],
         };
         let wasm = compile_module(&module).expect("compilation failed");
@@ -3233,8 +3252,10 @@ mod tests {
         // Expected result: 6
         let module = AstModule {
             name: "test".into(),
+            imports: vec![],
             decls: vec![Decl::Fn {
                 name: "main".into(),
+                visibility: Visibility::Private,
                 type_params: vec![],
                 params: vec![],
                 ret_ty: Ty::Base(BaseTy::I32),
@@ -3267,8 +3288,10 @@ mod tests {
         // Expected result: 15
         let module = AstModule {
             name: "test".into(),
+            imports: vec![],
             decls: vec![Decl::Fn {
                 name: "main".into(),
+                visibility: Visibility::Private,
                 type_params: vec![],
                 params: vec![],
                 ret_ty: Ty::Base(BaseTy::I32),
@@ -3307,8 +3330,10 @@ mod tests {
         // Expected result: 13
         let module = AstModule {
             name: "test".into(),
+            imports: vec![],
             decls: vec![Decl::Fn {
                 name: "main".into(),
+                visibility: Visibility::Private,
                 type_params: vec![],
                 params: vec![],
                 ret_ty: Ty::Base(BaseTy::I32),

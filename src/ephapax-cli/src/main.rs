@@ -565,8 +565,10 @@ fn show_parse(input: &str, pretty: bool, format: &str) -> Result<(), String> {
                 // Wrap single expression in a synthetic module for consistent output
                 let module = ephapax_syntax::Module {
                     name: smol_str::SmolStr::new(filename),
+                    imports: vec![],
                     decls: vec![ephapax_syntax::Decl::Fn {
                         name: smol_str::SmolStr::new("_expr"),
+                        visibility: ephapax_syntax::Visibility::Private,
                         type_params: vec![],
                         params: vec![],
                         ret_ty: ephapax_syntax::Ty::Base(ephapax_syntax::BaseTy::Unit),

@@ -15,7 +15,7 @@
 //! let result = parse(source);
 //! ```
 
-use ephapax_syntax::{BaseTy, BinOp, Decl, Expr, ExprKind, Literal, Module, Span, Ty, UnaryOp};
+use ephapax_syntax::{BaseTy, BinOp, Decl, Expr, ExprKind, Literal, Module, Span, Ty, UnaryOp, Visibility};
 use pest::Parser;
 use pest_derive::Parser;
 use smol_str::SmolStr;
@@ -74,6 +74,7 @@ pub fn parse_module(source: &str, name: &str) -> Result<Module, Vec<ParseError>>
 
     Ok(Module {
         name: SmolStr::new(name),
+        imports: vec![],
         decls,
     })
 }
@@ -158,6 +159,7 @@ fn parse_fn_decl(pair: pest::iterators::Pair<Rule>) -> Result<Decl, ParseError> 
 
     Ok(Decl::Fn {
         name,
+        visibility: Visibility::Private,
         type_params: vec![],
         params,
         ret_ty: ret_ty.unwrap_or(Ty::Base(BaseTy::Unit)),
@@ -191,7 +193,7 @@ fn parse_type_decl(pair: pest::iterators::Pair<Rule>) -> Result<Decl, ParseError
         }
     };
 
-    Ok(Decl::Type { name, ty })
+    Ok(Decl::Type { name, visibility: Visibility::Private, ty })
 }
 
 fn parse_sum_type_def(pair: pest::iterators::Pair<Rule>) -> Result<Ty, ParseError> {

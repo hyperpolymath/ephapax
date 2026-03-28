@@ -166,6 +166,7 @@ fn region_size(r: &Region) -> I32 = __builtin_region_size(r)
 pub fn build_stdlib_module() -> Module {
     Module {
         name: SmolStr::new("std"),
+        imports: vec![],
         decls: vec![], // Built-in declarations are handled specially
     }
 }

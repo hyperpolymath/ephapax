@@ -68,7 +68,7 @@ pub fn expr_to_json_compact(expr: &Expr) -> Result<String, String> {
 mod tests {
     use super::*;
     use ephapax_syntax::{
-        BaseTy, Decl, Expr, ExprKind, Literal, Module, Span, Ty,
+        BaseTy, Decl, Expr, ExprKind, Literal, Module, Span, Ty, Visibility,
     };
     use smol_str::SmolStr;
 
@@ -78,8 +78,10 @@ mod tests {
     fn module_json_contains_expected_fields() {
         let module = Module {
             name: SmolStr::new("test_mod"),
+            imports: vec![],
             decls: vec![Decl::Fn {
                 name: SmolStr::new("main"),
+                visibility: Visibility::Private,
                 type_params: vec![],
                 params: vec![],
                 ret_ty: Ty::Base(BaseTy::I32),
@@ -107,6 +109,7 @@ mod tests {
     fn compact_json_is_single_line() {
         let module = Module {
             name: SmolStr::new("m"),
+            imports: vec![],
             decls: vec![],
         };
 

@@ -6,7 +6,7 @@
 //!
 //! Provides a small, stable S-expression encoding for Ephapax AST nodes.
 
-use ephapax_syntax::{BaseTy, BinOp, Decl, Expr, ExprKind, Literal, Module, Ty, UnaryOp};
+use ephapax_syntax::{BaseTy, BinOp, Decl, Expr, ExprKind, Literal, Module, Ty, UnaryOp, Visibility};
 use smol_str::SmolStr;
 use std::fmt;
 use thiserror::Error;
@@ -240,6 +240,7 @@ fn decode_module(items: &[SExpr]) -> Result<Module, SExprError> {
 
     Ok(Module {
         name: SmolStr::new(name),
+        imports: vec![],
         decls,
     })
 }
@@ -251,6 +252,7 @@ fn decl_to_sexpr(decl: &Decl) -> SExpr {
             params,
             ret_ty,
             body,
+            visibility: _,
             type_params: _,
         } => SExpr::List(vec![
             SExpr::Atom("fn".into()),
@@ -264,7 +266,7 @@ fn decl_to_sexpr(decl: &Decl) -> SExpr {
             ty_to_sexpr(ret_ty),
             expr_to_sexpr(body),
         ]),
-        Decl::Type { name, ty } => SExpr::List(vec![
+        Decl::Type { name, visibility: _, ty } => SExpr::List(vec![
             SExpr::Atom("type".into()),
             SExpr::Atom(escape_atom(name)),
             ty_to_sexpr(ty),
@@ -303,6 +305,7 @@ fn decode_decl(expr: &SExpr) -> Result<Decl, SExprError> {
         let body = decode_expr(&list[4])?;
         Ok(Decl::Fn {
             name: SmolStr::new(name),
+            visibility: Visibility::Private,
             type_params: vec![],
             params,
             ret_ty,
@@ -318,6 +321,7 @@ fn decode_decl(expr: &SExpr) -> Result<Decl, SExprError> {
         let ty = decode_ty(&list[2])?;
         Ok(Decl::Type {
             name: SmolStr::new(name),
+            visibility: Visibility::Private,
             ty,
         })
     } else {
@@ -925,8 +929,10 @@ mod tests {
     fn roundtrip_module() {
         let module = Module {
             name: SmolStr::new("test"),
+            imports: vec![],
             decls: vec![Decl::Fn {
                 name: SmolStr::new("main"),
+                visibility: Visibility::Private,
                 type_params: vec![],
                 params: vec![],
                 ret_ty: Ty::Base(BaseTy::I32),

@@ -59,7 +59,7 @@ use ephapax_surface::{
     ConstructorDef, DataDecl, MatchArm, Pattern, Span, SurfaceDecl, SurfaceExpr, SurfaceExprKind,
     SurfaceModule, SurfaceTy,
 };
-use ephapax_syntax::{BaseTy, Decl, Expr, ExprKind, Literal, Module, Ty};
+use ephapax_syntax::{BaseTy, Decl, Expr, ExprKind, Literal, Module, Ty, Visibility};
 use smol_str::SmolStr;
 use thiserror::Error;
 
@@ -218,6 +218,7 @@ impl Desugarer {
                     let core_body = self.desugar_expr(body)?;
                     core_decls.push(Decl::Fn {
                         name: name.clone(),
+                        visibility: Visibility::Private,
                         type_params: vec![],
                         params: core_params,
                         ret_ty: core_ret,
@@ -227,6 +228,7 @@ impl Desugarer {
                 SurfaceDecl::Type { name, ty } => {
                     core_decls.push(Decl::Type {
                         name: name.clone(),
+                        visibility: Visibility::Private,
                         ty: self.desugar_ty(ty)?,
                     });
                 }
@@ -239,6 +241,7 @@ impl Desugarer {
 
         Ok(Module {
             name: module.name.clone(),
+            imports: vec![],
             decls: core_decls,
         })
     }

@@ -482,6 +482,8 @@ pub enum Decl {
     /// Empty for monomorphic functions.
     Fn {
         name: Var,
+        #[serde(skip_serializing_if = "is_private")]
+        visibility: Visibility,
         #[serde(skip_serializing_if = "Vec::is_empty")]
         type_params: Vec<SmolStr>,
         params: Vec<(Var, Ty)>,
@@ -490,13 +492,52 @@ pub enum Decl {
     },
 
     /// Type alias
-    Type { name: Var, ty: Ty },
+    Type {
+        name: Var,
+        #[serde(skip_serializing_if = "is_private")]
+        visibility: Visibility,
+        ty: Ty,
+    },
+}
+
+/// Helper for serde skip_serializing_if.
+/// Visibility of a declaration.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Visibility {
+    /// Accessible from other modules.
+    Public,
+    /// Only accessible within this module (default).
+    Private,
+}
+
+impl Default for Visibility {
+    fn default() -> Self {
+        Visibility::Private
+    }
+}
+
+/// Helper for serde skip_serializing_if.
+fn is_private(v: &Visibility) -> bool {
+    *v == Visibility::Private
+}
+
+/// An import declaration: `import module_name` or `import module_name (name1, name2)`.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct Import {
+    /// The module to import from.
+    pub module: SmolStr,
+    /// Specific names to import. Empty = import all public names.
+    pub names: Vec<SmolStr>,
 }
 
 /// A complete module
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct Module {
     pub name: SmolStr,
+    /// Import declarations.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub imports: Vec<Import>,
     pub decls: Vec<Decl>,
 }
 

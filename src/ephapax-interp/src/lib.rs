@@ -310,6 +310,7 @@ impl Interpreter {
         for decl in &module.decls {
             if let Decl::Fn {
                 name,
+                visibility: _,
                 params,
                 ret_ty,
                 body,

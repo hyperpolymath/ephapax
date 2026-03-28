@@ -1277,6 +1277,10 @@ pub fn type_check_module(module: &Module) -> Result<(), SpannedTypeError> {
                 }
 
                 tc.ctx = saved_ctx;
+                // Reset unification state between functions so unif vars
+                // from one function don't leak into the next.
+                tc.next_unif = saved_unif;
+                tc.unif_solutions.clear();
             }
             Decl::Type { .. } => {
                 // Type aliases don't need runtime checking
@@ -1958,5 +1962,244 @@ mod tests {
         // The error should point to the string literal (inner), not the let (outer)
         assert_eq!(err.span, Span::new(10, 25));
         assert!(matches!(err.error, TypeError::UnallocatedStringLiteral));
+    }
+
+    // ===== GENERICS / POLYMORPHISM Tests =====
+
+    #[test]
+    fn test_generic_identity_function() {
+        // fn identity<T>(x: T) : T = x
+        let module = Module {
+            name: "test".into(),
+            decls: vec![Decl::Fn {
+                name: "identity".into(),
+                type_params: vec!["T".into()],
+                params: vec![("x".into(), Ty::Var("T".into()))],
+                ret_ty: Ty::Var("T".into()),
+                body: dummy_expr(ExprKind::Var("x".into())),
+            }],
+        };
+        assert!(type_check_module(&module).is_ok());
+    }
+
+    #[test]
+    fn test_generic_identity_called_with_i32() {
+        // fn identity<T>(x: T) : T = x
+        // fn main() : I32 = identity(42)
+        let module = Module {
+            name: "test".into(),
+            decls: vec![
+                Decl::Fn {
+                    name: "identity".into(),
+                    type_params: vec!["T".into()],
+                    params: vec![("x".into(), Ty::Var("T".into()))],
+                    ret_ty: Ty::Var("T".into()),
+                    body: dummy_expr(ExprKind::Var("x".into())),
+                },
+                Decl::Fn {
+                    name: "main".into(),
+                    type_params: vec![],
+                    params: vec![],
+                    ret_ty: Ty::Base(BaseTy::I32),
+                    body: dummy_expr(ExprKind::App {
+                        func: Box::new(dummy_expr(ExprKind::Var("identity".into()))),
+                        arg: Box::new(dummy_expr(ExprKind::Lit(Literal::I32(42)))),
+                    }),
+                },
+            ],
+        };
+        assert!(type_check_module(&module).is_ok());
+    }
+
+    #[test]
+    fn test_generic_identity_called_with_bool() {
+        // fn identity<T>(x: T) : T = x
+        // fn main() : Bool = identity(true)
+        let module = Module {
+            name: "test".into(),
+            decls: vec![
+                Decl::Fn {
+                    name: "identity".into(),
+                    type_params: vec!["T".into()],
+                    params: vec![("x".into(), Ty::Var("T".into()))],
+                    ret_ty: Ty::Var("T".into()),
+                    body: dummy_expr(ExprKind::Var("x".into())),
+                },
+                Decl::Fn {
+                    name: "main".into(),
+                    type_params: vec![],
+                    params: vec![],
+                    ret_ty: Ty::Base(BaseTy::Bool),
+                    body: dummy_expr(ExprKind::App {
+                        func: Box::new(dummy_expr(ExprKind::Var("identity".into()))),
+                        arg: Box::new(dummy_expr(ExprKind::Lit(Literal::Bool(true)))),
+                    }),
+                },
+            ],
+        };
+        assert!(type_check_module(&module).is_ok());
+    }
+
+    #[test]
+    fn test_generic_identity_wrong_return_type() {
+        // fn identity<T>(x: T) : T = x
+        // fn main() : Bool = identity(42)  — returns I32, not Bool
+        let module = Module {
+            name: "test".into(),
+            decls: vec![
+                Decl::Fn {
+                    name: "identity".into(),
+                    type_params: vec!["T".into()],
+                    params: vec![("x".into(), Ty::Var("T".into()))],
+                    ret_ty: Ty::Var("T".into()),
+                    body: dummy_expr(ExprKind::Var("x".into())),
+                },
+                Decl::Fn {
+                    name: "main".into(),
+                    type_params: vec![],
+                    params: vec![],
+                    ret_ty: Ty::Base(BaseTy::Bool),
+                    body: dummy_expr(ExprKind::App {
+                        func: Box::new(dummy_expr(ExprKind::Var("identity".into()))),
+                        arg: Box::new(dummy_expr(ExprKind::Lit(Literal::I32(42)))),
+                    }),
+                },
+            ],
+        };
+        assert!(type_check_module(&module).is_err());
+    }
+
+    #[test]
+    fn test_generic_two_params() {
+        // fn const_fn<A, B>(x: A, y: B) : A = x
+        // fn main() : I32 = const_fn(42, true)
+        let module = Module {
+            name: "test".into(),
+            decls: vec![
+                Decl::Fn {
+                    name: "const_fn".into(),
+                    type_params: vec!["A".into(), "B".into()],
+                    params: vec![
+                        ("x".into(), Ty::Var("A".into())),
+                        ("y".into(), Ty::Var("B".into())),
+                    ],
+                    ret_ty: Ty::Var("A".into()),
+                    // const_fn is curried: fn(x: A) -> fn(y: B) -> x
+                    // But our module checker expects multi-param.
+                    // Actually module checker expects the body to be checked
+                    // with all params in scope, so just return x.
+                    body: dummy_expr(ExprKind::Var("x".into())),
+                },
+                Decl::Fn {
+                    name: "main".into(),
+                    type_params: vec![],
+                    params: vec![],
+                    ret_ty: Ty::Base(BaseTy::I32),
+                    // const_fn(42)(true) — curried application
+                    body: dummy_expr(ExprKind::App {
+                        func: Box::new(dummy_expr(ExprKind::App {
+                            func: Box::new(dummy_expr(ExprKind::Var("const_fn".into()))),
+                            arg: Box::new(dummy_expr(ExprKind::Lit(Literal::I32(42)))),
+                        })),
+                        arg: Box::new(dummy_expr(ExprKind::Lit(Literal::Bool(true)))),
+                    }),
+                },
+            ],
+        };
+        assert!(type_check_module(&module).is_ok());
+    }
+
+    #[test]
+    fn test_generic_called_multiple_times_different_types() {
+        // fn identity<T>(x: T) : T = x
+        // fn main() : I32 =
+        //   let a = identity(42) in     -- T = I32
+        //   let b = identity(true) in   -- T = Bool (fresh instantiation)
+        //   a
+        let module = Module {
+            name: "test".into(),
+            decls: vec![
+                Decl::Fn {
+                    name: "identity".into(),
+                    type_params: vec!["T".into()],
+                    params: vec![("x".into(), Ty::Var("T".into()))],
+                    ret_ty: Ty::Var("T".into()),
+                    body: dummy_expr(ExprKind::Var("x".into())),
+                },
+                Decl::Fn {
+                    name: "main".into(),
+                    type_params: vec![],
+                    params: vec![],
+                    ret_ty: Ty::Base(BaseTy::I32),
+                    body: dummy_expr(ExprKind::Let {
+                        name: "a".into(),
+                        ty: None,
+                        value: Box::new(dummy_expr(ExprKind::App {
+                            func: Box::new(dummy_expr(ExprKind::Var("identity".into()))),
+                            arg: Box::new(dummy_expr(ExprKind::Lit(Literal::I32(42)))),
+                        })),
+                        body: Box::new(dummy_expr(ExprKind::Let {
+                            name: "b".into(),
+                            ty: None,
+                            value: Box::new(dummy_expr(ExprKind::App {
+                                func: Box::new(dummy_expr(ExprKind::Var("identity".into()))),
+                                arg: Box::new(dummy_expr(ExprKind::Lit(Literal::Bool(true)))),
+                            })),
+                            body: Box::new(dummy_expr(ExprKind::Var("a".into()))),
+                        })),
+                    }),
+                },
+            ],
+        };
+        assert!(type_check_module(&module).is_ok());
+    }
+
+    #[test]
+    fn test_unification_basic() {
+        // Directly test the unification engine
+        let mut tc = TypeChecker::new();
+        let s = Span::dummy();
+
+        // Unify I32 with I32 — should succeed
+        assert!(tc.unify(s, &Ty::Base(BaseTy::I32), &Ty::Base(BaseTy::I32)).is_ok());
+
+        // Unify I32 with Bool — should fail
+        assert!(tc.unify(s, &Ty::Base(BaseTy::I32), &Ty::Base(BaseTy::Bool)).is_err());
+
+        // Unify ?0 with I32 — should succeed and solve ?0 = I32
+        let u = tc.fresh_unif();
+        assert!(tc.unify(s, &u, &Ty::Base(BaseTy::I32)).is_ok());
+        assert_eq!(tc.resolve(&u), Ty::Base(BaseTy::I32));
+
+        // Unify ?1 with ?2, then ?2 with Bool — should chain
+        let u1 = tc.fresh_unif();
+        let u2 = tc.fresh_unif();
+        assert!(tc.unify(s, &u1, &u2).is_ok());
+        assert!(tc.unify(s, &u2, &Ty::Base(BaseTy::Bool)).is_ok());
+        assert_eq!(tc.resolve(&u1), Ty::Base(BaseTy::Bool));
+    }
+
+    #[test]
+    fn test_instantiate_forall() {
+        let mut tc = TypeChecker::new();
+
+        // ForAll T. T -> T instantiates to ?0 -> ?0
+        let forall_ty = Ty::ForAll {
+            var: "T".into(),
+            body: Box::new(Ty::Fun {
+                param: Box::new(Ty::Var("T".into())),
+                ret: Box::new(Ty::Var("T".into())),
+            }),
+        };
+        let instantiated = tc.instantiate(forall_ty);
+
+        // Should be Fun { param: Unif(0), ret: Unif(0) }
+        match &instantiated {
+            Ty::Fun { param, ret } => {
+                assert!(matches!(param.as_ref(), Ty::Unif(0)));
+                assert!(matches!(ret.as_ref(), Ty::Unif(0)));
+            }
+            other => panic!("Expected Fun, got {:?}", other),
+        }
     }
 }

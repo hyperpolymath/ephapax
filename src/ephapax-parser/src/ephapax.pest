@@ -6,8 +6,16 @@
 // ============================================================================
 
 // Top-level rules
-module = { SOI ~ declaration* ~ EOI }
+module = { SOI ~ (import_decl | declaration)* ~ EOI }
 expression_only = { SOI ~ expression ~ EOI }
+
+// ============================================================================
+// Imports
+// ============================================================================
+
+import_decl = {
+    "import" ~ identifier ~ ("(" ~ identifier ~ ("," ~ identifier)* ~ ")")?
+}
 
 // ============================================================================
 // Declarations
@@ -15,8 +23,14 @@ expression_only = { SOI ~ expression ~ EOI }
 
 declaration = { data_decl | fn_decl | type_decl }
 
+// Optional "pub" prefix for visibility
+visibility = { "pub" }
+
+// Optional generic type parameters: <T>, <T, U>
+fn_type_params = { "<" ~ identifier ~ ("," ~ identifier)* ~ ">" }
+
 fn_decl = {
-    "fn" ~ identifier ~ "(" ~ param_list? ~ ")" ~ ":" ~ ty ~ "=" ~ expression
+    visibility? ~ "fn" ~ identifier ~ fn_type_params? ~ "(" ~ param_list? ~ ")" ~ ":" ~ ty ~ "=" ~ expression
 }
 
 param_list = { param ~ ("," ~ param)* }
@@ -24,7 +38,7 @@ param_list = { param ~ ("," ~ param)* }
 param = { identifier ~ ":" ~ ty }
 
 type_decl = {
-    "type" ~ identifier ~ "=" ~ (sum_type_def | record_type_def | ty)
+    visibility? ~ "type" ~ identifier ~ "=" ~ (sum_type_def | record_type_def | ty)
 }
 
 // Data type declaration: data Option(a) = None | Some(a)
@@ -64,6 +78,12 @@ type_atom = {
     | named_ty
     | type_var
 }
+
+// Type variables are single lowercase or uppercase identifiers that are NOT
+// constructor names with arguments. The named_ty rule handles constructors.
+// For single uppercase letters like T, A, B — the parser tries named_ty first,
+// which matches as a nullary constructor. The type checker resolves whether
+// it's a type variable or a constructor based on scope.
 
 // Named type application: Option(I32), Result(String@r, Error), Color
 // Nullary named types (no parens) are also valid: Color, Unit, etc.
@@ -283,7 +303,7 @@ keyword = {
     "let" | "let!" | "in" | "fn" | "if" | "then" | "else"
     | "region" | "case" | "of" | "inl" | "inr" | "end"
     | "fst" | "snd" | "drop" | "copy" | "type" | "data" | "match"
-    | "true" | "false"
+    | "true" | "false" | "pub" | "import"
     | "Bool" | "I32" | "I64" | "F32" | "F64" | "String"
 }
 

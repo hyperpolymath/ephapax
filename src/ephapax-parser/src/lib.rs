@@ -15,7 +15,9 @@
 //! let result = parse(source);
 //! ```
 
-use ephapax_syntax::{BaseTy, BinOp, Decl, Expr, ExprKind, Literal, Module, Span, Ty, UnaryOp, Visibility};
+use ephapax_syntax::{
+    BaseTy, BinOp, Decl, Expr, ExprKind, Import, Literal, Module, Span, Ty, UnaryOp, Visibility,
+};
 use pest::Parser;
 use pest_derive::Parser;
 use smol_str::SmolStr;
@@ -65,16 +67,23 @@ pub fn parse_module(source: &str, name: &str) -> Result<Module, Vec<ParseError>>
         .next()
         .ok_or_else(|| vec![ParseError::unexpected_end("module")])?;
     let mut decls = Vec::new();
+    let mut imports = Vec::new();
 
     for inner in pair.into_inner() {
-        if inner.as_rule() == Rule::declaration {
-            decls.push(parse_declaration(inner).map_err(|e| vec![e])?);
+        match inner.as_rule() {
+            Rule::declaration => {
+                decls.push(parse_declaration(inner).map_err(|e| vec![e])?);
+            }
+            Rule::import_decl => {
+                imports.push(parse_import(inner).map_err(|e| vec![e])?);
+            }
+            _ => {} // SOI, EOI
         }
     }
 
     Ok(Module {
         name: SmolStr::new(name),
-        imports: vec![],
+        imports,
         decls,
     })
 }
@@ -96,6 +105,27 @@ fn parse_identifier(pair: pest::iterators::Pair<Rule>) -> SmolStr {
 // Declaration Parsing
 // ============================================================================
 
+fn parse_import(pair: pest::iterators::Pair<Rule>) -> Result<Import, ParseError> {
+    let mut inner = pair.into_inner();
+    let module_name = parse_identifier(
+        inner
+            .next()
+            .ok_or_else(|| ParseError::missing("module name"))?,
+    );
+
+    let mut names = Vec::new();
+    for item in inner {
+        if item.as_rule() == Rule::identifier {
+            names.push(parse_identifier(item));
+        }
+    }
+
+    Ok(Import {
+        module: module_name,
+        names,
+    })
+}
+
 fn parse_declaration(pair: pest::iterators::Pair<Rule>) -> Result<Decl, ParseError> {
     let inner = pair
         .into_inner()
@@ -113,20 +143,30 @@ fn parse_declaration(pair: pest::iterators::Pair<Rule>) -> Result<Decl, ParseErr
 }
 
 fn parse_fn_decl(pair: pest::iterators::Pair<Rule>) -> Result<Decl, ParseError> {
-    let mut inner = pair.into_inner();
+    let inner = pair.into_inner();
 
-    let name = parse_identifier(
-        inner
-            .next()
-            .ok_or_else(|| ParseError::missing("function name"))?,
-    );
-
+    let mut visibility = Visibility::Private;
+    let mut type_params = Vec::new();
+    let mut name = None;
     let mut params = Vec::new();
     let mut ret_ty = None;
     let mut body = None;
 
     for item in inner {
         match item.as_rule() {
+            Rule::visibility => {
+                visibility = Visibility::Public;
+            }
+            Rule::identifier if name.is_none() => {
+                name = Some(parse_identifier(item));
+            }
+            Rule::fn_type_params => {
+                for tp in item.into_inner() {
+                    if tp.as_rule() == Rule::identifier {
+                        type_params.push(parse_identifier(tp));
+                    }
+                }
+            }
             Rule::param_list => {
                 for param in item.into_inner() {
                     if param.as_rule() == Rule::param {
@@ -158,9 +198,9 @@ fn parse_fn_decl(pair: pest::iterators::Pair<Rule>) -> Result<Decl, ParseError> 
     }
 
     Ok(Decl::Fn {
-        name,
-        visibility: Visibility::Private,
-        type_params: vec![],
+        name: name.unwrap_or_else(|| SmolStr::new("_")),
+        visibility,
+        type_params,
         params,
         ret_ty: ret_ty.unwrap_or(Ty::Base(BaseTy::Unit)),
         body: body.unwrap_or_else(|| Expr::dummy(ExprKind::Lit(Literal::Unit))),
@@ -169,11 +209,23 @@ fn parse_fn_decl(pair: pest::iterators::Pair<Rule>) -> Result<Decl, ParseError> 
 
 fn parse_type_decl(pair: pest::iterators::Pair<Rule>) -> Result<Decl, ParseError> {
     let mut inner = pair.into_inner();
-    let name = parse_identifier(
-        inner
-            .next()
-            .ok_or_else(|| ParseError::missing("type name"))?,
-    );
+    let mut visibility = Visibility::Private;
+    let mut name = None;
+
+    for item in &mut inner {
+        match item.as_rule() {
+            Rule::visibility => {
+                visibility = Visibility::Public;
+            }
+            Rule::identifier => {
+                name = Some(parse_identifier(item));
+                break;
+            }
+            _ => {}
+        }
+    }
+
+    let name = name.ok_or_else(|| ParseError::missing("type name"))?;
 
     let ty_or_def = inner
         .next()
@@ -193,7 +245,7 @@ fn parse_type_decl(pair: pest::iterators::Pair<Rule>) -> Result<Decl, ParseError
         }
     };
 
-    Ok(Decl::Type { name, visibility: Visibility::Private, ty })
+    Ok(Decl::Type { name, visibility, ty })
 }
 
 fn parse_sum_type_def(pair: pest::iterators::Pair<Rule>) -> Result<Ty, ParseError> {
@@ -370,6 +422,27 @@ fn parse_type_atom(pair: pest::iterators::Pair<Rule>) -> Result<Ty, ParseError> 
                     .ok_or_else(|| ParseError::missing("type variable name"))?,
             );
             Ok(Ty::Var(name))
+        }
+        Rule::named_ty => {
+            // In the core parser, named types without arguments are type variables.
+            // Named types with arguments (like Option(I32)) are handled by the
+            // surface parser and desugared to binary sums.
+            let mut parts = inner.into_inner();
+            let name = parts
+                .next()
+                .ok_or_else(|| ParseError::missing("named type name"))?;
+            let name_str = SmolStr::new(name.as_str());
+
+            if parts.next().is_some() {
+                // Has arguments — not supported in core parser
+                return Err(ParseError::Syntax {
+                    message: format!("Parameterized type '{}(...)' requires the surface parser", name_str),
+                    span: span_from_pair(&name),
+                });
+            }
+
+            // Bare name — treat as type variable
+            Ok(Ty::Var(name_str))
         }
         Rule::record_ty => {
             // Parse as tuple of field types
@@ -1514,5 +1587,117 @@ mod tests {
         "#;
         let module = parse_module(source, "test").expect("should parse");
         assert_eq!(module.decls.len(), 2);
+    }
+
+    // ===== New feature parsing tests =====
+
+    #[test]
+    fn test_parse_pub_fn() {
+        let source = r#"pub fn double(x: I32): I32 = x"#;
+        let module = parse_module(source, "test").expect("should parse");
+        assert_eq!(module.decls.len(), 1);
+        match &module.decls[0] {
+            Decl::Fn { name, visibility, .. } => {
+                assert_eq!(name.as_str(), "double");
+                assert_eq!(*visibility, Visibility::Public);
+            }
+            _ => panic!("Expected Fn decl"),
+        }
+    }
+
+    #[test]
+    fn test_parse_private_fn_default() {
+        let source = r#"fn secret(x: I32): I32 = x"#;
+        let module = parse_module(source, "test").expect("should parse");
+        match &module.decls[0] {
+            Decl::Fn { visibility, .. } => {
+                assert_eq!(*visibility, Visibility::Private);
+            }
+            _ => panic!("Expected Fn decl"),
+        }
+    }
+
+    #[test]
+    fn test_parse_generic_fn() {
+        let source = r#"fn identity<T>(x: T): T = x"#;
+        let module = parse_module(source, "test").expect("should parse");
+        match &module.decls[0] {
+            Decl::Fn { name, type_params, params, ret_ty, .. } => {
+                assert_eq!(name.as_str(), "identity");
+                assert_eq!(type_params.len(), 1);
+                assert_eq!(type_params[0].as_str(), "T");
+                assert_eq!(params.len(), 1);
+                assert!(matches!(&params[0].1, Ty::Var(v) if v == "T"));
+                assert!(matches!(ret_ty, Ty::Var(v) if v == "T"));
+            }
+            _ => panic!("Expected Fn decl"),
+        }
+    }
+
+    #[test]
+    fn test_parse_multi_type_params() {
+        let source = r#"fn swap<A, B>(x: A, y: B): B = y"#;
+        let module = parse_module(source, "test").expect("should parse");
+        match &module.decls[0] {
+            Decl::Fn { type_params, .. } => {
+                assert_eq!(type_params.len(), 2);
+                assert_eq!(type_params[0].as_str(), "A");
+                assert_eq!(type_params[1].as_str(), "B");
+            }
+            _ => panic!("Expected Fn decl"),
+        }
+    }
+
+    #[test]
+    fn test_parse_pub_generic_fn() {
+        let source = r#"pub fn identity<T>(x: T): T = x"#;
+        let module = parse_module(source, "test").expect("should parse");
+        match &module.decls[0] {
+            Decl::Fn { visibility, type_params, .. } => {
+                assert_eq!(*visibility, Visibility::Public);
+                assert_eq!(type_params.len(), 1);
+            }
+            _ => panic!("Expected Fn decl"),
+        }
+    }
+
+    #[test]
+    fn test_parse_import() {
+        let source = r#"
+            import utils
+            fn main(): I32 = 42
+        "#;
+        let module = parse_module(source, "test").expect("should parse");
+        assert_eq!(module.imports.len(), 1);
+        assert_eq!(module.imports[0].module.as_str(), "utils");
+        assert!(module.imports[0].names.is_empty());
+        assert_eq!(module.decls.len(), 1);
+    }
+
+    #[test]
+    fn test_parse_import_specific_names() {
+        let source = r#"
+            import utils(double, triple)
+            fn main(): I32 = double(21)
+        "#;
+        let module = parse_module(source, "test").expect("should parse");
+        assert_eq!(module.imports.len(), 1);
+        assert_eq!(module.imports[0].module.as_str(), "utils");
+        assert_eq!(module.imports[0].names.len(), 2);
+        assert_eq!(module.imports[0].names[0].as_str(), "double");
+        assert_eq!(module.imports[0].names[1].as_str(), "triple");
+    }
+
+    #[test]
+    fn test_parse_pub_type() {
+        let source = r#"pub type Alias = I32"#;
+        let module = parse_module(source, "test").expect("should parse");
+        match &module.decls[0] {
+            Decl::Type { name, visibility, .. } => {
+                assert_eq!(name.as_str(), "Alias");
+                assert_eq!(*visibility, Visibility::Public);
+            }
+            _ => panic!("Expected Type decl"),
+        }
     }
 }

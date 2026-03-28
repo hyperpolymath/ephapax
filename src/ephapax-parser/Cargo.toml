@@ -25,3 +25,8 @@ pest_derive = "2.7"
 [dev-dependencies]
 ephapax-desugar = { path = "../ephapax-desugar" }
 ephapax-typing = { path = "../ephapax-typing" }
+criterion = { workspace = true }
+
+[[bench]]
+name = "parse_bench"
+harness = false

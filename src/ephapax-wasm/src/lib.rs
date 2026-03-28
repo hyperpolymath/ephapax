@@ -419,12 +419,24 @@ impl Codegen {
         self.emit_types();
         self.emit_imports();
 
+        // Register main as a user function so lambda index calculation is correct.
+        // compile_lambda uses user_fns.len() to compute function/table indices.
+        self.user_fns.insert(
+            "main".into(),
+            UserFnInfo {
+                wasm_fn_idx: FIRST_USER_FN,
+                wasm_type_idx: TYPE_VOID_VOID,
+                param_names: Vec::new(),
+                param_linear: Vec::new(),
+            },
+        );
+
         // Build function + code sections together (runtime + main)
         let mut func_sec = FunctionSection::new();
         let mut code_sec = CodeSection::new();
         self.append_runtime_funcs(&mut func_sec, &mut code_sec);
 
-        // Main function (index FIRST_USER_FN = 9)
+        // Main function (index FIRST_USER_FN)
         func_sec.function(TYPE_VOID_VOID);
         self.locals = LocalTracker::new(0);
         let mut main_func = Function::new(vec![(16, ValType::I32)]);
@@ -433,15 +445,21 @@ impl Codegen {
         main_func.instruction(&Instruction::End);
         code_sec.function(&main_func);
 
+        // Lambda functions discovered during expression compilation
+        let _ = self.append_lambda_funcs(&mut func_sec, &mut code_sec);
+
+        // Emit sections in WASM-required order:
+        // Type, Import, Function, Table, Memory, Export, Element, Code, Data
         self.module.section(&func_sec);
+        self.emit_table();
         self.emit_memory();
 
-        // Exports
         let mut exports = ExportSection::new();
         self.add_runtime_exports(&mut exports);
         exports.export("main", ExportKind::Func, FIRST_USER_FN);
         self.module.section(&exports);
 
+        self.emit_elements();
         self.module.section(&code_sec);
         self.emit_data_section();
         self.emit_debug_sections();
@@ -521,8 +539,12 @@ impl Codegen {
         main_func.instruction(&Instruction::End);
         code_sec.function(&main_func);
 
-        // Emit in WASM order: Type, Import, Function, Memory, Export, Code, Data
+        // Lambda functions discovered during expression compilation
+        let _ = self.append_lambda_funcs(&mut func_sec, &mut code_sec);
+
+        // Emit in WASM order: Type, Import, Function, Table, Memory, Export, Element, Code, Data
         self.module.section(&func_sec);
+        self.emit_table();
         self.emit_memory();
 
         let mut exports = ExportSection::new();
@@ -530,6 +552,7 @@ impl Codegen {
         exports.export("main", ExportKind::Func, FIRST_USER_FN);
         self.module.section(&exports);
 
+        self.emit_elements();
         self.module.section(&code_sec);
         self.emit_data_section();
         self.emit_debug_sections();

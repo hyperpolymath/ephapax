@@ -92,7 +92,6 @@ fn e2e_pair() {
 }
 
 #[test]
-#[ignore = "codegen: closure table not yet emitted — tracked"]
 fn e2e_lambda_application() {
     run("(fn(x: I32) -> x)(42)");
 }

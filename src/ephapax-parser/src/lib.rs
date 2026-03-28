@@ -504,6 +504,7 @@ fn parse_expression(pair: pest::iterators::Pair<Rule>) -> Result<Expr, ParseErro
         Rule::if_expr => parse_if_expr(inner),
         Rule::region_expr => parse_region_expr(inner),
         Rule::case_expr => parse_case_expr(inner),
+        Rule::handle_expr => parse_handle_expr(inner),
         Rule::or_expr => parse_or_expr(inner),
         _ => Err(ParseError::Syntax {
             message: format!("Unexpected expression: {:?}", inner.as_rule()),
@@ -711,6 +712,124 @@ fn parse_case_expr(pair: pest::iterators::Pair<Rule>) -> Result<Expr, ParseError
             left_body: Box::new(left_body),
             right_var,
             right_body: Box::new(right_body),
+        },
+        span,
+    ))
+}
+
+fn parse_handle_expr(pair: pest::iterators::Pair<Rule>) -> Result<Expr, ParseError> {
+    use ephapax_syntax::{HandlerClause, ResumeMode};
+
+    let span = span_from_pair(&pair);
+    let mut inner = pair.into_inner();
+
+    // First child is the body expression
+    let body = parse_expression(
+        inner
+            .next()
+            .ok_or_else(|| ParseError::missing("handle body"))?,
+    )?;
+
+    // Remaining children are handler_clause
+    let mut clauses = Vec::new();
+    for clause_pair in inner {
+        if clause_pair.as_rule() != Rule::handler_clause {
+            continue;
+        }
+        let clause_inner = clause_pair
+            .into_inner()
+            .next()
+            .ok_or_else(|| ParseError::missing("handler clause content"))?;
+
+        match clause_inner.as_rule() {
+            Rule::handler_return_clause => {
+                let mut parts = clause_inner.into_inner();
+                let param = parse_identifier(
+                    parts
+                        .next()
+                        .ok_or_else(|| ParseError::missing("return param"))?,
+                );
+                let body = parse_expression(
+                    parts
+                        .next()
+                        .ok_or_else(|| ParseError::missing("return body"))?,
+                )?;
+                clauses.push(HandlerClause {
+                    op: SmolStr::default(), // empty = return clause
+                    params: vec![param],
+                    resume_mode: None,
+                    body,
+                });
+            }
+            Rule::handler_op_clause => {
+                let mut parts = clause_inner.into_inner();
+                let op = parse_identifier(
+                    parts
+                        .next()
+                        .ok_or_else(|| ParseError::missing("handler op name"))?,
+                );
+
+                let mut params = Vec::new();
+                let mut resume_mode = None;
+                let mut body_expr = None;
+
+                for item in parts {
+                    match item.as_rule() {
+                        Rule::handler_param_list => {
+                            for param_item in item.into_inner() {
+                                match param_item.as_rule() {
+                                    Rule::handler_param => {
+                                        let hp_inner = param_item.into_inner().next();
+                                        if let Some(hp) = hp_inner {
+                                            match hp.as_rule() {
+                                                Rule::resume_param => {
+                                                    // Check for mode
+                                                    if let Some(mode_pair) = hp.into_inner().next()
+                                                    {
+                                                        resume_mode =
+                                                            Some(match mode_pair.as_str() {
+                                                                "once" => ResumeMode::Once,
+                                                                "multi" => ResumeMode::Multi,
+                                                                _ => ResumeMode::Once,
+                                                            });
+                                                    } else {
+                                                        resume_mode = Some(ResumeMode::Once); // default
+                                                    }
+                                                }
+                                                Rule::identifier => {
+                                                    params.push(parse_identifier(hp));
+                                                }
+                                                _ => {}
+                                            }
+                                        }
+                                    }
+                                    _ => {}
+                                }
+                            }
+                        }
+                        Rule::expression => {
+                            body_expr = Some(parse_expression(item)?);
+                        }
+                        _ => {}
+                    }
+                }
+
+                clauses.push(HandlerClause {
+                    op,
+                    params,
+                    resume_mode,
+                    body: body_expr
+                        .unwrap_or_else(|| Expr::dummy(ExprKind::Lit(Literal::Unit))),
+                });
+            }
+            _ => {}
+        }
+    }
+
+    Ok(Expr::new(
+        ExprKind::Handle {
+            body: Box::new(body),
+            clauses,
         },
         span,
     ))
@@ -1072,6 +1191,26 @@ fn parse_atom_expr(pair: pest::iterators::Pair<Rule>) -> Result<Expr, ParseError
         .ok_or_else(|| ParseError::unexpected_end("atom expression"))?;
 
     match inner.as_rule() {
+        Rule::perform_expr => {
+            let mut parts = inner.into_inner();
+            let op = parse_identifier(
+                parts
+                    .next()
+                    .ok_or_else(|| ParseError::missing("effect operation name"))?,
+            );
+            let mut args = Vec::new();
+            for arg_pair in parts {
+                if arg_pair.as_rule() == Rule::expression || arg_pair.as_rule() == Rule::expr_list
+                {
+                    for expr_pair in arg_pair.into_inner() {
+                        if expr_pair.as_rule() == Rule::expression {
+                            args.push(parse_expression(expr_pair)?);
+                        }
+                    }
+                }
+            }
+            Ok(Expr::new(ExprKind::Perform { op, args }, span))
+        }
         Rule::ffi_expr => {
             let mut parts = inner.into_inner();
             // First arg is the symbol name (a string literal)
@@ -1698,6 +1837,63 @@ mod tests {
                 assert_eq!(*visibility, Visibility::Public);
             }
             _ => panic!("Expected Type decl"),
+        }
+    }
+
+    #[test]
+    fn test_parse_perform() {
+        let source = r#"perform print(42)"#;
+        let expr = parse(source).expect("should parse");
+        match &expr.kind {
+            ExprKind::Perform { op, args } => {
+                assert_eq!(op.as_str(), "print");
+                assert_eq!(args.len(), 1);
+            }
+            _ => panic!("Expected Perform, got {:?}", expr.kind),
+        }
+    }
+
+    #[test]
+    fn test_parse_perform_no_args() {
+        let source = r#"perform yield"#;
+        let expr = parse(source).expect("should parse");
+        match &expr.kind {
+            ExprKind::Perform { op, args } => {
+                assert_eq!(op.as_str(), "yield");
+                assert!(args.is_empty());
+            }
+            _ => panic!("Expected Perform, got {:?}", expr.kind),
+        }
+    }
+
+    #[test]
+    fn test_parse_handle() {
+        let source = r#"handle 42 with return(x) => x end"#;
+        let expr = parse(source).expect("should parse");
+        match &expr.kind {
+            ExprKind::Handle { clauses, .. } => {
+                assert_eq!(clauses.len(), 1);
+                assert!(clauses[0].op.is_empty()); // return clause
+            }
+            _ => panic!("Expected Handle, got {:?}", expr.kind),
+        }
+    }
+
+    #[test]
+    fn test_parse_handle_with_op() {
+        let source = r#"handle perform ask() with
+            | return(x) => x
+            | ask(k) => k
+        end"#;
+        let result = parse(source);
+        assert!(result.is_ok(), "should parse handle with op: {:?}", result.err());
+        match result.unwrap().kind {
+            ExprKind::Handle { clauses, .. } => {
+                assert_eq!(clauses.len(), 2);
+                assert!(clauses[0].op.is_empty()); // return
+                assert_eq!(clauses[1].op.as_str(), "ask");
+            }
+            _ => panic!("Expected Handle"),
         }
     }
 }

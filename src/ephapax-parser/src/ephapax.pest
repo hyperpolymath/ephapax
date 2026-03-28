@@ -116,6 +116,7 @@ expression = {
     | region_expr
     | match_expr
     | case_expr
+    | handle_expr
     | or_expr
 }
 
@@ -171,6 +172,38 @@ case_expr = {
     ~ "end"
 }
 
+// Effect handling: handle expr with { return(x) => e | Op(args, resume) => e } end
+handle_expr = {
+    "handle" ~ expression ~ "with"
+    ~ "|"? ~ handler_clause ~ ("|" ~ handler_clause)*
+    ~ "end"
+}
+
+handler_clause = {
+    handler_return_clause
+    | handler_op_clause
+}
+
+// return(x) => expr
+handler_return_clause = {
+    "return" ~ "(" ~ identifier ~ ")" ~ "=>" ~ expression
+}
+
+// Op(param1, param2, resume) => expr
+// resume may optionally have a mode: resume(once) or resume(multi)
+handler_op_clause = {
+    identifier ~ "(" ~ handler_param_list? ~ ")" ~ "=>" ~ expression
+}
+
+handler_param_list = { handler_param ~ ("," ~ handler_param)* }
+handler_param = {
+    resume_param
+    | identifier
+}
+
+resume_param = { "resume" ~ ("(" ~ resume_mode ~ ")")? }
+resume_mode = { "once" | "multi" }
+
 // ============================================================================
 // Binary Operators (by precedence, lowest to highest)
 // ============================================================================
@@ -218,7 +251,8 @@ member_op = { "." ~ (integer | identifier) }
 // ============================================================================
 
 atom_expr = {
-    ffi_expr
+    perform_expr
+    | ffi_expr
     | string_method
     | inl_expr
     | inr_expr
@@ -234,6 +268,9 @@ atom_expr = {
     | literal
     | variable
 }
+
+// Perform an effect operation: perform Op(args...)
+perform_expr = { "perform" ~ identifier ~ ("(" ~ expr_list? ~ ")")? }
 
 // Named constructor: Some(42), None, Ok(value)
 construct_expr = { constructor_name ~ ("(" ~ expr_list? ~ ")")? }
@@ -304,6 +341,7 @@ keyword = {
     | "region" | "case" | "of" | "inl" | "inr" | "end"
     | "fst" | "snd" | "drop" | "copy" | "type" | "data" | "match"
     | "true" | "false" | "pub" | "import"
+    | "perform" | "handle" | "with" | "return" | "resume" | "once" | "multi"
     | "Bool" | "I32" | "I64" | "F32" | "F64" | "String"
 }
 

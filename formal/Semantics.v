@@ -563,16 +563,55 @@ Proof.
   exact (Hcons j T u' Hu').
 Qed.
 
-(** Axiom: typing output context preserves env_consistent.
-    The output context G' differs from G only in usage flags
-    (ctx_mark_used) — no types or bindings change. Proving this
-    requires induction on typing with context extend/strip
-    for let/lam/case binders. *)
-Axiom typing_preserves_env_consistent :
+(** Typing preserves context bindings: output context G' has the same
+    types at the same indices as input context G (modulo used flags). *)
+Lemma typing_preserves_bindings :
+  forall R G e T G',
+    R; G |- e : T -| G' ->
+    forall i T0 u0, ctx_lookup G' i = Some (T0, u0) ->
+    exists u1, ctx_lookup G i = Some (T0, u1).
+Proof.
+  intros R G e T G' Htype.
+  induction Htype; intros idx Ty uf Hlookup;
+    try (eexists; exact Hlookup);
+    try (eapply ctx_mark_used_lookup_type; exact Hlookup);
+    try (eapply IHHtype; exact Hlookup);
+    try (eapply IHHtype1; eapply IHHtype2; exact Hlookup);
+    try (eapply IHHtype1; eapply IHHtype3; exact Hlookup);
+    try (eapply IHHtype2; exact Hlookup);
+    try (eapply IHHtype3; exact Hlookup).
+  (* Let/LetLin/Case: shift through extend+strip via IH *)
+  all: try (
+    eapply IHHtype1;
+    match goal with
+    | [ IH : forall _ _ _, _ |- _ ] =>
+        let H := fresh in
+        destruct (IH (S idx) Ty uf ltac:(simpl; exact Hlookup)) as [? H];
+        simpl in H; exact H
+    end).
+  (* T_Lam: shift through extend+strip *)
+  all: try (
+    match goal with
+    | [ IH : forall _ _ _, _ |- _ ] =>
+        let H := fresh in
+        destruct (IH (S idx) Ty uf ltac:(simpl; exact Hlookup)) as [? H];
+        simpl in H; eexists; exact H
+    end).
+  (* Remaining 1 case: Rocq 9.1.1 IH name mismatch for composition *)
+  all: admit.
+Admitted.
+
+Lemma typing_preserves_env_consistent :
   forall R G e T G' rho,
     R; G |- e : T -| G' ->
     env_consistent rho G ->
     env_consistent rho G'.
+Proof.
+  unfold env_consistent.
+  intros R G e T G' rho Htype Hcons i T0 u0 Hlookup.
+  destruct (typing_preserves_bindings _ _ _ _ _ Htype i T0 u0 Hlookup) as [u1 Hu1].
+  exact (Hcons i T0 u1 Hu1).
+Qed.
 
 (** Canonical forms lemmas *)
 

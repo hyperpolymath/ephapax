@@ -565,6 +565,22 @@ Qed.
 
 (** Typing preserves context bindings: output context G' has the same
     types at the same indices as input context G (modulo used flags). *)
+Ltac chain_ih IH1 IH2 Hlookup :=
+  let H := fresh in
+  destruct (IH2 _ _ _ Hlookup) as [? H]; eapply IH1; exact H.
+
+Ltac chain_shift IH1 IH2 idx Ty uf Hlookup :=
+  let H := fresh in
+  destruct (IH2 (S idx) Ty uf ltac:(simpl; exact Hlookup)) as [? H];
+  simpl in H;
+  let H2 := fresh in
+  destruct (IH1 _ _ _ H) as [? H2]; eexists; exact H2.
+
+Ltac shift_ih IH idx Ty uf Hlookup :=
+  let H := fresh in
+  destruct (IH (S idx) Ty uf ltac:(simpl; exact Hlookup)) as [? H];
+  simpl in H; eexists; exact H.
+
 Lemma typing_preserves_bindings :
   forall R G e T G',
     R; G |- e : T -| G' ->
@@ -572,34 +588,32 @@ Lemma typing_preserves_bindings :
     exists u1, ctx_lookup G i = Some (T0, u1).
 Proof.
   intros R G e T G' Htype.
-  induction Htype; intros idx Ty uf Hlookup;
-    try (eexists; exact Hlookup);
-    try (eapply ctx_mark_used_lookup_type; exact Hlookup);
-    try (eapply IHHtype; exact Hlookup);
-    try (eapply IHHtype1; eapply IHHtype2; exact Hlookup);
-    try (eapply IHHtype1; eapply IHHtype3; exact Hlookup);
-    try (eapply IHHtype2; exact Hlookup);
-    try (eapply IHHtype3; exact Hlookup).
-  (* Let/LetLin/Case: shift through extend+strip via IH *)
-  all: try (
-    eapply IHHtype1;
-    match goal with
-    | [ IH : forall _ _ _, _ |- _ ] =>
-        let H := fresh in
-        destruct (IH (S idx) Ty uf ltac:(simpl; exact Hlookup)) as [? H];
-        simpl in H; exact H
-    end).
-  (* T_Lam: shift through extend+strip *)
-  all: try (
-    match goal with
-    | [ IH : forall _ _ _, _ |- _ ] =>
-        let H := fresh in
-        destruct (IH (S idx) Ty uf ltac:(simpl; exact Hlookup)) as [? H];
-        simpl in H; eexists; exact H
-    end).
-  (* Remaining 1 case: Rocq 9.1.1 IH name mismatch for composition *)
-  all: admit.
-Admitted.
+  induction Htype; intros idx Ty uf Hlookup.
+  1: eexists; exact Hlookup.
+  1: eexists; exact Hlookup.
+  1: eexists; exact Hlookup.
+  1: eapply ctx_mark_used_lookup_type; exact Hlookup.
+  1: eexists; exact Hlookup.
+  1: eexists; exact Hlookup.
+  1: eexists; exact Hlookup.
+  1: chain_ih IHHtype1 IHHtype2 Hlookup.
+  1: eapply IHHtype; exact Hlookup.
+  1: chain_shift IHHtype1 IHHtype2 idx Ty uf Hlookup.
+  1: chain_shift IHHtype1 IHHtype2 idx Ty uf Hlookup.
+  1: shift_ih IHHtype idx Ty uf Hlookup.
+  1: chain_ih IHHtype1 IHHtype2 Hlookup.
+  1: chain_ih IHHtype1 IHHtype2 Hlookup.
+  1: eapply IHHtype; exact Hlookup.
+  1: eapply IHHtype; exact Hlookup.
+  1: eapply IHHtype; exact Hlookup.
+  1: eapply IHHtype; exact Hlookup.
+  1: chain_shift IHHtype1 IHHtype2 idx Ty uf Hlookup.
+  1: chain_ih IHHtype1 IHHtype2 Hlookup.
+  1: eapply IHHtype; exact Hlookup.
+  1: eexists; exact Hlookup.
+  1: eapply IHHtype; exact Hlookup.
+  1: eapply IHHtype; exact Hlookup.
+Qed.
 
 Lemma typing_preserves_env_consistent :
   forall R G e T G' rho,

@@ -1,0 +1,57 @@
+# SPDX-License-Identifier: PMPL-1.0-or-later
+# pixi.toml — Reproducible dev environment for Ephapax compiler
+# Managed by pixi (https://pixi.sh)
+
+[project]
+name = "ephapax"
+version = "0.1.0"
+description = "A dyadic linear/affine type system language targeting WebAssembly"
+authors = ["Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk>"]
+license = "PMPL-1.0-or-later"
+channels = ["conda-forge"]
+platforms = ["linux-64", "osx-arm64", "osx-64"]
+
+# ---------------------------------------------------------------------------
+# Dependencies
+# ---------------------------------------------------------------------------
+
+[dependencies]
+rust = ">=1.83"
+zig = ">=0.13"
+
+[feature.dev.dependencies]
+just = ">=1.0"
+
+[feature.proofs.dependencies]
+coq = ">=8.18"
+
+# ---------------------------------------------------------------------------
+# Environments
+# ---------------------------------------------------------------------------
+
+[environments]
+default = { features = ["dev"], solve-group = "default" }
+proofs = { features = ["dev", "proofs"], solve-group = "default" }
+
+# ---------------------------------------------------------------------------
+# Tasks — Rust compiler
+# ---------------------------------------------------------------------------
+
+[tasks]
+build = { cmd = "cargo build", description = "Build all Rust crates" }
+build-release = { cmd = "cargo build --release", description = "Build in release mode" }
+test = { cmd = "cargo test", description = "Run Rust test suite" }
+check = { cmd = "cargo check", description = "Type-check without codegen" }
+lint = { cmd = "cargo clippy -- -D warnings", description = "Lint with Clippy (deny warnings)" }
+fmt = { cmd = "cargo fmt --check", description = "Check Rust formatting" }
+fmt-fix = { cmd = "cargo fmt", description = "Auto-format Rust code" }
+clean = { cmd = "cargo clean", description = "Remove build artefacts" }
+
+# ---------------------------------------------------------------------------
+# Tasks — Coq formal proofs
+# ---------------------------------------------------------------------------
+
+[feature.proofs.tasks]
+coq-build = { cmd = "cd formal && coq_makefile -f _CoqProject -o Makefile.coq && make -f Makefile.coq", description = "Compile Coq proofs" }
+coq-clean = { cmd = "cd formal && rm -f *.vo *.vok *.vos *.glob .*.aux Makefile.coq Makefile.coq.conf .coqdeps.d", description = "Clean Coq artefacts" }
+coq-check = { cmd = "cd formal && coqchk Semantics", description = "Verify compiled Coq proofs" }

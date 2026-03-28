@@ -64,5 +64,8 @@ htmlcov/
 *.tmp
 *.bak
 
+# Pixi
+.pixi/
+
 # Crash recovery artifacts
 ai-cli-crash-capture/

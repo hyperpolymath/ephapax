@@ -125,6 +125,19 @@ Definition ctx := list (ty * bool).
 Definition ctx_lookup (G : ctx) (i : var) : option (ty * bool) :=
   nth_error G i.
 
+(** Projected lookups — avoid option (ty * bool) discrimination in Rocq 9.1.1. *)
+Definition ctx_lookup_ty (G : ctx) (i : var) : option ty :=
+  match nth_error G i with
+  | Some (T, _) => Some T
+  | None => None
+  end.
+
+Definition ctx_lookup_flag (G : ctx) (i : var) : option bool :=
+  match nth_error G i with
+  | Some (_, u) => Some u
+  | None => None
+  end.
+
 (** Mark variable at index i as used. *)
 Fixpoint ctx_mark_used (G : ctx) (i : var) : ctx :=
   match G, i with
@@ -136,6 +149,119 @@ Fixpoint ctx_mark_used (G : ctx) (i : var) : ctx :=
 (** Extend context with a new binding (prepend — index 0). *)
 Definition ctx_extend (G : ctx) (T : ty) : ctx :=
   (T, false) :: G.
+
+(** ===== Projected lookup lemmas ===== *)
+
+(** Bridging: whole lookup splits into projected lookups. *)
+Lemma ctx_lookup_split :
+  forall G i T u,
+    ctx_lookup G i = Some (T, u) ->
+    ctx_lookup_ty G i = Some T /\ ctx_lookup_flag G i = Some u.
+Proof.
+  unfold ctx_lookup, ctx_lookup_ty, ctx_lookup_flag.
+  intros G i T u H. rewrite H. auto.
+Qed.
+
+(** Bridging: projected lookups combine into whole lookup. *)
+Lemma ctx_lookup_combine :
+  forall G i T u,
+    ctx_lookup_ty G i = Some T ->
+    ctx_lookup_flag G i = Some u ->
+    ctx_lookup G i = Some (T, u).
+Proof.
+  unfold ctx_lookup, ctx_lookup_ty, ctx_lookup_flag.
+  intros G i T u Ht Hu.
+  destruct (nth_error G i) as [[T' u']|] eqn:E.
+  - inversion Ht. inversion Hu. subst. reflexivity.
+  - discriminate.
+Qed.
+
+(** Projected cons lemmas *)
+Lemma ctx_lookup_flag_zero :
+  forall T u G, ctx_lookup_flag ((T, u) :: G) 0 = Some u.
+Proof. reflexivity. Qed.
+
+Lemma ctx_lookup_flag_succ :
+  forall entry G i, ctx_lookup_flag (entry :: G) (S i) = ctx_lookup_flag G i.
+Proof. reflexivity. Qed.
+
+Lemma ctx_lookup_ty_zero :
+  forall T u G, ctx_lookup_ty ((T, u) :: G) 0 = Some T.
+Proof. reflexivity. Qed.
+
+Lemma ctx_lookup_ty_succ :
+  forall entry G i, ctx_lookup_ty (entry :: G) (S i) = ctx_lookup_ty G i.
+Proof. reflexivity. Qed.
+
+(** Flag contradiction — avoids option (ty * bool) discrimination *)
+Lemma flag_true_not_false :
+  forall G i,
+    ctx_lookup_flag G i = Some true ->
+    ctx_lookup_flag G i = Some false -> False.
+Proof. intros G i Ht Hf. rewrite Ht in Hf. discriminate. Qed.
+
+(** ctx_mark_used sets flag to true at position i *)
+Lemma ctx_mark_used_flag_at :
+  forall G i,
+    ctx_lookup_flag G i <> None ->
+    ctx_lookup_flag (ctx_mark_used G i) i = Some true.
+Proof.
+  induction G as [|[T0 u0] G' IH]; intros i Hlk.
+  - simpl in Hlk. destruct i; exfalso; apply Hlk; reflexivity.
+  - destruct i.
+    + reflexivity.
+    + simpl. apply IH. simpl in Hlk. exact Hlk.
+Qed.
+
+(** ctx_mark_used preserves flag at other positions *)
+Lemma ctx_mark_used_flag_other :
+  forall G i j,
+    i <> j ->
+    ctx_lookup_flag (ctx_mark_used G i) j = ctx_lookup_flag G j.
+Proof.
+  induction G as [|[T0 u0] G' IH]; intros i j Hne.
+  - simpl. destruct i; destruct j; reflexivity.
+  - destruct i; destruct j; simpl.
+    + exfalso. apply Hne. reflexivity.
+    + reflexivity.
+    + reflexivity.
+    + apply IH. intro H. apply Hne. f_equal. exact H.
+Qed.
+
+(** ctx_mark_used preserves type at other positions *)
+Lemma ctx_mark_used_ty_other :
+  forall G i j,
+    i <> j ->
+    ctx_lookup_ty (ctx_mark_used G i) j = ctx_lookup_ty G j.
+Proof.
+  induction G as [|[T0 u0] G' IH]; intros i j Hne.
+  - simpl. destruct i; destruct j; reflexivity.
+  - destruct i; destruct j; simpl.
+    + exfalso. apply Hne. reflexivity.
+    + reflexivity.
+    + reflexivity.
+    + apply IH. intro H. apply Hne. f_equal. exact H.
+Qed.
+
+(** flags_only_increase via projection: if flag is false in output, it was false in input *)
+(** Direct contradiction for the T_Let/T_LetLin/T_Case idx=0 case.
+    Uses functional extraction to avoid option-pair discrimination. *)
+Lemma ctx_lookup_cons_zero_flag_contra :
+  forall (T1 : ty) (G'' : ctx) (T0 : ty),
+    ctx_lookup ((T1, true) :: G'') 0 = Some (T0, false) -> False.
+Proof.
+  unfold ctx_lookup. simpl. intros T1 G'' T0 H.
+  apply (f_equal (fun x => match x with Some (_, b) => b | None => true end)) in H.
+  simpl in H. discriminate H.
+Qed.
+
+Lemma flags_only_increase_proj :
+  forall (G G' : ctx) (i : var),
+    List.length G = List.length G' ->
+    (forall j, ctx_lookup_flag G' j = Some false -> ctx_lookup_flag G j = Some false) ->
+    ctx_lookup_flag G' i = Some false ->
+    ctx_lookup_flag G i = Some false.
+Proof. intros. auto. Qed.
 
 (** Check if a type is linear *)
 Fixpoint is_linear_ty (T : ty) : bool :=

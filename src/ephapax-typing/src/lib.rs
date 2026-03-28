@@ -257,6 +257,10 @@ impl Context {
 /// Type checker state
 pub struct TypeChecker {
     ctx: Context,
+    /// Next fresh unification variable ID.
+    next_unif: u32,
+    /// Solved unification variables: id -> type.
+    unif_solutions: HashMap<u32, Ty>,
 }
 
 impl TypeChecker {
@@ -264,12 +268,102 @@ impl TypeChecker {
     pub fn new() -> Self {
         Self {
             ctx: Context::new(),
+            next_unif: 0,
+            unif_solutions: HashMap::new(),
         }
     }
 
     /// Construct a SpannedTypeError at the given span.
     fn at(&self, span: Span, error: TypeError) -> SpannedTypeError {
         SpannedTypeError { error, span }
+    }
+
+    /// Generate a fresh unification variable.
+    fn fresh_unif(&mut self) -> Ty {
+        let id = self.next_unif;
+        self.next_unif += 1;
+        Ty::Unif(id)
+    }
+
+    /// Instantiate a ForAll type by replacing bound variables with fresh
+    /// unification variables. Non-ForAll types pass through unchanged.
+    fn instantiate(&mut self, ty: Ty) -> Ty {
+        match ty {
+            Ty::ForAll { var, body } => {
+                let fresh = self.fresh_unif();
+                let instantiated = body.subst_var(&var, &fresh);
+                self.instantiate(instantiated)
+            }
+            other => other,
+        }
+    }
+
+    /// Resolve a type by chasing unification variable solutions.
+    fn resolve(&self, ty: &Ty) -> Ty {
+        ty.resolve(&self.unif_solutions)
+    }
+
+    /// Unify two types. On success, updates unification solutions.
+    /// On failure, returns a TypeMismatch error at the given span.
+    fn unify(&mut self, s: Span, a: &Ty, b: &Ty) -> Result<(), SpannedTypeError> {
+        let a = self.resolve(a);
+        let b = self.resolve(b);
+
+        match (&a, &b) {
+            // Same structure — trivially equal
+            _ if a == b => Ok(()),
+
+            // Unification variable cases
+            (Ty::Unif(id), _) => {
+                if b.contains_unif(*id) {
+                    return Err(self.at(s, TypeError::TypeMismatch { expected: a, found: b }));
+                }
+                self.unif_solutions.insert(*id, b);
+                Ok(())
+            }
+            (_, Ty::Unif(id)) => {
+                if a.contains_unif(*id) {
+                    return Err(self.at(s, TypeError::TypeMismatch { expected: a, found: b }));
+                }
+                self.unif_solutions.insert(*id, a);
+                Ok(())
+            }
+
+            // Structural cases
+            (Ty::Fun { param: p1, ret: r1 }, Ty::Fun { param: p2, ret: r2 }) => {
+                self.unify(s, p1, p2)?;
+                self.unify(s, r1, r2)
+            }
+            (Ty::Prod { left: l1, right: r1 }, Ty::Prod { left: l2, right: r2 }) => {
+                self.unify(s, l1, l2)?;
+                self.unify(s, r1, r2)
+            }
+            (Ty::Sum { left: l1, right: r1 }, Ty::Sum { left: l2, right: r2 }) => {
+                self.unify(s, l1, l2)?;
+                self.unify(s, r1, r2)
+            }
+            (Ty::Ref { linearity: l1, inner: i1 }, Ty::Ref { linearity: l2, inner: i2 })
+                if l1 == l2 =>
+            {
+                self.unify(s, i1, i2)
+            }
+            (Ty::Region { name: n1, inner: i1 }, Ty::Region { name: n2, inner: i2 })
+                if n1 == n2 =>
+            {
+                self.unify(s, i1, i2)
+            }
+            (Ty::Borrow(i1), Ty::Borrow(i2)) => self.unify(s, i1, i2),
+            (Ty::List(i1), Ty::List(i2)) => self.unify(s, i1, i2),
+            (Ty::Tuple(e1), Ty::Tuple(e2)) if e1.len() == e2.len() => {
+                for (t1, t2) in e1.iter().zip(e2.iter()) {
+                    self.unify(s, t1, t2)?;
+                }
+                Ok(())
+            }
+
+            // Mismatch
+            _ => Err(self.at(s, TypeError::TypeMismatch { expected: a, found: b })),
+        }
     }
 
     /// Type check an expression.
@@ -359,7 +453,9 @@ impl TypeChecker {
 
         self.ctx.mark_used(name).map_err(|e| self.at(s, e))?;
 
-        Ok(ty)
+        // Instantiate ForAll types with fresh unification variables.
+        // E.g. `identity : forall T. T -> T` becomes `?0 -> ?0`.
+        Ok(self.instantiate(ty))
     }
 
     fn check_string_new(&self, s: Span, region: &RegionName) -> Result<Ty, SpannedTypeError> {
@@ -401,19 +497,25 @@ impl TypeChecker {
         let value_ty = self.check(value)?;
 
         if let Some(declared) = ty_ann {
-            if *declared != value_ty {
-                return Err(self.at(
+            self.unify(s, declared, &value_ty).map_err(|_| {
+                self.at(
                     s,
                     TypeError::AnnotationMismatch {
                         declared: declared.clone(),
-                        actual: value_ty,
+                        actual: self.resolve(&value_ty),
                     },
-                ));
-            }
+                )
+            })?;
         }
 
+        let resolved_ty = if ty_ann.is_some() {
+            self.resolve(&value_ty)
+        } else {
+            value_ty
+        };
+
         self.ctx
-            .extend(name.clone(), value_ty.clone(), BindingForm::Let);
+            .extend(name.clone(), resolved_ty, BindingForm::Let);
         let body_ty = self.check(body)?;
 
         // `let` is AFFINE — unconsumed bindings are allowed (implicit drop).
@@ -455,19 +557,13 @@ impl TypeChecker {
         let func_ty = self.check(func)?;
         let arg_ty = self.check(arg)?;
 
+        // Resolve func_ty in case it's a unification variable
+        let func_ty = self.resolve(&func_ty);
+
         match func_ty {
             Ty::Fun { param, ret } => {
-                if *param == arg_ty {
-                    Ok(*ret)
-                } else {
-                    Err(self.at(
-                        s,
-                        TypeError::TypeMismatch {
-                            expected: *param,
-                            found: arg_ty,
-                        },
-                    ))
-                }
+                self.unify(s, &param, &arg_ty)?;
+                Ok(self.resolve(&ret))
             }
             _ => Err(self.at(
                 s,
@@ -511,15 +607,7 @@ impl TypeChecker {
         let else_ty = self.check(else_branch)?;
         let ctx_after_else = self.ctx.snapshot();
 
-        if then_ty != else_ty {
-            return Err(self.at(
-                s,
-                TypeError::TypeMismatch {
-                    expected: then_ty,
-                    found: else_ty,
-                },
-            ));
-        }
+        self.unify(s, &then_ty, &else_ty)?;
 
         ctx_after_then
             .check_branch_agreement(&ctx_after_else)
@@ -527,7 +615,7 @@ impl TypeChecker {
 
         self.ctx = ctx_after_then;
 
-        Ok(then_ty)
+        Ok(self.resolve(&then_ty))
     }
 
     /// Type check a region block: `region r: { body }`
@@ -812,15 +900,7 @@ impl TypeChecker {
                 let mut ctx_after_right = self.ctx.snapshot();
                 ctx_after_right.vars.remove(right_var);
 
-                if left_result_ty != right_result_ty {
-                    return Err(self.at(
-                        s,
-                        TypeError::TypeMismatch {
-                            expected: left_result_ty,
-                            found: right_result_ty,
-                        },
-                    ));
-                }
+                self.unify(s, &left_result_ty, &right_result_ty)?;
 
                 ctx_after_left
                     .check_branch_agreement(&ctx_after_right)
@@ -828,7 +908,7 @@ impl TypeChecker {
 
                 self.ctx = ctx_after_left;
 
-                Ok(left_result_ty)
+                Ok(self.resolve(&left_result_ty))
             }
             _ => Err(self.at(
                 s,
@@ -881,15 +961,8 @@ impl TypeChecker {
         let left_ty = self.check(left)?;
         let right_ty = self.check(right)?;
 
-        if left_ty != right_ty {
-            return Err(self.at(
-                s,
-                TypeError::TypeMismatch {
-                    expected: left_ty,
-                    found: right_ty,
-                },
-            ));
-        }
+        self.unify(s, &left_ty, &right_ty)?;
+        let left_ty = self.resolve(&left_ty);
 
         match op {
             BinOp::Add | BinOp::Sub | BinOp::Mul | BinOp::Div | BinOp::Mod => match &left_ty {
@@ -1149,9 +1222,11 @@ pub fn type_check_module(module: &Module) -> Result<(), SpannedTypeError> {
             name,
             params,
             ret_ty,
+            type_params,
             ..
         } = decl
         {
+            // Build the monomorphic function type
             let fn_ty = params
                 .iter()
                 .rev()
@@ -1159,7 +1234,12 @@ pub fn type_check_module(module: &Module) -> Result<(), SpannedTypeError> {
                     param: Box::new(param_ty.clone()),
                     ret: Box::new(acc),
                 });
-            tc.ctx.extend(name.clone(), fn_ty, BindingForm::Let);
+            // Wrap in ForAll for each type parameter (outermost first)
+            let poly_ty = type_params.iter().rev().fold(fn_ty, |acc, tv| Ty::ForAll {
+                var: tv.clone(),
+                body: Box::new(acc),
+            });
+            tc.ctx.extend(name.clone(), poly_ty, BindingForm::Let);
         }
     }
 
@@ -1168,11 +1248,13 @@ pub fn type_check_module(module: &Module) -> Result<(), SpannedTypeError> {
         match decl {
             Decl::Fn {
                 name: _,
+                type_params: _,
                 params,
                 ret_ty,
                 body,
             } => {
                 let saved_ctx = tc.ctx.clone();
+                let saved_unif = tc.next_unif;
 
                 for (param_name, param_ty) in params {
                     tc.ctx
@@ -1181,15 +1263,7 @@ pub fn type_check_module(module: &Module) -> Result<(), SpannedTypeError> {
 
                 let body_ty = tc.check(body)?;
 
-                if body_ty != *ret_ty {
-                    return Err(SpannedTypeError {
-                        error: TypeError::TypeMismatch {
-                            expected: ret_ty.clone(),
-                            found: body_ty,
-                        },
-                        span: body.span,
-                    });
-                }
+                tc.unify(body.span, ret_ty, &body_ty)?;
 
                 for (param_name, _param_ty) in params {
                     if let Some(entry) = tc.ctx.vars.get(param_name) {
@@ -1669,6 +1743,7 @@ mod tests {
             name: "test".into(),
             decls: vec![Decl::Fn {
                 name: "add".into(),
+                type_params: vec![],
                 params: vec![
                     ("a".into(), Ty::Base(BaseTy::I32)),
                     ("b".into(), Ty::Base(BaseTy::I32)),
@@ -1690,6 +1765,7 @@ mod tests {
             name: "test".into(),
             decls: vec![Decl::Fn {
                 name: "bad".into(),
+                type_params: vec![],
                 params: vec![],
                 ret_ty: Ty::Base(BaseTy::Bool),
                 body: dummy_expr(ExprKind::Lit(Literal::I32(42))),
@@ -1794,6 +1870,7 @@ mod tests {
             name: "test".into(),
             decls: vec![Decl::Fn {
                 name: "forget".into(),
+                type_params: vec![],
                 params: vec![("s".into(), Ty::String("r".into()))],
                 ret_ty: Ty::Base(BaseTy::Unit),
                 body: dummy_expr(ExprKind::Lit(Literal::Unit)),

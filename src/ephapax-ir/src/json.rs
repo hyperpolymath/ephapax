@@ -80,6 +80,7 @@ mod tests {
             name: SmolStr::new("test_mod"),
             decls: vec![Decl::Fn {
                 name: SmolStr::new("main"),
+                type_params: vec![],
                 params: vec![],
                 ret_ty: Ty::Base(BaseTy::I32),
                 body: Expr {

@@ -571,6 +571,7 @@ impl Codegen {
                     name,
                     params,
                     ret_ty,
+                    type_params: _,
                     ..
                 } => {
                     // Build WASM type for this function
@@ -816,7 +817,7 @@ impl Codegen {
         for decl in &ast.decls {
             match decl {
                 Decl::Fn {
-                    name, params, body, ..
+                    name, params, body, type_params: _, ..
                 } => {
                     let info = self.user_fns.get(name.as_str()).cloned().ok_or_else(|| {
                         CodegenError(format!("BUG: function `{}` not collected", name))
@@ -975,7 +976,7 @@ impl Codegen {
 
         // Export all user functions by name
         for decl in &ast.decls {
-            if let Decl::Fn { name, .. } = decl {
+            if let Decl::Fn { name, type_params: _, .. } = decl {
                 if let Some(info) = self.user_fns.get(name.as_str()) {
                     exports.export(name.as_str(), ExportKind::Func, info.wasm_fn_idx);
                 }
@@ -2814,6 +2815,7 @@ mod tests {
             name: "test".into(),
             decls: vec![Decl::Fn {
                 name: "identity".into(),
+                type_params: vec![],
                 params: vec![("x".into(), Ty::Base(BaseTy::I32))],
                 ret_ty: Ty::Base(BaseTy::I32),
                 body: e(ExprKind::Var("x".into())),
@@ -2831,6 +2833,7 @@ mod tests {
             name: "test".into(),
             decls: vec![Decl::Fn {
                 name: "add".into(),
+                type_params: vec![],
                 params: vec![
                     ("a".into(), Ty::Base(BaseTy::I32)),
                     ("b".into(), Ty::Base(BaseTy::I32)),
@@ -2855,6 +2858,7 @@ mod tests {
             name: "test".into(),
             decls: vec![Decl::Fn {
                 name: "main".into(),
+                type_params: vec![],
                 params: vec![],
                 ret_ty: Ty::Base(BaseTy::I32),
                 body: e(ExprKind::Lit(Literal::I32(42))),
@@ -2874,6 +2878,7 @@ mod tests {
             decls: vec![
                 Decl::Fn {
                     name: "double".into(),
+                    type_params: vec![],
                     params: vec![("x".into(), Ty::Base(BaseTy::I32))],
                     ret_ty: Ty::Base(BaseTy::I32),
                     body: e(ExprKind::BinOp {
@@ -2884,6 +2889,7 @@ mod tests {
                 },
                 Decl::Fn {
                     name: "main".into(),
+                    type_params: vec![],
                     params: vec![],
                     ret_ty: Ty::Base(BaseTy::I32),
                     body: e(ExprKind::Lit(Literal::I32(21))),
@@ -2902,6 +2908,7 @@ mod tests {
             name: "test".into(),
             decls: vec![Decl::Fn {
                 name: "abs".into(),
+                type_params: vec![],
                 params: vec![("x".into(), Ty::Base(BaseTy::I32))],
                 ret_ty: Ty::Base(BaseTy::I32),
                 body: e(ExprKind::If {
@@ -2931,6 +2938,7 @@ mod tests {
             name: "test".into(),
             decls: vec![Decl::Fn {
                 name: "compute".into(),
+                type_params: vec![],
                 params: vec![("a".into(), Ty::Base(BaseTy::I32))],
                 ret_ty: Ty::Base(BaseTy::I32),
                 body: e(ExprKind::Let {
@@ -2963,6 +2971,7 @@ mod tests {
             decls: vec![
                 Decl::Fn {
                     name: "double".into(),
+                    type_params: vec![],
                     params: vec![("x".into(), Ty::Base(BaseTy::I32))],
                     ret_ty: Ty::Base(BaseTy::I32),
                     body: e(ExprKind::BinOp {
@@ -2973,6 +2982,7 @@ mod tests {
                 },
                 Decl::Fn {
                     name: "main".into(),
+                    type_params: vec![],
                     params: vec![],
                     ret_ty: Ty::Base(BaseTy::I32),
                     body: e(ExprKind::App {
@@ -2994,6 +3004,7 @@ mod tests {
             name: "test".into(),
             decls: vec![Decl::Fn {
                 name: "is_positive".into(),
+                type_params: vec![],
                 params: vec![("x".into(), Ty::Base(BaseTy::I32))],
                 ret_ty: Ty::Base(BaseTy::Bool),
                 body: e(ExprKind::BinOp {
@@ -3224,6 +3235,7 @@ mod tests {
             name: "test".into(),
             decls: vec![Decl::Fn {
                 name: "main".into(),
+                type_params: vec![],
                 params: vec![],
                 ret_ty: Ty::Base(BaseTy::I32),
                 body: e(ExprKind::App {
@@ -3257,6 +3269,7 @@ mod tests {
             name: "test".into(),
             decls: vec![Decl::Fn {
                 name: "main".into(),
+                type_params: vec![],
                 params: vec![],
                 ret_ty: Ty::Base(BaseTy::I32),
                 body: e(ExprKind::Let {
@@ -3296,6 +3309,7 @@ mod tests {
             name: "test".into(),
             decls: vec![Decl::Fn {
                 name: "main".into(),
+                type_params: vec![],
                 params: vec![],
                 ret_ty: Ty::Base(BaseTy::I32),
                 body: e(ExprKind::Let {

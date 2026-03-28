@@ -251,6 +251,7 @@ fn decl_to_sexpr(decl: &Decl) -> SExpr {
             params,
             ret_ty,
             body,
+            type_params: _,
         } => SExpr::List(vec![
             SExpr::Atom("fn".into()),
             SExpr::Atom(escape_atom(name)),
@@ -302,6 +303,7 @@ fn decode_decl(expr: &SExpr) -> Result<Decl, SExprError> {
         let body = decode_expr(&list[4])?;
         Ok(Decl::Fn {
             name: SmolStr::new(name),
+            type_params: vec![],
             params,
             ret_ty,
             body,
@@ -705,6 +707,15 @@ fn ty_to_sexpr(ty: &Ty) -> SExpr {
             elems.extend(elem_types.iter().map(ty_to_sexpr));
             SExpr::List(elems)
         }
+        Ty::ForAll { var, body } => SExpr::List(vec![
+            SExpr::Atom("forall".into()),
+            SExpr::Atom(escape_atom(var)),
+            ty_to_sexpr(body),
+        ]),
+        Ty::Unif(id) => SExpr::List(vec![
+            SExpr::Atom("unif".into()),
+            SExpr::Atom(id.to_string()),
+        ]),
     }
 }
 
@@ -916,6 +927,7 @@ mod tests {
             name: SmolStr::new("test"),
             decls: vec![Decl::Fn {
                 name: SmolStr::new("main"),
+                type_params: vec![],
                 params: vec![],
                 ret_ty: Ty::Base(BaseTy::I32),
                 body: Expr::dummy(ExprKind::Lit(Literal::I32(42))),

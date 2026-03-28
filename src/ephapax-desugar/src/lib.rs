@@ -218,6 +218,7 @@ impl Desugarer {
                     let core_body = self.desugar_expr(body)?;
                     core_decls.push(Decl::Fn {
                         name: name.clone(),
+                        type_params: vec![],
                         params: core_params,
                         ret_ty: core_ret,
                         body: core_body,

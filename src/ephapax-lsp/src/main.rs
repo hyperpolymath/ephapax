@@ -165,7 +165,7 @@ impl Backend {
         if let Some(module) = &state.module {
             for d in &module.decls {
                 if let Decl::Fn {
-                    name, body, params, ..
+                    name, body, params, type_params: _, ..
                 } = d
                 {
                     // Check if word matches a parameter
@@ -489,6 +489,7 @@ fn extract_declarations(module: &Module, _source: &str) -> Vec<DeclInfo> {
                 params,
                 ret_ty,
                 body,
+                type_params: _,
             } => {
                 let param_strs: Vec<(String, String)> = params
                     .iter()
@@ -547,6 +548,8 @@ fn format_ty(ty: &Ty) -> String {
         Ty::Region { name, inner } => format!("Region({}, {})", name, format_ty(inner)),
         Ty::Borrow(inner) => format!("&{}", format_ty(inner)),
         Ty::Var(name) => name.to_string(),
+        Ty::ForAll { var, body } => format!("forall {}. {}", var, format_ty(body)),
+        Ty::Unif(id) => format!("?{}", id),
         Ty::List(inner) => format!("[{}]", format_ty(inner)),
         Ty::Tuple(elems) => {
             let parts: Vec<_> = elems.iter().map(format_ty).collect();

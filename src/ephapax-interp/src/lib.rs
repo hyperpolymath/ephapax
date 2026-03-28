@@ -313,6 +313,7 @@ impl Interpreter {
                 params,
                 ret_ty,
                 body,
+                type_params: _,
             } = decl
             {
                 self.functions

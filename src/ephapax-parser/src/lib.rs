@@ -158,6 +158,7 @@ fn parse_fn_decl(pair: pest::iterators::Pair<Rule>) -> Result<Decl, ParseError> 
 
     Ok(Decl::Fn {
         name,
+        type_params: vec![],
         params,
         ret_ty: ret_ty.unwrap_or(Ty::Base(BaseTy::Unit)),
         body: body.unwrap_or_else(|| Expr::dummy(ExprKind::Lit(Literal::Unit))),

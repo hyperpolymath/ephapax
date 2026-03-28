@@ -86,8 +86,16 @@ pub enum Ty {
     /// Second-class borrow &T
     Borrow(Box<Ty>),
 
-    /// Type variable (for polymorphism, future)
+    /// Type variable (for polymorphism)
     Var(SmolStr),
+
+    /// Universal quantification: forall a. T
+    /// Used for polymorphic function types at the core level.
+    ForAll { var: SmolStr, body: Box<Ty> },
+
+    /// Unification variable (internal to type checker, never in user code).
+    /// Created during instantiation of ForAll types at use sites.
+    Unif(u32),
 
     /// List type [T]
     List(Box<Ty>),
@@ -118,10 +126,15 @@ impl Ty {
             Ty::Borrow(inner) => inner.references_region(region),
             Ty::List(inner) => inner.references_region(region),
             Ty::Tuple(elements) => elements.iter().any(|t| t.references_region(region)),
-            Ty::Base(_) | Ty::Var(_) => false,
+            Ty::ForAll { body, .. } => body.references_region(region),
+            Ty::Base(_) | Ty::Var(_) | Ty::Unif(_) => false,
         }
     }
 
+    /// Check if type is linear (must be used exactly once).
+    ///
+    /// Type variables (`Var`, `Unif`) are conservatively non-linear.
+    /// Phase 2 will add linearity bounds (`T: Lin`) for generic linear code.
     pub fn is_linear(&self) -> bool {
         match self {
             Ty::String(_) => true,
@@ -130,7 +143,109 @@ impl Ty {
                 ..
             } => true,
             Ty::Region { inner, .. } => inner.is_linear(),
+            Ty::ForAll { body, .. } => body.is_linear(),
             _ => false,
+        }
+    }
+
+    /// Substitute a type variable with a concrete type.
+    pub fn subst_var(&self, var: &SmolStr, replacement: &Ty) -> Ty {
+        match self {
+            Ty::Var(v) if v == var => replacement.clone(),
+            Ty::Var(_) | Ty::Base(_) | Ty::Unif(_) => self.clone(),
+            Ty::ForAll { var: v, body } if v == var => self.clone(), // shadowed
+            Ty::ForAll { var: v, body } => Ty::ForAll {
+                var: v.clone(),
+                body: Box::new(body.subst_var(var, replacement)),
+            },
+            Ty::Fun { param, ret } => Ty::Fun {
+                param: Box::new(param.subst_var(var, replacement)),
+                ret: Box::new(ret.subst_var(var, replacement)),
+            },
+            Ty::Prod { left, right } => Ty::Prod {
+                left: Box::new(left.subst_var(var, replacement)),
+                right: Box::new(right.subst_var(var, replacement)),
+            },
+            Ty::Sum { left, right } => Ty::Sum {
+                left: Box::new(left.subst_var(var, replacement)),
+                right: Box::new(right.subst_var(var, replacement)),
+            },
+            Ty::String(r) => Ty::String(r.clone()),
+            Ty::Ref { linearity, inner } => Ty::Ref {
+                linearity: *linearity,
+                inner: Box::new(inner.subst_var(var, replacement)),
+            },
+            Ty::Region { name, inner } => Ty::Region {
+                name: name.clone(),
+                inner: Box::new(inner.subst_var(var, replacement)),
+            },
+            Ty::Borrow(inner) => Ty::Borrow(Box::new(inner.subst_var(var, replacement))),
+            Ty::List(inner) => Ty::List(Box::new(inner.subst_var(var, replacement))),
+            Ty::Tuple(elems) => Ty::Tuple(
+                elems.iter().map(|t| t.subst_var(var, replacement)).collect(),
+            ),
+        }
+    }
+
+    /// Check if this type contains a specific unification variable.
+    /// Used for the occurs check during unification.
+    pub fn contains_unif(&self, id: u32) -> bool {
+        match self {
+            Ty::Unif(i) => *i == id,
+            Ty::Base(_) | Ty::Var(_) | Ty::String(_) => false,
+            Ty::Fun { param, ret } => param.contains_unif(id) || ret.contains_unif(id),
+            Ty::Prod { left, right } | Ty::Sum { left, right } => {
+                left.contains_unif(id) || right.contains_unif(id)
+            }
+            Ty::Ref { inner, .. }
+            | Ty::Region { inner, .. }
+            | Ty::Borrow(inner)
+            | Ty::List(inner)
+            | Ty::ForAll { body: inner, .. } => inner.contains_unif(id),
+            Ty::Tuple(elems) => elems.iter().any(|t| t.contains_unif(id)),
+        }
+    }
+
+    /// Resolve all unification variables using the given solution map.
+    pub fn resolve(&self, solutions: &std::collections::HashMap<u32, Ty>) -> Ty {
+        match self {
+            Ty::Unif(id) => {
+                if let Some(solution) = solutions.get(id) {
+                    solution.resolve(solutions)
+                } else {
+                    self.clone()
+                }
+            }
+            Ty::Base(_) | Ty::Var(_) | Ty::String(_) => self.clone(),
+            Ty::Fun { param, ret } => Ty::Fun {
+                param: Box::new(param.resolve(solutions)),
+                ret: Box::new(ret.resolve(solutions)),
+            },
+            Ty::Prod { left, right } => Ty::Prod {
+                left: Box::new(left.resolve(solutions)),
+                right: Box::new(right.resolve(solutions)),
+            },
+            Ty::Sum { left, right } => Ty::Sum {
+                left: Box::new(left.resolve(solutions)),
+                right: Box::new(right.resolve(solutions)),
+            },
+            Ty::Ref { linearity, inner } => Ty::Ref {
+                linearity: *linearity,
+                inner: Box::new(inner.resolve(solutions)),
+            },
+            Ty::Region { name, inner } => Ty::Region {
+                name: name.clone(),
+                inner: Box::new(inner.resolve(solutions)),
+            },
+            Ty::Borrow(inner) => Ty::Borrow(Box::new(inner.resolve(solutions))),
+            Ty::ForAll { var, body } => Ty::ForAll {
+                var: var.clone(),
+                body: Box::new(body.resolve(solutions)),
+            },
+            Ty::List(inner) => Ty::List(Box::new(inner.resolve(solutions))),
+            Ty::Tuple(elems) => Ty::Tuple(
+                elems.iter().map(|t| t.resolve(solutions)).collect(),
+            ),
         }
     }
 }
@@ -361,9 +476,14 @@ impl Expr {
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum Decl {
-    /// Function definition
+    /// Function definition, optionally polymorphic.
+    ///
+    /// `type_params` lists universally quantified type variables (e.g. `<T, U>`).
+    /// Empty for monomorphic functions.
     Fn {
         name: Var,
+        #[serde(skip_serializing_if = "Vec::is_empty")]
+        type_params: Vec<SmolStr>,
         params: Vec<(Var, Ty)>,
         ret_ty: Ty,
         body: Expr,

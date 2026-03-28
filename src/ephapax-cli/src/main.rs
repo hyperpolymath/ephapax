@@ -567,6 +567,7 @@ fn show_parse(input: &str, pretty: bool, format: &str) -> Result<(), String> {
                     name: smol_str::SmolStr::new(filename),
                     decls: vec![ephapax_syntax::Decl::Fn {
                         name: smol_str::SmolStr::new("_expr"),
+                        type_params: vec![],
                         params: vec![],
                         ret_ty: ephapax_syntax::Ty::Base(ephapax_syntax::BaseTy::Unit),
                         body: expr,

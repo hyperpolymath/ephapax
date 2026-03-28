@@ -426,6 +426,8 @@ fn format_type(ty: &Ty) -> String {
         Ty::Region { name, inner } => format!("region {} . {}", name, format_type(inner)),
         Ty::Ref { inner, .. } => format!("Ref({})", format_type(inner)),
         Ty::Var(v) => v.to_string(),
+        Ty::ForAll { var, body } => format!("forall {}. {}", var, format_type(body)),
+        Ty::Unif(id) => format!("?{}", id),
     }
 }
 

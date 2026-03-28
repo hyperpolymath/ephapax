@@ -531,7 +531,83 @@ Proof.
        simpl in Hlocs; tauto.
 Qed.
 
-(** *** Theorem 3: Progress (Admitted — needs retacticking) *)
+(** *** Theorem 3: Progress (22/24 cases proved)
+
+    Well-typed expressions in a consistent environment are either values
+    or can take a step.
+
+    22 of 24 cases proved. Remaining 2: T_StringLen (needs borrow
+    canonical form) and T_Drop (needs linear-type canonical form).
+    Uses 1 axiom: typing_preserves_env_consistent for IH threading
+    through output contexts in binary expressions. *)
+
+Lemma ctx_mark_used_lookup_type :
+  forall G i j T u,
+    ctx_lookup (ctx_mark_used G i) j = Some (T, u) ->
+    exists u', ctx_lookup G j = Some (T, u').
+Proof.
+  induction G; intros i j T u Hlookup; simpl in *.
+  - destruct j; discriminate.
+  - destruct a. destruct i, j; simpl in *;
+    try (injection Hlookup as <- <-; eexists; reflexivity);
+    try (eexists; exact Hlookup).
+    exact (IHG i j T u Hlookup).
+Qed.
+
+Lemma env_consistent_mark_used :
+  forall rho G i,
+    env_consistent rho G -> env_consistent rho (ctx_mark_used G i).
+Proof.
+  unfold env_consistent. intros rho G i Hcons j T u Hlookup.
+  destruct (ctx_mark_used_lookup_type G i j T u Hlookup) as [u' Hu'].
+  exact (Hcons j T u' Hu').
+Qed.
+
+(** Axiom: typing output context preserves env_consistent.
+    The output context G' differs from G only in usage flags
+    (ctx_mark_used) — no types or bindings change. Proving this
+    requires induction on typing with context extend/strip
+    for let/lam/case binders. *)
+Axiom typing_preserves_env_consistent :
+  forall R G e T G' rho,
+    R; G |- e : T -| G' ->
+    env_consistent rho G ->
+    env_consistent rho G'.
+
+(** Canonical forms lemmas *)
+
+Lemma canonical_bool :
+  forall R G G' v,
+    R; G |- v : TBase TBool -| G' -> is_value v -> exists b, v = EBool b.
+Proof. intros; inversion H0; subst; inversion H; subst; eauto. Qed.
+
+Lemma canonical_fun :
+  forall R G G' v T1 T2,
+    R; G |- v : TFun T1 T2 -| G' -> is_value v ->
+    exists body, v = ELam T1 body.
+Proof. intros; inversion H0; subst; inversion H; subst; eauto. Qed.
+
+Lemma canonical_prod :
+  forall R G G' v T1 T2,
+    R; G |- v : TProd T1 T2 -| G' -> is_value v ->
+    exists v1 v2, v = EPair v1 v2 /\ is_value v1 /\ is_value v2.
+Proof. intros; inversion H0; subst; inversion H; subst; eexists _, _; auto. Qed.
+
+Lemma canonical_sum :
+  forall R G G' v T1 T2,
+    R; G |- v : TSum T1 T2 -| G' -> is_value v ->
+    (exists T v0, v = EInl T v0 /\ is_value v0) \/
+    (exists T v0, v = EInr T v0 /\ is_value v0).
+Proof.
+  intros; inversion H0; subst; inversion H; subst;
+    [left|right]; eexists _, _; auto.
+Qed.
+
+Lemma canonical_string :
+  forall R G G' v r,
+    R; G |- v : TString r -| G' -> is_value v -> exists l, v = ELoc l r.
+Proof. intros; inversion H0; subst; inversion H; subst; eauto. Qed.
+
 Theorem progress :
   forall R G e T G',
     R; G |- e : T -| G' ->
@@ -540,7 +616,106 @@ Theorem progress :
       expr_locs_valid mu e ->
       is_value e \/ exists mu' R' rho' e', (mu, R, rho, e) -->> (mu', R', rho', e').
 Proof.
-  admit.
+  intros R G e T G' Htype.
+  induction Htype; intros mu rho Hcons Hlocs.
+  (* Values *)
+  1-3: left; constructor.
+  (* Var_Lin, Var_Unr *)
+  - right; destruct (Hcons _ _ _ H) as [v Hv];
+    eexists _, _, _, _; econstructor; eassumption.
+  - right; destruct (Hcons _ _ _ H) as [v Hv];
+    eexists _, _, _, _; econstructor; eassumption.
+  (* Loc *)
+  - left; constructor.
+  (* StringNew *)
+  - right; destruct (mem_alloc mu (CString r s)) eqn:E;
+    eexists _, _, _, _; econstructor; eassumption.
+  (* StringConcat *)
+  - right. simpl in Hlocs; destruct Hlocs as [Hl1 Hl2].
+    destruct (IHHtype1 mu rho Hcons Hl1) as [Hv1|[?[?[?[? Hs1]]]]].
+    + pose proof (typing_preserves_env_consistent _ _ _ _ _ _ Htype1 Hcons).
+      destruct (IHHtype2 mu rho H Hl2) as [Hv2|[?[?[?[? Hs2]]]]].
+      * destruct (canonical_string _ _ _ _ _ Htype1 Hv1) as [l1 ->].
+        destruct (canonical_string _ _ _ _ _ Htype2 Hv2) as [l2 ->].
+        simpl in Hl1, Hl2. destruct Hl1 as [s1 Hs1]. destruct Hl2 as [s2 Hs2].
+        destruct (mem_alloc (mem_write (mem_write mu l1 CFree) l2 CFree)
+                  (CString r (s1 ++ s2))) eqn:E.
+        eexists _, _, _, _; econstructor; eassumption.
+      * eexists _, _, _, _; eapply S_StringConcat_Step2; eassumption.
+    + eexists _, _, _, _; eapply S_StringConcat_Step1; eassumption.
+  (* StringLen — needs borrow canonical form *)
+  - admit.
+  (* Let, LetLin *)
+  - right. simpl in Hlocs; destruct Hlocs as [Hl1 Hl2].
+    destruct (IHHtype1 mu rho Hcons Hl1) as [Hv1|[?[?[?[? Hs1]]]]].
+    + eexists _, _, _, _; econstructor; eassumption.
+    + eexists _, _, _, _; eapply S_Let_Step; eassumption.
+  - right. simpl in Hlocs; destruct Hlocs as [Hl1 Hl2].
+    destruct (IHHtype1 mu rho Hcons Hl1) as [Hv1|[?[?[?[? Hs1]]]]].
+    + eexists _, _, _, _; econstructor; eassumption.
+    + eexists _, _, _, _; eapply S_LetLin_Step; eassumption.
+  (* Lam *)
+  - left; constructor.
+  (* App *)
+  - right. simpl in Hlocs; destruct Hlocs as [Hl1 Hl2].
+    destruct (IHHtype1 mu rho Hcons Hl1) as [Hv1|[?[?[?[? Hs1]]]]].
+    + pose proof (typing_preserves_env_consistent _ _ _ _ _ _ Htype1 Hcons).
+      destruct (IHHtype2 mu rho H Hl2) as [Hv2|[?[?[?[? Hs2]]]]].
+      * destruct (canonical_fun _ _ _ _ _ _ Htype1 Hv1) as [body ->].
+        eexists _, _, _, _; econstructor; eassumption.
+      * eexists _, _, _, _; eapply S_App_Step2; eassumption.
+    + eexists _, _, _, _; eapply S_App_Step1; eassumption.
+  (* Pair *)
+  - simpl in Hlocs; destruct Hlocs as [Hl1 Hl2].
+    destruct (IHHtype1 mu rho Hcons Hl1) as [Hv1|[?[?[?[? Hs1]]]]].
+    + pose proof (typing_preserves_env_consistent _ _ _ _ _ _ Htype1 Hcons).
+      destruct (IHHtype2 mu rho H Hl2) as [Hv2|[?[?[?[? Hs2]]]]].
+      * left; constructor; assumption.
+      * right; eexists _, _, _, _; eapply S_Pair_Step2; eassumption.
+    + right; eexists _, _, _, _; eapply S_Pair_Step1; eassumption.
+  (* Fst, Snd *)
+  - right. destruct (IHHtype mu rho Hcons Hlocs) as [Hv|[?[?[?[? Hs]]]]].
+    + destruct (canonical_prod _ _ _ _ _ _ Htype Hv) as [v1 [v2 [-> [Hv1 Hv2]]]].
+      eexists _, _, _, _; econstructor; eassumption.
+    + eexists _, _, _, _; eapply S_Fst_Step; eassumption.
+  - right. destruct (IHHtype mu rho Hcons Hlocs) as [Hv|[?[?[?[? Hs]]]]].
+    + destruct (canonical_prod _ _ _ _ _ _ Htype Hv) as [v1 [v2 [-> [Hv1 Hv2]]]].
+      eexists _, _, _, _; econstructor; eassumption.
+    + eexists _, _, _, _; eapply S_Snd_Step; eassumption.
+  (* Inl, Inr *)
+  - simpl in Hlocs.
+    destruct (IHHtype mu rho Hcons Hlocs) as [Hv|[?[?[?[? Hs]]]]].
+    + left; constructor; assumption.
+    + right; eexists _, _, _, _; eapply S_Inl_Step; eassumption.
+  - simpl in Hlocs.
+    destruct (IHHtype mu rho Hcons Hlocs) as [Hv|[?[?[?[? Hs]]]]].
+    + left; constructor; assumption.
+    + right; eexists _, _, _, _; eapply S_Inr_Step; eassumption.
+  (* Case *)
+  - right. simpl in Hlocs; destruct Hlocs as [Hl_e [Hl1 Hl2]].
+    destruct (IHHtype1 mu rho Hcons Hl_e) as [Hv|[?[?[?[? Hs]]]]].
+    + destruct (canonical_sum _ _ _ _ _ _ Htype1 Hv)
+        as [[?[?[-> ?]]]|[?[?[-> ?]]]];
+      eexists _, _, _, _; econstructor; eassumption.
+    + eexists _, _, _, _; eapply S_Case_Step; eassumption.
+  (* If *)
+  - right. simpl in Hlocs; destruct Hlocs as [Hl1 [Hl2 Hl3]].
+    destruct (IHHtype1 mu rho Hcons Hl1) as [Hv|[?[?[?[? Hs]]]]].
+    + destruct (canonical_bool _ _ _ _ Htype1 Hv) as [b ->];
+      destruct b; eexists _, _, _, _; econstructor.
+    + eexists _, _, _, _; eapply S_If_Step; eassumption.
+  (* Region *)
+  - right; eexists _, _, _, _; econstructor; eassumption.
+  (* Borrow *)
+  - right. destruct (Hcons _ _ _ H) as [v Hv].
+    eexists _, _, _, _; eapply S_Borrow_Step; econstructor; eassumption.
+  (* Drop — needs linear canonical form *)
+  - admit.
+  (* Copy *)
+  - right. simpl in Hlocs.
+    destruct (IHHtype mu rho Hcons Hlocs) as [Hv|[?[?[?[? Hs]]]]].
+    + eexists _, _, _, _; econstructor; eassumption.
+    + eexists _, _, _, _; eapply S_Copy_Step; eassumption.
 Admitted.
 
 (** *** Theorem 4: Preservation (Admitted — needs retacticking) *)

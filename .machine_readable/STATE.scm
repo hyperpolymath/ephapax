@@ -13,7 +13,7 @@
 
   (current-position
     (milestone "type-checker-audit-complete")
-    (completion-percentage 92)
+    (completion-percentage 94)
     (summary "Full type checker audit against Perfect Type Checker checklist.
               Generics, modules, effects, error spans all implemented.
               Formal proofs blocked by Rocq 9.1.1 regression."))
@@ -29,19 +29,20 @@
         ("effect-type-checking" . "done")
         ("parser-generics-imports" . "done")
         ("parser-perform-handle" . "done")
-        ("formal-ctx-transfer" . "22/24-proved")
-        ("formal-subst-lemma" . "blocked-rocq-9.1.1")
-        ("formal-preservation" . "blocked-rocq-9.1.1"))))
+        ("formal-flags-only-increase" . "Qed")
+        ("formal-ctx-transfer" . "20/24-proved-4-need-consumption-tracking")
+        ("formal-subst-lemma" . "needs-ctx-transfer")
+        ("formal-preservation" . "needs-subst-lemma"))))
 
   (blockers-and-issues
     (blocker
       (id "rocq-pair-injection")
-      (severity "high")
-      (description "Rocq 9.1.1 congruence/discriminate/injection fail on
-                    option (ty * bool) hypotheses in inductive proof contexts.
-                    Works in standalone tests. No upgrade available.")
-      (resolution "Wait for Rocq 9.2 or restructure proofs to avoid
-                   nth_error on list (ty * bool)")))
+      (severity "medium")
+      (description "flags_only_increase SOLVED via projected lookups.
+                    Remaining: ctx_transfer T_Let/LetLin/Lam/Case need
+                    consumption tracking (theoretical, not Rocq bug).")
+      (resolution "Add 4th conjunct to ctx_transfer: consumed positions
+                   in original are consumed in transfer.")))
 
   (critical-next-actions
     ("Resolve Rocq 9.1.1 pair injection regression")

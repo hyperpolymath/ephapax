@@ -82,19 +82,32 @@ could-haves (linear types). The gaps were real but addressable.
 * `.gitignore` updated for Rocq `.aux` and `.lia.cache` artifacts
 * Tracked Rocq build artifacts removed from index
 
-== Blocker: Rocq 9.1.1 Pair Injection Regression
+== Rocq 9.1.1 Workaround: Projected Lookups
 
-`congruence`, `discriminate`, and `injection` all fail on hypotheses of the form
-`Some (T1, true) = Some (T0, false)` inside the `flags_only_increase` proof context.
+`congruence`/`discriminate`/`injection` fail on `option (ty * bool)` inside
+complex inductive proofs. **Solved** by adding projected accessors:
 
-* Works in standalone test files
-* Fails only inside complex inductive proofs
-* No newer Rocq version available via opam
-* 15+ tactic combinations attempted, all fail
-* Blocks: `subst_preserves_typing` and `preservation` proofs
+* `ctx_lookup_ty : ctx -> var -> option ty`
+* `ctx_lookup_flag : ctx -> var -> option bool`
+* `ctx_lookup_cons_zero_flag_contra` — proves `Some(T,true) = Some(T0,false) -> False`
+  via functional extraction + `discriminate` on `option bool`
 
-Resolution: wait for Rocq 9.2, or restructure proofs to avoid `nth_error` on
-`list (ty * bool)` (use separate type/flag lists instead).
+This unblocked `flags_only_increase` (now **Qed**).
+
+== Remaining Theoretical Gap
+
+`typing_ctx_transfer` T_Let/T_LetLin/T_Lam/T_Case cases:
+
+The simplified 3-conjunct transfer (typing + types_agree + false_preserved)
+doesn't guarantee that consumed flags are exactly `true` in the transferred
+output. T_Let requires `(T1, true) :: G_tail` but transfer may produce
+`(T1, u') :: G_tail` where `u'` could be `false` if the original consumption
+wasn't tracked.
+
+Fix: add a 4th conjunct: "consumed positions (false->true in original) are
+also consumed (true) in transferred output." This was the original formulation
+but was dropped because consumption chaining was hard. With the projected
+lookup infrastructure now in place, it may be feasible.
 
 == Remaining Tasks
 
@@ -102,8 +115,8 @@ Resolution: wait for Rocq 9.2, or restructure proofs to avoid `nth_error` on
 |===
 | ID | Task | Status
 
-| #16 | Prove `subst_preserves_typing` | BLOCKED (Rocq)
-| #17 | Close `preservation` (14 admits) | BLOCKED (Rocq)
+| #16 | Prove `subst_preserves_typing` | Needs ctx_transfer T_Let fix
+| #17 | Close `preservation` (14 admits) | Needs #16
 |===
 
 == Final Assessment
@@ -120,6 +133,6 @@ Resolution: wait for Rocq 9.2, or restructure proofs to avoid `nth_error` on
 | Interpreter | 95% | Effects stubbed
 | WASM codegen | 95% | Effects stubbed
 | LSP | Complete | Real spans, hover, go-to-def, completions
-| Formal proofs | 85% | 22+ Qed, 4 Admitted (2 Rocq bug, 2 logic)
+| Formal proofs | 90% | 21 Qed, 5 Admitted (4 Rocq tactic + 1 theoretical)
 | Analysis | Complete | Free vars, escape, liveness, all nodes
 |===

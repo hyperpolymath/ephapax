@@ -682,8 +682,13 @@ Proof.
         eexists _, _, _, _; econstructor; eassumption.
       * eexists _, _, _, _; eapply S_StringConcat_Step2; eassumption.
     + eexists _, _, _, _; eapply S_StringConcat_Step1; eassumption.
-  (* StringLen — needs borrow canonical form *)
-  - admit.
+  (* StringLen: T_Borrow says e = EVar i, which always steps via S_Var *)
+  - right. inversion Htype; subst.
+    match goal with
+    | [ Hlk : ctx_lookup _ _ = Some (_, false) |- _ ] =>
+        destruct (Hcons _ _ _ Hlk) as [vx Hvx];
+        eexists _, _, _, _; eapply S_StringLen_Step; econstructor; exact Hvx
+    end.
   (* Let, LetLin *)
   - right. simpl in Hlocs; destruct Hlocs as [Hl1 Hl2].
     destruct (IHHtype1 mu rho Hcons Hl1) as [Hv1|[?[?[?[? Hs1]]]]].
@@ -748,14 +753,19 @@ Proof.
   (* Borrow *)
   - right. destruct (Hcons _ _ _ H) as [v Hv].
     eexists _, _, _, _; eapply S_Borrow_Step; econstructor; eassumption.
-  (* Drop — needs linear canonical form *)
-  - admit.
+  (* Drop: if inner value, must be ELoc (linear); if steps, wrap *)
+  - right. simpl in Hlocs.
+    destruct (IHHtype mu rho Hcons Hlocs) as [Hv|[?[?[?[? Hs]]]]].
+    + (* Value of linear type — must be ELoc for TString (only linear value form) *)
+      inversion Hv; subst; inversion Htype; subst; try discriminate.
+      * eexists _, _, _, _; econstructor.
+    + eexists _, _, _, _; eapply S_Drop_Step; eassumption.
   (* Copy *)
   - right. simpl in Hlocs.
     destruct (IHHtype mu rho Hcons Hlocs) as [Hv|[?[?[?[? Hs]]]]].
     + eexists _, _, _, _; econstructor; eassumption.
     + eexists _, _, _, _; eapply S_Copy_Step; eassumption.
-Admitted.
+Qed.
 
 (** *** Theorem 4: Preservation (reduction cases proved, congruence admitted)
 

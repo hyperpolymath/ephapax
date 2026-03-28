@@ -86,15 +86,14 @@ impl Backend {
                 declarations = extract_declarations(&module, text);
                 module_opt = Some(module.clone());
 
-                // Type-check (try linear mode first, then affine)
+                // Type-check
                 if let Err(err) = type_check_module(&module) {
-                    let span = extract_error_span(&err);
                     diagnostics.push(Diagnostic {
-                        range: span_to_range(text, span),
+                        range: span_to_range(text, err.span),
                         severity: Some(DiagnosticSeverity::ERROR),
                         code: None,
                         source: Some("ephapax-typing".to_string()),
-                        message: format!("Type error (linear mode): {}", err),
+                        message: format!("Type error: {}", err),
                         related_information: None,
                         tags: None,
                         code_description: None,
@@ -699,11 +698,7 @@ fn find_let_binding_span(expr: &Expr, target: &str) -> Option<Span> {
     }
 }
 
-/// Try to extract a span from a type error (best-effort).
-fn extract_error_span(_err: &ephapax_typing::TypeError) -> Span {
-    // Type errors don't currently carry span info — use dummy
-    Span::dummy()
-}
+// extract_error_span removed — SpannedTypeError carries its own span.
 
 // ============================================================================
 // Entry point

@@ -11,7 +11,7 @@ use ephapax_interp::{Interpreter, RuntimeError, Value};
 use ephapax_lexer::Lexer;
 use ephapax_parser::{parse, parse_module, ParseError};
 use ephapax_syntax::Ty;
-use ephapax_typing::{type_check, TypeError};
+use ephapax_typing::{type_check, SpannedTypeError};
 use rustyline::error::ReadlineError;
 use rustyline::history::DefaultHistory;
 use rustyline::{DefaultEditor, Editor};
@@ -383,7 +383,7 @@ enum CommandResult {
 #[derive(Debug)]
 pub enum ReplError {
     Parse(Vec<ParseError>),
-    Type(TypeError),
+    Type(SpannedTypeError),
     Runtime(RuntimeError),
 }
 

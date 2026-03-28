@@ -726,6 +726,22 @@ fn report_parse_error(_filename: &str, _source: &str, error: &ephapax_parser::Pa
     );
 }
 
-fn report_type_error(filename: &str, _source: &str, error: &ephapax_typing::TypeError) {
-    eprintln!("{}: {} in {}", "Type error".red().bold(), error, filename);
+fn report_type_error(filename: &str, source: &str, error: &ephapax_typing::SpannedTypeError) {
+    let span = error.span;
+    if span.start != 0 || span.end != 0 {
+        // Calculate line/column from byte offset
+        let before = &source[..span.start.min(source.len())];
+        let line = before.matches('\n').count() + 1;
+        let col = before.len() - before.rfind('\n').map(|p| p + 1).unwrap_or(0) + 1;
+        eprintln!(
+            "{}:{}:{}: {} {}",
+            filename,
+            line,
+            col,
+            "Type error:".red().bold(),
+            error
+        );
+    } else {
+        eprintln!("{}: {} in {}", "Type error".red().bold(), error, filename);
+    }
 }

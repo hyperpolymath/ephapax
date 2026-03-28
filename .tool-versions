@@ -1,0 +1,4 @@
+# SPDX-License-Identifier: PMPL-1.0-or-later
+# asdf tool versions for Ephapax development
+rust stable
+ocaml 5.4.1

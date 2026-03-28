@@ -23,12 +23,14 @@ build/
 **/zig-out/
 **/.zig-cache/
 
-# Coq
+# Coq / Rocq
 *.vo
 *.vok
 *.vos
 *.glob
 .coqdeps.d
+.*.aux
+.lia.cache
 # NOTE: _CoqProject IS tracked (it's the project definition file)
 
 # WASM

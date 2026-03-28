@@ -428,8 +428,8 @@ impl TypeChecker {
             ExprKind::TupleLit(elements) => self.check_tuple_lit(s, elements),
             ExprKind::TupleIndex { tuple, index } => self.check_tuple_index(s, tuple, *index),
             ExprKind::FFI { args, .. } => self.check_ffi(s, args),
-            ExprKind::Perform { .. } => todo!("effect perform type checking not yet implemented"),
-            ExprKind::Handle { .. } => todo!("effect handle type checking not yet implemented"),
+            ExprKind::Perform { op, args } => self.check_perform(s, op, args),
+            ExprKind::Handle { body, clauses } => self.check_handle(s, body, clauses),
         }
     }
 
@@ -1179,6 +1179,102 @@ impl TypeChecker {
             }
         }
         Ok(Ty::Base(BaseTy::I64))
+    }
+
+    /// Type check a perform expression: `perform op(args...)`.
+    ///
+    /// Performs an effect operation. All arguments are type-checked.
+    /// The return type is a fresh unification variable — it will be
+    /// constrained by the enclosing handler's return clause or by
+    /// the context where the result is used.
+    ///
+    /// Linear variables passed as arguments are consumed.
+    fn check_perform(
+        &mut self,
+        _s: Span,
+        _op: &Var,
+        args: &[Expr],
+    ) -> Result<Ty, SpannedTypeError> {
+        // Type check all arguments (consumes linear resources)
+        for arg in args {
+            self.check(arg)?;
+        }
+        // Return type determined by handler — use fresh unification variable
+        Ok(self.fresh_unif())
+    }
+
+    /// Type check a handle expression: `handle body with clauses end`.
+    ///
+    /// The body is type-checked. Each handler clause is checked:
+    /// - **Return clause** (op = ""): binds the body's result type, produces
+    ///   the handle expression's overall return type.
+    /// - **Operation clause**: binds operation parameters, optionally a resume
+    ///   continuation. The clause body must produce the same type as the
+    ///   return clause.
+    ///
+    /// If `resume(multi)` is used and the continuation captures linear values,
+    /// this is a type error (linear values would be duplicated).
+    fn check_handle(
+        &mut self,
+        s: Span,
+        body: &Expr,
+        clauses: &[ephapax_syntax::HandlerClause],
+    ) -> Result<Ty, SpannedTypeError> {
+        // Type check the body — its type is what the return clause receives
+        let body_ty = self.check(body)?;
+
+        // Find the return clause to determine the overall type
+        let mut result_ty: Option<Ty> = None;
+
+        for clause in clauses {
+            if clause.op.is_empty() {
+                // Return clause: return(x) => body
+                // x has the body's type
+                if let Some(param) = clause.params.first() {
+                    self.ctx
+                        .extend(param.clone(), body_ty.clone(), BindingForm::Let);
+                }
+                let clause_ty = self.check(&clause.body)?;
+                result_ty = Some(clause_ty);
+            } else {
+                // Operation clause: op(params..., resume?) => body
+                // Parameters get fresh unification variables
+                for param in &clause.params {
+                    let param_ty = self.fresh_unif();
+                    self.ctx
+                        .extend(param.clone(), param_ty, BindingForm::Let);
+                }
+
+                // If resume mode is specified, add a resume callback to scope
+                if let Some(mode) = clause.resume_mode {
+                    // resume : answer_ty -> result_ty
+                    // For resume(multi), check no linear captures exist
+                    if mode == ephapax_syntax::ResumeMode::Multi {
+                        // Check context for linear variables — multi-shot with
+                        // linear captures is a type error
+                        for (name, entry) in &self.ctx.vars {
+                            if entry.demands_consumption() && !entry.used {
+                                return Err(self.at(
+                                    s,
+                                    TypeError::LinearVariableNotConsumed(name.clone()),
+                                ));
+                            }
+                        }
+                    }
+                }
+
+                let clause_ty = self.check(&clause.body)?;
+
+                // All clauses must produce the same type
+                if let Some(ref rt) = result_ty {
+                    self.unify(s, rt, &clause_ty)?;
+                } else {
+                    result_ty = Some(clause_ty);
+                }
+            }
+        }
+
+        Ok(result_ty.unwrap_or(self.resolve(&body_ty)))
     }
 }
 

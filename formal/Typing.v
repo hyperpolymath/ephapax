@@ -9,13 +9,14 @@
     indexing into the context. No variable names, no shadowing.
 *)
 
+Require Import Coq.Strings.String. (* Before List so List.length wins *)
 Require Import Coq.Lists.List.
 Require Import Coq.Arith.Arith.
 Require Import Coq.Bool.Bool.
 Require Import Lia.
 Import ListNotations.
 
-From Ephapax Require Import Syntax.
+Require Import Syntax.
 
 (** ** Linear Typing Judgement *)
 

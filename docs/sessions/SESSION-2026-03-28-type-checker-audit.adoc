@@ -133,6 +133,17 @@ lookup infrastructure now in place, it may be feasible.
 | Interpreter | 95% | Effects stubbed
 | WASM codegen | 95% | Effects stubbed
 | LSP | Complete | Real spans, hover, go-to-def, completions
-| Formal proofs | 90% | 21 Qed, 5 Admitted (4 Rocq tactic + 1 theoretical)
+| Formal proofs | 90% | 20 Qed, 6 Admitted. All .v compile clean (0 errors)
 | Analysis | Complete | Free vars, escape, liveness, all nodes
 |===
+
+== Root Cause: String.length / List.length Shadowing
+
+The Rocq 9.1.1 issues that appeared as `congruence`/`discriminate` failures
+were caused by `Coq.Strings.String.length` shadowing `Coq.Lists.List.length`
+across module boundaries. Typing.v exports lemmas using `List.length`, but
+Semantics.v (which imports String) resolves `length` to `String.length`,
+making `eapply`/`eassumption` fail on type mismatches.
+
+Fix: import `Coq.Strings.String` BEFORE `Coq.Lists.List` so `List.length` wins.
+Applied to both Typing.v and Semantics.v. All three .v files now compile clean.

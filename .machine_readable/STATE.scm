@@ -13,7 +13,7 @@
 
   (current-position
     (milestone "type-checker-audit-complete")
-    (completion-percentage 94)
+    (completion-percentage 95)
     (summary "Full type checker audit against Perfect Type Checker checklist.
               Generics, modules, effects, error spans all implemented.
               Formal proofs blocked by Rocq 9.1.1 regression."))
@@ -38,11 +38,12 @@
     (blocker
       (id "rocq-pair-injection")
       (severity "medium")
-      (description "flags_only_increase SOLVED via projected lookups.
-                    Remaining: ctx_transfer T_Let/LetLin/Lam/Case need
-                    consumption tracking (theoretical, not Rocq bug).")
-      (resolution "Add 4th conjunct to ctx_transfer: consumed positions
-                   in original are consumed in transfer.")))
+      (description "Root cause: String.length shadows List.length across
+                    Rocq module boundaries. flags_only_increase SOLVED via
+                    projected lookups. All .v files compile clean (0 errors).")
+      (resolution "1. Fix length shadowing (import String before List)
+                   2. Add consumption tracking to ctx_transfer
+                   3. Close remaining 6 Admitted")))
 
   (critical-next-actions
     ("Resolve Rocq 9.1.1 pair injection regression")

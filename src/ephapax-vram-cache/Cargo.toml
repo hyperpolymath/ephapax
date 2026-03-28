@@ -12,7 +12,7 @@ repository.workspace = true
 
 [dependencies]
 # Formally verified LRU cache (Proven library)
-ephapax-proven = { version = "0.1", path = "/var/mnt/eclipse/repos/ephapax-proven" }
+ephapax-proven = { version = "0.1", path = "/var$REPOS_DIR/ephapax-proven" }
 
 # GPU acceleration
 cudarc = { version = "0.12", features = ["std"], optional = true }

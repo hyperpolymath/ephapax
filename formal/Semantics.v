@@ -591,8 +591,8 @@ Proof. intros; inversion H0; subst; inversion H; subst; eauto. Qed.
 
     If an expression types in context G, it can be retyped in any
     compatible context G2 (same types, preserving unused flags).
-    The output context preserves the same properties, plus linear
-    variables that were consumed remain consumed. *)
+    The output preserves types, unused flags, and consumption:
+    variables consumed in the original are consumed in the transfer. *)
 
 Lemma typing_ctx_transfer :
   forall R G e T G',
@@ -603,146 +603,319 @@ Lemma typing_ctx_transfer :
       exists G2', R; G2 |- e : T -| G2'
         /\ ctx_types_agree G' G2'
         /\ ctx_false_preserved G' G2'
-        /\ ctx_lin_true_preserved G' G2'.
-Proof.
-  (* This is a 24-case induction on the typing derivation.
-     Each case follows the same pattern: apply the typing rule in G2,
-     use IH for sub-derivations, verify output conditions. *)
-  intros R G e T G' Htype.
-  induction Htype; intros G2 [Hlen Htypes] Hfp.
-  (* T_Unit *)
-  - exists G2. repeat split; auto.
-    + split; auto.
-    + unfold ctx_lin_true_preserved; intros; apply Hfp in H; auto.
-      (* G' = G, so false_preserved gives us what we need;
-         lin_true_preserved: if (T0, true) linear in G, then in G2.
-         But we only have false_preserved, not true_preserved.
-         For lin_true: ctx_lookup G i = Some(T0, true) with linear T0.
-         We need ctx_lookup G2 i = Some(T0, true).
-         Htypes gives: exists u', ctx_lookup G2 i = Some(T0, u').
-         But u' might be false if G2 has it unused. *)
-      admit.
-  all: admit.
+        /\ (forall i T0,
+              ctx_lookup G i = Some (T0, false) ->
+              ctx_lookup G' i = Some (T0, true) ->
+              ctx_lookup G2 i = Some (T0, false) ->
+              ctx_lookup G2' i = Some (T0, true)).
 Admitted.
+(* TODO: 24-case induction — each case follows the typing rule structure.
+   Representative proof sketch:
+   - Value rules (T_Unit etc.): G2' = G2, conditions trivially pass through
+   - T_Var_Lin: G2' = ctx_mark_used G2 i, consumption at position i preserved
+   - Compound rules (T_Let etc.): chain IH through sub-derivations
+   Deferred to separate focused session — mechanical but verbose in Rocq 9.1.1 *)
 
 (** ** Substitution Lemma
 
-    The key lemma for preservation's reduction cases: if e types in an
-    extended context (T1, false)::G with the bound variable consumed,
-    and v types as T1 (as a value, context-invariantly), then
-    subst 0 v e types in G. *)
+    The key lemma for preservation's reduction cases.
+    If e types in extended context (T1,false)::G and v types as T1 from G,
+    then subst 0 v e types from G_v (the output of typing v). *)
 
-Lemma substitution_preserves_typing :
-  forall R G e T2 G' T1,
+Lemma subst_preserves_typing :
+  forall R G e T2 G' T1 v G_v,
     R; (T1, false) :: G |- e : T2 -| (T1, true) :: G' ->
-    (forall G_a, R; G_a |- shift 0 (length G_a) EUnit : TBase TUnit -| G_a) ->
-    (* Placeholder: need proper value typing condition *)
-    True.
-Proof. auto. Qed.
+    R; G |- v : T1 -| G_v ->
+    is_value v ->
+    exists G_out, R; G_v |- subst 0 v e : T2 -| G_out.
+Admitted.
+(* TODO: Induction on e's typing derivation. Standard for De Bruijn typed calculi.
+   Key cases: T_Var at index 0 (replaced by v), T_Var at index >0 (shifted down),
+   compound rules (chain through sub-derivations with shifted substitution). *)
 
-(** ** Preservation
+(** Helper: types_agree and false_preserved are reflexive *)
+Lemma ctx_types_agree_refl : forall G, ctx_types_agree G G.
+Proof.
+  intro G. split; [reflexivity|]. intros. eexists. exact H.
+Qed.
 
-    Well-typed closed expressions preserve typing under reduction.
-    Uses substitution lemma for reduction cases and context transfer
-    for congruence cases. *)
+Lemma ctx_false_preserved_refl : forall G, ctx_false_preserved G G.
+Proof. unfold ctx_false_preserved. auto. Qed.
+
+(** Helper: flags_only_increase implies false_preserved from output to input *)
+Lemma typing_false_preserved_output_to_input :
+  forall R G e T G',
+    R; G |- e : T -| G' ->
+    ctx_false_preserved G' G.
+Proof.
+  unfold ctx_false_preserved. intros. eapply flags_only_increase; eassumption.
+Qed.
+
+(** Helper: typing preserves type agreement (output has same types as input) *)
+Lemma typing_types_agree :
+  forall R G e T G',
+    R; G |- e : T -| G' ->
+    ctx_types_agree G' G.
+Proof.
+  intros. split.
+  - symmetry. eapply typing_preserves_length. eassumption.
+  - intros. eapply typing_preserves_bindings; eassumption.
+Qed.
+
+(** ** Preservation (Strengthened)
+
+    Well-typed expressions preserve typing under reduction.
+    Induction on the step derivation. The strengthened conclusion
+    (same input context G + output agreement) provides the IH
+    needed for congruence cases via typing_ctx_transfer. *)
 
 Theorem preservation :
   forall mu R e mu' R' e',
     (mu, R, e) -->> (mu', R', e') ->
     forall G T G',
     R; G |- e : T -| G' ->
-    exists G'' G_out, R'; G'' |- e' : T -| G_out.
+    exists G_out, R'; G |- e' : T -| G_out.
 Proof.
   intros mu R e mu' R' e' Hstep.
   induction Hstep; intros G T0 G' Htype.
+
+  (* ===== String operations ===== *)
+
   (* S_StringNew *)
-  - inversion Htype; subst. eexists _, _. econstructor. assumption.
-  (* S_StringConcat *) - admit.
-  (* S_StringConcat_Step1 *) - admit.
-  (* S_StringConcat_Step2 *) - admit.
-  (* S_StringLen *) - admit.
-  (* S_StringLen_Step *) - admit.
+  - inversion Htype; subst. eexists. econstructor. assumption.
+
+  (* S_StringConcat: both values reduce to new loc *)
+  - inversion Htype; subst.
+    inversion H5; subst. inversion H6; subst.
+    eexists. econstructor; eassumption.
+
+  (* S_StringConcat_Step1: e1 steps *)
+  - inversion Htype; subst.
+    destruct (IHHstep _ _ _ H5) as [G1_out Htyped1].
+    (* Retype e2 from G' (e1's output) using ctx_transfer *)
+    assert (Hagree: ctx_types_agree G' G1_out).
+    { eapply typing_types_agree in H5. eapply typing_types_agree in Htyped1.
+      admit. (* types agree transitivity through G *) }
+    assert (Hfp: ctx_false_preserved G' G1_out).
+    { admit. (* false_preserved through the chain *) }
+    destruct (typing_ctx_transfer _ _ _ _ _ H6 G1_out Hagree Hfp)
+      as [G2_out [Htyped2 _]].
+    eexists. econstructor; eassumption.
+
+  (* S_StringConcat_Step2: v1 is value, e2 steps *)
+  - inversion Htype; subst.
+    destruct (IHHstep _ _ _ H6) as [G2_out Htyped2].
+    eexists. econstructor; eassumption.
+
+  (* S_StringLen *)
+  - inversion Htype; subst. eexists. econstructor.
+
+  (* S_StringLen_Step *)
+  - inversion Htype; subst.
+    (* T_StringLen uses T_Borrow, which means e = EVar i.
+       The step is on e, so we need to handle what steps from EBorrow (EVar i). *)
+    admit. (* StringLen stepping is unusual — involves Borrow *)
+
+  (* ===== Let bindings ===== *)
+
   (* S_Let_Val: ELet v e2 → subst 0 v e2 *)
   - inversion Htype; subst.
-    (* v is a value, types as T1 from G to G1.
-       e2 types from (T1,false)::G1 to (T1,true)::G'.
-       subst 0 v e2 should type from G1 (or G). *)
-    admit. (* Needs substitution lemma *)
-  (* S_Let_Step *)
+    destruct (subst_preserves_typing _ _ _ _ _ _ _ _ H4 H3 H)
+      as [G_sub Htyped_sub].
+    (* subst types from G_v; transfer to G *)
+    destruct (typing_ctx_transfer _ _ _ _ _ Htyped_sub G
+                (typing_types_agree _ _ _ _ _ H3)
+                (typing_false_preserved_output_to_input _ _ _ _ _ H3))
+      as [G_out [Htyped _]].
+    eexists. exact Htyped.
+
+  (* S_Let_Step: e1 steps under let *)
   - inversion Htype; subst.
-    destruct (IHHstep _ _ _ H3) as [G_a [G_b Htyped]].
-    (* Have: R; G_a |- e1' : T1 -| G_b
-       Need: R; ??? |- ELet e1' e2 : T2 -| ???
-       Context transfer needed to retype e2 from (T1,false)::G1 to (T1,false)::G_b *)
-    admit. (* Needs context transfer *)
+    destruct (IHHstep _ _ _ H3) as [G1_out Htyped1].
+    (* Retype e2 from (T1,false)::G1 to (T1,false)::G1_out *)
+    assert (Hagree: ctx_types_agree ((T1,false)::G1) ((T1,false)::G1_out)).
+    { split.
+      - simpl. f_equal.
+        destruct (typing_types_agree _ _ _ _ _ H3) as [Hlen1 _].
+        destruct (typing_types_agree _ _ _ _ _ Htyped1) as [Hlen2 _].
+        lia.
+      - intros i T1' u Hlk. destruct i; simpl in *.
+        + injection Hlk as -> ->. eexists. reflexivity.
+        + destruct (typing_preserves_bindings _ _ _ _ _ H3 i T1' u Hlk) as [u1 Hu1].
+          destruct (typing_preserves_bindings _ _ _ _ _ Htyped1 i T1' u1) as [u2 Hu2].
+          * admit. (* need: lookup G i = Some(T1', u1) -> lookup G1_out i = ... *)
+          * eexists. simpl. exact Hu2. }
+    assert (Hfp: ctx_false_preserved ((T1,false)::G1) ((T1,false)::G1_out)).
+    { unfold ctx_false_preserved. intros i T1' Hlk.
+      destruct i; simpl in *.
+      - exact Hlk.
+      - (* false in G1 → false in G (by flags_only_increase on H3)
+           → false in G1_out? Not directly... *)
+        admit. }
+    destruct (typing_ctx_transfer _ _ _ _ _ H4 _ Hagree Hfp)
+      as [G2_out [Htyped2 [_ [_ Hcons]]]].
+    (* Need (T1, true) at pos 0 in G2_out for T_Let *)
+    assert (Hpos0: exists G_tail, G2_out = (T1, true) :: G_tail).
+    { (* Original output: (T1,true)::G'. Transfer consumed pos 0. *)
+      admit. }
+    destruct Hpos0 as [G_tail ->].
+    eexists. econstructor; eassumption.
+
   (* S_LetLin_Val *)
-  - inversion Htype; subst. admit.
+  - inversion Htype; subst.
+    destruct (subst_preserves_typing _ _ _ _ _ _ _ _ H5 H4 H)
+      as [G_sub Htyped_sub].
+    destruct (typing_ctx_transfer _ _ _ _ _ Htyped_sub G
+                (typing_types_agree _ _ _ _ _ H4)
+                (typing_false_preserved_output_to_input _ _ _ _ _ H4))
+      as [G_out [Htyped _]].
+    eexists. exact Htyped.
+
   (* S_LetLin_Step *)
   - inversion Htype; subst.
-    destruct (IHHstep _ _ _ H4) as [G_a [G_b Htyped]].
-    admit.
-  (* S_App_Fun *)
+    destruct (IHHstep _ _ _ H4) as [G1_out Htyped1].
+    admit. (* Same pattern as S_Let_Step *)
+
+  (* ===== Application ===== *)
+
+  (* S_App_Fun: (fn(T)->body) v → subst 0 v body *)
   - inversion Htype; subst.
     inversion H3; subst.
-    admit. (* Needs substitution lemma *)
+    (* body types from (T,false)::G to (T,true)::G (T_Lam premise) *)
+    (* v types from G to G'' (T_App's second premise) *)
+    destruct (subst_preserves_typing _ _ _ _ _ _ _ _ H1 H5 H)
+      as [G_sub Htyped_sub].
+    destruct (typing_ctx_transfer _ _ _ _ _ Htyped_sub G
+                (typing_types_agree _ _ _ _ _ H5)
+                (typing_false_preserved_output_to_input _ _ _ _ _ H5))
+      as [G_out [Htyped _]].
+    eexists. exact Htyped.
+
   (* S_App_Step1 *)
   - inversion Htype; subst.
-    destruct (IHHstep _ _ _ H2) as [G_a [G_b Htyped]].
-    admit.
+    destruct (IHHstep _ _ _ H2) as [G1_out Htyped1].
+    admit. (* Retype e2 via ctx_transfer, construct T_App *)
+
   (* S_App_Step2 *)
   - inversion Htype; subst.
-    destruct (IHHstep _ _ _ H5) as [G_a [G_b Htyped]].
-    admit.
+    destruct (IHHstep _ _ _ H5) as [G2_out Htyped2].
+    eexists. econstructor; eassumption.
+
+  (* ===== Conditionals ===== *)
+
   (* S_If_True *)
-  - inversion Htype; subst. eexists _, _. eassumption.
+  - inversion Htype; subst. eexists. eassumption.
+
   (* S_If_False *)
-  - inversion Htype; subst. eexists _, _. eassumption.
+  - inversion Htype; subst. eexists. eassumption.
+
   (* S_If_Step *)
   - inversion Htype; subst.
-    destruct (IHHstep _ _ _ H3) as [G_a [G_b Htyped]].
-    admit.
-  (* S_Pair_Step1 *) - admit.
-  (* S_Pair_Step2 *) - admit.
+    destruct (IHHstep _ _ _ H3) as [G1_out Htyped1].
+    (* Retype e2 and e3 from G' to G1_out via ctx_transfer *)
+    admit. (* Same pattern: transfer both branches *)
+
+  (* ===== Products ===== *)
+
+  (* S_Pair_Step1 *)
+  - inversion Htype; subst.
+    destruct (IHHstep _ _ _ H2) as [G1_out Htyped1].
+    admit. (* Transfer e2, construct T_Pair *)
+
+  (* S_Pair_Step2 *)
+  - inversion Htype; subst.
+    destruct (IHHstep _ _ _ H5) as [G2_out Htyped2].
+    eexists. econstructor; eassumption.
+
   (* S_Fst *)
   - inversion Htype; subst.
     inversion H3; subst.
-    eexists _, _. eassumption.
-  (* S_Fst_Step *) - admit.
+    eexists. eassumption.
+
+  (* S_Fst_Step *)
+  - inversion Htype; subst.
+    destruct (IHHstep _ _ _ H3) as [G1_out Htyped1].
+    eexists. econstructor; [exact Htyped1 | admit]. (* is_linear_ty side condition *)
+
   (* S_Snd *)
   - inversion Htype; subst.
     inversion H3; subst.
-    eexists _, _. eassumption.
-  (* S_Snd_Step *) - admit.
-  (* S_Inl_Step *) - admit.
-  (* S_Inr_Step *) - admit.
-  (* S_Case_Inl *)
+    eexists. eassumption.
+
+  (* S_Snd_Step *)
+  - inversion Htype; subst.
+    destruct (IHHstep _ _ _ H3) as [G1_out Htyped1].
+    eexists. econstructor; [exact Htyped1 | admit].
+
+  (* ===== Sums ===== *)
+
+  (* S_Inl_Step *)
+  - inversion Htype; subst.
+    destruct (IHHstep _ _ _ H2) as [G1_out Htyped1].
+    eexists. econstructor. exact Htyped1.
+
+  (* S_Inr_Step *)
+  - inversion Htype; subst.
+    destruct (IHHstep _ _ _ H2) as [G1_out Htyped1].
+    eexists. econstructor. exact Htyped1.
+
+  (* S_Case_Inl: case (inl v) e1 e2 → subst 0 v e1 *)
   - inversion Htype; subst.
     inversion H4; subst.
     admit. (* Needs substitution lemma *)
+
   (* S_Case_Inr *)
   - inversion Htype; subst.
     inversion H4; subst.
-    admit.
-  (* S_Case_Step *) - admit.
+    admit. (* Needs substitution lemma *)
+
+  (* S_Case_Step *)
+  - inversion Htype; subst.
+    destruct (IHHstep _ _ _ H3) as [G1_out Htyped1].
+    admit. (* Transfer both branches *)
+
+  (* ===== Regions ===== *)
+
   (* S_Region_Enter *)
-  - inversion Htype; subst. eexists _, _. econstructor.
+  - inversion Htype; subst. eexists. econstructor.
     + intro Hin. apply H. right. assumption.
     + econstructor; [assumption | eassumption].
+
   (* S_Region_Exit *)
-  - inversion Htype; subst.
-    eexists _, _. eassumption.
+  - inversion Htype; subst. eexists. eassumption.
+
   (* S_Region_Step *)
   - inversion Htype; subst.
-    destruct (IHHstep _ _ _ H6) as [G_a [G_b Htyped]].
-    admit.
+    destruct (IHHstep _ _ _ H6) as [G1_out Htyped1].
+    eexists. econstructor; [assumption | exact Htyped1].
+
+  (* ===== Borrowing ===== *)
+
   (* S_Borrow_Val *)
-  - inversion Htype; subst. eexists _, _. eassumption.
-  (* S_Borrow_Step *) - admit.
+  - inversion Htype; subst. eexists. eassumption.
+
+  (* S_Borrow_Step *)
+  - inversion Htype; subst.
+    admit. (* T_Borrow is EBorrow (EVar i) — only steps if inner steps *)
+
+  (* ===== Drop ===== *)
+
   (* S_Drop *)
-  - inversion Htype; subst. eexists _, _. econstructor.
-  (* S_Drop_Step *) - admit.
+  - inversion Htype; subst. eexists. econstructor.
+
+  (* S_Drop_Step *)
+  - inversion Htype; subst.
+    destruct (IHHstep _ _ _ H3) as [G1_out Htyped1].
+    eexists. econstructor; [admit | exact Htyped1]. (* is_linear side cond *)
+
+  (* ===== Copy ===== *)
+
   (* S_Copy *)
   - inversion Htype; subst.
-    eexists _, _. econstructor; eassumption.
-  (* S_Copy_Step *) - admit.
+    eexists. econstructor; eassumption.
+
+  (* S_Copy_Step *)
+  - inversion Htype; subst.
+    destruct (IHHstep _ _ _ H3) as [G1_out Htyped1].
+    eexists. econstructor; [admit | exact Htyped1]. (* is_linear side cond *)
 Admitted.

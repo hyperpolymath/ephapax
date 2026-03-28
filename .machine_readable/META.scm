@@ -52,6 +52,24 @@
 
   (development-practices
     (formal-proofs "Rocq 9.1.1 (Coq fork)")
+    (adr "projected-lookups"
+      (status "accepted")
+      (date "2026-03-28")
+      (decision "Added ctx_lookup_ty and ctx_lookup_flag projected accessors
+                 to avoid option (ty * bool) discrimination in Rocq 9.1.1")
+      (rationale "congruence/discriminate/injection fail on nested pairs inside
+                  option in complex inductive proof contexts. Projected lookups
+                  decompose into option ty + option bool which Rocq handles fine"))
+
+    (adr "rocq-import-order"
+      (status "accepted")
+      (date "2026-03-28")
+      (decision "Import Coq.Strings.String BEFORE Coq.Lists.List in all .v files")
+      (rationale "String.length shadows List.length across module boundaries,
+                  breaking eapply/eassumption for cross-module lemma application")))
+
+  (development-practices
+    (formal-proofs "Rocq 9.1.1 — 20 Qed, 6 Admitted, 0 compilation errors")
     (testing "cargo test, 35 suites, 290+ tests")
     (ci "GitHub Actions with hypatia-scan")
     (toolchain "asdf: rust stable, ocaml 5.4.1")))

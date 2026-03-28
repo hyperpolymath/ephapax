@@ -69,3 +69,6 @@ htmlcov/
 
 # Crash recovery artifacts
 ai-cli-crash-capture/
+
+# asdf version manager
+.tool-versions

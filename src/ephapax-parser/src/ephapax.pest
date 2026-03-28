@@ -203,6 +203,8 @@ atom_expr = {
     | inl_expr
     | inr_expr
     | borrow_expr
+    | fst_expr
+    | snd_expr
     | drop_expr
     | copy_expr
     | construct_expr
@@ -236,6 +238,8 @@ inr_expr = { "inr" ~ "[" ~ ty ~ "]" ~ "(" ~ expression ~ ")" }
 
 borrow_expr = { "&" ~ unary_expr }
 
+fst_expr = { "fst" ~ "(" ~ expression ~ ")" }
+snd_expr = { "snd" ~ "(" ~ expression ~ ")" }
 drop_expr = { "drop" ~ "(" ~ expression ~ ")" }
 copy_expr = { "copy" ~ "(" ~ expression ~ ")" }
 
@@ -278,7 +282,7 @@ identifier = @{
 keyword = {
     "let" | "let!" | "in" | "fn" | "if" | "then" | "else"
     | "region" | "case" | "of" | "inl" | "inr" | "end"
-    | "drop" | "copy" | "type" | "data" | "match"
+    | "fst" | "snd" | "drop" | "copy" | "type" | "data" | "match"
     | "true" | "false"
     | "Bool" | "I32" | "I64" | "F32" | "F64" | "String"
 }

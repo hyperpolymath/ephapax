@@ -12,6 +12,7 @@
 Require Import Coq.Lists.List.
 Require Import Coq.Arith.Arith.
 Require Import Coq.Bool.Bool.
+Require Import Lia.
 Import ListNotations.
 
 Require Import Syntax.
@@ -171,16 +172,26 @@ where "R ';' G '|-' e ':' T '-|' G'" := (has_type R G e T G').
     The shadowing problem is ELIMINATED: no variable name can appear
     twice because positions are unique by construction. *)
 
+(** ctx_mark_used preserves context length *)
+Lemma ctx_mark_used_length :
+  forall G i, length (ctx_mark_used G i) = length G.
+Proof.
+  induction G; intros i; simpl.
+  - reflexivity.
+  - destruct a as [T u]. destruct i; simpl;
+      [reflexivity | f_equal; apply IHG].
+Qed.
+
 Theorem typing_preserves_length :
   forall R G e T G',
     R; G |- e : T -| G' ->
-    length G' = length G \/
-    (* For let/letlin/lam/case: output = input + 1 bound var stripped *)
-    exists n, length G' = n /\ length G = n.
+    length G' = length G.
 Proof.
-  (* Deferred: needs helper lemmas about ctx_mark_used length preservation *)
-  admit.
-Admitted.
+  intros R G e T G' Htype.
+  induction Htype; simpl in *;
+    try reflexivity; try lia;
+    try apply ctx_mark_used_length.
+Qed.
 
 (** The meaningful linearity property holds by construction. *)
 Theorem linearity_structural :

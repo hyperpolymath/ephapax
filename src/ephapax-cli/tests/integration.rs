@@ -85,7 +85,20 @@ fn pair_construction() {
     assert_checks("(1, 2)");
 }
 
-// fst/snd not yet in parser grammar — tested at AST level in ephapax-typing
+#[test]
+fn pair_fst() {
+    assert_checks("fst((1, 2))");
+}
+
+#[test]
+fn pair_snd() {
+    assert_checks("snd((1, 2))");
+}
+
+#[test]
+fn pair_dot_projection() {
+    assert_checks("(1, 2).0");
+}
 
 // =========================================================================
 // Conditionals

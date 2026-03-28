@@ -1062,6 +1062,24 @@ fn parse_atom_expr(pair: pest::iterators::Pair<Rule>) -> Result<Expr, ParseError
             )?;
             Ok(Expr::new(ExprKind::Borrow(Box::new(inner_expr)), span))
         }
+        Rule::fst_expr => {
+            let inner_expr = parse_expression(
+                inner
+                    .into_inner()
+                    .next()
+                    .ok_or_else(|| ParseError::missing("fst operand"))?,
+            )?;
+            Ok(Expr::new(ExprKind::Fst(Box::new(inner_expr)), span))
+        }
+        Rule::snd_expr => {
+            let inner_expr = parse_expression(
+                inner
+                    .into_inner()
+                    .next()
+                    .ok_or_else(|| ParseError::missing("snd operand"))?,
+            )?;
+            Ok(Expr::new(ExprKind::Snd(Box::new(inner_expr)), span))
+        }
         Rule::drop_expr => {
             let inner_expr = parse_expression(
                 inner

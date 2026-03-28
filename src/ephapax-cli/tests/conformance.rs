@@ -96,7 +96,19 @@ fn spec_pair() {
     assert!(check("(true, 42)").is_ok());
 }
 
-// SPEC 3.2: Pair projections not yet in parser grammar — tested at AST level in ephapax-typing
+/// SPEC 3.2: Pair projections — fst() and snd() keyword syntax
+#[test]
+fn spec_projections() {
+    assert!(check("fst((1, 2))").is_ok());
+    assert!(check("snd((1, 2))").is_ok());
+}
+
+/// SPEC 3.3: Pair projections — .0 and .1 postfix syntax
+#[test]
+fn spec_projections_dot() {
+    assert!(check("(1, 2).0").is_ok());
+    assert!(check("(1, 2).1").is_ok());
+}
 
 // =========================================================================
 // SPEC: Sums

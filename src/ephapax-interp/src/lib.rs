@@ -209,9 +209,10 @@ impl std::fmt::Display for Value {
 /// Environment for variable bindings
 #[derive(Debug, Clone, Default)]
 pub struct Environment {
-    bindings: HashMap<Var, Value>,
+    /// Variable bindings (pub for save-restore in eval_let/eval_case)
+    pub bindings: HashMap<Var, Value>,
     /// Track which linear values have been consumed
-    consumed: HashMap<Var, bool>,
+    pub consumed: HashMap<Var, bool>,
 }
 
 impl Environment {
@@ -725,9 +726,26 @@ impl Interpreter {
 
     fn eval_let(&mut self, name: &Var, value: &Expr, body: &Expr) -> Result<Value, RuntimeError> {
         let val = self.eval(value)?;
+        // Save-restore: prevents environment leaking between nested let bindings.
+        // The old extend/remove pattern clobbered outer bindings on name shadowing
+        // and leaked intermediate env state to sibling expressions.
+        // See formal/DESIGN-NOTE-2026-03-28.md for the soundness proof.
+        let prev = self.env.bindings.get(name).cloned();
+        let prev_consumed = self.env.consumed.get(name).copied();
         self.env.extend(name.clone(), val);
         let result = self.eval(body)?;
-        self.env.remove(name);
+        // Restore previous binding (or remove if there was none)
+        match prev {
+            Some(old_val) => {
+                self.env.bindings.insert(name.clone(), old_val);
+                if let Some(c) = prev_consumed {
+                    self.env.consumed.insert(name.clone(), c);
+                }
+            }
+            None => {
+                self.env.remove(name);
+            }
+        }
         Ok(result)
     }
 
@@ -803,15 +821,31 @@ impl Interpreter {
 
         match scrutinee_val {
             Value::Left(inner) => {
+                let prev = self.env.bindings.get(left_var).cloned();
+                let prev_c = self.env.consumed.get(left_var).copied();
                 self.env.extend(left_var.clone(), *inner);
                 let result = self.eval(left_body)?;
-                self.env.remove(left_var);
+                match prev {
+                    Some(v) => {
+                        self.env.bindings.insert(left_var.clone(), v);
+                        if let Some(c) = prev_c { self.env.consumed.insert(left_var.clone(), c); }
+                    }
+                    None => { self.env.remove(left_var); }
+                }
                 Ok(result)
             }
             Value::Right(inner) => {
+                let prev = self.env.bindings.get(right_var).cloned();
+                let prev_c = self.env.consumed.get(right_var).copied();
                 self.env.extend(right_var.clone(), *inner);
                 let result = self.eval(right_body)?;
-                self.env.remove(right_var);
+                match prev {
+                    Some(v) => {
+                        self.env.bindings.insert(right_var.clone(), v);
+                        if let Some(c) = prev_c { self.env.consumed.insert(right_var.clone(), c); }
+                    }
+                    None => { self.env.remove(right_var); }
+                }
                 Ok(result)
             }
             _ => Err(RuntimeError::NotASum),
@@ -983,6 +1017,10 @@ impl Interpreter {
             });
         }
 
+        // Save-restore: snapshot env before binding params, restore after.
+        // Matches the substitution-based semantics proven in formal/Semantics.v.
+        let saved_env = self.env.clone();
+
         // Bind parameters
         for ((param_name, _), arg) in params.iter().zip(args) {
             self.env.extend(param_name.clone(), arg);
@@ -991,10 +1029,8 @@ impl Interpreter {
         // Evaluate body
         let result = self.eval(&body)?;
 
-        // Remove parameters
-        for (param_name, _) in &params {
-            self.env.remove(param_name);
-        }
+        // Restore previous environment
+        self.env = saved_env;
 
         Ok(result)
     }

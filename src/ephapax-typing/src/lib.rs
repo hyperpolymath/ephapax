@@ -428,6 +428,8 @@ impl TypeChecker {
             ExprKind::TupleLit(elements) => self.check_tuple_lit(s, elements),
             ExprKind::TupleIndex { tuple, index } => self.check_tuple_index(s, tuple, *index),
             ExprKind::FFI { args, .. } => self.check_ffi(s, args),
+            ExprKind::Perform { .. } => todo!("effect perform type checking not yet implemented"),
+            ExprKind::Handle { .. } => todo!("effect handle type checking not yet implemented"),
         }
     }
 

@@ -556,6 +556,14 @@ fn format_ty(ty: &Ty) -> String {
             let parts: Vec<_> = elems.iter().map(format_ty).collect();
             format!("({})", parts.join(", "))
         }
+        Ty::Effectful {
+            param,
+            ret,
+            effects,
+        } => {
+            let effs = effects.join(" + ");
+            format!("{} -> {} with {}", format_ty(param), format_ty(ret), effs)
+        }
     }
 }
 
@@ -698,6 +706,14 @@ fn find_let_binding_span(expr: &Expr, target: &str) -> Option<Span> {
         }
         ExprKind::TupleIndex { tuple, .. } => find_let_binding_span(tuple, target),
         ExprKind::FFI { args, .. } => args.iter().find_map(|a| find_let_binding_span(a, target)),
+        ExprKind::Perform { args, .. } => {
+            args.iter().find_map(|a| find_let_binding_span(a, target))
+        }
+        ExprKind::Handle { body, clauses } => find_let_binding_span(body, target).or_else(|| {
+            clauses
+                .iter()
+                .find_map(|c| find_let_binding_span(&c.body, target))
+        }),
         ExprKind::Var(_) | ExprKind::Lit(_) | ExprKind::StringNew { .. } => None,
     }
 }

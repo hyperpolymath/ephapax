@@ -181,6 +181,25 @@ impl LivenessAnalysis {
                 }
             }
 
+            // --- Effects ---
+            ExprKind::Perform { args, .. } => {
+                for arg in args.iter().rev() {
+                    Self::compute(arg, live);
+                }
+            }
+            ExprKind::Handle { body, clauses } => {
+                for clause in clauses.iter().rev() {
+                    let mut clause_live = HashSet::new();
+                    Self::compute(&clause.body, &mut clause_live);
+                    // Remove clause params from live set
+                    for param in &clause.params {
+                        clause_live.remove(param);
+                    }
+                    live.extend(clause_live);
+                }
+                Self::compute(body, live);
+            }
+
             ExprKind::Lit(_) | ExprKind::StringNew { .. } => {}
         }
     }

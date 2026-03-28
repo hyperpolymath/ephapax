@@ -181,6 +181,20 @@ impl EscapeAnalysis {
                 }
             }
 
+            // --- Effects ---
+            ExprKind::Perform { args, .. } => {
+                // Effect args escape (passed to handler)
+                for arg in args {
+                    Self::analyze_expr(arg, escaping, true);
+                }
+            }
+            ExprKind::Handle { body, clauses } => {
+                Self::analyze_expr(body, escaping, in_escaping_context);
+                for clause in clauses {
+                    Self::analyze_expr(&clause.body, escaping, in_escaping_context);
+                }
+            }
+
             // Literals and string allocations never escape
             ExprKind::Lit(_) | ExprKind::StringNew { .. } => {}
         }

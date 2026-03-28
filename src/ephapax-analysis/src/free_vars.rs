@@ -176,6 +176,24 @@ impl FreeVarAnalysis {
                 }
             }
 
+            // --- Effects ---
+            ExprKind::Perform { args, .. } => {
+                for arg in args {
+                    Self::collect(arg, free, bound);
+                }
+            }
+            ExprKind::Handle { body, clauses } => {
+                Self::collect(body, free, bound);
+                for clause in clauses {
+                    // Clause params are bound inside the handler body
+                    let mut inner_bound = bound.clone();
+                    for param in &clause.params {
+                        inner_bound.insert(param.clone());
+                    }
+                    Self::collect(&clause.body, free, &mut inner_bound);
+                }
+            }
+
             ExprKind::Lit(_) | ExprKind::StringNew { .. } => {}
         }
     }

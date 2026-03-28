@@ -288,6 +288,26 @@ impl AffineChecker {
             ExprKind::TupleIndex { tuple, .. } => {
                 self.walk_expr(tuple);
             }
+
+            // --- Effects ---
+            ExprKind::Perform { args, .. } => {
+                for arg in args {
+                    self.walk_expr(arg);
+                }
+            }
+            ExprKind::Handle { body, clauses } => {
+                self.walk_expr(body);
+                for clause in clauses {
+                    // Clause params are fresh bindings in the handler body
+                    for param in &clause.params {
+                        self.ctx.bind(param.clone(), BindingForm::Let, None);
+                    }
+                    self.walk_expr(&clause.body);
+                    for param in clause.params.iter().rev() {
+                        self.ctx.unbind(param);
+                    }
+                }
+            }
         }
     }
 

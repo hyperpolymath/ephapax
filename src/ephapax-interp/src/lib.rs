@@ -465,6 +465,13 @@ impl Interpreter {
                     Ok(Value::I64(0))
                 }
             }
+
+            ExprKind::Perform { .. } => {
+                todo!("effect perform not yet implemented in interpreter")
+            }
+            ExprKind::Handle { .. } => {
+                todo!("effect handle not yet implemented in interpreter")
+            }
         }
     }
 

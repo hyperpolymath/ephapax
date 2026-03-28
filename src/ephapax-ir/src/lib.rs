@@ -483,6 +483,26 @@ fn expr_to_sexpr(expr: &Expr) -> SExpr {
             elems.extend(args.iter().map(expr_to_sexpr));
             SExpr::List(elems)
         }
+        ExprKind::Perform { op, args } => {
+            let mut elems = vec![
+                SExpr::Atom("perform".into()),
+                SExpr::Atom(escape_atom(op)),
+            ];
+            elems.extend(args.iter().map(expr_to_sexpr));
+            SExpr::List(elems)
+        }
+        ExprKind::Handle { body, clauses } => {
+            let mut elems = vec![SExpr::Atom("handle".into()), expr_to_sexpr(body)];
+            for clause in clauses {
+                let mut clause_elems = vec![SExpr::Atom(escape_atom(&clause.op))];
+                for param in &clause.params {
+                    clause_elems.push(SExpr::Atom(escape_atom(param)));
+                }
+                clause_elems.push(expr_to_sexpr(&clause.body));
+                elems.push(SExpr::List(clause_elems));
+            }
+            SExpr::List(elems)
+        }
     }
 }
 
@@ -720,6 +740,21 @@ fn ty_to_sexpr(ty: &Ty) -> SExpr {
             SExpr::Atom("unif".into()),
             SExpr::Atom(id.to_string()),
         ]),
+        Ty::Effectful {
+            param,
+            ret,
+            effects,
+        } => {
+            let mut elems = vec![
+                SExpr::Atom("effectful".into()),
+                ty_to_sexpr(param),
+                ty_to_sexpr(ret),
+            ];
+            for eff in effects {
+                elems.push(SExpr::Atom(escape_atom(eff)));
+            }
+            SExpr::List(elems)
+        }
     }
 }
 

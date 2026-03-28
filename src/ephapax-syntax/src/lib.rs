@@ -89,6 +89,18 @@ pub enum Ty {
     /// Type variable (for polymorphism)
     Var(SmolStr),
 
+    /// Effectful function type: (param -> ret) with [effects].
+    ///
+    /// An effectful function carries an effect row — the set of effects
+    /// it may perform. `effects` is empty for pure functions.
+    /// Effect names are SmolStr (e.g. "IO", "State").
+    Effectful {
+        param: Box<Ty>,
+        ret: Box<Ty>,
+        /// Effect row: list of effect names this function may perform.
+        effects: Vec<SmolStr>,
+    },
+
     /// Universal quantification: forall a. T
     /// Used for polymorphic function types at the core level.
     ForAll { var: SmolStr, body: Box<Ty> },
@@ -127,6 +139,9 @@ impl Ty {
             Ty::List(inner) => inner.references_region(region),
             Ty::Tuple(elements) => elements.iter().any(|t| t.references_region(region)),
             Ty::ForAll { body, .. } => body.references_region(region),
+            Ty::Effectful { param, ret, .. } => {
+                param.references_region(region) || ret.references_region(region)
+            }
             Ty::Base(_) | Ty::Var(_) | Ty::Unif(_) => false,
         }
     }
@@ -180,6 +195,11 @@ impl Ty {
                 inner: Box::new(inner.subst_var(var, replacement)),
             },
             Ty::Borrow(inner) => Ty::Borrow(Box::new(inner.subst_var(var, replacement))),
+            Ty::Effectful { param, ret, effects } => Ty::Effectful {
+                param: Box::new(param.subst_var(var, replacement)),
+                ret: Box::new(ret.subst_var(var, replacement)),
+                effects: effects.clone(),
+            },
             Ty::List(inner) => Ty::List(Box::new(inner.subst_var(var, replacement))),
             Ty::Tuple(elems) => Ty::Tuple(
                 elems.iter().map(|t| t.subst_var(var, replacement)).collect(),
@@ -202,6 +222,9 @@ impl Ty {
             | Ty::Borrow(inner)
             | Ty::List(inner)
             | Ty::ForAll { body: inner, .. } => inner.contains_unif(id),
+            Ty::Effectful { param, ret, .. } => {
+                param.contains_unif(id) || ret.contains_unif(id)
+            }
             Ty::Tuple(elems) => elems.iter().any(|t| t.contains_unif(id)),
         }
     }
@@ -241,6 +264,11 @@ impl Ty {
             Ty::ForAll { var, body } => Ty::ForAll {
                 var: var.clone(),
                 body: Box::new(body.resolve(solutions)),
+            },
+            Ty::Effectful { param, ret, effects } => Ty::Effectful {
+                param: Box::new(param.resolve(solutions)),
+                ret: Box::new(ret.resolve(solutions)),
+                effects: effects.clone(),
             },
             Ty::List(inner) => Ty::List(Box::new(inner.resolve(solutions))),
             Ty::Tuple(elems) => Ty::Tuple(
@@ -309,6 +337,34 @@ pub enum Pattern {
     Unit,
     /// Tuple pattern (p1, p2, p3, ...)
     Tuple(Vec<Pattern>),
+}
+
+/// Resume mode for effect handler continuations.
+///
+/// Controls whether the continuation can be called once or multiple times.
+/// Critical for linear safety: `resume(multi)` is a type error if the
+/// continuation captures linear values.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ResumeMode {
+    /// One-shot: continuation called at most once. Safe with linear captures.
+    Once,
+    /// Multi-shot: continuation may be called multiple times.
+    /// Type error if linear values are captured.
+    Multi,
+}
+
+/// A clause in an effect handler.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct HandlerClause {
+    /// Effect operation name. Empty string = return clause.
+    pub op: SmolStr,
+    /// Parameter names bound in this clause.
+    pub params: Vec<Var>,
+    /// Resume mode (None for return clause which has no resume).
+    pub resume_mode: Option<ResumeMode>,
+    /// Handler body expression.
+    pub body: Expr,
 }
 
 /// Expressions
@@ -432,6 +488,24 @@ pub enum ExprKind {
         symbol: String,
         /// Arguments to pass to the foreign function
         args: Vec<Expr>,
+    },
+
+    // ===== Effects =====
+    /// Perform an effect operation: `perform Op(args...)`
+    Perform {
+        /// Effect operation name (e.g. "print", "get", "put")
+        op: SmolStr,
+        /// Arguments to the operation
+        args: Vec<Expr>,
+    },
+
+    /// Handle effects: `handle e with { return(x) => ..., |Op(args, resume) => ... }`
+    Handle {
+        /// The expression whose effects are handled
+        body: Box<Expr>,
+        /// Handler clauses: (op_name, param_names, resume_mode, handler_body)
+        /// Empty op_name = return clause.
+        clauses: Vec<HandlerClause>,
     },
 
     // ===== Operators =====

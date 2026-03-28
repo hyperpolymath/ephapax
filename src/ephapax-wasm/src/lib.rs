@@ -1482,6 +1482,13 @@ impl Codegen {
                 // Call the imported function by index.
                 func.instruction(&wasm_encoder::Instruction::Call(import_idx));
             }
+
+            ExprKind::Perform { .. } => {
+                todo!("effect perform not yet implemented in WASM backend")
+            }
+            ExprKind::Handle { .. } => {
+                todo!("effect handle not yet implemented in WASM backend")
+            }
         }
     }
 
@@ -1701,6 +1708,21 @@ impl Codegen {
                 ExprKind::FFI { args, .. } => {
                     for arg in args {
                         collect(arg, bound, free, seen);
+                    }
+                }
+                ExprKind::Perform { args, .. } => {
+                    for arg in args {
+                        collect(arg, bound, free, seen);
+                    }
+                }
+                ExprKind::Handle { body, clauses } => {
+                    collect(body, bound, free, seen);
+                    for clause in clauses {
+                        let mut inner = bound.clone();
+                        for param in &clause.params {
+                            inner.insert(param.to_string());
+                        }
+                        collect(&clause.body, &inner, free, seen);
                     }
                 }
                 ExprKind::Lit(_) | ExprKind::StringNew { .. } => {}

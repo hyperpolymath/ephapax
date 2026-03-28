@@ -428,6 +428,14 @@ fn format_type(ty: &Ty) -> String {
         Ty::Var(v) => v.to_string(),
         Ty::ForAll { var, body } => format!("forall {}. {}", var, format_type(body)),
         Ty::Unif(id) => format!("?{}", id),
+        Ty::Effectful {
+            param,
+            ret,
+            effects,
+        } => {
+            let effs = effects.join(" + ");
+            format!("{} -> {} with {}", format_type(param), format_type(ret), effs)
+        }
     }
 }
 

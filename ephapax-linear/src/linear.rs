@@ -343,6 +343,34 @@ impl LinearChecker {
             ExprKind::TupleIndex { tuple, .. } => {
                 self.walk_expr(tuple);
             }
+
+            // --- Effects ---
+            ExprKind::Perform { args, .. } => {
+                for arg in args {
+                    self.walk_expr(arg);
+                }
+            }
+            ExprKind::Handle { body, clauses } => {
+                self.walk_expr(body);
+                for clause in clauses {
+                    for param in &clause.params {
+                        self.ctx.bind(param.clone(), BindingForm::Let, None);
+                    }
+                    self.walk_expr(&clause.body);
+                    // In linear discipline, handler clause params must be consumed
+                    for param in clause.params.iter().rev() {
+                        if let Some(binding) = self.ctx.get(param) {
+                            if !binding.consumed {
+                                self.violations
+                                    .push(DisciplineViolation::WeakeningForbidden {
+                                        name: param.to_string(),
+                                    });
+                            }
+                        }
+                        self.ctx.unbind(param);
+                    }
+                }
+            }
         }
     }
 

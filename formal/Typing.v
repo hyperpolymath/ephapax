@@ -15,7 +15,7 @@ Require Import Coq.Bool.Bool.
 Require Import Lia.
 Import ListNotations.
 
-Require Import Syntax.
+From Ephapax Require Import Syntax.
 
 (** ** Linear Typing Judgement *)
 

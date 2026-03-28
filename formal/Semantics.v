@@ -476,7 +476,42 @@ Proof.
   intros. eapply no_leaks_gen; try eassumption; reflexivity.
 Qed.
 
-(** *** Theorem 2: Memory Safety (Admitted — needs retacticking) *)
+(** *** Theorem 2: Memory Safety (Qed)
+
+    If all environment values have valid memory locs before and after the step,
+    and the expression's locs are valid, then the output environment's values
+    also have valid locs.
+
+    Proof by fix (induction on step derivation). Non-env-changing cases are
+    trivial. Env-extending cases (Let/LetLin/App/Case) use value_expr_to_val_locs.
+    Sub-step cases use the IH recursively. *)
+
+Lemma value_expr_to_val_locs :
+  forall mu e,
+    is_value e -> expr_locs_valid mu e -> val_locs_valid mu (expr_to_val e).
+Proof.
+  intros mu e Hval.
+  induction Hval; simpl; intro Hlocs.
+  1-4: exact I.
+  - destruct Hlocs as [H1 H2]. split; auto.
+  - auto.
+  - auto.
+  - destruct Hlocs as [sx Hsx].
+    refine (ex_intro _ _ (conj Hsx _)). discriminate.
+Qed.
+
+Lemma env_extend_valid :
+  forall mu rho v,
+    (forall i w, env_lookup rho i = Some w -> val_locs_valid mu w) ->
+    val_locs_valid mu v ->
+    (forall i w, env_lookup (env_extend rho v) i = Some w -> val_locs_valid mu w).
+Proof.
+  intros mu rho v Henv Hv i w Hlookup.
+  destruct i; simpl in Hlookup.
+  - injection Hlookup as ->. exact Hv.
+  - eapply Henv. exact Hlookup.
+Qed.
+
 Theorem memory_safety :
   forall mu R rho e mu' R' rho' e',
     (mu, R, rho, e) -->> (mu', R', rho', e') ->
@@ -485,8 +520,16 @@ Theorem memory_safety :
     expr_locs_valid mu e ->
     (forall i v, env_lookup rho' i = Some v -> val_locs_valid mu' v).
 Proof.
-  admit.
-Admitted.
+  fix IH 9.
+  intros mu R rho e mu' R' rho' e' Hstep Henv_mu Henv_mu' Hlocs.
+  inversion Hstep; subst;
+    try (intros i0 v0 Hlu; eapply Henv_mu'; exact Hlu).
+  all: try (apply env_extend_valid; [exact Henv_mu'|];
+            apply value_expr_to_val_locs; [eassumption|];
+            simpl in Hlocs; tauto).
+  all: eapply IH; [eassumption | exact Henv_mu | exact Henv_mu' |];
+       simpl in Hlocs; tauto.
+Qed.
 
 (** *** Theorem 3: Progress (Admitted — needs retacticking) *)
 Theorem progress :

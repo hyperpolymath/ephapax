@@ -24,7 +24,7 @@ pub mod error;
 pub mod surface;
 
 pub use error::{ParseError, Report};
-pub use surface::{parse_surface_module, parse_surface_expr};
+pub use surface::{parse_surface_expr, parse_surface_module};
 
 #[derive(Parser)]
 #[grammar = "ephapax.pest"]
@@ -878,7 +878,7 @@ fn parse_unary_expr(pair: pest::iterators::Pair<Rule>) -> Result<Expr, ParseErro
             },
             span,
         ))
-    } else if text.starts_with('-') && !text.chars().nth(1).map_or(false, |c| c.is_ascii_digit()) {
+    } else if text.starts_with('-') && !text.chars().nth(1).is_some_and(|c| c.is_ascii_digit()) {
         let inner = pair
             .into_inner()
             .next()
@@ -911,83 +911,77 @@ fn parse_postfix_expr(pair: pest::iterators::Pair<Rule>) -> Result<Expr, ParseEr
     )?;
 
     for op in inner {
-        match op.as_rule() {
-            Rule::postfix_op => {
-                let op_inner = op
-                    .into_inner()
-                    .next()
-                    .ok_or_else(|| ParseError::unexpected_end("postfix operator"))?;
-                match op_inner.as_rule() {
-                    Rule::call_op => {
-                        let arg = parse_expression(
-                            op_inner
-                                .into_inner()
-                                .next()
-                                .ok_or_else(|| ParseError::missing("function call argument"))?,
-                        )?;
-                        result = Expr::new(
-                            ExprKind::App {
-                                func: Box::new(result),
-                                arg: Box::new(arg),
-                            },
-                            span,
-                        );
-                    }
-                    Rule::index_op => {
-                        let index = parse_expression(
-                            op_inner
-                                .into_inner()
-                                .next()
-                                .ok_or_else(|| ParseError::missing("index expression"))?,
-                        )?;
-                        result = Expr::new(
-                            ExprKind::ListIndex {
-                                list: Box::new(result),
-                                index: Box::new(index),
-                            },
-                            span,
-                        );
-                    }
-                    Rule::member_op => {
-                        let member = op_inner
+        if op.as_rule() == Rule::postfix_op {
+            let op_inner = op
+                .into_inner()
+                .next()
+                .ok_or_else(|| ParseError::unexpected_end("postfix operator"))?;
+            match op_inner.as_rule() {
+                Rule::call_op => {
+                    let arg = parse_expression(
+                        op_inner
                             .into_inner()
                             .next()
-                            .ok_or_else(|| ParseError::missing("member access target"))?;
-                        match member.as_rule() {
-                            Rule::integer => {
-                                let index = member.as_str().parse::<usize>().map_err(|_| {
-                                    ParseError::Syntax {
-                                        message: format!(
-                                            "Invalid tuple index: {}",
-                                            member.as_str()
-                                        ),
-                                        span: span_from_pair(&member),
-                                    }
-                                })?;
-                                if index == 0 {
-                                    result = Expr::new(ExprKind::Fst(Box::new(result)), span);
-                                } else if index == 1 {
-                                    result = Expr::new(ExprKind::Snd(Box::new(result)), span);
-                                } else {
-                                    result = Expr::new(
-                                        ExprKind::TupleIndex {
-                                            tuple: Box::new(result),
-                                            index,
-                                        },
-                                        span,
-                                    );
-                                }
-                            }
-                            Rule::identifier => {
-                                // Field access by name not currently supported
-                            }
-                            _ => {}
-                        }
-                    }
-                    _ => {}
+                            .ok_or_else(|| ParseError::missing("function call argument"))?,
+                    )?;
+                    result = Expr::new(
+                        ExprKind::App {
+                            func: Box::new(result),
+                            arg: Box::new(arg),
+                        },
+                        span,
+                    );
                 }
+                Rule::index_op => {
+                    let index = parse_expression(
+                        op_inner
+                            .into_inner()
+                            .next()
+                            .ok_or_else(|| ParseError::missing("index expression"))?,
+                    )?;
+                    result = Expr::new(
+                        ExprKind::ListIndex {
+                            list: Box::new(result),
+                            index: Box::new(index),
+                        },
+                        span,
+                    );
+                }
+                Rule::member_op => {
+                    let member = op_inner
+                        .into_inner()
+                        .next()
+                        .ok_or_else(|| ParseError::missing("member access target"))?;
+                    match member.as_rule() {
+                        Rule::integer => {
+                            let index = member.as_str().parse::<usize>().map_err(|_| {
+                                ParseError::Syntax {
+                                    message: format!("Invalid tuple index: {}", member.as_str()),
+                                    span: span_from_pair(&member),
+                                }
+                            })?;
+                            if index == 0 {
+                                result = Expr::new(ExprKind::Fst(Box::new(result)), span);
+                            } else if index == 1 {
+                                result = Expr::new(ExprKind::Snd(Box::new(result)), span);
+                            } else {
+                                result = Expr::new(
+                                    ExprKind::TupleIndex {
+                                        tuple: Box::new(result),
+                                        index,
+                                    },
+                                    span,
+                                );
+                            }
+                        }
+                        Rule::identifier => {
+                            // Field access by name not currently supported
+                        }
+                        _ => {}
+                    }
+                }
+                _ => {}
             }
-            _ => {}
         }
     }
 

@@ -9,17 +9,14 @@
 // Note: ariadne removed for now - using simple error output
 use clap::{Parser, Subcommand};
 use colored::Colorize;
+use ephapax_desugar::desugar;
 use ephapax_interp::Interpreter;
 use ephapax_lexer::Lexer;
 use ephapax_parser::{parse, parse_module, parse_surface_module};
 use ephapax_repl::Repl;
 use ephapax_typing::type_check_module;
-use ephapax_desugar::desugar;
 // AST dump support (sexpr + json output)
 #[allow(unused_imports)]
-use ephapax_ir;
-#[allow(unused_imports)]
-use ephapax_syntax;
 use std::fs;
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -322,12 +319,7 @@ fn check_files(files: &[PathBuf], _mode_str: &str, verbose: bool) -> Result<(), 
                 match desugar(&surface_module) {
                     Ok(core) => core,
                     Err(e) => {
-                        eprintln!(
-                            "{} {} desugar error: {}",
-                            "✗".red(),
-                            path.display(),
-                            e
-                        );
+                        eprintln!("{} {} desugar error: {}", "✗".red(), path.display(), e);
                         errors += 1;
                         continue;
                     }
@@ -431,11 +423,9 @@ fn compile_file(
 
     // Compile to WASM (with or without debug info)
     let wasm_bytes = if debug {
-        ephapax_wasm::compile_module(&module)
-            .map_err(|e| format!("Codegen error: {}", e))?
+        ephapax_wasm::compile_module(&module).map_err(|e| format!("Codegen error: {}", e))?
     } else {
-        ephapax_wasm::compile_module(&module)
-            .map_err(|e| format!("Codegen error: {}", e))?
+        ephapax_wasm::compile_module(&module).map_err(|e| format!("Codegen error: {}", e))?
     };
 
     if verbose {
@@ -467,9 +457,8 @@ fn compile_file(
 
     // Write source map if debug enabled
     if debug {
-        let source_map =
-            ephapax_wasm::generate_source_map_for_module(&module, filename)
-                .map_err(|e| format!("Source map generation error: {}", e))?;
+        let source_map = ephapax_wasm::generate_source_map_for_module(&module, filename)
+            .map_err(|e| format!("Source map generation error: {}", e))?;
 
         let map_path = output_path.with_extension("wasm.map");
         fs::write(&map_path, source_map)
@@ -562,16 +551,13 @@ fn show_parse(input: &str, pretty: bool, format: &str) -> Result<(), String> {
     // For sexpr/json, parse as module (richer output)
     if format == "sexpr" || format == "json" {
         // Try as module first (preferred for structured output)
-        match parse_module(&source, filename) {
-            Ok(module) => {
-                match format {
-                    "sexpr" => println!("{}", ephapax_ir::module_to_sexpr(&module)),
-                    "json" => println!("{}", ephapax_ir::module_to_json(&module)),
-                    _ => unreachable!(),
-                }
-                return Ok(());
+        if let Ok(module) = parse_module(&source, filename) {
+            match format {
+                "sexpr" => println!("{}", ephapax_ir::module_to_sexpr(&module)),
+                "json" => println!("{}", ephapax_ir::module_to_json(&module)),
+                _ => unreachable!(),
             }
-            Err(_) => {}
+            return Ok(());
         }
         // Fall back to expression
         match parse(&source) {
@@ -604,16 +590,13 @@ fn show_parse(input: &str, pretty: bool, format: &str) -> Result<(), String> {
 
     // Default: pretty/debug format
     // Try as expression first
-    match parse(&source) {
-        Ok(expr) => {
-            if pretty {
-                println!("{:#?}", expr);
-            } else {
-                println!("{:?}", expr);
-            }
-            return Ok(());
+    if let Ok(expr) = parse(&source) {
+        if pretty {
+            println!("{:#?}", expr);
+        } else {
+            println!("{:?}", expr);
         }
-        Err(_) => {}
+        return Ok(());
     }
 
     // Try as module

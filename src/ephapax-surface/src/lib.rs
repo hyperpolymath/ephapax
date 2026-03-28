@@ -32,9 +32,7 @@ use serde::Serialize;
 use smol_str::SmolStr;
 
 // Re-export shared types from the core AST.
-pub use ephapax_syntax::{
-    BaseTy, BinOp, Linearity, Literal, Span, UnaryOp,
-};
+pub use ephapax_syntax::{BaseTy, BinOp, Linearity, Literal, Span, UnaryOp};
 
 /// Variable identifier (same as core).
 pub type Var = SmolStr;
@@ -106,15 +104,11 @@ pub enum SurfaceTy {
     Tuple(Vec<SurfaceTy>),
 
     // === Surface-only types ===
-
     /// Named type application: `Option(I32)`, `Result(String@r, Error)`
     ///
     /// `name` is the data type name, `args` are the type arguments.
     /// Desugars to the binary-sum encoding of the data declaration.
-    Named {
-        name: SmolStr,
-        args: Vec<SurfaceTy>,
-    },
+    Named { name: SmolStr, args: Vec<SurfaceTy> },
 }
 
 // =========================================================================
@@ -139,10 +133,7 @@ pub enum Pattern {
     ///
     /// `ctor` is the constructor name, `args` are the sub-patterns
     /// for the constructor's payload. Nullary constructors have empty args.
-    Constructor {
-        ctor: SmolStr,
-        args: Vec<Pattern>,
-    },
+    Constructor { ctor: SmolStr, args: Vec<Pattern> },
 
     /// Literal pattern: `42`, `true`, `"hello"`
     Literal(Literal),
@@ -164,12 +155,8 @@ impl Pattern {
         match self {
             Pattern::Wildcard | Pattern::Literal(_) | Pattern::Unit => vec![],
             Pattern::Var(v) => vec![v.clone()],
-            Pattern::Constructor { args, .. } => {
-                args.iter().flat_map(|p| p.bound_vars()).collect()
-            }
-            Pattern::Tuple(elements) => {
-                elements.iter().flat_map(|p| p.bound_vars()).collect()
-            }
+            Pattern::Constructor { args, .. } => args.iter().flat_map(|p| p.bound_vars()).collect(),
+            Pattern::Tuple(elements) => elements.iter().flat_map(|p| p.bound_vars()).collect(),
             Pattern::Pair(l, r) => {
                 let mut vars = l.bound_vars();
                 vars.extend(r.bound_vars());
@@ -266,8 +253,14 @@ pub enum SurfaceExprKind {
     Lit(Literal),
     Var(Var),
 
-    StringNew { region: RegionName, value: String },
-    StringConcat { left: Box<SurfaceExpr>, right: Box<SurfaceExpr> },
+    StringNew {
+        region: RegionName,
+        value: String,
+    },
+    StringConcat {
+        left: Box<SurfaceExpr>,
+        right: Box<SurfaceExpr>,
+    },
     StringLen(Box<SurfaceExpr>),
 
     Let {
@@ -303,8 +296,14 @@ pub enum SurfaceExprKind {
     Snd(Box<SurfaceExpr>),
 
     /// Raw sum injections (still valid at surface level for expert use)
-    Inl { ty: SurfaceTy, value: Box<SurfaceExpr> },
-    Inr { ty: SurfaceTy, value: Box<SurfaceExpr> },
+    Inl {
+        ty: SurfaceTy,
+        value: Box<SurfaceExpr>,
+    },
+    Inr {
+        ty: SurfaceTy,
+        value: Box<SurfaceExpr>,
+    },
 
     /// Raw binary case (still valid for expert use — desugars to itself)
     Case {
@@ -321,7 +320,10 @@ pub enum SurfaceExprKind {
         else_branch: Box<SurfaceExpr>,
     },
 
-    Region { name: RegionName, body: Box<SurfaceExpr> },
+    Region {
+        name: RegionName,
+        body: Box<SurfaceExpr>,
+    },
     Borrow(Box<SurfaceExpr>),
     Deref(Box<SurfaceExpr>),
     Drop(Box<SurfaceExpr>),
@@ -344,12 +346,17 @@ pub enum SurfaceExprKind {
     },
 
     ListLit(Vec<SurfaceExpr>),
-    ListIndex { list: Box<SurfaceExpr>, index: Box<SurfaceExpr> },
+    ListIndex {
+        list: Box<SurfaceExpr>,
+        index: Box<SurfaceExpr>,
+    },
     TupleLit(Vec<SurfaceExpr>),
-    TupleIndex { tuple: Box<SurfaceExpr>, index: usize },
+    TupleIndex {
+        tuple: Box<SurfaceExpr>,
+        index: usize,
+    },
 
     // === Surface-only nodes ===
-
     /// Named constructor application: `Some(x)`, `None`, `Ok(value)`
     ///
     /// Desugars to the appropriate chain of `inl`/`inr` based on
@@ -392,10 +399,7 @@ pub enum SurfaceDecl {
     },
 
     /// Type alias (same as core, but with surface types)
-    Type {
-        name: Var,
-        ty: SurfaceTy,
-    },
+    Type { name: Var, ty: SurfaceTy },
 
     /// Data type declaration (surface-only)
     Data(DataDecl),
@@ -523,9 +527,18 @@ mod tests {
             name: "Color".into(),
             params: vec![],
             constructors: vec![
-                ConstructorDef { name: "Red".into(), fields: vec![] },
-                ConstructorDef { name: "Green".into(), fields: vec![] },
-                ConstructorDef { name: "Blue".into(), fields: vec![] },
+                ConstructorDef {
+                    name: "Red".into(),
+                    fields: vec![],
+                },
+                ConstructorDef {
+                    name: "Green".into(),
+                    fields: vec![],
+                },
+                ConstructorDef {
+                    name: "Blue".into(),
+                    fields: vec![],
+                },
             ],
             span: Span::dummy(),
         };
@@ -537,10 +550,7 @@ mod tests {
     fn named_type() {
         let ty = SurfaceTy::Named {
             name: "Result".into(),
-            args: vec![
-                SurfaceTy::Base(BaseTy::I32),
-                SurfaceTy::Base(BaseTy::Bool),
-            ],
+            args: vec![SurfaceTy::Base(BaseTy::I32), SurfaceTy::Base(BaseTy::Bool)],
         };
         if let SurfaceTy::Named { name, args } = &ty {
             assert_eq!(name.as_str(), "Result");

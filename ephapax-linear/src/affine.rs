@@ -65,11 +65,7 @@ impl AffineChecker {
     /// Walk a top-level declaration.
     fn walk_decl(&mut self, decl: &Decl) {
         match decl {
-            Decl::Fn {
-                params,
-                body,
-                ..
-            } => {
+            Decl::Fn { params, body, .. } => {
                 for (name, ty) in params {
                     self.ctx
                         .bind(name.clone(), BindingForm::Param, Some(ty.clone()));
@@ -98,7 +94,10 @@ impl AffineChecker {
 
             // --- let (affine: any type allowed, implicit drop OK) ---
             ExprKind::Let {
-                name, ty, value, body,
+                name,
+                ty,
+                value,
+                body,
             } => {
                 self.walk_expr(value);
                 self.ctx.bind(name.clone(), BindingForm::Let, ty.clone());
@@ -125,18 +124,23 @@ impl AffineChecker {
             // Even in affine grammar, let! demands exactly-once consumption.
             // This is the dyadic contract: let! always means linear.
             ExprKind::LetLin {
-                name, ty, value, body,
+                name,
+                ty,
+                value,
+                body,
             } => {
                 self.walk_expr(value);
-                self.ctx.bind(name.clone(), BindingForm::LetBang, ty.clone());
+                self.ctx
+                    .bind(name.clone(), BindingForm::LetBang, ty.clone());
                 self.walk_expr(body);
 
                 // let! MUST be consumed — even in affine grammar
                 if let Some(binding) = self.ctx.get(name) {
                     if !binding.consumed {
-                        self.violations.push(DisciplineViolation::WeakeningForbidden {
-                            name: name.to_string(),
-                        });
+                        self.violations
+                            .push(DisciplineViolation::WeakeningForbidden {
+                                name: name.to_string(),
+                            });
                     }
                 }
                 self.ctx.unbind(name);

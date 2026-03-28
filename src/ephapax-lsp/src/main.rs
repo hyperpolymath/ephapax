@@ -166,10 +166,7 @@ impl Backend {
         if let Some(module) = &state.module {
             for d in &module.decls {
                 if let Decl::Fn {
-                    name,
-                    body,
-                    params,
-                    ..
+                    name, body, params, ..
                 } = d
                 {
                     // Check if word matches a parameter
@@ -188,7 +185,7 @@ impl Backend {
                     }
 
                     // Check for let-bound variables in the body
-                    if let Some(span) = find_let_binding_span(body, &word) {
+                    if let Some(span) = find_let_binding_span(body, word) {
                         return Some((uri.clone(), span_to_range(&state.text, span)));
                     }
                 }
@@ -351,7 +348,9 @@ impl LanguageServer for Backend {
 
     async fn did_save(&self, params: DidSaveTextDocumentParams) {
         if let Some(text) = params.text {
-            let diagnostics = self.analyze_document(&params.text_document.uri, &text).await;
+            let diagnostics = self
+                .analyze_document(&params.text_document.uri, &text)
+                .await;
             self.client
                 .publish_diagnostics(params.text_document.uri, diagnostics, None)
                 .await;
@@ -424,7 +423,11 @@ impl LanguageServer for Backend {
             ("let", "Let binding", "let $1 = $2 in $0"),
             ("let!", "Linear let binding", "let! $1 = $2 in $0"),
             ("if", "Conditional", "if $1 then $2 else $3"),
-            ("case", "Case analysis", "case $1 of inl $2 => $3, inr $4 => $5 end"),
+            (
+                "case",
+                "Case analysis",
+                "case $1 of inl $2 => $3, inr $4 => $5 end",
+            ),
             ("region", "Region scope", "region $1 { $0 }"),
             ("__ffi", "FFI call", "__ffi(\"$1\", $0)"),
         ];
@@ -481,7 +484,7 @@ fn extract_declarations(module: &Module, _source: &str) -> Vec<DeclInfo> {
     module
         .decls
         .iter()
-        .filter_map(|decl| match decl {
+        .map(|decl| match decl {
             Decl::Fn {
                 name,
                 params,
@@ -504,23 +507,23 @@ fn extract_declarations(module: &Module, _source: &str) -> Vec<DeclInfo> {
                     format_ty(ret_ty)
                 );
 
-                Some(DeclInfo {
+                DeclInfo {
                     name: name.to_string(),
                     kind: DeclKind::Function,
                     span: body.span,
                     signature: sig,
                     params: param_strs,
                     return_type: Some(format_ty(ret_ty)),
-                })
+                }
             }
-            Decl::Type { name, ty } => Some(DeclInfo {
+            Decl::Type { name, ty } => DeclInfo {
                 name: name.to_string(),
                 kind: DeclKind::TypeAlias,
                 span: Span::dummy(),
                 signature: format!("type {} = {}", name, format_ty(ty)),
                 params: Vec::new(),
                 return_type: None,
-            }),
+            },
         })
         .collect()
 }
@@ -637,36 +640,51 @@ fn is_ident_char(b: u8) -> bool {
 /// Returns the span of the value expression (where the binding is defined).
 fn find_let_binding_span(expr: &Expr, target: &str) -> Option<Span> {
     match &expr.kind {
-        ExprKind::Let { name, value, body, .. } | ExprKind::LetLin { name, value, body, .. } => {
+        ExprKind::Let {
+            name, value, body, ..
+        }
+        | ExprKind::LetLin {
+            name, value, body, ..
+        } => {
             if name.as_str() == target {
                 return Some(value.span);
             }
-            find_let_binding_span(value, target)
-                .or_else(|| find_let_binding_span(body, target))
+            find_let_binding_span(value, target).or_else(|| find_let_binding_span(body, target))
         }
         ExprKind::Lambda { body, .. } => find_let_binding_span(body, target),
         ExprKind::App { func, arg } => {
             find_let_binding_span(func, target).or_else(|| find_let_binding_span(arg, target))
         }
-        ExprKind::If { cond, then_branch, else_branch } => {
-            find_let_binding_span(cond, target)
-                .or_else(|| find_let_binding_span(then_branch, target))
-                .or_else(|| find_let_binding_span(else_branch, target))
-        }
-        ExprKind::Case { scrutinee, left_body, right_body, .. } => {
-            find_let_binding_span(scrutinee, target)
-                .or_else(|| find_let_binding_span(left_body, target))
-                .or_else(|| find_let_binding_span(right_body, target))
-        }
+        ExprKind::If {
+            cond,
+            then_branch,
+            else_branch,
+        } => find_let_binding_span(cond, target)
+            .or_else(|| find_let_binding_span(then_branch, target))
+            .or_else(|| find_let_binding_span(else_branch, target)),
+        ExprKind::Case {
+            scrutinee,
+            left_body,
+            right_body,
+            ..
+        } => find_let_binding_span(scrutinee, target)
+            .or_else(|| find_let_binding_span(left_body, target))
+            .or_else(|| find_let_binding_span(right_body, target)),
         ExprKind::Pair { left, right } | ExprKind::StringConcat { left, right } => {
             find_let_binding_span(left, target).or_else(|| find_let_binding_span(right, target))
         }
         ExprKind::BinOp { left, right, .. } => {
             find_let_binding_span(left, target).or_else(|| find_let_binding_span(right, target))
         }
-        ExprKind::Fst(inner) | ExprKind::Snd(inner) | ExprKind::Inl { value: inner, .. }
-        | ExprKind::Inr { value: inner, .. } | ExprKind::Drop(inner) | ExprKind::Copy(inner)
-        | ExprKind::Borrow(inner) | ExprKind::Deref(inner) | ExprKind::UnaryOp { operand: inner, .. }
+        ExprKind::Fst(inner)
+        | ExprKind::Snd(inner)
+        | ExprKind::Inl { value: inner, .. }
+        | ExprKind::Inr { value: inner, .. }
+        | ExprKind::Drop(inner)
+        | ExprKind::Copy(inner)
+        | ExprKind::Borrow(inner)
+        | ExprKind::Deref(inner)
+        | ExprKind::UnaryOp { operand: inner, .. }
         | ExprKind::StringLen(inner) => find_let_binding_span(inner, target),
         ExprKind::Region { body, .. } => find_let_binding_span(body, target),
         ExprKind::Block(exprs) | ExprKind::ListLit(exprs) | ExprKind::TupleLit(exprs) => {
@@ -676,9 +694,7 @@ fn find_let_binding_span(expr: &Expr, target: &str) -> Option<Span> {
             find_let_binding_span(list, target).or_else(|| find_let_binding_span(index, target))
         }
         ExprKind::TupleIndex { tuple, .. } => find_let_binding_span(tuple, target),
-        ExprKind::FFI { args, .. } => {
-            args.iter().find_map(|a| find_let_binding_span(a, target))
-        }
+        ExprKind::FFI { args, .. } => args.iter().find_map(|a| find_let_binding_span(a, target)),
         ExprKind::Var(_) | ExprKind::Lit(_) | ExprKind::StringNew { .. } => None,
     }
 }
@@ -698,6 +714,6 @@ async fn main() {
     let stdin = tokio::io::stdin();
     let stdout = tokio::io::stdout();
 
-    let (service, socket) = LspService::new(|client| Backend::new(client));
+    let (service, socket) = LspService::new(Backend::new);
     Server::new(stdin, stdout, socket).serve(service).await;
 }

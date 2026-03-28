@@ -205,46 +205,39 @@ impl Repl {
     fn print_help(&self) {
         println!("{}", "Commands:".yellow().bold());
         println!(
-            "  {}  {:30} {}",
+            "  {}  {:30} Show this help",
             ":help".green(),
-            "(:h, :?)".dimmed(),
-            "Show this help"
+            "(:h, :?)".dimmed()
         );
         println!(
-            "  {}  {:30} {}",
+            "  {}  {:30} Exit the REPL",
             ":quit".green(),
-            "(:q, :exit)".dimmed(),
-            "Exit the REPL"
+            "(:q, :exit)".dimmed()
         );
         println!(
-            "  {}  {:30} {}",
+            "  {}  {:30} Show type of expression",
             ":type <expr>".green(),
-            "(:t)".dimmed(),
-            "Show type of expression"
+            "(:t)".dimmed()
         );
         println!(
-            "  {}  {:30} {}",
+            "  {}  {:30} Load a file",
             ":load <file>".green(),
-            "(:l)".dimmed(),
-            "Load a file"
+            "(:l)".dimmed()
         );
         println!(
-            "  {}  {:30} {}",
+            "  {}  {:30} Reset the environment",
             ":reset".green(),
-            "".dimmed(),
-            "Reset the environment"
+            "".dimmed()
         );
         println!(
-            "  {}  {:30} {}",
+            "  {}  {:30} Show lexer tokens",
             ":tokens <expr>".green(),
-            "".dimmed(),
-            "Show lexer tokens"
+            "".dimmed()
         );
         println!(
-            "  {}  {:30} {}",
+            "  {}  {:30} Toggle verbose mode",
             ":verbose".green(),
-            "".dimmed(),
-            "Toggle verbose mode"
+            "".dimmed()
         );
         println!();
         println!("{}", "Examples:".yellow().bold());
@@ -425,7 +418,7 @@ fn format_type(ty: &Ty) -> String {
         Ty::Tuple(elem_types) => {
             let types_str = elem_types
                 .iter()
-                .map(|t| format_type(t))
+                .map(format_type)
                 .collect::<Vec<_>>()
                 .join(", ");
             format!("({})", types_str)
@@ -450,14 +443,18 @@ mod tests {
     #[test]
     fn test_eval_let() {
         let mut repl = Repl::new().expect("REPL should initialize");
-        let result = repl.eval_expr("let x = 1 in x").expect("eval should succeed");
+        let result = repl
+            .eval_expr("let x = 1 in x")
+            .expect("eval should succeed");
         assert!(matches!(result, Value::I32(1)));
     }
 
     #[test]
     fn test_eval_if() {
         let mut repl = Repl::new().expect("REPL should initialize");
-        let result = repl.eval_expr("if true then 42 else 0").expect("eval should succeed");
+        let result = repl
+            .eval_expr("if true then 42 else 0")
+            .expect("eval should succeed");
         assert!(matches!(result, Value::I32(42)));
     }
 }

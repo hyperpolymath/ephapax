@@ -12,6 +12,12 @@ pub struct LiveVars {
     live: HashSet<SmolStr>,
 }
 
+impl Default for LiveVars {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl LiveVars {
     pub fn new() -> Self {
         Self {
@@ -29,6 +35,10 @@ impl LiveVars {
 
     pub fn len(&self) -> usize {
         self.live.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.live.is_empty()
     }
 }
 

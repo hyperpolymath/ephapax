@@ -54,8 +54,8 @@ use ephapax_syntax::{
 };
 use std::collections::HashMap;
 use wasm_encoder::{
-    CodeSection, ConstExpr, ElementSection, Elements, ExportKind, ExportSection,
-    Function, FunctionSection, ImportSection, Instruction, MemArg, MemorySection, MemoryType,
+    CodeSection, ConstExpr, ElementSection, Elements, ExportKind, ExportSection, Function,
+    FunctionSection, ImportSection, Instruction, MemArg, MemorySection, MemoryType,
     Module as WasmModule, RefType, TableSection, TableType, TypeSection, ValType,
 };
 
@@ -129,24 +129,8 @@ const TYPE_CLOSURE_CALL: u32 = TYPE_I32_I32_I32;
 const NUM_FIXED_TYPES: u32 = 7;
 
 // ---------------------------------------------------------------------------
-// Compilation mode (deprecated — dyadic property is per-binding)
+// (Mode removed — dyadic property is per-binding, not a global switch)
 // ---------------------------------------------------------------------------
-
-/// Deprecated: The dyadic property is per-binding (`let` vs `let!`), not a
-/// global mode. This enum exists for backward compatibility only.
-#[deprecated(note = "Mode removed: dyadic property is per-binding (let vs let!), not a global switch")]
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Mode {
-    /// Linear (the only real mode)
-    Linear,
-}
-
-#[allow(deprecated)]
-impl Default for Mode {
-    fn default() -> Self {
-        Mode::Linear
-    }
-}
 
 // ---------------------------------------------------------------------------
 // Compilation error
@@ -248,11 +232,7 @@ impl LocalTracker {
 
     /// Total number of extra (non-parameter) locals needed.
     fn num_extra_locals(&self, num_params: u32) -> u32 {
-        if self.next_idx > num_params {
-            self.next_idx - num_params
-        } else {
-            0
-        }
+        self.next_idx.saturating_sub(num_params)
     }
 }
 
@@ -294,9 +274,6 @@ pub struct Codegen {
     /// Lambda functions generated during compilation
     /// Each lambda gets compiled to a named function and stored here
     lambda_fns: Vec<LambdaInfo>,
-
-    /// Compilation mode (affine or linear)
-    mode: Mode,
 
     /// Optional debug information (enabled with --debug flag)
     debug_info: Option<DebugInfo>,
@@ -347,13 +324,8 @@ impl Default for Codegen {
 }
 
 impl Codegen {
-    /// Create a new code generator in linear mode (default)
+    /// Create a new code generator
     pub fn new() -> Self {
-        Self::new_with_mode(Mode::Linear)
-    }
-
-    /// Create a new code generator with specified mode
-    pub fn new_with_mode(mode: Mode) -> Self {
         Self {
             bump_ptr: REGION_HEADER_SIZE,
             region_stack: Vec::new(),
@@ -364,7 +336,6 @@ impl Codegen {
             user_fns: HashMap::new(),
             extra_types: Vec::new(),
             lambda_fns: Vec::new(),
-            mode,
             debug_info: None,
             optimize_closures: false,
             ffi_imports: HashMap::new(),
@@ -417,16 +388,6 @@ impl Codegen {
     /// Check if debug mode is enabled
     pub fn is_debug_enabled(&self) -> bool {
         self.debug_info.is_some()
-    }
-
-    /// Get the current compilation mode
-    pub fn mode(&self) -> Mode {
-        self.mode
-    }
-
-    /// Set the compilation mode
-    pub fn set_mode(&mut self, mode: Mode) {
-        self.mode = mode;
     }
 
     // -----------------------------------------------------------------------
@@ -1419,9 +1380,7 @@ impl Codegen {
             // Note: We approximate WASM offset by counting instructions
             // A more precise implementation would track actual byte offsets
             let approx_offset = debug.instruction_spans.len() as u32;
-            debug
-                .instruction_spans
-                .push((approx_offset, expr.span.clone()));
+            debug.instruction_spans.push((approx_offset, expr.span));
         }
 
         match &expr.kind {
@@ -1759,7 +1718,11 @@ impl Codegen {
         // 6. Allocate environment block for captured variables
         //    Layout: [captured_0: i32, captured_1: i32, ...]
         let num_captured = captured_vars.len() as u32;
-        let env_size = if num_captured > 0 { num_captured * 4 } else { 4 }; // min 4 bytes
+        let env_size = if num_captured > 0 {
+            num_captured * 4
+        } else {
+            4
+        }; // min 4 bytes
 
         // Allocate env block via bump allocator
         func.instruction(&Instruction::I32Const(env_size as i32));
@@ -2288,14 +2251,6 @@ pub fn generate_source_map_for_module(
     } else {
         Err(CodegenError("Debug info not enabled".to_string()))
     }
-
-}
-
-/// Deprecated: Use `compile_module` directly.
-#[deprecated(note = "Use compile_module() — Mode parameter removed")]
-#[allow(deprecated)]
-pub fn compile_module_with_mode(module: &AstModule, _mode: Mode) -> Result<Vec<u8>, CodegenError> {
-    compile_module(module)
 }
 
 // ===========================================================================

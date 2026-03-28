@@ -200,8 +200,7 @@ impl Registry {
             ));
         }
 
-        Manifest::from_file(&manifest_path)
-            .map_err(|e| RegistryError::Io(std::io::Error::new(std::io::ErrorKind::Other, e)))
+        Manifest::from_file(&manifest_path).map_err(|e| RegistryError::Io(std::io::Error::other(e)))
     }
 
     /// List all packages in the registry

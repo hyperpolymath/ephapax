@@ -58,7 +58,9 @@ fn both_reject_contraction() {
     assert!(result.is_err(), "linear must reject contraction");
     let violations = result.unwrap_err();
     assert!(
-        violations.iter().any(|v| matches!(v, DisciplineViolation::Contraction { .. })),
+        violations
+            .iter()
+            .any(|v| matches!(v, DisciplineViolation::Contraction { .. })),
         "must contain Contraction violation"
     );
 
@@ -67,7 +69,9 @@ fn both_reject_contraction() {
     assert!(result.is_err(), "affine must reject contraction");
     let violations = result.unwrap_err();
     assert!(
-        violations.iter().any(|v| matches!(v, DisciplineViolation::Contraction { .. })),
+        violations
+            .iter()
+            .any(|v| matches!(v, DisciplineViolation::Contraction { .. })),
         "must contain Contraction violation"
     );
 }
@@ -141,7 +145,9 @@ fn linear_rejects_drop() {
     let result = checker.check(&expr);
     assert!(result.is_err());
     let violations = result.unwrap_err();
-    assert!(violations.iter().any(|v| matches!(v, DisciplineViolation::DropForbidden)));
+    assert!(violations
+        .iter()
+        .any(|v| matches!(v, DisciplineViolation::DropForbidden)));
 }
 
 #[test]
@@ -184,7 +190,9 @@ fn linear_rejects_branch_disagreement() {
     assert!(result.is_err());
     let violations = result.unwrap_err();
     assert!(
-        violations.iter().any(|v| matches!(v, DisciplineViolation::BranchDisagreement { .. })),
+        violations
+            .iter()
+            .any(|v| matches!(v, DisciplineViolation::BranchDisagreement { .. })),
         "linear must reject branch disagreement"
     );
 }
@@ -287,10 +295,9 @@ fn linear_errors_on_region_leak() {
     assert!(result.is_err());
     // Should have both WeakeningForbidden (from let!) and RegionLeakLinear
     let violations = result.unwrap_err();
-    assert!(violations.iter().any(|v| matches!(
-        v,
-        DisciplineViolation::WeakeningForbidden { .. }
-    )));
+    assert!(violations
+        .iter()
+        .any(|v| matches!(v, DisciplineViolation::WeakeningForbidden { .. })));
 }
 
 #[test]

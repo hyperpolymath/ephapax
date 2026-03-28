@@ -12,6 +12,12 @@ pub struct EscapeInfo {
     escaping: HashSet<SmolStr>,
 }
 
+impl Default for EscapeInfo {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl EscapeInfo {
     pub fn new() -> Self {
         Self {

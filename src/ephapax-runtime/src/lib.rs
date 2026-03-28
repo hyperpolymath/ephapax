@@ -208,7 +208,7 @@ pub unsafe extern "C" fn __ephapax_string_substr(
 /// char_code should be valid byte value (0-255)
 #[no_mangle]
 pub unsafe extern "C" fn __ephapax_string_from_char(char_code: i32) -> StringHandle {
-    if char_code < 0 || char_code > 255 {
+    if !(0..=255).contains(&char_code) {
         // Return empty string for invalid char
         return __ephapax_string_new(0, 0);
     }

@@ -56,12 +56,10 @@
 use std::collections::HashMap;
 
 use ephapax_surface::{
-    ConstructorDef, DataDecl, MatchArm, Pattern, SurfaceDecl, SurfaceExpr, SurfaceExprKind,
-    SurfaceModule, SurfaceTy, Span,
+    ConstructorDef, DataDecl, MatchArm, Pattern, Span, SurfaceDecl, SurfaceExpr, SurfaceExprKind,
+    SurfaceModule, SurfaceTy,
 };
-use ephapax_syntax::{
-    BaseTy, Decl, Expr, ExprKind, Literal, Module, Ty,
-};
+use ephapax_syntax::{BaseTy, Decl, Expr, ExprKind, Literal, Module, Ty};
 use smol_str::SmolStr;
 use thiserror::Error;
 
@@ -348,18 +346,10 @@ impl Desugarer {
                 body: Box::new(self.desugar_expr(body)?),
             },
 
-            SurfaceExprKind::Borrow(inner) => {
-                ExprKind::Borrow(Box::new(self.desugar_expr(inner)?))
-            }
-            SurfaceExprKind::Deref(inner) => {
-                ExprKind::Deref(Box::new(self.desugar_expr(inner)?))
-            }
-            SurfaceExprKind::Drop(inner) => {
-                ExprKind::Drop(Box::new(self.desugar_expr(inner)?))
-            }
-            SurfaceExprKind::Copy(inner) => {
-                ExprKind::Copy(Box::new(self.desugar_expr(inner)?))
-            }
+            SurfaceExprKind::Borrow(inner) => ExprKind::Borrow(Box::new(self.desugar_expr(inner)?)),
+            SurfaceExprKind::Deref(inner) => ExprKind::Deref(Box::new(self.desugar_expr(inner)?)),
+            SurfaceExprKind::Drop(inner) => ExprKind::Drop(Box::new(self.desugar_expr(inner)?)),
+            SurfaceExprKind::Copy(inner) => ExprKind::Copy(Box::new(self.desugar_expr(inner)?)),
 
             SurfaceExprKind::Block(exprs) => {
                 let desugared: Vec<_> = exprs
@@ -414,7 +404,6 @@ impl Desugarer {
             },
 
             // === Surface-only nodes (real desugaring) ===
-
             SurfaceExprKind::Construct { ctor, args } => {
                 return self.desugar_construct(ctor, args, span);
             }
@@ -476,17 +465,12 @@ impl Desugarer {
     ///
     /// `Option(I32)` → `() + I32`
     /// `Result(I32, Bool)` → `I32 + Bool`
-    fn desugar_named_type(
-        &self,
-        name: &SmolStr,
-        args: &[SurfaceTy],
-    ) -> Result<Ty, DesugarError> {
-        let (params, ctors) = self
-            .registry
-            .get_type_ctors(name.as_str())
-            .ok_or_else(|| DesugarError::UnknownType {
+    fn desugar_named_type(&self, name: &SmolStr, args: &[SurfaceTy]) -> Result<Ty, DesugarError> {
+        let (params, ctors) = self.registry.get_type_ctors(name.as_str()).ok_or_else(|| {
+            DesugarError::UnknownType {
                 name: name.to_string(),
-            })?;
+            }
+        })?;
 
         if params.len() != args.len() {
             return Err(DesugarError::TypeArityMismatch {
@@ -497,8 +481,7 @@ impl Desugarer {
         }
 
         // Build substitution map: type param → concrete type
-        let subst: HashMap<&SmolStr, &SurfaceTy> =
-            params.iter().zip(args.iter()).collect();
+        let subst: HashMap<&SmolStr, &SurfaceTy> = params.iter().zip(args.iter()).collect();
 
         // Build right-nested sum from constructor field types
         self.build_sum_type(&ctors.clone(), &subst)
@@ -516,7 +499,10 @@ impl Desugarer {
         ctors: &[ConstructorDef],
         subst: &HashMap<&SmolStr, &SurfaceTy>,
     ) -> Result<Ty, DesugarError> {
-        assert!(!ctors.is_empty(), "data type must have at least one constructor");
+        assert!(
+            !ctors.is_empty(),
+            "data type must have at least one constructor"
+        );
 
         if ctors.len() == 1 {
             return self.build_payload_type(&ctors[0].fields, subst);
@@ -627,11 +613,7 @@ impl Desugarer {
     /// - No args → `()`
     /// - One arg → the arg itself
     /// - Multiple args → right-nested pair
-    fn build_payload_expr(
-        &self,
-        args: &[SurfaceExpr],
-        span: Span,
-    ) -> Result<Expr, DesugarError> {
+    fn build_payload_expr(&self, args: &[SurfaceExpr], span: Span) -> Result<Expr, DesugarError> {
         match args.len() {
             0 => Ok(Expr::new(ExprKind::Lit(Literal::Unit), span)),
             1 => self.desugar_expr(&args[0]),
@@ -726,10 +708,7 @@ impl Desugarer {
         // Find the data type from constructor patterns
         let data_name = self.find_data_type_from_arms(arms)?;
 
-        let (_, ctors) = self
-            .registry
-            .get_type_ctors(data_name.as_str())
-            .unwrap();
+        let (_, ctors) = self.registry.get_type_ctors(data_name.as_str()).unwrap();
         let ctors = ctors.clone();
 
         // Build an ordered map: constructor index → (pattern bindings, body)
@@ -804,22 +783,24 @@ impl Desugarer {
 
             // Last (or only) constructor — no case needed, just bind
             1 => {
-                let arm = arm_map.get(&base_index).or(wildcard.as_ref()).ok_or_else(|| {
-                    DesugarError::NonExhaustive {
+                let arm = arm_map
+                    .get(&base_index)
+                    .or(wildcard.as_ref())
+                    .ok_or_else(|| DesugarError::NonExhaustive {
                         ctor: ctors[0].name.to_string(),
-                    }
-                })?;
+                    })?;
 
                 self.build_arm_body(scrutinee, &ctors[0], arm, span)
             }
 
             // Two or more constructors — generate case
             _ => {
-                let left_arm = arm_map.get(&base_index).or(wildcard.as_ref()).ok_or_else(|| {
-                    DesugarError::NonExhaustive {
+                let left_arm = arm_map
+                    .get(&base_index)
+                    .or(wildcard.as_ref())
+                    .ok_or_else(|| DesugarError::NonExhaustive {
                         ctor: ctors[0].name.to_string(),
-                    }
-                })?;
+                    })?;
 
                 // Variable name for the left (inl) payload
                 let left_var = self.fresh_var_for_arm(left_arm, &ctors[0]);
@@ -1036,8 +1017,8 @@ pub fn desugar(module: &SurfaceModule) -> Result<Module, DesugarError> {
 mod tests {
     use super::*;
     use ephapax_surface::{
-        ConstructorDef, DataDecl, MatchArm, Pattern, SurfaceDecl, SurfaceExpr,
-        SurfaceExprKind, SurfaceModule, SurfaceTy, BaseTy, Literal, Span,
+        BaseTy, ConstructorDef, DataDecl, Literal, MatchArm, Pattern, Span, SurfaceDecl,
+        SurfaceExpr, SurfaceExprKind, SurfaceModule, SurfaceTy,
     };
 
     fn se(kind: SurfaceExprKind) -> SurfaceExpr {
@@ -1067,9 +1048,18 @@ mod tests {
             name: "Color".into(),
             params: vec![],
             constructors: vec![
-                ConstructorDef { name: "Red".into(), fields: vec![] },
-                ConstructorDef { name: "Green".into(), fields: vec![] },
-                ConstructorDef { name: "Blue".into(), fields: vec![] },
+                ConstructorDef {
+                    name: "Red".into(),
+                    fields: vec![],
+                },
+                ConstructorDef {
+                    name: "Green".into(),
+                    fields: vec![],
+                },
+                ConstructorDef {
+                    name: "Blue".into(),
+                    fields: vec![],
+                },
             ],
             span: Span::dummy(),
         }
@@ -1415,7 +1405,11 @@ mod tests {
 
         let core = desugar(&module).unwrap();
         // Data declaration should not appear in core
-        assert_eq!(core.decls.len(), 1, "data decl should be consumed, only fn remains");
+        assert_eq!(
+            core.decls.len(),
+            1,
+            "data decl should be consumed, only fn remains"
+        );
         // Function should have sum type parameter
         if let Decl::Fn { params, .. } = &core.decls[0] {
             assert_eq!(
@@ -1442,28 +1436,43 @@ mod tests {
                     name: "Option".into(),
                     params: vec!["a".into()],
                     constructors: vec![
-                        ConstructorDef { name: "None".into(), fields: vec![] },
-                        ConstructorDef { name: "Some".into(), fields: vec![SurfaceTy::Var("a".into())] },
+                        ConstructorDef {
+                            name: "None".into(),
+                            fields: vec![],
+                        },
+                        ConstructorDef {
+                            name: "Some".into(),
+                            fields: vec![SurfaceTy::Var("a".into())],
+                        },
                     ],
                     span: Span::dummy(),
                 }),
                 SurfaceDecl::Fn {
                     name: "test".into(),
-                    params: vec![("opt".into(), SurfaceTy::Named {
-                        name: "Option".into(),
-                        args: vec![SurfaceTy::Base(BaseTy::I32)],
-                    })],
+                    params: vec![(
+                        "opt".into(),
+                        SurfaceTy::Named {
+                            name: "Option".into(),
+                            args: vec![SurfaceTy::Base(BaseTy::I32)],
+                        },
+                    )],
                     ret_ty: SurfaceTy::Base(BaseTy::I32),
                     body: SurfaceExpr::dummy(SurfaceExprKind::Match {
                         scrutinee: Box::new(SurfaceExpr::dummy(SurfaceExprKind::Var("opt".into()))),
                         arms: vec![
                             MatchArm {
-                                pattern: Pattern::Constructor { ctor: "None".into(), args: vec![] },
+                                pattern: Pattern::Constructor {
+                                    ctor: "None".into(),
+                                    args: vec![],
+                                },
                                 guard: None,
                                 body: SurfaceExpr::dummy(SurfaceExprKind::Lit(Literal::I32(0))),
                             },
                             MatchArm {
-                                pattern: Pattern::Constructor { ctor: "Some".into(), args: vec![Pattern::Var("v".into())] },
+                                pattern: Pattern::Constructor {
+                                    ctor: "Some".into(),
+                                    args: vec![Pattern::Var("v".into())],
+                                },
                                 guard: None,
                                 body: SurfaceExpr::dummy(SurfaceExprKind::Var("v".into())),
                             },
@@ -1490,28 +1499,43 @@ mod tests {
                     name: "Option".into(),
                     params: vec!["a".into()],
                     constructors: vec![
-                        ConstructorDef { name: "None".into(), fields: vec![] },
-                        ConstructorDef { name: "Some".into(), fields: vec![SurfaceTy::Var("a".into())] },
+                        ConstructorDef {
+                            name: "None".into(),
+                            fields: vec![],
+                        },
+                        ConstructorDef {
+                            name: "Some".into(),
+                            fields: vec![SurfaceTy::Var("a".into())],
+                        },
                     ],
                     span: Span::dummy(),
                 }),
                 SurfaceDecl::Fn {
                     name: "test".into(),
-                    params: vec![("opt".into(), SurfaceTy::Named {
-                        name: "Option".into(),
-                        args: vec![SurfaceTy::Base(BaseTy::I32)],
-                    })],
+                    params: vec![(
+                        "opt".into(),
+                        SurfaceTy::Named {
+                            name: "Option".into(),
+                            args: vec![SurfaceTy::Base(BaseTy::I32)],
+                        },
+                    )],
                     ret_ty: SurfaceTy::Base(BaseTy::I32),
                     body: SurfaceExpr::dummy(SurfaceExprKind::Match {
                         scrutinee: Box::new(SurfaceExpr::dummy(SurfaceExprKind::Var("opt".into()))),
                         arms: vec![
                             MatchArm {
-                                pattern: Pattern::Constructor { ctor: "None".into(), args: vec![] },
+                                pattern: Pattern::Constructor {
+                                    ctor: "None".into(),
+                                    args: vec![],
+                                },
                                 guard: None,
                                 body: SurfaceExpr::dummy(SurfaceExprKind::Lit(Literal::I32(0))),
                             },
                             MatchArm {
-                                pattern: Pattern::Constructor { ctor: "Some".into(), args: vec![Pattern::Var("v".into())] },
+                                pattern: Pattern::Constructor {
+                                    ctor: "Some".into(),
+                                    args: vec![Pattern::Var("v".into())],
+                                },
                                 guard: None,
                                 body: SurfaceExpr::dummy(SurfaceExprKind::Var("v".into())),
                             },
@@ -1527,7 +1551,14 @@ mod tests {
         assert_eq!(core.decls.len(), 1);
         if let Decl::Fn { body, .. } = &core.decls[0] {
             // Should be a Case expression
-            if let ExprKind::Case { left_body, right_body, left_var, right_var, .. } = &body.kind {
+            if let ExprKind::Case {
+                left_body,
+                right_body,
+                left_var,
+                right_var,
+                ..
+            } = &body.kind
+            {
                 // Left body (None arm) should just be I32(0)
                 assert!(
                     matches!(left_body.kind, ExprKind::Lit(Literal::I32(0))),

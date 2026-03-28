@@ -12,6 +12,12 @@ pub struct FreeVars {
     free: HashSet<SmolStr>,
 }
 
+impl Default for FreeVars {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl FreeVars {
     pub fn new() -> Self {
         Self {

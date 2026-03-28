@@ -64,11 +64,7 @@ impl LinearChecker {
     /// Walk a top-level declaration.
     fn walk_decl(&mut self, decl: &Decl) {
         match decl {
-            Decl::Fn {
-                params,
-                body,
-                ..
-            } => {
+            Decl::Fn { params, body, .. } => {
                 // Bind parameters
                 for (name, ty) in params {
                     self.ctx
@@ -83,9 +79,10 @@ impl LinearChecker {
                     if ty.is_linear() {
                         if let Some(binding) = self.ctx.get(name) {
                             if !binding.consumed {
-                                self.violations.push(DisciplineViolation::WeakeningForbidden {
-                                    name: name.to_string(),
-                                });
+                                self.violations
+                                    .push(DisciplineViolation::WeakeningForbidden {
+                                        name: name.to_string(),
+                                    });
                             }
                         }
                     }
@@ -109,18 +106,23 @@ impl LinearChecker {
 
             // --- let! (linear binding) ---
             ExprKind::LetLin {
-                name, ty, value, body,
+                name,
+                ty,
+                value,
+                body,
             } => {
                 self.walk_expr(value);
-                self.ctx.bind(name.clone(), BindingForm::LetBang, ty.clone());
+                self.ctx
+                    .bind(name.clone(), BindingForm::LetBang, ty.clone());
                 self.walk_expr(body);
 
                 // In linear discipline: MUST be consumed
                 if let Some(binding) = self.ctx.get(name) {
                     if !binding.consumed {
-                        self.violations.push(DisciplineViolation::WeakeningForbidden {
-                            name: name.to_string(),
-                        });
+                        self.violations
+                            .push(DisciplineViolation::WeakeningForbidden {
+                                name: name.to_string(),
+                            });
                     }
                 }
                 self.ctx.unbind(name);
@@ -128,7 +130,10 @@ impl LinearChecker {
 
             // --- let (restricted in linear grammar) ---
             ExprKind::Let {
-                name, ty, value, body,
+                name,
+                ty,
+                value,
+                body,
             } => {
                 self.walk_expr(value);
 
@@ -147,9 +152,10 @@ impl LinearChecker {
                 // (we already reported the LetForLinearType violation)
                 if let Some(binding) = self.ctx.get(name) {
                     if binding.is_linear_type() && !binding.consumed {
-                        self.violations.push(DisciplineViolation::WeakeningForbidden {
-                            name: name.to_string(),
-                        });
+                        self.violations
+                            .push(DisciplineViolation::WeakeningForbidden {
+                                name: name.to_string(),
+                            });
                     }
                 }
                 self.ctx.unbind(name);
@@ -169,9 +175,10 @@ impl LinearChecker {
                 if param_ty.is_linear() {
                     if let Some(binding) = self.ctx.get(param) {
                         if !binding.consumed {
-                            self.violations.push(DisciplineViolation::WeakeningForbidden {
-                                name: param.to_string(),
-                            });
+                            self.violations
+                                .push(DisciplineViolation::WeakeningForbidden {
+                                    name: param.to_string(),
+                                });
                         }
                     }
                 }
@@ -214,16 +221,14 @@ impl LinearChecker {
                 let pre_snapshot = self.ctx.snapshot_consumption();
 
                 // Check left branch
-                self.ctx
-                    .bind(left_var.clone(), BindingForm::Let, None);
+                self.ctx.bind(left_var.clone(), BindingForm::Let, None);
                 self.walk_expr(left_body);
                 self.ctx.unbind(left_var);
                 let left_snapshot = self.ctx.snapshot_consumption();
 
                 // Restore and check right branch
                 self.ctx.restore_consumption(&pre_snapshot);
-                self.ctx
-                    .bind(right_var.clone(), BindingForm::Let, None);
+                self.ctx.bind(right_var.clone(), BindingForm::Let, None);
                 self.walk_expr(right_body);
                 self.ctx.unbind(right_var);
                 let right_snapshot = self.ctx.snapshot_consumption();
@@ -368,12 +373,13 @@ impl LinearChecker {
             if let Some(&right_consumed) = right.get(name) {
                 // Only check bindings that are linear
                 if let Some(binding) = self.ctx.get(name) {
-                    if binding.is_linear_type() || binding.is_linear_form() {
-                        if left_consumed != right_consumed {
-                            self.violations.push(DisciplineViolation::BranchDisagreement {
+                    if (binding.is_linear_type() || binding.is_linear_form())
+                        && left_consumed != right_consumed
+                    {
+                        self.violations
+                            .push(DisciplineViolation::BranchDisagreement {
                                 name: name.to_string(),
                             });
-                        }
                     }
                 }
             }

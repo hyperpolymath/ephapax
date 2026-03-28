@@ -128,11 +128,11 @@ impl Manifest {
     /// Load manifest from file
     pub fn from_file(path: &Path) -> Result<Self, ManifestError> {
         let content = std::fs::read_to_string(path)?;
-        Self::from_str(&content)
+        Self::parse(&content)
     }
 
     /// Parse manifest from string
-    pub fn from_str(content: &str) -> Result<Self, ManifestError> {
+    pub fn parse(content: &str) -> Result<Self, ManifestError> {
         let manifest: Manifest = toml::from_str(content)?;
         manifest.validate()?;
         Ok(manifest)
@@ -165,8 +165,7 @@ impl Manifest {
 
     /// Write manifest to file
     pub fn to_file(&self, path: &Path) -> Result<(), ManifestError> {
-        let content = toml::to_string_pretty(self)
-            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+        let content = toml::to_string_pretty(self).map_err(std::io::Error::other)?;
         std::fs::write(path, content)?;
         Ok(())
     }
@@ -222,7 +221,7 @@ license = "PMPL-1.0-or-later"
 linear-collections = "1.0"
 "#;
 
-        let manifest = Manifest::from_str(toml).unwrap();
+        let manifest = Manifest::parse(toml).unwrap();
         assert_eq!(manifest.package.name, "my-lib");
         assert_eq!(manifest.package.version, "0.1.0");
         assert_eq!(manifest.dependencies.len(), 1);
@@ -243,7 +242,7 @@ local-lib = { path = "../local" }
 git-lib = { git = "https://github.com/example/lib", tag = "v1.0" }
 "#;
 
-        let manifest = Manifest::from_str(toml).unwrap();
+        let manifest = Manifest::parse(toml).unwrap();
         assert_eq!(manifest.dependencies.len(), 3);
 
         let affine = &manifest.dependencies["affine-utils"];
@@ -267,7 +266,7 @@ authors = ["Test"]
 license = "PMPL-1.0-or-later"
 "#;
 
-        assert!(Manifest::from_str(toml).is_err());
+        assert!(Manifest::parse(toml).is_err());
     }
 
     #[test]
@@ -280,7 +279,7 @@ authors = ["Test"]
 license = "PMPL-1.0-or-later"
 "#;
 
-        assert!(Manifest::from_str(toml).is_err());
+        assert!(Manifest::parse(toml).is_err());
     }
 
     #[test]

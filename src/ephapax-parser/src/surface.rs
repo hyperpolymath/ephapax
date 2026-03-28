@@ -97,9 +97,7 @@ fn parse_constructor_name(pair: pest::iterators::Pair<Rule>) -> SmolStr {
 // Declaration parsing
 // =========================================================================
 
-fn parse_surface_declaration(
-    pair: pest::iterators::Pair<Rule>,
-) -> Result<SurfaceDecl, ParseError> {
+fn parse_surface_declaration(pair: pest::iterators::Pair<Rule>) -> Result<SurfaceDecl, ParseError> {
     let inner = pair
         .into_inner()
         .next()
@@ -283,7 +281,11 @@ fn parse_let_expr(pair: pest::iterators::Pair<Rule>) -> Result<SurfaceExpr, Pars
     let span = span_from_pair(&pair);
     let mut inner = pair.into_inner();
 
-    let name = parse_identifier(inner.next().ok_or_else(|| ParseError::missing("let name"))?);
+    let name = parse_identifier(
+        inner
+            .next()
+            .ok_or_else(|| ParseError::missing("let name"))?,
+    );
 
     let mut ty = None;
     let mut value = None;
@@ -302,12 +304,8 @@ fn parse_let_expr(pair: pest::iterators::Pair<Rule>) -> Result<SurfaceExpr, Pars
         SurfaceExprKind::Let {
             name,
             ty,
-            value: Box::new(
-                value.ok_or_else(|| ParseError::missing("let value"))?,
-            ),
-            body: Box::new(
-                body.ok_or_else(|| ParseError::missing("let body"))?,
-            ),
+            value: Box::new(value.ok_or_else(|| ParseError::missing("let value"))?),
+            body: Box::new(body.ok_or_else(|| ParseError::missing("let body"))?),
         },
         span,
     ))
@@ -317,7 +315,11 @@ fn parse_let_lin_expr(pair: pest::iterators::Pair<Rule>) -> Result<SurfaceExpr, 
     let span = span_from_pair(&pair);
     let mut inner = pair.into_inner();
 
-    let name = parse_identifier(inner.next().ok_or_else(|| ParseError::missing("let! name"))?);
+    let name = parse_identifier(
+        inner
+            .next()
+            .ok_or_else(|| ParseError::missing("let! name"))?,
+    );
 
     let mut ty = None;
     let mut value = None;
@@ -336,12 +338,8 @@ fn parse_let_lin_expr(pair: pest::iterators::Pair<Rule>) -> Result<SurfaceExpr, 
         SurfaceExprKind::LetLin {
             name,
             ty,
-            value: Box::new(
-                value.ok_or_else(|| ParseError::missing("let! value"))?,
-            ),
-            body: Box::new(
-                body.ok_or_else(|| ParseError::missing("let! body"))?,
-            ),
+            value: Box::new(value.ok_or_else(|| ParseError::missing("let! value"))?),
+            body: Box::new(body.ok_or_else(|| ParseError::missing("let! body"))?),
         },
         span,
     ))
@@ -352,8 +350,16 @@ fn parse_lambda_expr(pair: pest::iterators::Pair<Rule>) -> Result<SurfaceExpr, P
     let mut inner = pair.into_inner();
 
     let param = parse_identifier(inner.next().ok_or_else(|| ParseError::missing("param"))?);
-    let param_ty = parse_type(inner.next().ok_or_else(|| ParseError::missing("param type"))?)?;
-    let body = parse_expression(inner.next().ok_or_else(|| ParseError::missing("lambda body"))?)?;
+    let param_ty = parse_type(
+        inner
+            .next()
+            .ok_or_else(|| ParseError::missing("param type"))?,
+    )?;
+    let body = parse_expression(
+        inner
+            .next()
+            .ok_or_else(|| ParseError::missing("lambda body"))?,
+    )?;
 
     Ok(SurfaceExpr::new(
         SurfaceExprKind::Lambda {
@@ -387,8 +393,16 @@ fn parse_region_expr(pair: pest::iterators::Pair<Rule>) -> Result<SurfaceExpr, P
     let span = span_from_pair(&pair);
     let mut inner = pair.into_inner();
 
-    let name = parse_identifier(inner.next().ok_or_else(|| ParseError::missing("region name"))?);
-    let body = parse_expression(inner.next().ok_or_else(|| ParseError::missing("region body"))?)?;
+    let name = parse_identifier(
+        inner
+            .next()
+            .ok_or_else(|| ParseError::missing("region name"))?,
+    );
+    let body = parse_expression(
+        inner
+            .next()
+            .ok_or_else(|| ParseError::missing("region body"))?,
+    )?;
 
     Ok(SurfaceExpr::new(
         SurfaceExprKind::Region {
@@ -403,11 +417,23 @@ fn parse_case_expr(pair: pest::iterators::Pair<Rule>) -> Result<SurfaceExpr, Par
     let span = span_from_pair(&pair);
     let mut inner = pair.into_inner();
 
-    let scrutinee = parse_expression(inner.next().ok_or_else(|| ParseError::missing("case scrutinee"))?)?;
+    let scrutinee = parse_expression(
+        inner
+            .next()
+            .ok_or_else(|| ParseError::missing("case scrutinee"))?,
+    )?;
     let left_var = parse_identifier(inner.next().ok_or_else(|| ParseError::missing("inl var"))?);
-    let left_body = parse_expression(inner.next().ok_or_else(|| ParseError::missing("inl body"))?)?;
+    let left_body = parse_expression(
+        inner
+            .next()
+            .ok_or_else(|| ParseError::missing("inl body"))?,
+    )?;
     let right_var = parse_identifier(inner.next().ok_or_else(|| ParseError::missing("inr var"))?);
-    let right_body = parse_expression(inner.next().ok_or_else(|| ParseError::missing("inr body"))?)?;
+    let right_body = parse_expression(
+        inner
+            .next()
+            .ok_or_else(|| ParseError::missing("inr body"))?,
+    )?;
 
     Ok(SurfaceExpr::new(
         SurfaceExprKind::Case {
@@ -461,9 +487,8 @@ fn parse_match_arm(pair: pest::iterators::Pair<Rule>) -> Result<MatchArm, ParseE
     )?;
 
     // Remaining items: optional guard (expression before =>), then body (expression after =>)
-    let mut exprs: Vec<pest::iterators::Pair<Rule>> = inner
-        .filter(|p| p.as_rule() == Rule::expression)
-        .collect();
+    let mut exprs: Vec<pest::iterators::Pair<Rule>> =
+        inner.filter(|p| p.as_rule() == Rule::expression).collect();
 
     let (guard, body) = if exprs.len() >= 2 {
         let body = parse_expression(exprs.pop().unwrap())?;
@@ -492,19 +517,33 @@ fn parse_pattern(pair: pest::iterators::Pair<Rule>) -> Result<Pattern, ParseErro
         Rule::constructor_pattern => parse_constructor_pattern(inner),
         Rule::pair_pattern => {
             let mut parts = inner.into_inner();
-            let left = parse_pattern(parts.next().ok_or_else(|| ParseError::missing("left pattern"))?)?;
-            let right = parse_pattern(parts.next().ok_or_else(|| ParseError::missing("right pattern"))?)?;
+            let left = parse_pattern(
+                parts
+                    .next()
+                    .ok_or_else(|| ParseError::missing("left pattern"))?,
+            )?;
+            let right = parse_pattern(
+                parts
+                    .next()
+                    .ok_or_else(|| ParseError::missing("right pattern"))?,
+            )?;
             Ok(Pattern::Pair(Box::new(left), Box::new(right)))
         }
         Rule::wildcard_pattern => Ok(Pattern::Wildcard),
         Rule::literal_pattern => {
-            let lit_pair = inner.into_inner().next().ok_or_else(|| ParseError::missing("literal"))?;
+            let lit_pair = inner
+                .into_inner()
+                .next()
+                .ok_or_else(|| ParseError::missing("literal"))?;
             let lit = parse_literal_value(lit_pair)?;
             Ok(Pattern::Literal(lit))
         }
         Rule::var_pattern => {
             let name = parse_identifier(
-                inner.into_inner().next().ok_or_else(|| ParseError::missing("var pattern"))?,
+                inner
+                    .into_inner()
+                    .next()
+                    .ok_or_else(|| ParseError::missing("var pattern"))?,
             );
             Ok(Pattern::Var(name))
         }
@@ -551,7 +590,11 @@ fn parse_constructor_pattern(pair: pest::iterators::Pair<Rule>) -> Result<Patter
 fn parse_or_expr(pair: pest::iterators::Pair<Rule>) -> Result<SurfaceExpr, ParseError> {
     let span = span_from_pair(&pair);
     let mut inner = pair.into_inner();
-    let mut left = parse_and_expr(inner.next().ok_or_else(|| ParseError::unexpected_end("or_expr"))?)?;
+    let mut left = parse_and_expr(
+        inner
+            .next()
+            .ok_or_else(|| ParseError::unexpected_end("or_expr"))?,
+    )?;
 
     for right_pair in inner {
         let right = parse_and_expr(right_pair)?;
@@ -570,7 +613,11 @@ fn parse_or_expr(pair: pest::iterators::Pair<Rule>) -> Result<SurfaceExpr, Parse
 fn parse_and_expr(pair: pest::iterators::Pair<Rule>) -> Result<SurfaceExpr, ParseError> {
     let span = span_from_pair(&pair);
     let mut inner = pair.into_inner();
-    let mut left = parse_eq_expr(inner.next().ok_or_else(|| ParseError::unexpected_end("and_expr"))?)?;
+    let mut left = parse_eq_expr(
+        inner
+            .next()
+            .ok_or_else(|| ParseError::unexpected_end("and_expr"))?,
+    )?;
 
     for right_pair in inner {
         let right = parse_eq_expr(right_pair)?;
@@ -589,20 +636,30 @@ fn parse_and_expr(pair: pest::iterators::Pair<Rule>) -> Result<SurfaceExpr, Pars
 fn parse_eq_expr(pair: pest::iterators::Pair<Rule>) -> Result<SurfaceExpr, ParseError> {
     let span = span_from_pair(&pair);
     let mut inner = pair.into_inner();
-    let mut left = parse_cmp_expr(inner.next().ok_or_else(|| ParseError::unexpected_end("eq_expr"))?)?;
+    let mut left = parse_cmp_expr(
+        inner
+            .next()
+            .ok_or_else(|| ParseError::unexpected_end("eq_expr"))?,
+    )?;
 
     while let Some(op_pair) = inner.next() {
         let op = match op_pair.as_str() {
             "==" => BinOp::Eq,
             "!=" => BinOp::Ne,
-            _ => return Err(ParseError::Syntax {
-                message: format!("Unknown eq op: {}", op_pair.as_str()),
-                span: span_from_pair(&op_pair),
-            }),
+            _ => {
+                return Err(ParseError::Syntax {
+                    message: format!("Unknown eq op: {}", op_pair.as_str()),
+                    span: span_from_pair(&op_pair),
+                })
+            }
         };
         let right = parse_cmp_expr(inner.next().ok_or_else(|| ParseError::missing("rhs"))?)?;
         left = SurfaceExpr::new(
-            SurfaceExprKind::BinOp { op, left: Box::new(left), right: Box::new(right) },
+            SurfaceExprKind::BinOp {
+                op,
+                left: Box::new(left),
+                right: Box::new(right),
+            },
             span,
         );
     }
@@ -612,7 +669,11 @@ fn parse_eq_expr(pair: pest::iterators::Pair<Rule>) -> Result<SurfaceExpr, Parse
 fn parse_cmp_expr(pair: pest::iterators::Pair<Rule>) -> Result<SurfaceExpr, ParseError> {
     let span = span_from_pair(&pair);
     let mut inner = pair.into_inner();
-    let mut left = parse_add_expr(inner.next().ok_or_else(|| ParseError::unexpected_end("cmp_expr"))?)?;
+    let mut left = parse_add_expr(
+        inner
+            .next()
+            .ok_or_else(|| ParseError::unexpected_end("cmp_expr"))?,
+    )?;
 
     while let Some(op_pair) = inner.next() {
         let op = match op_pair.as_str() {
@@ -620,14 +681,20 @@ fn parse_cmp_expr(pair: pest::iterators::Pair<Rule>) -> Result<SurfaceExpr, Pars
             "<=" => BinOp::Le,
             ">" => BinOp::Gt,
             ">=" => BinOp::Ge,
-            _ => return Err(ParseError::Syntax {
-                message: format!("Unknown cmp op: {}", op_pair.as_str()),
-                span: span_from_pair(&op_pair),
-            }),
+            _ => {
+                return Err(ParseError::Syntax {
+                    message: format!("Unknown cmp op: {}", op_pair.as_str()),
+                    span: span_from_pair(&op_pair),
+                })
+            }
         };
         let right = parse_add_expr(inner.next().ok_or_else(|| ParseError::missing("rhs"))?)?;
         left = SurfaceExpr::new(
-            SurfaceExprKind::BinOp { op, left: Box::new(left), right: Box::new(right) },
+            SurfaceExprKind::BinOp {
+                op,
+                left: Box::new(left),
+                right: Box::new(right),
+            },
             span,
         );
     }
@@ -637,20 +704,30 @@ fn parse_cmp_expr(pair: pest::iterators::Pair<Rule>) -> Result<SurfaceExpr, Pars
 fn parse_add_expr(pair: pest::iterators::Pair<Rule>) -> Result<SurfaceExpr, ParseError> {
     let span = span_from_pair(&pair);
     let mut inner = pair.into_inner();
-    let mut left = parse_mul_expr(inner.next().ok_or_else(|| ParseError::unexpected_end("add_expr"))?)?;
+    let mut left = parse_mul_expr(
+        inner
+            .next()
+            .ok_or_else(|| ParseError::unexpected_end("add_expr"))?,
+    )?;
 
     while let Some(op_pair) = inner.next() {
         let op = match op_pair.as_str() {
             "+" => BinOp::Add,
             "-" => BinOp::Sub,
-            _ => return Err(ParseError::Syntax {
-                message: format!("Unknown add op: {}", op_pair.as_str()),
-                span: span_from_pair(&op_pair),
-            }),
+            _ => {
+                return Err(ParseError::Syntax {
+                    message: format!("Unknown add op: {}", op_pair.as_str()),
+                    span: span_from_pair(&op_pair),
+                })
+            }
         };
         let right = parse_mul_expr(inner.next().ok_or_else(|| ParseError::missing("rhs"))?)?;
         left = SurfaceExpr::new(
-            SurfaceExprKind::BinOp { op, left: Box::new(left), right: Box::new(right) },
+            SurfaceExprKind::BinOp {
+                op,
+                left: Box::new(left),
+                right: Box::new(right),
+            },
             span,
         );
     }
@@ -660,21 +737,31 @@ fn parse_add_expr(pair: pest::iterators::Pair<Rule>) -> Result<SurfaceExpr, Pars
 fn parse_mul_expr(pair: pest::iterators::Pair<Rule>) -> Result<SurfaceExpr, ParseError> {
     let span = span_from_pair(&pair);
     let mut inner = pair.into_inner();
-    let mut left = parse_unary_expr(inner.next().ok_or_else(|| ParseError::unexpected_end("mul_expr"))?)?;
+    let mut left = parse_unary_expr(
+        inner
+            .next()
+            .ok_or_else(|| ParseError::unexpected_end("mul_expr"))?,
+    )?;
 
     while let Some(op_pair) = inner.next() {
         let op = match op_pair.as_str() {
             "*" => BinOp::Mul,
             "/" => BinOp::Div,
             "%" => BinOp::Mod,
-            _ => return Err(ParseError::Syntax {
-                message: format!("Unknown mul op: {}", op_pair.as_str()),
-                span: span_from_pair(&op_pair),
-            }),
+            _ => {
+                return Err(ParseError::Syntax {
+                    message: format!("Unknown mul op: {}", op_pair.as_str()),
+                    span: span_from_pair(&op_pair),
+                })
+            }
         };
         let right = parse_unary_expr(inner.next().ok_or_else(|| ParseError::missing("rhs"))?)?;
         left = SurfaceExpr::new(
-            SurfaceExprKind::BinOp { op, left: Box::new(left), right: Box::new(right) },
+            SurfaceExprKind::BinOp {
+                op,
+                left: Box::new(left),
+                right: Box::new(right),
+            },
             span,
         );
     }
@@ -690,7 +777,8 @@ fn parse_unary_expr(pair: pest::iterators::Pair<Rule>) -> Result<SurfaceExpr, Pa
         match first.as_str() {
             "!" => {
                 inner.next();
-                let operand = parse_unary_expr(inner.next().ok_or_else(|| ParseError::missing("operand"))?)?;
+                let operand =
+                    parse_unary_expr(inner.next().ok_or_else(|| ParseError::missing("operand"))?)?;
                 return Ok(SurfaceExpr::new(
                     SurfaceExprKind::UnaryOp {
                         op: UnaryOp::Not,
@@ -701,7 +789,8 @@ fn parse_unary_expr(pair: pest::iterators::Pair<Rule>) -> Result<SurfaceExpr, Pa
             }
             "-" => {
                 inner.next();
-                let operand = parse_unary_expr(inner.next().ok_or_else(|| ParseError::missing("operand"))?)?;
+                let operand =
+                    parse_unary_expr(inner.next().ok_or_else(|| ParseError::missing("operand"))?)?;
                 return Ok(SurfaceExpr::new(
                     SurfaceExprKind::UnaryOp {
                         op: UnaryOp::Neg,
@@ -715,7 +804,9 @@ fn parse_unary_expr(pair: pest::iterators::Pair<Rule>) -> Result<SurfaceExpr, Pa
     }
 
     // Must be postfix_expr
-    let next = inner.next().ok_or_else(|| ParseError::unexpected_end("unary"))?;
+    let next = inner
+        .next()
+        .ok_or_else(|| ParseError::unexpected_end("unary"))?;
     parse_postfix_expr(next)
 }
 
@@ -723,15 +814,25 @@ fn parse_postfix_expr(pair: pest::iterators::Pair<Rule>) -> Result<SurfaceExpr, 
     let span = span_from_pair(&pair);
     let mut inner = pair.into_inner();
 
-    let base = parse_atom_expr(inner.next().ok_or_else(|| ParseError::unexpected_end("postfix"))?)?;
+    let base = parse_atom_expr(
+        inner
+            .next()
+            .ok_or_else(|| ParseError::unexpected_end("postfix"))?,
+    )?;
 
     let mut result = base;
     for op in inner {
         if op.as_rule() == Rule::postfix_op {
-            let op_inner = op.into_inner().next().ok_or_else(|| ParseError::unexpected_end("postfix op"))?;
+            let op_inner = op
+                .into_inner()
+                .next()
+                .ok_or_else(|| ParseError::unexpected_end("postfix op"))?;
             match op_inner.as_rule() {
                 Rule::call_op => {
-                    let arg_pair = op_inner.into_inner().next().ok_or_else(|| ParseError::missing("call arg"))?;
+                    let arg_pair = op_inner
+                        .into_inner()
+                        .next()
+                        .ok_or_else(|| ParseError::missing("call arg"))?;
                     let arg = parse_expression(arg_pair)?;
                     result = SurfaceExpr::new(
                         SurfaceExprKind::App {
@@ -742,7 +843,10 @@ fn parse_postfix_expr(pair: pest::iterators::Pair<Rule>) -> Result<SurfaceExpr, 
                     );
                 }
                 Rule::index_op => {
-                    let idx_pair = op_inner.into_inner().next().ok_or_else(|| ParseError::missing("index"))?;
+                    let idx_pair = op_inner
+                        .into_inner()
+                        .next()
+                        .ok_or_else(|| ParseError::missing("index"))?;
                     let index = parse_expression(idx_pair)?;
                     result = SurfaceExpr::new(
                         SurfaceExprKind::ListIndex {
@@ -753,19 +857,23 @@ fn parse_postfix_expr(pair: pest::iterators::Pair<Rule>) -> Result<SurfaceExpr, 
                     );
                 }
                 Rule::member_op => {
-                    let member = op_inner.into_inner().next().ok_or_else(|| ParseError::missing("member"))?;
+                    let member = op_inner
+                        .into_inner()
+                        .next()
+                        .ok_or_else(|| ParseError::missing("member"))?;
                     match member.as_rule() {
                         Rule::integer => {
-                            let idx: usize = member.as_str().parse().map_err(|_| {
-                                ParseError::Syntax {
+                            let idx: usize =
+                                member.as_str().parse().map_err(|_| ParseError::Syntax {
                                     message: "Invalid tuple index".into(),
                                     span: span_from_pair(&member),
-                                }
-                            })?;
+                                })?;
                             if idx == 0 {
-                                result = SurfaceExpr::new(SurfaceExprKind::Fst(Box::new(result)), span);
+                                result =
+                                    SurfaceExpr::new(SurfaceExprKind::Fst(Box::new(result)), span);
                             } else if idx == 1 {
-                                result = SurfaceExpr::new(SurfaceExprKind::Snd(Box::new(result)), span);
+                                result =
+                                    SurfaceExpr::new(SurfaceExprKind::Snd(Box::new(result)), span);
                             } else {
                                 result = SurfaceExpr::new(
                                     SurfaceExprKind::TupleIndex {
@@ -803,7 +911,9 @@ fn parse_atom_expr(pair: pest::iterators::Pair<Rule>) -> Result<SurfaceExpr, Par
     match inner.as_rule() {
         Rule::ffi_expr => {
             let mut parts = inner.into_inner();
-            let symbol_pair = parts.next().ok_or_else(|| ParseError::missing("ffi symbol"))?;
+            let symbol_pair = parts
+                .next()
+                .ok_or_else(|| ParseError::missing("ffi symbol"))?;
             let symbol = parse_string_value(symbol_pair);
             let mut args = Vec::new();
             for p in parts {
@@ -811,12 +921,16 @@ fn parse_atom_expr(pair: pest::iterators::Pair<Rule>) -> Result<SurfaceExpr, Par
                     args.push(parse_expression(p)?);
                 }
             }
-            Ok(SurfaceExpr::new(SurfaceExprKind::FFI { symbol, args }, span))
+            Ok(SurfaceExpr::new(
+                SurfaceExprKind::FFI { symbol, args },
+                span,
+            ))
         }
 
         Rule::string_method => {
             let mut parts = inner.into_inner();
-            let method = parse_identifier(parts.next().ok_or_else(|| ParseError::missing("method"))?);
+            let method =
+                parse_identifier(parts.next().ok_or_else(|| ParseError::missing("method"))?);
 
             match method.as_str() {
                 "new" => {
@@ -835,7 +949,10 @@ fn parse_atom_expr(pair: pest::iterators::Pair<Rule>) -> Result<SurfaceExpr, Par
                             _ => {}
                         }
                     }
-                    Ok(SurfaceExpr::new(SurfaceExprKind::StringNew { region, value }, span))
+                    Ok(SurfaceExpr::new(
+                        SurfaceExprKind::StringNew { region, value },
+                        span,
+                    ))
                 }
                 "len" => {
                     let mut arg = None;
@@ -847,9 +964,9 @@ fn parse_atom_expr(pair: pest::iterators::Pair<Rule>) -> Result<SurfaceExpr, Par
                         }
                     }
                     Ok(SurfaceExpr::new(
-                        SurfaceExprKind::StringLen(Box::new(
-                            arg.unwrap_or_else(|| SurfaceExpr::dummy(SurfaceExprKind::Lit(Literal::Unit))),
-                        )),
+                        SurfaceExprKind::StringLen(Box::new(arg.unwrap_or_else(|| {
+                            SurfaceExpr::dummy(SurfaceExprKind::Lit(Literal::Unit))
+                        }))),
                         span,
                     ))
                 }
@@ -862,37 +979,83 @@ fn parse_atom_expr(pair: pest::iterators::Pair<Rule>) -> Result<SurfaceExpr, Par
 
         Rule::inl_expr => {
             let mut parts = inner.into_inner();
-            let ty = parse_type(parts.next().ok_or_else(|| ParseError::missing("inl type"))?)?;
-            let value = parse_expression(parts.next().ok_or_else(|| ParseError::missing("inl value"))?)?;
-            Ok(SurfaceExpr::new(SurfaceExprKind::Inl { ty, value: Box::new(value) }, span))
+            let ty = parse_type(
+                parts
+                    .next()
+                    .ok_or_else(|| ParseError::missing("inl type"))?,
+            )?;
+            let value = parse_expression(
+                parts
+                    .next()
+                    .ok_or_else(|| ParseError::missing("inl value"))?,
+            )?;
+            Ok(SurfaceExpr::new(
+                SurfaceExprKind::Inl {
+                    ty,
+                    value: Box::new(value),
+                },
+                span,
+            ))
         }
 
         Rule::inr_expr => {
             let mut parts = inner.into_inner();
-            let ty = parse_type(parts.next().ok_or_else(|| ParseError::missing("inr type"))?)?;
-            let value = parse_expression(parts.next().ok_or_else(|| ParseError::missing("inr value"))?)?;
-            Ok(SurfaceExpr::new(SurfaceExprKind::Inr { ty, value: Box::new(value) }, span))
+            let ty = parse_type(
+                parts
+                    .next()
+                    .ok_or_else(|| ParseError::missing("inr type"))?,
+            )?;
+            let value = parse_expression(
+                parts
+                    .next()
+                    .ok_or_else(|| ParseError::missing("inr value"))?,
+            )?;
+            Ok(SurfaceExpr::new(
+                SurfaceExprKind::Inr {
+                    ty,
+                    value: Box::new(value),
+                },
+                span,
+            ))
         }
 
         Rule::borrow_expr => {
             let inner_expr = parse_unary_expr(
-                inner.into_inner().next().ok_or_else(|| ParseError::missing("borrow"))?,
+                inner
+                    .into_inner()
+                    .next()
+                    .ok_or_else(|| ParseError::missing("borrow"))?,
             )?;
-            Ok(SurfaceExpr::new(SurfaceExprKind::Borrow(Box::new(inner_expr)), span))
+            Ok(SurfaceExpr::new(
+                SurfaceExprKind::Borrow(Box::new(inner_expr)),
+                span,
+            ))
         }
 
         Rule::drop_expr => {
             let inner_expr = parse_expression(
-                inner.into_inner().next().ok_or_else(|| ParseError::missing("drop"))?,
+                inner
+                    .into_inner()
+                    .next()
+                    .ok_or_else(|| ParseError::missing("drop"))?,
             )?;
-            Ok(SurfaceExpr::new(SurfaceExprKind::Drop(Box::new(inner_expr)), span))
+            Ok(SurfaceExpr::new(
+                SurfaceExprKind::Drop(Box::new(inner_expr)),
+                span,
+            ))
         }
 
         Rule::copy_expr => {
             let inner_expr = parse_expression(
-                inner.into_inner().next().ok_or_else(|| ParseError::missing("copy"))?,
+                inner
+                    .into_inner()
+                    .next()
+                    .ok_or_else(|| ParseError::missing("copy"))?,
             )?;
-            Ok(SurfaceExpr::new(SurfaceExprKind::Copy(Box::new(inner_expr)), span))
+            Ok(SurfaceExpr::new(
+                SurfaceExprKind::Copy(Box::new(inner_expr)),
+                span,
+            ))
         }
 
         Rule::construct_expr => parse_construct_expr(inner),
@@ -944,7 +1107,10 @@ fn parse_atom_expr(pair: pest::iterators::Pair<Rule>) -> Result<SurfaceExpr, Par
 
         Rule::variable => {
             let name = parse_identifier(
-                inner.into_inner().next().ok_or_else(|| ParseError::missing("variable name"))?,
+                inner
+                    .into_inner()
+                    .next()
+                    .ok_or_else(|| ParseError::missing("variable name"))?,
             );
             Ok(SurfaceExpr::new(SurfaceExprKind::Var(name), span))
         }
@@ -1109,13 +1275,19 @@ fn parse_type_atom(pair: pest::iterators::Pair<Rule>) -> Result<SurfaceTy, Parse
         }
         Rule::borrow_ty => {
             let inner_ty = parse_type_atom(
-                inner.into_inner().next().ok_or_else(|| ParseError::missing("borrow inner"))?,
+                inner
+                    .into_inner()
+                    .next()
+                    .ok_or_else(|| ParseError::missing("borrow inner"))?,
             )?;
             Ok(SurfaceTy::Borrow(Box::new(inner_ty)))
         }
         Rule::list_ty => {
             let elem_ty = parse_type(
-                inner.into_inner().next().ok_or_else(|| ParseError::missing("list element type"))?,
+                inner
+                    .into_inner()
+                    .next()
+                    .ok_or_else(|| ParseError::missing("list element type"))?,
             )?;
             Ok(SurfaceTy::List(Box::new(elem_ty)))
         }
@@ -1130,7 +1302,9 @@ fn parse_type_atom(pair: pest::iterators::Pair<Rule>) -> Result<SurfaceTy, Parse
         Rule::named_ty => {
             let mut parts = inner.into_inner();
             let name = parse_constructor_name(
-                parts.next().ok_or_else(|| ParseError::missing("type name"))?,
+                parts
+                    .next()
+                    .ok_or_else(|| ParseError::missing("type name"))?,
             );
             let mut args = Vec::new();
             for p in parts {
@@ -1150,7 +1324,10 @@ fn parse_type_atom(pair: pest::iterators::Pair<Rule>) -> Result<SurfaceTy, Parse
         }
         Rule::type_var => {
             let name = parse_identifier(
-                inner.into_inner().next().ok_or_else(|| ParseError::missing("type var"))?,
+                inner
+                    .into_inner()
+                    .next()
+                    .ok_or_else(|| ParseError::missing("type var"))?,
             );
             Ok(SurfaceTy::Var(name))
         }
@@ -1182,12 +1359,10 @@ fn parse_base_ty(pair: pest::iterators::Pair<Rule>) -> Result<SurfaceTy, ParseEr
         "F32" => Ok(SurfaceTy::Base(BaseTy::F32)),
         "F64" => Ok(SurfaceTy::Base(BaseTy::F64)),
         _ => {
-            // Check inner (for unit_ty rule)
-            if pair.into_inner().any(|p| p.as_rule() == Rule::unit_ty) {
-                Ok(SurfaceTy::Base(BaseTy::Unit))
-            } else {
-                Ok(SurfaceTy::Base(BaseTy::Unit))
-            }
+            // Fallback: treat unknown type text as Unit
+            // (covers unit_ty rule and any unrecognised fragments)
+            let _ = pair.into_inner(); // consume inner pairs
+            Ok(SurfaceTy::Base(BaseTy::Unit))
         }
     }
 }

@@ -870,7 +870,7 @@ fn unescape_string(s: String) -> String {
     chars.next();
     let mut out = String::new();
     let mut escape = false;
-    while let Some(c) = chars.next() {
+    for c in chars {
         if escape {
             out.push(match c {
                 'n' => '\n',

@@ -248,13 +248,16 @@ impl Environment {
     }
 }
 
+/// Function definition: (parameters, return type, body expression).
+type FnDef = (Vec<(Var, Ty)>, Ty, Expr);
+
 /// Interpreter state
 pub struct Interpreter {
     env: Environment,
     /// Active regions stack
     regions: Vec<RegionName>,
     /// Function definitions
-    functions: HashMap<Var, (Vec<(Var, Ty)>, Ty, Expr)>,
+    functions: HashMap<Var, FnDef>,
     /// Loaded native libraries for FFI (dlopen handles).
     /// Libraries are kept alive for the lifetime of the interpreter.
     ffi_libraries: Vec<libloading::Library>,
@@ -292,7 +295,8 @@ impl Interpreter {
     fn find_ffi_symbol<'a>(
         &'a self,
         name: &str,
-    ) -> Option<libloading::Symbol<'a, unsafe extern "C" fn(i64, i64, i64, i64, i64, i64) -> i64>> {
+    ) -> Option<libloading::Symbol<'a, unsafe extern "C" fn(i64, i64, i64, i64, i64, i64) -> i64>>
+    {
         for lib in &self.ffi_libraries {
             if let Ok(sym) = unsafe { lib.get(name.as_bytes()) } {
                 return Some(sym);

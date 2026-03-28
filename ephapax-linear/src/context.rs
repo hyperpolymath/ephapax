@@ -104,6 +104,7 @@ impl Context {
     }
 
     /// Get all bindings (for scope-exit checks).
+    #[allow(dead_code)]
     pub fn all_bindings(&self) -> impl Iterator<Item = (&Var, &Binding)> {
         self.bindings
             .iter()
@@ -142,9 +143,7 @@ impl Context {
     pub fn snapshot_consumption(&self) -> HashMap<Var, bool> {
         self.bindings
             .iter()
-            .filter_map(|(name, stack)| {
-                stack.last().map(|b| (name.clone(), b.consumed))
-            })
+            .filter_map(|(name, stack)| stack.last().map(|b| (name.clone(), b.consumed)))
             .collect()
     }
 

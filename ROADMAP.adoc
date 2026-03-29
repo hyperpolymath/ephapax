@@ -1,0 +1,97 @@
+// SPDX-License-Identifier: PMPL-1.0-or-later
+// SPDX-FileCopyrightText: 2026 Jonathan D.A. Jewell
+:toc: macro
+:toclevels: 2
+:icons: font
+
+= Ephapax Roadmap
+
+_Linear-type language with dual formalisation (Coq + Idris2) targeting WebAssembly._
+
+toc::[]
+
+== Current State
+
+Ephapax is an early-development linear-type language implemented across 19 Rust crates
+with a two-phase compiler pipeline (Idris2 type-checking -> Rust/WASM backend). The core
+type system design, lexer, parser, interpreter, REPL, and CLI are complete. The type
+checker and WASM code generation are in progress.
+
+**Dual formalisation status:**
+
+* **Coq** (`formal/`): `no_leaks` (Qed), `memory_safety` (Qed), `progress` (92%),
+  `preservation` (50%). Three `Admitted` proofs remain: `ctx_transfer` (15/24 cases),
+  `subst_lemma`, `preservation`.
+* **Idris2** (`src/formal/`): `noEscapeTheorem`, `regionSafetyTheorem`, `noGCTheorem`,
+  `orthogonalityLemma` -- all complete with zero unsafe patterns.
+
+**Interpreter:** Environment-leak fix applied (2026-03-28). Proofs chain and effects
+chain are sound.
+
+== v0.1.0 -- Core Language (In Progress)
+
+* [x] Core type system design (affine + linear modes)
+* [x] Lexer (logos-based tokenizer)
+* [x] Parser (chumsky-based)
+* [x] Tree-walking interpreter with env-leak fix
+* [x] REPL
+* [x] CLI (`ephapax-cli`)
+* [x] Coq formalisation: `no_leaks` proof (Qed)
+* [x] Coq formalisation: `memory_safety` proof (Qed)
+* [x] Idris2 formalisation: all four theorems complete
+* [x] S-expression IR (`ephapax-ir`)
+* [x] Two-phase pipeline: Idris2 type-check -> Rust WASM backend
+* [x] Zig FFI token buffer (`Ephapax.Parse.ZigBuffer`)
+* [x] Conformance test suite (pass/fail cases)
+* [ ] Type checker completion (`ephapax-typing`)
+* [ ] WASM code generation: lambda/app compilation (closure conversion)
+* [ ] Coq: close `ctx_transfer` proof (9 remaining cases of 24)
+* [ ] Coq: close `subst_lemma` proof
+* [ ] Coq: close `preservation` proof (currently 50%)
+* [ ] Coq: `progress` proof completion (currently 92%)
+
+== v0.2.0 -- Backend Maturity
+
+* [ ] Closure conversion for WASM backend
+* [ ] Native backend via Cranelift
+* [ ] Region-based allocation in WASM linear memory
+* [ ] Bulk deallocation on region exit
+* [ ] Standard library foundation (`ephapax-stdlib`)
+* [ ] Surface syntax desugaring pipeline (`ephapax-desugar`)
+* [ ] Package system (`ephapax-package`)
+* [ ] LSP server (`ephapax-lsp`) -- basic diagnostics
+
+== v0.3.0 -- PipeWire Proving Ground
+
+PipeWire filter node as a real-world validation of linear types for audio buffer management.
+
+* [ ] PipeWire filter node implementation in Ephapax
+* [ ] Linear buffer types proving zero-copy audio safety
+* [ ] Real-time constraints validation (no GC pauses)
+* [ ] Integration with AmbientOps audio pipeline
+
+== v0.4.0 -- Tooling and Ecosystem
+
+* [ ] Tree-sitter grammar (`editors/tree-sitter-ephapax`) integration with editors
+* [ ] LSP server -- full features (hover, go-to-definition, completions)
+* [ ] Documentation generator (`ephapax-doc`)
+* [ ] VRAM cache for GPU-side linear resources (`ephapax-vram-cache`)
+* [ ] Static analysis module (`ephapax-analysis`)
+* [ ] Error recovery in parser for IDE use
+
+== v1.0.0 -- Production Ready
+
+* [ ] All Coq `Admitted` proofs closed (zero remaining)
+* [ ] Full `preservation` and `progress` proofs (Qed)
+* [ ] Stable surface syntax (already locked, but confirm no changes needed)
+* [ ] Comprehensive standard library
+* [ ] Cross-platform WASM + native compilation
+* [ ] Performance benchmarks vs Rust/C for linear workloads
+* [ ] Published language specification (`spec/`)
+
+== Long-Term
+
+* [ ] Session-sentinel integration (Ephapax rewrite of session management)
+* [ ] Gossamer integration for UI applications
+* [ ] IDApTIK migration from current stack to Ephapax where linear types add value
+* [ ] Self-hosting: Ephapax compiler written in Ephapax

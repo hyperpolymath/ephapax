@@ -804,11 +804,49 @@ Admitted.
    lemmas needed. Each follows the same pattern — extract consumption
    from the IH chain. This is down from 24 unsolved to ~9 mechanical admits. *)
 
+(** ** Value Context Preservation
+
+    Values do not consume linear resources — their output context
+    equals their input context. This is crucial for the substitution
+    lemma: substituting a value doesn't disturb the context. *)
+
+Lemma value_context_unchanged :
+  forall R G v T G',
+    R; G |- v : T -| G' ->
+    is_value v ->
+    G' = G.
+Proof.
+  intros R G v T G' Htype Hval.
+  generalize dependent G'. generalize dependent T. generalize dependent G.
+  generalize dependent R.
+  induction Hval; intros Rx Gx Tx G'x Htype; inversion Htype; subst; try reflexivity.
+  (* VPair *)
+  - rename H3 into Ht1.
+    match goal with [ H : Rx; _ |- v2 : _ -| _ |- _ ] => rename H into Ht2 end.
+    assert (IH1 := IHHval1 _ _ _ _ Ht1). assert (IH2 := IHHval2 _ _ _ _ Ht2).
+    congruence.
+  (* VInl *)
+  - eapply IHHval. eassumption.
+  (* VInr *)
+  - eapply IHHval. eassumption.
+Qed.
+
 (** ** Substitution Lemma
 
     The key lemma for preservation's reduction cases.
     If e types in extended context (T1,false)::G and v types as T1 from G,
-    then subst 0 v e types from G_v (the output of typing v). *)
+    then subst 0 v e types from G_v (the output of typing v).
+
+    PROOF STRATEGY: Induction on the typing derivation of e, with the
+    context shape abstracted via [remember]. Many cases are vacuous because
+    the output context must have (T1,true) at position 0, which contradicts
+    rules where position 0 stays unchanged.
+
+    NON-BINDING cases (values, variables, non-binding compounds) are
+    handled directly. BINDING cases (Let, LetLin, Lam, Case) require
+    a generalized version at arbitrary depth k, because substitution under
+    a binder increments the index: subst 0 v (ELet e1 e2) involves
+    subst 1 (shift 0 1 v) e2. *)
 
 Lemma subst_preserves_typing :
   forall R G e T2 G' T1 v G_v,
@@ -816,10 +854,122 @@ Lemma subst_preserves_typing :
     R; G |- v : T1 -| G_v ->
     is_value v ->
     exists G_out, R; G_v |- subst 0 v e : T2 -| G_out.
+Proof.
+  intros R G e T2 G' T1 v G_v Htype Hv Hval.
+  remember ((T1, false) :: G) as Gin eqn:HeqIn.
+  remember ((T1, true) :: G') as Gout eqn:HeqOut.
+  revert G G' T1 v G_v HeqIn HeqOut Hv Hval.
+  induction Htype; intros G0 G0' T1' v0 G_v0 HeqIn HeqOut Hv0 Hval0;
+    subst.
+
+  (* T_Unit: output = input, so (T1',false)::G0 = (T1',true)::G0' — false≠true *)
+  - injection HeqOut as Hf _. congruence.
+
+  (* T_Bool: same contradiction *)
+  - injection HeqOut as Hf _. congruence.
+
+  (* T_I32: same contradiction *)
+  - injection HeqOut as Hf _. congruence.
+
+  (* T_Var_Lin: ctx_mark_used at i *)
+  - destruct i.
+    + (* i = 0: EVar 0 → subst gives v0. Lookup at 0 gives T1'. *)
+      simpl. unfold ctx_lookup in H. simpl in H.
+      (* H : Some (T1', false) = Some (T, false) *)
+      assert (T = T1') by congruence. subst T.
+      (* Values don't change context *)
+      assert (HG: G_v0 = G0) by (eapply value_context_unchanged; eassumption).
+      subst G_v0.
+      (* ctx_mark_used at 0 gives (T1',true)::G0, matching HeqOut *)
+      simpl in HeqOut.
+      assert (G0' = G0) by congruence. subst G0'.
+      eexists. exact Hv0.
+    + (* i > 0: mark_used at S i leaves index 0 as (T1',false).
+         Output has (T1',false) at 0, contradicts (T1',true). *)
+      simpl in HeqOut.
+      injection HeqOut as Hf _.
+      congruence.
+
+  (* T_Var_Unr: output = input, same false≠true contradiction *)
+  - injection HeqOut as Hf _. congruence.
+
+  (* T_Loc: output = input *)
+  - injection HeqOut as Hf _. congruence.
+
+  (* T_StringNew: output = input *)
+  - injection HeqOut as Hf _. congruence.
+
+  (* T_StringConcat: e1 then e2, output threads through *)
+  - simpl.
+    (* e1 types from (T1',false)::G0 to G', e2 types from G' to (T1',true)::G0'.
+       IH for e2 needs G' to have shape (T1',?)::... — but we don't know that.
+       Actually: IHHtype1 and IHHtype2 both require the output to be (T1',true)::G0'.
+       IHHtype2 has output = (T1',true)::G0' which matches.
+       IHHtype1 has output = G' which may not match.
+       We need the intermediate context G' to thread the substitution. *)
+    admit. (* Compound case: needs context threading through IHs *)
+
+  (* T_StringLen *)
+  - simpl. admit. (* Similar compound case *)
+
+  (* T_Let: binding case — needs generalized lemma at depth 1 *)
+  - simpl. admit.
+
+  (* T_LetLin: binding case *)
+  - simpl. admit.
+
+  (* T_Lam: output = input, false≠true contradiction *)
+  - injection HeqOut as Hf _. congruence.
+
+  (* T_App: compound case *)
+  - simpl. admit.
+
+  (* T_Pair: compound case *)
+  - simpl. admit.
+
+  (* T_Fst *)
+  - simpl. admit.
+
+  (* T_Snd *)
+  - simpl. admit.
+
+  (* T_Inl *)
+  - simpl. admit.
+
+  (* T_Inr *)
+  - simpl. admit.
+
+  (* T_Case: binding case *)
+  - simpl. admit.
+
+  (* T_If: compound case *)
+  - simpl. admit.
+
+  (* T_Region *)
+  - simpl. admit.
+
+  (* T_Borrow: output = input, false≠true contradiction *)
+  - injection HeqOut as Hf _. congruence.
+
+  (* T_Drop *)
+  - simpl. admit.
+
+  (* T_Copy *)
+  - simpl. admit.
 Admitted.
-(* TODO: Induction on e's typing derivation. Standard for De Bruijn typed calculi.
-   Key cases: T_Var at index 0 (replaced by v), T_Var at index >0 (shifted down),
-   compound rules (chain through sub-derivations with shifted substitution). *)
+(* REMAINING WORK for full Qed:
+   1. Compound non-binding cases (StringConcat, App, Pair, If, etc.):
+      Need to split the context threading — e1 consumes part, e2 consumes the rest.
+      The IH applies to whichever sub-expression actually consumes index 0.
+      Need a lemma: if R; (T1,false)::G |- e : T -| G_mid and G_mid has (T1,false)
+      at index 0, then e doesn't touch index 0, so subst 0 v e = e (modulo shift).
+   2. Binding cases (Let, LetLin, Case):
+      Need generalized lemma: subst_preserves_typing_gen at depth k.
+      Under a binder, subst 0 becomes subst 1 with shifted value.
+   3. Single-subexpr cases (Fst, Snd, Inl, Inr, Drop, Copy, Region):
+      Straightforward once the IH is correctly applied.
+   Key helper needed: shift_preserves_typing — shifting a well-typed value
+   preserves its typing in an extended context. *)
 
 (** Helper: types_agree and false_preserved are reflexive *)
 Lemma ctx_types_agree_refl : forall G, ctx_types_agree G G.

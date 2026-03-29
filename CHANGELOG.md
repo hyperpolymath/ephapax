@@ -5,6 +5,20 @@ All notable changes to Ephapax are documented here.
 
 ## [Unreleased]
 
+### Added
+- `module Qualified.Name` declarations (dotted module paths)
+- `--` Haskell-style line comments (alongside existing `//` and `/* */`)
+- Qualified names in imports: `import Foo.Bar.Baz`
+- `linear type` and `affine type` modifiers on type definitions
+- `const_decl`: module-level `let NAME = expr` bindings
+- `named_record_type_def`: `Type = Constructor { field: Type, ... }` syntax
+- `->` return type syntax (alongside existing `:`)
+- `region name:` colon syntax (alongside `region name { }`)
+- `Decl::Const` variant in the AST for module-level constants
+
+### Fixed
+- Keyword word-boundary fix: identifiers like `init_result` no longer blocked by `in` keyword match
+
 ### Changed
 - Parser hardened: 80 production unwraps eliminated, proper ParseError propagation
 - License headers: 13 files migrated from EUPL-1.2 to PMPL-1.0-or-later

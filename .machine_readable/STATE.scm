@@ -1,9 +1,9 @@
 ;; SPDX-License-Identifier: PMPL-1.0-or-later
-;; Ephapax project state — updated 2026-03-28
+;; Ephapax project state — updated 2026-03-29
 (state
   (metadata
     (version "0.1.0")
-    (last-session "2026-03-28")
+    (last-session "2026-03-29")
     (agent "claude-opus-4.6"))
 
   (project-context
@@ -29,6 +29,15 @@
         ("effect-type-checking" . "done")
         ("parser-generics-imports" . "done")
         ("parser-perform-handle" . "done")
+        ("parser-qualified-modules" . "done")
+        ("parser-haskell-comments" . "done")
+        ("parser-linear-affine-modifiers" . "done")
+        ("parser-const-decl" . "done")
+        ("parser-named-record-types" . "done")
+        ("parser-arrow-return-syntax" . "done")
+        ("parser-region-colon-syntax" . "done")
+        ("parser-keyword-word-boundary" . "done")
+        ("ast-decl-const-variant" . "done")
         ("formal-flags-only-increase" . "Qed")
         ("formal-ctx-transfer" . "20/24-proved-4-need-consumption-tracking")
         ("formal-subst-lemma" . "needs-ctx-transfer")

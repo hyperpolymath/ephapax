@@ -615,13 +615,12 @@ Proof.
         split.
         -- simpl in Hlen. exact Hlen.
         -- intros j T0 u0 Hj. destruct j; simpl in *.
-           ++ (* j = 0: type is Ta in G1, need type Tb = Ta in G2 *)
+           ++ (* j = 0: mark_used at 0 gives (Ta,true). Hj says T0=Ta, u0=true. *)
+              assert (T0 = Ta) by congruence. subst T0.
               destruct (Hlk 0 Ta ua) as [u' Hu']. { simpl. reflexivity. }
               simpl in Hu'.
-              assert (HTeq: Tb = Ta).
-              { apply (f_equal (fun x => match x with Some (t,_) => t | None => Ta end)) in Hu'.
-                simpl in Hu'. exact Hu'. }
-              subst Tb. admit. (* need: exists u', Some(Ta,true) = Some(Ta,u') *)
+              assert (Tb = Ta) by congruence. subst Tb.
+              eexists. reflexivity.
            ++ destruct (Hlk (S j) T0 u0) as [u' Hu']. { simpl. exact Hj. }
               simpl in Hu'. eexists. exact Hu'.
       * (* i = S i': recurse *)
@@ -637,7 +636,7 @@ Proof.
            ++ destruct (Hlk 0 T0 u0) as [u' Hu']. { simpl. exact Hj. }
               simpl in Hu'. eexists. exact Hu'.
            ++ destruct (Hlk' j T0 u0 Hj) as [u' Hu']. eexists. exact Hu'.
-Admitted. (* 1 trivial admit remaining in i=0,j=0 case *)
+Qed.
 
 Lemma ctx_mark_used_false_preserved :
   forall G1 G2 i,
@@ -645,10 +644,50 @@ Lemma ctx_mark_used_false_preserved :
     ctx_false_preserved (ctx_mark_used G1 i) (ctx_mark_used G2 i).
 Proof.
   unfold ctx_false_preserved.
-  intros G1. induction G1 as [|[Ta ua] G1' IH]; intros G2 i Hfp j Tb Hj.
-Admitted.
-(* Proof structure is correct — blocked by Rocq 9.1.1 discriminate on empty
-   context cases. The non-empty case logic is verified. *)
+  intro G1. induction G1 as [|[Ta ua] G1' IH]; intros G2 i Hfp j Tb Hj.
+  (* G1 = []: ctx_mark_used [] i = []. Lookup in [] gives None. *)
+  - unfold ctx_lookup in Hj. destruct i; destruct j; simpl in Hj; congruence.
+  (* G1 = (Ta,ua)::G1' *)
+  - destruct G2 as [|[Tc uc] G2'].
+    + (* G2 = []: goal is ctx_lookup [] j = Some(Tb,false) i.e. None=Some — absurd.
+         Derive False via case split on j=i vs j≠i. *)
+      exfalso.
+      destruct (Nat.eq_dec j i) as [Heq | Hne].
+      * (* j = i: mark_used at i sets flag to true, but Hj says false *)
+        subst j.
+        (* Use projected lookups to extract the flag contradiction *)
+        destruct (ctx_lookup_split _ _ _ _ Hj) as [_ Hflag_false].
+        assert (Hne: ctx_lookup_flag ((Ta, ua) :: G1') i <> None).
+        { intro Habs. unfold ctx_lookup_flag in Habs.
+          unfold ctx_lookup in Hj.
+          destruct (nth_error ((Ta, ua) :: G1') i) as [[? ?]|] eqn:E.
+          - discriminate.
+          - (* nth_error is None → ctx_mark_used at i also gives None at i *)
+            assert (Hmu: nth_error (ctx_mark_used ((Ta, ua) :: G1') i) i = None).
+            { clear -E. generalize dependent i. induction ((Ta,ua)::G1') as [|[T0 u0] l IHl]; intros.
+              - destruct i; reflexivity.
+              - destruct i; simpl in *.
+                + discriminate.
+                + apply IHl. exact E. }
+            rewrite Hmu in Hj. discriminate. }
+        pose proof (ctx_mark_used_flag_at _ _ Hne) as Htrue.
+        rewrite Htrue in Hflag_false. discriminate.
+      * (* j ≠ i: lookup at j is unchanged by mark_used *)
+        rewrite ctx_mark_used_lookup_other in Hj by (intro; apply Hne; symmetry; assumption).
+        assert (Habs := Hfp j Tb Hj).
+        unfold ctx_lookup in Habs. destruct j; simpl in Habs; discriminate.
+    + destruct i; destruct j; simpl in *.
+      * (* i=0, j=0: mark_used sets flag to true. Hj says flag is false. *)
+        congruence.
+      * (* i=0, j=S j': unchanged at j. Chain through Hfp. *)
+        exact (Hfp (S j) Tb Hj).
+      * (* i=S i', j=0: unchanged at 0. Chain through Hfp. *)
+        exact (Hfp 0 Tb Hj).
+      * (* i=S i', j=S j': recurse on G1' and G2'. *)
+        apply IH with (i := i).
+        intros k T0 Hk. exact (Hfp (S k) T0 Hk).
+        exact Hj.
+Qed.
 
 Lemma ctx_extend_types_agree :
   forall G1 G2 T,
@@ -995,9 +1034,10 @@ Lemma typing_types_agree :
     R; G |- e : T -| G' ->
     ctx_types_agree G' G.
 Proof.
-Proof.
-Admitted. (* Trivial — uses typing_preserves_length + typing_preserves_bindings.
-             String.length/List.length shadowing prevents eapply across modules. *)
+  intros R G e T G' H. split.
+  - exact (typing_preserves_length _ _ _ _ _ H).
+  - intros. eapply typing_preserves_bindings; eassumption.
+Qed.
 
 (** ** Preservation (Strengthened)
 

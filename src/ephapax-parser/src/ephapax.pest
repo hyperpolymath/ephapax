@@ -6,22 +6,34 @@
 // ============================================================================
 
 // Top-level rules
-module = { SOI ~ (import_decl | declaration)* ~ EOI }
+module = { SOI ~ module_decl? ~ (import_decl | declaration)* ~ EOI }
 expression_only = { SOI ~ expression ~ EOI }
+
+// ============================================================================
+// Module Declaration
+// ============================================================================
+
+module_decl = { "module" ~ qualified_name }
+
+// Qualified name: Foo.Bar.Baz
+qualified_name = @{ (ASCII_ALPHA | "_") ~ (ASCII_ALPHANUMERIC | "_" | ".")* }
 
 // ============================================================================
 // Imports
 // ============================================================================
 
 import_decl = {
-    "import" ~ identifier ~ ("(" ~ identifier ~ ("," ~ identifier)* ~ ")")?
+    "import" ~ qualified_name ~ ("(" ~ identifier ~ ("," ~ identifier)* ~ ")")?
 }
 
 // ============================================================================
 // Declarations
 // ============================================================================
 
-declaration = { data_decl | fn_decl | type_decl }
+declaration = { data_decl | fn_decl | type_decl | const_decl }
+
+// Top-level constant binding: let NAME = expr
+const_decl = { "let" ~ identifier ~ (":" ~ ty)? ~ "=" ~ expression }
 
 // Optional "pub" prefix for visibility
 visibility = { "pub" }
@@ -30,7 +42,7 @@ visibility = { "pub" }
 fn_type_params = { "<" ~ identifier ~ ("," ~ identifier)* ~ ">" }
 
 fn_decl = {
-    visibility? ~ "fn" ~ identifier ~ fn_type_params? ~ "(" ~ param_list? ~ ")" ~ ":" ~ ty ~ "=" ~ expression
+    visibility? ~ "fn" ~ identifier ~ fn_type_params? ~ "(" ~ param_list? ~ ")" ~ (":" | "->") ~ ty ~ "=" ~ expression
 }
 
 param_list = { param ~ ("," ~ param)* }
@@ -38,8 +50,13 @@ param_list = { param ~ ("," ~ param)* }
 param = { identifier ~ ":" ~ ty }
 
 type_decl = {
-    visibility? ~ "type" ~ identifier ~ "=" ~ (sum_type_def | record_type_def | ty)
+    visibility? ~ linearity? ~ "type" ~ identifier ~ "=" ~ (named_record_type_def | record_type_def | sum_type_def | ty)
 }
+
+// Named record: TypeName = ConstructorName { field: Type, ... }
+named_record_type_def = { constructor_name ~ "{" ~ record_field ~ ("," ~ record_field)* ~ ","? ~ "}" }
+
+linearity = { "linear" | "affine" }
 
 // Data type declaration: data Option(a) = None | Some(a)
 data_decl = {
@@ -162,7 +179,7 @@ if_expr = {
 }
 
 region_expr = {
-    "region" ~ identifier ~ "{" ~ expression ~ "}"
+    "region" ~ identifier ~ (":" | "{") ~ expression ~ "}"?
 }
 
 case_expr = {
@@ -272,8 +289,8 @@ atom_expr = {
 // Perform an effect operation: perform Op(args...)
 perform_expr = { "perform" ~ identifier ~ ("(" ~ expr_list? ~ ")")? }
 
-// Named constructor: Some(42), None, Ok(value)
-construct_expr = { constructor_name ~ ("(" ~ expr_list? ~ ")")? }
+// Named constructor: Some(42), None, Ok(value), or named record: GsaApp { field = val }
+construct_expr = { constructor_name ~ (("(" ~ expr_list? ~ ")") | ("{" ~ record_field_assign ~ ("," ~ record_field_assign)* ~ ","? ~ "}"))? }
 
 // FFI call: __ffi("symbol_name", arg1, arg2, ...)
 // Calls a C ABI function from a linked shared library.
@@ -333,17 +350,28 @@ escape = @{ "\\" ~ ("n" | "r" | "t" | "\\" | "\"") }
 // ============================================================================
 
 identifier = @{
-    !keyword ~ (ASCII_ALPHA | "_") ~ (ASCII_ALPHANUMERIC | "_")*
+    !keyword_boundary ~ (ASCII_ALPHA | "_") ~ (ASCII_ALPHANUMERIC | "_")*
+}
+
+// Keywords must be followed by a non-identifier character (word boundary)
+keyword_boundary = {
+    ( "let!" | "let" | "in" | "fn" | "if" | "then" | "else"
+    | "region" | "case" | "of" | "inl" | "inr" | "end"
+    | "fst" | "snd" | "drop" | "copy" | "type" | "data" | "match"
+    | "true" | "false" | "pub" | "import" | "module" | "linear"
+    | "perform" | "handle" | "with" | "return" | "resume" | "once" | "multi"
+    | "Bool" | "I32" | "I64" | "F32" | "F64" | "String"
+    ) ~ !(ASCII_ALPHANUMERIC | "_")
 }
 
 keyword = {
     "let" | "let!" | "in" | "fn" | "if" | "then" | "else"
     | "region" | "case" | "of" | "inl" | "inr" | "end"
     | "fst" | "snd" | "drop" | "copy" | "type" | "data" | "match"
-    | "true" | "false" | "pub" | "import"
+    | "true" | "false" | "pub" | "import" | "module" | "linear"
     | "perform" | "handle" | "with" | "return" | "resume" | "once" | "multi"
     | "Bool" | "I32" | "I64" | "F32" | "F64" | "String"
 }
 
 WHITESPACE = _{ " " | "\t" | "\n" | "\r" }
-COMMENT = _{ "//" ~ (!"\n" ~ ANY)* | "/*" ~ (!"*/" ~ ANY)* ~ "*/" }
+COMMENT = _{ "--" ~ (!"\n" ~ ANY)* | "//" ~ (!"\n" ~ ANY)* | "/*" ~ (!"*/" ~ ANY)* ~ "*/" }

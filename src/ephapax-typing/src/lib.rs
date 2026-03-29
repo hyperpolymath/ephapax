@@ -1364,6 +1364,11 @@ impl ModuleRegistry {
                 } => {
                     entries.push((name.clone(), ty.clone(), *visibility));
                 }
+                Decl::Const { name, ty, value: _ } => {
+                    // Constants are module-level values; add with inferred or annotated type
+                    let const_ty = ty.clone().unwrap_or(Ty::Base(BaseTy::Unit));
+                    entries.push((name.clone(), const_ty, Visibility::Private));
+                }
             }
         }
         self.modules.insert(module.name.clone(), entries);
@@ -1510,6 +1515,7 @@ fn type_check_module_inner(
                 tc.unif_solutions.clear();
             }
             Decl::Type { .. } => {}
+            Decl::Const { .. } => {} // Constants are handled in module registration
         }
     }
 

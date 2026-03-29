@@ -572,6 +572,13 @@ pub enum Decl {
         visibility: Visibility,
         ty: Ty,
     },
+
+    /// Module-level constant binding: `let NAME = expr`
+    Const {
+        name: Var,
+        ty: Option<Ty>,
+        value: Expr,
+    },
 }
 
 /// Helper for serde skip_serializing_if.

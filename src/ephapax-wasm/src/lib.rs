@@ -597,6 +597,7 @@ impl Codegen {
                     idx += 1;
                 }
                 Decl::Type { .. } => { /* type aliases are erased at runtime */ }
+                Decl::Const { .. } => { /* constants inlined at compile time */ }
             }
         }
         Ok(())
@@ -868,6 +869,7 @@ impl Codegen {
                     code_sec.function(&func);
                 }
                 Decl::Type { .. } => {}
+                Decl::Const { .. } => {} // constants inlined
             }
         }
         Ok(())

@@ -271,6 +271,12 @@ fn decl_to_sexpr(decl: &Decl) -> SExpr {
             SExpr::Atom(escape_atom(name)),
             ty_to_sexpr(ty),
         ]),
+        Decl::Const { name, ty, value } => SExpr::List(vec![
+            SExpr::Atom("const".into()),
+            SExpr::Atom(escape_atom(name)),
+            ty.as_ref().map(ty_to_sexpr).unwrap_or(SExpr::Atom("_".into())),
+            expr_to_sexpr(value),
+        ]),
     }
 }
 

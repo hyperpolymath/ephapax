@@ -68,9 +68,16 @@ pub fn parse_module(source: &str, name: &str) -> Result<Module, Vec<ParseError>>
         .ok_or_else(|| vec![ParseError::unexpected_end("module")])?;
     let mut decls = Vec::new();
     let mut imports = Vec::new();
+    let mut module_name = SmolStr::new(name);
 
     for inner in pair.into_inner() {
         match inner.as_rule() {
+            Rule::module_decl => {
+                // Extract qualified name from `module Foo.Bar.Baz`
+                if let Some(qn) = inner.into_inner().next() {
+                    module_name = SmolStr::new(qn.as_str());
+                }
+            }
             Rule::declaration => {
                 decls.push(parse_declaration(inner).map_err(|e| vec![e])?);
             }
@@ -82,7 +89,7 @@ pub fn parse_module(source: &str, name: &str) -> Result<Module, Vec<ParseError>>
     }
 
     Ok(Module {
-        name: SmolStr::new(name),
+        name: module_name,
         imports,
         decls,
     })
@@ -107,11 +114,12 @@ fn parse_identifier(pair: pest::iterators::Pair<Rule>) -> SmolStr {
 
 fn parse_import(pair: pest::iterators::Pair<Rule>) -> Result<Import, ParseError> {
     let mut inner = pair.into_inner();
-    let module_name = parse_identifier(
-        inner
-            .next()
-            .ok_or_else(|| ParseError::missing("module name"))?,
-    );
+    let module_name_pair = inner
+        .next()
+        .ok_or_else(|| ParseError::missing("module name"))?;
+
+    // Module name is now a qualified_name (e.g., "GSA.Core.Types")
+    let module_name = SmolStr::new(module_name_pair.as_str());
 
     let mut names = Vec::new();
     for item in inner {
@@ -135,6 +143,8 @@ fn parse_declaration(pair: pest::iterators::Pair<Rule>) -> Result<Decl, ParseErr
     match inner.as_rule() {
         Rule::fn_decl => parse_fn_decl(inner),
         Rule::type_decl => parse_type_decl(inner),
+        Rule::data_decl => parse_type_decl(inner), // data decls are a form of type decl
+        Rule::const_decl => parse_const_decl(inner),
         _ => Err(ParseError::Syntax {
             message: format!("Unexpected declaration: {:?}", inner.as_rule()),
             span: span_from_pair(&inner),
@@ -207,6 +217,34 @@ fn parse_fn_decl(pair: pest::iterators::Pair<Rule>) -> Result<Decl, ParseError> 
     })
 }
 
+fn parse_const_decl(pair: pest::iterators::Pair<Rule>) -> Result<Decl, ParseError> {
+    let mut inner = pair.into_inner();
+    let mut name = None;
+    let mut ty = None;
+    let mut value = None;
+
+    for item in &mut inner {
+        match item.as_rule() {
+            Rule::identifier if name.is_none() => {
+                name = Some(parse_identifier(item));
+            }
+            Rule::ty => {
+                ty = Some(parse_type(item)?);
+            }
+            Rule::expression => {
+                value = Some(parse_expression(item)?);
+            }
+            _ => {}
+        }
+    }
+
+    Ok(Decl::Const {
+        name: name.unwrap_or_else(|| SmolStr::new("_")),
+        ty,
+        value: value.unwrap_or_else(|| Expr::dummy(ExprKind::Lit(Literal::Unit))),
+    })
+}
+
 fn parse_type_decl(pair: pest::iterators::Pair<Rule>) -> Result<Decl, ParseError> {
     let mut inner = pair.into_inner();
     let mut visibility = Visibility::Private;
@@ -216,6 +254,10 @@ fn parse_type_decl(pair: pest::iterators::Pair<Rule>) -> Result<Decl, ParseError
         match item.as_rule() {
             Rule::visibility => {
                 visibility = Visibility::Public;
+            }
+            Rule::linearity => {
+                // Record linearity for future use (type system)
+                // For now, just skip it during parsing
             }
             Rule::identifier => {
                 name = Some(parse_identifier(item));
@@ -233,6 +275,7 @@ fn parse_type_decl(pair: pest::iterators::Pair<Rule>) -> Result<Decl, ParseError
     let ty = match ty_or_def.as_rule() {
         Rule::sum_type_def => parse_sum_type_def(ty_or_def)?,
         Rule::record_type_def => parse_record_type_def(ty_or_def)?,
+        Rule::named_record_type_def => parse_record_type_def(ty_or_def)?, // constructor name skipped
         Rule::ty => parse_type(ty_or_def)?,
         _ => {
             return Err(ParseError::Syntax {

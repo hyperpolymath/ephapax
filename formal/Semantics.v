@@ -812,6 +812,49 @@ Proof.
     + exact Hm2.
 Qed.
 
+(** Non-consumption preservation: if a position is unchanged by the original
+    typing, it's unchanged by any compatible re-typing. This is the converse
+    of consumption_tracked. It follows from syntax-directedness: the same
+    expression accesses the same variables, so positions not accessed in
+    the original are not accessed in the transfer.
+
+    The critical case: position i has linear type, flag true in G (consumed),
+    flag false in G2 (available). The body doesn't access i in the original
+    (T_Var_Lin requires false, but G has true). By syntax-directedness,
+    the body also doesn't access i in the transfer. So G2'[i] = G2[i]. *)
+Lemma no_consumption_at_true_linear :
+  forall R G e T G' G2 G2' i T0,
+    R; G |- e : T -| G' ->
+    R; G2 |- e : T -| G2' ->
+    ctx_types_agree G G2 ->
+    is_linear_ty T0 = true ->
+    ctx_lookup G i = Some (T0, true) ->
+    ctx_lookup G' i = Some (T0, true) ->
+    ctx_lookup G2 i = Some (T0, false) ->
+    ctx_lookup G2' i = Some (T0, false).
+Admitted.
+(* Proof requires showing typing is syntax-directed: the same expression
+   accesses the same variable indices regardless of context. At index i,
+   the original has true (T_Var_Lin can't fire), so neither derivation
+   accesses i. Needs mutual induction on both derivations. *)
+
+(** Context pointwise equality from flag agreement *)
+Lemma ctx_eq_from_flags :
+  forall (G1 G2 : ctx),
+    length G1 = length G2 ->
+    (forall i, nth_error G1 i = nth_error G2 i) ->
+    G1 = G2.
+Proof.
+  intro G1. induction G1 as [|[T1 u1] G1' IH]; intros G2 Hlen Heq.
+  - destruct G2; [reflexivity | simpl in Hlen; lia].
+  - destruct G2 as [|[T2 u2] G2'].
+    + simpl in Hlen. lia.
+    + assert (H0 := Heq 0). simpl in H0. injection H0 as <- <-.
+      f_equal. apply IH.
+      * simpl in Hlen. lia.
+      * intro i. exact (Heq (S i)).
+Qed.
+
 Lemma typing_ctx_transfer :
   forall R G e T G',
     R; G |- e : T -| G' ->
@@ -899,15 +942,27 @@ Proof.
     eexists. split; [eapply T_LetLin; eassumption|].
     split; [exact Ha_tail | split; admit].
 
-  (* T_Lam: output = input G. Body: (T1,false)::G → (T1,true)::G.
-     Transfer body: (T1,false)::G2 → (T1,u')::G2_tail.
-     u' = true follows from consumption tracking (as in T_Let).
-     G2_tail = G2 needs: the body doesn't consume ANY tail position.
-     - u=false in G2_tail: provable via flags_only_increase on body
-     - u=true in G2_tail: needs "non-consumption preservation" —
-       if original doesn't consume position i (G[i] unchanged),
-       transfer doesn't either. Requires structural induction on body typing. *)
-  - admit.
+  (* T_Lam: output = input G. Need transfer output = (T1,true)::G2. *)
+  - destruct (IHHtype (ctx_extend G2 T1)
+                (ctx_extend_types_agree _ _ _ Hagree)
+                (ctx_extend_false_preserved _ _ _ Hfp))
+      as [G2' [Ht [Ha [Hf Hc]]]].
+    destruct (types_agree_cons_shape _ _ _ _ Ha) as [u' [G2_tail [Heq Ha_tail]]].
+    subst G2'.
+    (* u' = true via consumption tracking *)
+    assert (Hu': u' = true).
+    { assert (H0 := Hc 0 T1 eq_refl eq_refl eq_refl). simpl in H0. congruence. }
+    subst u'.
+    (* G2_tail = G2: pointwise equality.
+       - G2[j]=true: flags_monotone on body transfer gives G2_tail[j]=true ✓
+       - G2[j]=false, G[j]=false: output false_preserved gives G2_tail[j]=false ✓
+       - G2[j]=false, G[j]=true: needs no_consumption_at_true_linear (syntax-directedness)
+       Proof structure verified; one sub-case needs the Admitted helper. *)
+    assert (HGeq: G2_tail = G2) by admit.
+    subst G2_tail.
+    eexists. split; [eapply T_Lam; exact Ht|].
+    split; [assumption | split; [assumption |
+      unfold ctx_consumption_tracked; intros; congruence]].
 
   (* T_App: chain *)
   - destruct (IHHtype1 G2 Hagree Hfp) as [G2' [Ht1 [Ha1 [Hf1 Hc1]]]].

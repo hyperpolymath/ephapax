@@ -899,9 +899,14 @@ Proof.
     eexists. split; [eapply T_LetLin; eassumption|].
     split; [exact Ha_tail | split; admit].
 
-  (* T_Lam: output = input G. Body types in extended ctx with output (T1,true)::G.
-     Transfer gives (T1,true)::G2_tail, but T_Lam needs output = (T1,true)::G2.
-     This requires G2_tail = G2, which needs typing output determinism. *)
+  (* T_Lam: output = input G. Body: (T1,false)::G → (T1,true)::G.
+     Transfer body: (T1,false)::G2 → (T1,u')::G2_tail.
+     u' = true follows from consumption tracking (as in T_Let).
+     G2_tail = G2 needs: the body doesn't consume ANY tail position.
+     - u=false in G2_tail: provable via flags_only_increase on body
+     - u=true in G2_tail: needs "non-consumption preservation" —
+       if original doesn't consume position i (G[i] unchanged),
+       transfer doesn't either. Requires structural induction on body typing. *)
   - admit.
 
   (* T_App: chain *)

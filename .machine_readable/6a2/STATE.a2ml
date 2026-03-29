@@ -5,10 +5,20 @@
 [metadata]
 project = "ephapax"
 version = "0.1.0"
-last-updated = "2026-03-22"
+last-updated = "2026-03-29"
 status = "active"
 
 [project-context]
 name = "ephapax"
-completion-percentage = 5
-phase = "concept"
+completion-percentage = 45
+phase = "implementation"
+description = "Linear type system compiler — 15 crates, 229 tests, formal proofs compiling"
+
+[formal-proofs]
+rocq-version = "9.1.1"
+compiles-clean = true
+qed-count = 27
+admitted-count = 4
+abort-count = 1
+# Admitted: ctx_mark_used_false_preserved (1 case), typing_ctx_transfer, subst_preserves_typing, preservation
+# Key win: flags_only_increase now fully Qed (was Admitted)

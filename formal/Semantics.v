@@ -566,7 +566,7 @@ Lemma ctx_mark_used_lookup_other :
     ctx_lookup (ctx_mark_used G i) j = ctx_lookup G j.
 Proof.
   induction G as [|[T0 u0] G' IH]; intros i j Hne.
-  - simpl. destruct i; destruct j; reflexivity.
+  - unfold ctx_lookup. destruct i; destruct j; reflexivity.
   - destruct i; destruct j; simpl.
     + exfalso. apply Hne. reflexivity.
     + reflexivity.
@@ -799,9 +799,6 @@ Proof.
   - destruct (IHHtype G2 Hagree Hfp) as [G2' [Ht [Ha Hf]]].
     eexists. split; [econstructor; eassumption|]. split; assumption.
 Admitted.
-(* 22 of 24 cases fully proved. T_Case and T_If remain:
-   both need typing output uniqueness — that the transfer produces
-   the same output for expressions that originally typed to the same G''. *)
 (* Remaining admits in T_Var_Lin, T_StringConcat, T_Let, T_LetLin, T_Lam,
    T_App, T_Pair, T_Case, T_If: consumption tracking and context shape
    lemmas needed. Each follows the same pattern — extract consumption

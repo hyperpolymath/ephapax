@@ -760,13 +760,17 @@ Proof.
   - destruct (IHHtype G2 Hagree Hfp) as [G2' [Ht [Ha Hf]]].
     eexists. split; [econstructor; exact Ht|]. split; assumption.
 
-  (* T_Let — needs consumption tracking in transfer conclusion *)
+  (* T_Let — IHs give transferred sub-derivations, but T_Let requires
+     (T1,true) at position 0 in body output. Transfer preserves false flags
+     but doesn't guarantee true flags. Needs: strengthen conclusion to also
+     preserve true flags, or prove typing is flag-deterministic. *)
   - admit.
 
-  (* T_LetLin — same *)
+  (* T_LetLin — same consumption tracking issue as T_Let *)
   - admit.
 
-  (* T_Lam — needs consumption tracking *)
+  (* T_Lam — same: output = input, body output has (T1,true), transfer
+     might change to (T1,u') where u' could be false. *)
   - admit.
 
   (* T_App *)

@@ -80,6 +80,7 @@ impl AffineChecker {
                 }
             }
             Decl::Type { .. } => {}
+            Decl::Const { .. } => {}
         }
     }
 

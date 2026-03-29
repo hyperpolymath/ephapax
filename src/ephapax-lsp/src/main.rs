@@ -525,6 +525,18 @@ fn extract_declarations(module: &Module, _source: &str) -> Vec<DeclInfo> {
                 params: Vec::new(),
                 return_type: None,
             },
+            Decl::Const { name, ty, value } => DeclInfo {
+                name: name.to_string(),
+                kind: DeclKind::TypeAlias,
+                span: value.span,
+                signature: format!(
+                    "const {}{} = ...",
+                    name,
+                    ty.as_ref().map(|t| format!(": {}", format_ty(t))).unwrap_or_default()
+                ),
+                params: Vec::new(),
+                return_type: ty.as_ref().map(|t| format_ty(t)),
+            },
         })
         .collect()
 }

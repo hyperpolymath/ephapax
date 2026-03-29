@@ -90,6 +90,7 @@ impl LinearChecker {
                 }
             }
             Decl::Type { .. } => { /* no discipline check needed */ }
+            Decl::Const { .. } => { /* no discipline check needed */ }
         }
     }
 

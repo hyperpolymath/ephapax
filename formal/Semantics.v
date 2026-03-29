@@ -712,6 +712,106 @@ Proof.
   - exact (Hfp i T0 Hi).
 Qed.
 
+(** ** Flags Monotonicity
+
+    Once a flag is true, it stays true through typing. This follows from
+    flags_only_increase (false in output → false in input) contraposed
+    with type agreement (every position in input has a corresponding
+    position in output with the same type). *)
+
+Lemma flags_monotone :
+  forall R G e T G' i T0,
+    R; G |- e : T -| G' ->
+    ctx_lookup G i = Some (T0, true) ->
+    ctx_lookup G' i = Some (T0, true).
+Proof.
+  intros R G e T G' i T0 Htype Hin.
+  unfold ctx_lookup.
+  assert (Hlen: length G' = length G) by (eapply typing_preserves_length; eassumption).
+  unfold ctx_lookup in Hin.
+  assert (Hi: i < length G) by (apply nth_error_Some; congruence).
+  destruct (nth_error G' i) as [[T1 u1]|] eqn:Hout.
+  2: { apply nth_error_None in Hout. lia. }
+  (* T1 = T0 by typing_preserves_bindings *)
+  destruct (typing_preserves_bindings _ _ _ _ _ Htype i T1 u1) as [u2 Hu2].
+  { unfold ctx_lookup. exact Hout. }
+  unfold ctx_lookup in Hu2. rewrite Hin in Hu2.
+  assert (HT: T1 = T0) by congruence. subst T1.
+  (* u1 must be true — if false, flags_only_increase gives contradiction *)
+  destruct u1; [reflexivity |].
+  exfalso.
+  assert (Hf := flags_only_increase _ _ _ _ _ Htype i T0).
+  unfold ctx_lookup in Hf. rewrite Hout in Hf.
+  specialize (Hf eq_refl). congruence.
+Qed.
+
+(** ** Consumption Tracking
+
+    The key property for closing T_Let/T_LetLin/T_Lam in ctx_transfer:
+    if an expression consumes a variable (flag goes false→true) in one
+    typing, it also consumes it in any compatible re-typing.
+
+    Proved by strengthening the transfer conclusion with a fourth conjunct. *)
+
+Definition ctx_consumption_tracked
+  (G G' G2 G2' : ctx) : Prop :=
+  forall i T0,
+    ctx_lookup G i = Some (T0, false) ->
+    ctx_lookup G' i = Some (T0, true) ->
+    ctx_lookup G2 i = Some (T0, false) ->
+    ctx_lookup G2' i = Some (T0, true).
+
+(** Consumption chains through two-step typing.
+    Case split: was i consumed in step 1 or step 2?
+    u_mid=true: Hc1 gives G2m true, flags_monotone gives G2' true.
+    u_mid=false: Hfpm gives G2m false, Hc2 gives G2' true. *)
+Lemma consumption_chain :
+  forall R1 G e1 T1 Gm R2 e2 T2 G' G2 G2m G2',
+    R1; G |- e1 : T1 -| Gm ->
+    R2; Gm |- e2 : T2 -| G' ->
+    R2; G2m |- e2 : T2 -| G2' ->
+    ctx_consumption_tracked G Gm G2 G2m ->
+    ctx_consumption_tracked Gm G' G2m G2' ->
+    ctx_false_preserved Gm G2m ->
+    ctx_consumption_tracked G G' G2 G2'.
+Proof.
+  unfold ctx_consumption_tracked.
+  intros R1 G e1 T1 Gm R2 e2 T2 G' G2 G2m G2'
+    Htype1 Htype2 Htype2' Hc1 Hc2 Hfpm i T0 Hi_in Hi_out Hi_in2.
+  (* Get Gm's flag at position i via typing_preserves_bindings on Htype1.
+     We know G has (T0, false) at i. Need to know what Gm has.
+     flags_only_increase on Htype1: if Gm has false → G has false (consistent).
+     We need the actual value. Use nth_error + length preservation. *)
+  (* Get Gm's value at position i *)
+  assert (Hlen1: length Gm = length G) by (eapply typing_preserves_length; eassumption).
+  unfold ctx_lookup in Hi_in.
+  assert (Hi: i < length Gm).
+  { rewrite Hlen1. apply nth_error_Some. congruence. }
+  destruct (nth_error Gm i) as [[Tm u_mid]|] eqn:Emid.
+  2: { apply nth_error_None in Emid. lia. }
+  (* Tm = T0 by typing_preserves_bindings *)
+  destruct (typing_preserves_bindings _ _ _ _ _ Htype1 i Tm u_mid) as [u_in Hu_in].
+  { unfold ctx_lookup. exact Emid. }
+  unfold ctx_lookup in Hu_in. rewrite Hi_in in Hu_in.
+  assert (Tm = T0) by congruence. subst Tm.
+  (* Case split on u_mid *)
+  destruct u_mid.
+  - (* Gm has true at i — step 1 consumed it *)
+    assert (Hm2: ctx_lookup G2m i = Some (T0, true)).
+    { apply Hc1 with (i := i) (T0 := T0).
+      - unfold ctx_lookup. exact Hi_in.
+      - unfold ctx_lookup. exact Emid.
+      - exact Hi_in2. }
+    exact (flags_monotone _ _ _ _ _ _ _ Htype2' Hm2).
+  - (* Gm has false at i — step 1 didn't consume it *)
+    assert (Hm2: ctx_lookup G2m i = Some (T0, false)).
+    { apply Hfpm. unfold ctx_lookup. exact Emid. }
+    apply Hc2 with (i := i) (T0 := T0).
+    + unfold ctx_lookup. exact Emid.
+    + exact Hi_out.
+    + exact Hm2.
+Qed.
+
 Lemma typing_ctx_transfer :
   forall R G e T G',
     R; G |- e : T -| G' ->
@@ -720,127 +820,149 @@ Lemma typing_ctx_transfer :
       ctx_false_preserved G G2 ->
       exists G2', R; G2 |- e : T -| G2'
         /\ ctx_types_agree G' G2'
-        /\ ctx_false_preserved G' G2'.
+        /\ ctx_false_preserved G' G2'
+        /\ ctx_consumption_tracked G G' G2 G2'.
 Proof.
   intros R G e T G' Htype.
   induction Htype; intros G2 Hagree Hfp.
 
-  (* T_Unit *)
-  - eexists. split; [econstructor | split]; assumption.
+  (* All cases need 4 conjuncts. Identity-context cases (G'=G) have
+     vacuous consumption tracking (false≠true at same position). *)
 
-  (* T_Bool *)
-  - eexists. split; [econstructor | split]; assumption.
-
-  (* T_I32 *)
-  - eexists. split; [econstructor | split]; assumption.
+  (* T_Unit, T_Bool, T_I32: G'=G *)
+  1-3: eexists; split; [econstructor | split; [| split; [| unfold ctx_consumption_tracked; intros; congruence]]]; assumption.
 
   (* T_Var_Lin *)
   - assert (Hlk2: ctx_lookup G2 i = Some (T, false)) by (apply Hfp; assumption).
     eexists. split; [econstructor; eassumption|].
     split; [apply ctx_mark_used_types_agree; assumption|].
-    apply ctx_mark_used_false_preserved. assumption.
+    split; [apply ctx_mark_used_false_preserved; assumption|].
+    admit.
 
-  (* T_Var_Unr *)
+  (* T_Var_Unr: G'=G, consumption vacuous *)
   - destruct (proj2 Hagree i T u H) as [u' Hu'].
     eexists. split; [econstructor; eassumption|].
-    split; assumption.
+    split; [assumption | split; [assumption | unfold ctx_consumption_tracked; intros; congruence]].
 
-  (* T_Loc *)
-  - eexists. split; [econstructor; assumption|]. split; assumption.
+  (* T_Loc: G'=G *)
+  - eexists. split; [econstructor; assumption|].
+    split; [assumption | split; [assumption | unfold ctx_consumption_tracked; intros; congruence]].
 
-  (* T_StringNew *)
-  - eexists. split; [econstructor; assumption|]. split; assumption.
+  (* T_StringNew: G'=G *)
+  - eexists. split; [econstructor; assumption|].
+    split; [assumption | split; [assumption | unfold ctx_consumption_tracked; intros; congruence]].
 
-  (* T_StringConcat *)
-  - destruct (IHHtype1 G2 Hagree Hfp) as [G2' [Ht1 [Ha1 Hf1]]].
-    destruct (IHHtype2 G2' Ha1 Hf1) as [G2'' [Ht2 [Ha2 Hf2]]].
-    eexists. split; [econstructor; eassumption|]. split; assumption.
+  (* T_StringConcat: chain *)
+  - destruct (IHHtype1 G2 Hagree Hfp) as [G2' [Ht1 [Ha1 [Hf1 Hc1]]]].
+    destruct (IHHtype2 G2' Ha1 Hf1) as [G2'' [Ht2 [Ha2 [Hf2 Hc2]]]].
+    eexists. split; [econstructor; eassumption|].
+    split; [assumption | split; [assumption |]].
+    eapply consumption_chain; eassumption.
 
   (* T_StringLen *)
-  - destruct (IHHtype G2 Hagree Hfp) as [G2' [Ht [Ha Hf]]].
-    eexists. split; [econstructor; exact Ht|]. split; assumption.
+  - destruct (IHHtype G2 Hagree Hfp) as [G2' [Ht [Ha [Hf Hc]]]].
+    eexists. split; [econstructor; exact Ht|].
+    split; [assumption | split; [assumption | exact Hc]].
 
-  (* T_Let — IHs give transferred sub-derivations, but T_Let requires
-     (T1,true) at position 0 in body output. Transfer preserves false flags
-     but doesn't guarantee true flags. Needs: strengthen conclusion to also
-     preserve true flags, or prove typing is flag-deterministic. *)
+  (* T_Let — NOW CLOSEABLE with consumption tracking from IH *)
+  - destruct (IHHtype1 G2 Hagree Hfp) as [G2' [Ht1 [Ha1 [Hf1 Hc1]]]].
+    destruct (IHHtype2 (ctx_extend G2' T1)
+                (ctx_extend_types_agree _ _ _ Ha1)
+                (ctx_extend_false_preserved _ _ _ Hf1))
+      as [G2'' [Ht2 [Ha2 [Hf2 Hc2]]]].
+    destruct (types_agree_cons_shape _ _ _ _ Ha2) as [u' [G2_tail [Heq Ha_tail]]].
+    subst G2''.
+    (* u' = true: position 0 starts false (ctx_extend), original output has true,
+       so consumption tracking gives transferred output also has true. *)
+    assert (Hu': u' = true).
+    { assert (H0in: ctx_lookup (ctx_extend G' T1) 0 = Some (T1, false)) by reflexivity.
+      assert (H0out: ctx_lookup ((T1, true) :: G'') 0 = Some (T1, true)) by reflexivity.
+      assert (H0in2: ctx_lookup (ctx_extend G2' T1) 0 = Some (T1, false)) by reflexivity.
+      assert (H0out2 := Hc2 0 T1 H0in H0out H0in2).
+      simpl in H0out2. congruence. }
+    subst u'.
+    eexists. split; [eapply T_Let; eassumption|].
+    split; [exact Ha_tail | split; admit].
+
+  (* T_LetLin — same pattern as T_Let *)
+  - destruct (IHHtype1 G2 Hagree Hfp) as [G2' [Ht1 [Ha1 [Hf1 Hc1]]]].
+    destruct (IHHtype2 (ctx_extend G2' T1)
+                (ctx_extend_types_agree _ _ _ Ha1)
+                (ctx_extend_false_preserved _ _ _ Hf1))
+      as [G2'' [Ht2 [Ha2 [Hf2 Hc2]]]].
+    destruct (types_agree_cons_shape _ _ _ _ Ha2) as [u' [G2_tail [Heq Ha_tail]]].
+    subst G2''.
+    assert (Hu': u' = true).
+    { assert (H0out2 := Hc2 0 T1 eq_refl eq_refl eq_refl).
+      simpl in H0out2. congruence. }
+    subst u'.
+    eexists. split; [eapply T_LetLin; eassumption|].
+    split; [exact Ha_tail | split; admit].
+
+  (* T_Lam: output = input G. Body types in extended ctx with output (T1,true)::G.
+     Transfer gives (T1,true)::G2_tail, but T_Lam needs output = (T1,true)::G2.
+     This requires G2_tail = G2, which needs typing output determinism. *)
   - admit.
 
-  (* T_LetLin — same consumption tracking issue as T_Let *)
-  - admit.
+  (* T_App: chain *)
+  - destruct (IHHtype1 G2 Hagree Hfp) as [G2' [Ht1 [Ha1 [Hf1 Hc1]]]].
+    destruct (IHHtype2 G2' Ha1 Hf1) as [G2'' [Ht2 [Ha2 [Hf2 Hc2]]]].
+    eexists. split; [econstructor; eassumption|].
+    split; [assumption | split; [assumption |]].
+    eapply consumption_chain; eassumption.
 
-  (* T_Lam — same: output = input, body output has (T1,true), transfer
-     might change to (T1,u') where u' could be false. *)
-  - admit.
-
-  (* T_App *)
-  - destruct (IHHtype1 G2 Hagree Hfp) as [G2' [Ht1 [Ha1 Hf1]]].
-    destruct (IHHtype2 G2' Ha1 Hf1) as [G2'' [Ht2 [Ha2 Hf2]]].
-    eexists. split; [econstructor; eassumption|]. split; assumption.
-
-  (* T_Pair *)
-  - destruct (IHHtype1 G2 Hagree Hfp) as [G2' [Ht1 [Ha1 Hf1]]].
-    destruct (IHHtype2 G2' Ha1 Hf1) as [G2'' [Ht2 [Ha2 Hf2]]].
-    eexists. split; [econstructor; eassumption|]. split; assumption.
+  (* T_Pair: chain *)
+  - destruct (IHHtype1 G2 Hagree Hfp) as [G2' [Ht1 [Ha1 [Hf1 Hc1]]]].
+    destruct (IHHtype2 G2' Ha1 Hf1) as [G2'' [Ht2 [Ha2 [Hf2 Hc2]]]].
+    eexists. split; [econstructor; eassumption|].
+    split; [assumption | split; [assumption |]].
+    eapply consumption_chain; eassumption.
 
   (* T_Fst *)
-  - destruct (IHHtype G2 Hagree Hfp) as [G2' [Ht [Ha Hf]]].
-    eexists. split; [econstructor; eassumption|]. split; assumption.
+  - destruct (IHHtype G2 Hagree Hfp) as [G2' [Ht [Ha [Hf Hc]]]].
+    eexists. split; [econstructor; eassumption|].
+    split; [assumption | split; [assumption | exact Hc]].
 
   (* T_Snd *)
-  - destruct (IHHtype G2 Hagree Hfp) as [G2' [Ht [Ha Hf]]].
-    eexists. split; [econstructor; eassumption|]. split; assumption.
+  - destruct (IHHtype G2 Hagree Hfp) as [G2' [Ht [Ha [Hf Hc]]]].
+    eexists. split; [econstructor; eassumption|].
+    split; [assumption | split; [assumption | exact Hc]].
 
   (* T_Inl *)
-  - destruct (IHHtype G2 Hagree Hfp) as [G2' [Ht [Ha Hf]]].
-    eexists. split; [econstructor; exact Ht|]. split; assumption.
+  - destruct (IHHtype G2 Hagree Hfp) as [G2' [Ht [Ha [Hf Hc]]]].
+    eexists. split; [econstructor; exact Ht|].
+    split; [assumption | split; [assumption | exact Hc]].
 
   (* T_Inr *)
-  - destruct (IHHtype G2 Hagree Hfp) as [G2' [Ht [Ha Hf]]].
-    eexists. split; [econstructor; exact Ht|]. split; assumption.
+  - destruct (IHHtype G2 Hagree Hfp) as [G2' [Ht [Ha [Hf Hc]]]].
+    eexists. split; [econstructor; exact Ht|].
+    split; [assumption | split; [assumption | exact Hc]].
 
-  (* T_Case *)
-  - destruct (IHHtype1 G2 Hagree Hfp) as [G2' [Ht0 [Ha0 Hf0]]].
-    destruct (IHHtype2 (ctx_extend G2' T1)
-                (ctx_extend_types_agree _ _ _ Ha0)
-                (ctx_extend_false_preserved _ _ _ Hf0))
-      as [G2_l [Htl [Hal Hfl]]].
-    destruct (IHHtype3 (ctx_extend G2' T2)
-                (ctx_extend_types_agree _ _ _ Ha0)
-                (ctx_extend_false_preserved _ _ _ Hf0))
-      as [G2_r [Htr [Har Hfr]]].
-    (* Both branches produce output agreeing with G_final.
-       T_Case requires identical outputs. We can use either branch's output
-       and rewrite the other using ctx_transfer again. But this is circular.
-       Instead: weaken — use G2_l as the output for both.
-       The second branch (Htr) types to G2_r. We need it to type to G2_l.
-       This requires typing determinism or uniqueness of transfer output.
-       For now: use G2_l, accept that T_Case needs the same G_final. *)
-    admit. (* T_Case branch output agreement — needs typing output uniqueness *)
+  (* T_Case — still needs output uniqueness *)
+  - admit.
 
-  (* T_If *)
-  - destruct (IHHtype1 G2 Hagree Hfp) as [G2' [Ht1 [Ha1 Hf1]]].
-    destruct (IHHtype2 G2' Ha1 Hf1) as [G2_t [Htt [Hat Hft]]].
-    destruct (IHHtype3 G2' Ha1 Hf1) as [G2_f [Htf [Haf Hff]]].
-    (* Same issue: T_If requires both branches to produce same output.
-       G2_t and G2_f both agree with G'', but may differ from each other. *)
-    admit. (* T_If branch output agreement — same as T_Case *)
+  (* T_If — still needs output uniqueness *)
+  - admit.
 
   (* T_Region *)
-  - destruct (IHHtype G2 Hagree Hfp) as [G2' [Ht [Ha Hf]]].
-    eexists. split; [econstructor; [assumption | exact Ht]|]. split; assumption.
+  - destruct (IHHtype G2 Hagree Hfp) as [G2' [Ht [Ha [Hf Hc]]]].
+    eexists. split; [econstructor; [assumption | exact Ht]|].
+    split; [assumption | split; [assumption | exact Hc]].
 
-  (* T_Borrow *)
+  (* T_Borrow: G'=G *)
   - assert (Hlk2: ctx_lookup G2 i = Some (T, false)) by (apply Hfp; assumption).
-    eexists. split; [econstructor; exact Hlk2|]. split; assumption.
+    eexists. split; [econstructor; exact Hlk2|].
+    split; [assumption | split; [assumption | unfold ctx_consumption_tracked; intros; congruence]].
 
   (* T_Drop *)
-  - destruct (IHHtype G2 Hagree Hfp) as [G2' [Ht [Ha Hf]]].
-    eexists. split; [econstructor; eassumption|]. split; assumption.
+  - destruct (IHHtype G2 Hagree Hfp) as [G2' [Ht [Ha [Hf Hc]]]].
+    eexists. split; [econstructor; eassumption|].
+    split; [assumption | split; [assumption | exact Hc]].
 
   (* T_Copy *)
-  - destruct (IHHtype G2 Hagree Hfp) as [G2' [Ht [Ha Hf]]].
-    eexists. split; [econstructor; eassumption|]. split; assumption.
+  - destruct (IHHtype G2 Hagree Hfp) as [G2' [Ht [Ha [Hf Hc]]]].
+    eexists. split; [econstructor; eassumption|].
+    split; [assumption | split; [assumption | exact Hc]].
 Admitted.
 (* Remaining admits in T_Var_Lin, T_StringConcat, T_Let, T_LetLin, T_Lam,
    T_App, T_Pair, T_Case, T_If: consumption tracking and context shape

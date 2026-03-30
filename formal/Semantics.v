@@ -856,6 +856,10 @@ Proof.
     + rewrite nth_error_None in E2'. lia.
 Qed.
 
+Lemma ctx_lookup_extend_succ :
+  forall G T i, ctx_lookup (ctx_extend G T) (S i) = ctx_lookup G i.
+Proof. intros. reflexivity. Qed.
+
 Lemma no_consumption_at_true_linear :
   forall R G e T G' G2 G2' i T0,
     R; G |- e : T -| G' ->
@@ -868,16 +872,16 @@ Lemma no_consumption_at_true_linear :
     ctx_lookup G2' i = Some (T0, false).
 Proof.
   intros R G e T G' G2 G2' i T0 H1 H2 Hagree Hlin HiG HiG' HiG2.
-  (* Proof by induction on H1, inversion on H2 at each step.
-     Key: at each step, if position i has true in G, the rule can't access it
-     via T_Var_Lin (requires false). So position i is untouched. *)
+  (* Generalize i, T0, and all position-dependent hypotheses so the IH
+     works at shifted indices (S i) in binding cases (T_Case, T_If, T_Let). *)
   generalize dependent G2'. generalize dependent G2.
+  generalize dependent T0. generalize dependent i.
   induction H1 as
     [ (* T_Unit *)
     | (* T_Bool *)
     | (* T_I32 *)
-    | ? ? ? ? ? ? (* T_Var_Lin *)
-    | ? ? ? ? ? ? (* T_Var_Unr *)
+    | ? ? j ? ? ? (* T_Var_Lin *)
+    | ? ? j ? ? ? (* T_Var_Unr *)
     | (* T_Loc *)
     | (* T_StringNew *)
     | ? ? ? ? ? ? IHe1 ? IHe2 (* T_StringConcat *)
@@ -894,10 +898,10 @@ Proof.
     | ? ? ? ? ? ? ? ? ? IHe1 ? IHe2 ? IHe3 (* T_Case *)
     | ? ? ? ? ? ? ? ? IHe1 ? IHe2 ? IHe3 (* T_If *)
     | ? ? ? ? ? ? IHe1 (* T_Region *)
-    | (* T_Borrow *)
+    | ? ? j0 ? ? (* T_Borrow *)
     | ? ? ? ? ? IHe1 (* T_Drop *)
     | ? ? ? ? ? IHe1 (* T_Copy *)
-    ]; intros G2 Hagree HiG2 G2' H2.
+    ]; intros i T0 Hlin HiG HiG' G2 Hagree HiG2 G2' H2.
 
   (* T_Unit *) - inversion H2; subst. exact HiG2.
   (* T_Bool *) - inversion H2; subst. exact HiG2.
@@ -905,8 +909,8 @@ Proof.
 
   (* T_Var_Lin at index j *)
   - inversion H2; subst.
-    + destruct (Nat.eq_dec i i0).
-      * subst i0. rewrite HiG in H. congruence.
+    + destruct (Nat.eq_dec i j).
+      * subst j. rewrite HiG in H. congruence.
       * rewrite ctx_mark_used_lookup_other by (intro; apply n; symmetry; assumption).
         rewrite ctx_mark_used_lookup_other in HiG' by (intro; apply n; symmetry; assumption).
         exact HiG2.
@@ -922,14 +926,19 @@ Proof.
 
   (* T_StringConcat: IH on e1 gives G2_mid[i]=false, IH on e2 gives G2'[i]=false *)
   - inversion H2; subst.
-    eauto 10 using typing_preserves_types_agree, flags_monotone.
+    eauto 6 using typing_preserves_types_agree, flags_monotone.
   (* All remaining compound cases: use eauto with IH + key lemmas.
      T_Case and T_If need ctx_join reasoning — admit for those. *)
   all: try (inversion H2; subst; exact HiG2).
   all: try (inversion H2; subst;
-    eauto 10 using typing_preserves_types_agree, flags_monotone,
+    eauto 6 using typing_preserves_types_agree, flags_monotone,
                    ctx_extend_types_agree).
-  (* T_Case and T_If — need G_final join reasoning *)
+  (* T_Case: scrutinee consumes from G→G', branches extend G' by T1/T2,
+     both converge to G_final. With i generalized, IH works at S i. *)
+  all: try (inversion H2; subst;
+    eauto 8 using typing_preserves_types_agree, flags_monotone,
+                  ctx_extend_types_agree, ctx_extend_false_preserved,
+                  ctx_lookup_extend_succ).
   all: admit.
 Admitted.
 (* NOTE (2026-03-29): The generalized version of this lemma (with i and T0

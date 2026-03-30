@@ -924,26 +924,17 @@ Proof.
   (* T_Loc *) - inversion H2; subst. exact HiG2.
   (* T_StringNew *) - inversion H2; subst. exact HiG2.
 
-  (* All compound/binding cases: use eauto with key lemmas.
-     For T_Case/T_If, the IH at S i handles the binder shift. *)
+  (* T_StringConcat: chain case — IH on e1, then IH on e2.
+     IHe2 requires: Hagree for G', flags for G', HiG2 for G2'.
+     The ctx_lookup G2' i = false comes from IHe1. *)
+  - inversion H2; subst; admit.
+  (* T_StringLen *) - inversion H2; subst; admit.
+  (* T_Let: binding case *)
+  - inversion H2; subst; admit.
+  (* All remaining compound/binding cases *)
   all: try (inversion H2; subst; exact HiG2).
-  all: try (inversion H2; subst;
-    eauto 8 using typing_preserves_types_agree, flags_monotone,
-                  ctx_extend_types_agree, ctx_extend_false_preserved,
-                  ctx_lookup_extend_succ).
-  (* T_Case / T_If: try explicit S i instantiation for binding cases *)
-  all: try (inversion H2; subst;
-    match goal with
-    | [ IH_branch : forall (ix : var) _, _ -> ctx_lookup _ ix = _ ->
-                    ctx_lookup _ ix = _ -> _ |- _ ] =>
-        eapply (IH_branch (S i)); simpl; try eassumption;
-        try (eapply typing_preserves_types_agree; eassumption);
-        try (eapply flags_monotone; eassumption);
-        try (eapply ctx_extend_types_agree; eassumption);
-        try (eapply ctx_extend_false_preserved; eassumption);
-        try eauto 6
-    end).
-  all: admit.
+  all: try (inversion H2; subst; eauto 6).
+  all: inversion H2; subst; admit.
 Admitted.
 (* NOTE (2026-03-29): The generalized version of this lemma (with i and T0
    universally quantified before induction) is proved in test files. The

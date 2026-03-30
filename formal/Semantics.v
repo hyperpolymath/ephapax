@@ -872,7 +872,32 @@ Proof.
      Key: at each step, if position i has true in G, the rule can't access it
      via T_Var_Lin (requires false). So position i is untouched. *)
   generalize dependent G2'. generalize dependent G2.
-  induction H1; intros G2 Hagree HiG2 G2' H2.
+  induction H1 as
+    [ (* T_Unit *)
+    | (* T_Bool *)
+    | (* T_I32 *)
+    | ? ? ? ? ? ? (* T_Var_Lin *)
+    | ? ? ? ? ? ? (* T_Var_Unr *)
+    | (* T_Loc *)
+    | (* T_StringNew *)
+    | ? ? ? ? ? ? IHe1 ? IHe2 (* T_StringConcat *)
+    | ? ? ? ? ? IHe1 (* T_StringLen *)
+    | ? ? ? ? ? ? ? ? IHe1 ? IHe2 (* T_Let *)
+    | ? ? ? ? ? ? ? ? IHe1 ? IHe2 (* T_LetLin *)
+    | ? ? ? ? ? IHe1 (* T_Lam *)
+    | ? ? ? ? ? ? ? ? IHe1 ? IHe2 (* T_App *)
+    | ? ? ? ? ? ? ? ? IHe1 ? IHe2 (* T_Pair *)
+    | ? ? ? ? ? ? IHe1 (* T_Fst *)
+    | ? ? ? ? ? ? IHe1 (* T_Snd *)
+    | ? ? ? ? ? ? IHe1 (* T_Inl *)
+    | ? ? ? ? ? ? IHe1 (* T_Inr *)
+    | ? ? ? ? ? ? ? ? ? IHe1 ? IHe2 ? IHe3 (* T_Case *)
+    | ? ? ? ? ? ? ? ? IHe1 ? IHe2 ? IHe3 (* T_If *)
+    | ? ? ? ? ? ? IHe1 (* T_Region *)
+    | (* T_Borrow *)
+    | ? ? ? ? ? IHe1 (* T_Drop *)
+    | ? ? ? ? ? IHe1 (* T_Copy *)
+    ]; intros G2 Hagree HiG2 G2' H2.
 
   (* T_Unit *) - inversion H2; subst. exact HiG2.
   (* T_Bool *) - inversion H2; subst. exact HiG2.
@@ -880,58 +905,31 @@ Proof.
 
   (* T_Var_Lin at index j *)
   - inversion H2; subst.
-    + (* Second is also T_Var_Lin at j *)
-      destruct (Nat.eq_dec i i0).
-      * (* i = j: original has G[i] = (T, false) by H (T_Var_Lin precondition).
-           But HiG says G[i] = (T0, true). Same position: (T, false) = (T0, true).
-           false ≠ true. Contradiction. *)
-        subst i0. rewrite HiG in H. congruence.
-      * (* i ≠ j: mark_used at j doesn't change position i *)
-        rewrite ctx_mark_used_lookup_other by (intro; apply n; symmetry; assumption).
+    + destruct (Nat.eq_dec i i0).
+      * subst i0. rewrite HiG in H. congruence.
+      * rewrite ctx_mark_used_lookup_other by (intro; apply n; symmetry; assumption).
         rewrite ctx_mark_used_lookup_other in HiG' by (intro; apply n; symmetry; assumption).
         exact HiG2.
-    + (* Second is T_Var_Unr: is_linear_ty true vs false — contradiction *)
-      exfalso. congruence.
+    + exfalso. congruence.
 
   (* T_Var_Unr *)
   - inversion H2; subst.
-    + (* Second is T_Var_Lin: is_linear_ty false vs true — contradiction *)
-      exfalso. congruence.
-    + (* Second is T_Var_Unr: output = input for both *)
-      exact HiG2.
+    + exfalso. congruence.
+    + exact HiG2.
 
   (* T_Loc *) - inversion H2; subst. exact HiG2.
   (* T_StringNew *) - inversion H2; subst. exact HiG2.
 
-  (* Remaining compound/binding cases: thread IH through sub-derivations.
-     The pattern is: inversion H2 gives sub-typing derivations that
-     match the IHs from induction on H1. For each sub-derivation,
-     the IH gives us the false-preservation at position i. *)
-
-  (* Generic tactic: for compound cases, inversion on H2 and use available IHs *)
+  (* T_StringConcat: IH on e1 gives G2_mid[i]=false, IH on e2 gives G2'[i]=false *)
+  - inversion H2; subst.
+    eauto 10 using typing_preserves_types_agree, flags_monotone.
+  (* All remaining compound cases: use eauto with IH + key lemmas.
+     T_Case and T_If need ctx_join reasoning — admit for those. *)
   all: try (inversion H2; subst; exact HiG2).
   all: try (inversion H2; subst;
-    match goal with
-    | [ IH : forall _ _, ctx_types_agree _ _ -> _ -> _ -> _ ; _ |- _ : _ -| _ -> _
-        |- ctx_lookup _ _ = Some (_, false) ] =>
-        eapply IH; try eassumption;
-        try (eapply typing_preserves_types_agree; eassumption);
-        try (eapply flags_monotone; eassumption)
-    end).
-  (* Remaining cases: try threading IH1 through IH2 for chain types *)
-  all: try (inversion H2; subst;
-    match goal with
-    | [ IH1 : forall _ _, ctx_types_agree _ _ -> _ -> _ -> _ ; _ |- _ : _ -| _ -> _,
-        IH2 : forall _ _, ctx_types_agree _ _ -> _ -> _ -> _ ; _ |- _ : _ -| _ -> _,
-        Htyp_sub : _ ; _ |- _ : _ -| ?Gmid |- _ ] =>
-        eapply IH1; try eassumption;
-        try (eapply typing_preserves_types_agree; eassumption);
-        try (eapply flags_monotone; eassumption);
-        try (eapply IH2; try eassumption;
-             try (eapply typing_preserves_types_agree; eassumption);
-             try (eapply flags_monotone; eassumption))
-    end).
-  all: try (inversion H2; subst; eauto using typing_preserves_types_agree, flags_monotone).
+    eauto 10 using typing_preserves_types_agree, flags_monotone,
+                   ctx_extend_types_agree).
+  (* T_Case and T_If — need G_final join reasoning *)
   all: admit.
 Admitted.
 (* NOTE (2026-03-29): The generalized version of this lemma (with i and T0

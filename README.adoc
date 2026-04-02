@@ -2,7 +2,7 @@ image:https://img.shields.io/badge/OpenSSF-Best_Practices-green?logo=opensources
 image:https://img.shields.io/badge/License-PMPL--1.0-blue.svg[License: PMPL-1.0,link="https://github.com/hyperpolymath/palimpsest-license"]
 image:https://img.shields.io/badge/Philosophy-Palimpsest-indigo.svg[Palimpsest,link="https://github.com/hyperpolymath/palimpsest-license"]
 image:https://github.com/hyperpolymath/ephapax/actions/workflows/codeql.yml/badge.svg?branch=main[CodeQL,link="https://github.com/hyperpolymath/ephapax/actions/workflows/codeql.yml"]
-image:https://api.thegreenwebfoundation.org/greencheckimage/jewell.nexus[Green Hosting,link="https://www.thegreenwebfoundation.org/green-web-check/?url=jewell.nexus"]
+image:https://api.thegreenwebfoundation.org/greencheckimage/ephapax.org[Green Hosting,link="https://www.thegreenwebfoundation.org/green-web-check/?url=ephapax.org"]
 
 
 // SPDX-License-Identifier: PMPL-1.0-or-later

@@ -527,12 +527,12 @@ fn extract_declarations(module: &Module, _source: &str) -> Vec<DeclInfo> {
             },
             Decl::Const { name, ty, value } => DeclInfo {
                 name: name.to_string(),
-                kind: DeclKind::TypeAlias,
+                kind: DeclKind::TypeAlias, // closest existing variant
                 span: value.span,
                 signature: format!(
-                    "const {}{} = ...",
+                    "let {} {}= ...",
                     name,
-                    ty.as_ref().map(|t| format!(": {}", format_ty(t))).unwrap_or_default()
+                    ty.as_ref().map(|t| format!(": {} ", format_ty(t))).unwrap_or_default()
                 ),
                 params: Vec::new(),
                 return_type: ty.as_ref().map(|t| format_ty(t)),

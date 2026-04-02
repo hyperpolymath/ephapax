@@ -79,8 +79,7 @@ impl AffineChecker {
                     self.ctx.unbind(name);
                 }
             }
-            Decl::Type { .. } => {}
-            Decl::Const { .. } => {}
+            Decl::Type { .. } | Decl::Const { .. } => {}
         }
     }
 

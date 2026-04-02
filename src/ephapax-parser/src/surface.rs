@@ -262,6 +262,9 @@ fn parse_expression(pair: pest::iterators::Pair<Rule>) -> Result<SurfaceExpr, Pa
         .ok_or_else(|| ParseError::unexpected_end("expression"))?;
 
     match inner.as_rule() {
+        Rule::seq_expr => parse_seq_expr(inner),
+        // Legacy: if expression directly contains a single_expr child
+        Rule::single_expr => parse_single_expr(inner),
         Rule::let_expr => parse_let_expr(inner),
         Rule::let_lin_expr => parse_let_lin_expr(inner),
         Rule::lambda_expr => parse_lambda_expr(inner),
@@ -272,6 +275,73 @@ fn parse_expression(pair: pest::iterators::Pair<Rule>) -> Result<SurfaceExpr, Pa
         Rule::or_expr => parse_or_expr(inner),
         _ => Err(ParseError::Syntax {
             message: format!("Unexpected expression rule: {:?}", inner.as_rule()),
+            span,
+        }),
+    }
+}
+
+/// Parse a semicolon-separated sequence of expressions.
+///
+/// `e1 ; e2 ; e3` desugars to `let _ = e1 in let _ = e2 in e3`.
+fn parse_seq_expr(pair: pest::iterators::Pair<Rule>) -> Result<SurfaceExpr, ParseError> {
+    let span = span_from_pair(&pair);
+    let exprs: Vec<_> = pair
+        .into_inner()
+        .filter(|p| p.as_rule() == Rule::single_expr)
+        .collect();
+
+    if exprs.is_empty() {
+        return Ok(SurfaceExpr::new(SurfaceExprKind::Lit(Literal::Unit), span));
+    }
+
+    // Parse all sub-expressions
+    let mut parsed: Vec<SurfaceExpr> = Vec::with_capacity(exprs.len());
+    for e in exprs {
+        parsed.push(parse_single_expr(e)?);
+    }
+
+    // If only one expression, return it directly (no sequencing)
+    if parsed.len() == 1 {
+        return Ok(parsed.into_iter().next().unwrap());
+    }
+
+    // Desugar e1 ; e2 ; ... ; eN into nested lets:
+    //   let _ = e1 in (let _ = e2 in (... eN))
+    let last = parsed.pop().unwrap();
+    parsed.into_iter().rev().fold(Ok(last), |acc, expr| {
+        let acc = acc?;
+        let s = expr.span;
+        Ok(SurfaceExpr::new(
+            SurfaceExprKind::Let {
+                name: SmolStr::new("_"),
+                ty: None,
+                value: Box::new(expr),
+                body: Box::new(acc),
+            },
+            s,
+        ))
+    })
+}
+
+/// Parse a single (non-sequenced) expression.
+fn parse_single_expr(pair: pest::iterators::Pair<Rule>) -> Result<SurfaceExpr, ParseError> {
+    let span = span_from_pair(&pair);
+    let inner = pair
+        .into_inner()
+        .next()
+        .ok_or_else(|| ParseError::unexpected_end("single expression"))?;
+
+    match inner.as_rule() {
+        Rule::let_expr => parse_let_expr(inner),
+        Rule::let_lin_expr => parse_let_lin_expr(inner),
+        Rule::lambda_expr => parse_lambda_expr(inner),
+        Rule::if_expr => parse_if_expr(inner),
+        Rule::region_expr => parse_region_expr(inner),
+        Rule::match_expr => parse_match_expr(inner),
+        Rule::case_expr => parse_case_expr(inner),
+        Rule::or_expr => parse_or_expr(inner),
+        _ => Err(ParseError::Syntax {
+            message: format!("Unexpected single_expr rule: {:?}", inner.as_rule()),
             span,
         }),
     }
@@ -829,18 +899,40 @@ fn parse_postfix_expr(pair: pest::iterators::Pair<Rule>) -> Result<SurfaceExpr, 
                 .ok_or_else(|| ParseError::unexpected_end("postfix op"))?;
             match op_inner.as_rule() {
                 Rule::call_op => {
-                    let arg_pair = op_inner
-                        .into_inner()
-                        .next()
-                        .ok_or_else(|| ParseError::missing("call arg"))?;
-                    let arg = parse_expression(arg_pair)?;
-                    result = SurfaceExpr::new(
-                        SurfaceExprKind::App {
-                            func: Box::new(result),
-                            arg: Box::new(arg),
-                        },
-                        span,
-                    );
+                    let call_inner: Vec<_> = op_inner.into_inner().collect();
+                    if call_inner.is_empty() {
+                        // Zero-arg call: foo() → App(foo, ())
+                        result = SurfaceExpr::new(
+                            SurfaceExprKind::App {
+                                func: Box::new(result),
+                                arg: Box::new(SurfaceExpr::new(
+                                    SurfaceExprKind::Lit(Literal::Unit),
+                                    span,
+                                )),
+                            },
+                            span,
+                        );
+                    } else {
+                        // call_args: one or more comma-separated expressions
+                        // Parse all args from the call_args rule
+                        let args_pair = &call_inner[0];
+                        let arg_exprs: Vec<_> = args_pair
+                            .clone()
+                            .into_inner()
+                            .filter(|p| p.as_rule() == Rule::expression)
+                            .collect();
+                        // Curry: f(a, b, c) → App(App(App(f, a), b), c)
+                        for arg_pair in arg_exprs {
+                            let arg = parse_expression(arg_pair)?;
+                            result = SurfaceExpr::new(
+                                SurfaceExprKind::App {
+                                    func: Box::new(result),
+                                    arg: Box::new(arg),
+                                },
+                                span,
+                            );
+                        }
+                    }
                 }
                 Rule::index_op => {
                     let idx_pair = op_inner

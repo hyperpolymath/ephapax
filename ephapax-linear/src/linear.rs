@@ -89,8 +89,7 @@ impl LinearChecker {
                     self.ctx.unbind(name);
                 }
             }
-            Decl::Type { .. } => { /* no discipline check needed */ }
-            Decl::Const { .. } => { /* no discipline check needed */ }
+            Decl::Type { .. } | Decl::Const { .. } => { /* no discipline check needed */ }
         }
     }
 

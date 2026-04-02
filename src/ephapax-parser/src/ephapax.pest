@@ -126,8 +126,15 @@ type_var = { identifier }
 // ============================================================================
 
 expression = {
-    let_expr
-    | let_lin_expr
+    seq_expr
+}
+
+// Statement sequencing: e1 ; e2 ; e3  (last expression is the result)
+seq_expr = { single_expr ~ (";" ~ single_expr)* }
+
+single_expr = {
+    let_lin_expr
+    | let_expr
     | lambda_expr
     | if_expr
     | region_expr
@@ -259,7 +266,8 @@ postfix_op = {
     | member_op
 }
 
-call_op = { "(" ~ expression ~ ")" }
+call_op = { "(" ~ call_args? ~ ")" }
+call_args = { expression ~ ("," ~ expression)* }
 index_op = { "[" ~ expression ~ "]" }
 member_op = { "." ~ (integer | identifier) }
 

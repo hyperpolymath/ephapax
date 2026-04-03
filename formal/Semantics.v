@@ -559,6 +559,19 @@ Proof. intros; inversion H0; subst; inversion H; subst; eauto. Qed.
 
 (* ctx_mark_used_lookup_same removed — use ctx_mark_used_flag_at from Syntax.v instead *)
 
+(** ctx_mark_used at position i sets the full lookup to (T, true) when G[i]=(T,_) *)
+Lemma ctx_mark_used_lookup_at :
+  forall G i T u,
+    ctx_lookup G i = Some (T, u) ->
+    ctx_lookup (ctx_mark_used G i) i = Some (T, true).
+Proof.
+  induction G as [|[T0 u0] G' IH]; intros i T u Hlk.
+  - unfold ctx_lookup in Hlk. destruct i; discriminate.
+  - destruct i; simpl in *.
+    + injection Hlk as <- <-. reflexivity.
+    + exact (IH i T u Hlk).
+Qed.
+
 (** ctx_mark_used at position i leaves other positions unchanged *)
 Lemma ctx_mark_used_lookup_other :
   forall G i j,
@@ -1106,6 +1119,93 @@ Proof.
     end).
 Qed.
 
+(** ** New Helper Lemmas (2026-03-29)
+    Building blocks for closing the remaining Admitted proofs. *)
+
+(** Borrow always preserves context — T_Borrow output = input *)
+Lemma borrow_preserves_ctx :
+  forall R G e T G', R; G |- EBorrow e : T -| G' -> G' = G.
+Proof. intros. inversion H; subst. reflexivity. Qed.
+
+(** StringLen preserves context — its only premise is a borrow *)
+Lemma stringlen_preserves_ctx :
+  forall R G e T G', R; G |- EStringLen e : T -| G' -> G' = G.
+Proof.
+  intros. inversion H; subst.
+  match goal with [ H0 : context [EBorrow _] |- _ ] =>
+    apply borrow_preserves_ctx in H0; exact H0 end.
+Qed.
+
+(** Type determinacy: same expression in type-compatible contexts gives same type.
+    Required for no_consumption_at_true_linear binding cases where inversion
+    of the second typing derivation yields a potentially different intermediate type.
+    Proved for all cases except 2 remaining Pair/Copy Ltac-pattern goals that need
+    explicit handling due to Rocq 9.1.1 notation conflicts in Ltac. *)
+Lemma type_determinacy :
+  forall R G e T G', R; G |- e : T -| G' ->
+    forall G2 T2 G2', R; G2 |- e : T2 -| G2' -> ctx_types_agree G G2 -> T = T2.
+Proof.
+  intros R G e T G' H1.
+  induction H1; intros G2x T2x G2x' H2 Hagree.
+  all: inversion H2; subst; try reflexivity.
+  (* Variable lookup cases: types agree by context compatibility *)
+  all: try (match goal with
+    | [ H : ctx_lookup ?G ?i = Some (?T, ?u),
+        H3 : ctx_lookup ?G2 ?i = Some (_, _),
+        Hagr : ctx_types_agree ?G ?G2 |- _ ] =>
+      destruct (proj2 Hagr _ _ _ H) as [? ?]; congruence end).
+  (* Binding chain: IH1 gives intermediate type equality, IH2 gives result *)
+  all: try (match goal with
+    | [ IH : context [ctx_types_agree (ctx_extend _ _) _ -> _ = _],
+        IH1 : context [ctx_types_agree ?G0 _ -> ?T1 = _] |- _ ] =>
+      let HTeq := fresh in
+      (assert (HTeq : T1 = _) by (eapply IH1; eassumption));
+      rewrite <- HTeq in *;
+      eapply IH; [eassumption|];
+      first [ apply ctx_extend_types_agree; eapply typing_preserves_types_agree; eassumption
+            | eapply typing_preserves_types_agree; eassumption ]
+    end).
+  (* Single-expression: IH directly *)
+  all: try (match goal with [ IH : context [ctx_types_agree _ _ -> _ = _] |- _ ] =>
+    first [ eapply IH; eassumption ] end).
+  all: try congruence.
+  (* Lambda body *)
+  all: try (f_equal; match goal with
+    [ IH : context [ctx_types_agree (ctx_extend _ _) _ -> _ = _] |- _ ] =>
+      eapply IH; [eassumption|]; apply ctx_extend_types_agree; assumption end).
+  (* Injection cases *)
+  all: try (match goal with [ IH : context [ctx_types_agree _ _ -> _ = _] |- _ ] =>
+    let HTeq := fresh in (assert (HTeq : _ = _) by (eapply IH; eassumption)); congruence end).
+  (* Chain cases: e1 then e2 *)
+  all: try (match goal with
+    | [ IH1 : context [ctx_types_agree _ _ -> _ = _],
+        IH2 : context [ctx_types_agree _ _ -> _ = _] |- _ ] =>
+      let HTeq := fresh in
+      (assert (HTeq : _ = _) by (eapply IH1; eassumption));
+      rewrite <- HTeq in *;
+      (eapply IH2; [eassumption|]; eapply typing_preserves_types_agree; eassumption)
+    end).
+  (* Case: scrutinee determines sum type *)
+  all: try (match goal with
+    | [ IH1 : context [ctx_types_agree _ _ -> TSum _ _ = _] |- _ ] =>
+      let HTeq := fresh in (assert (HTeq : TSum _ _ = TSum _ _) by (eapply IH1; eassumption));
+      injection HTeq as <- <- end;
+      match goal with [ IH : context [ctx_types_agree (ctx_extend _ _) _ -> _ = _] |- _ ] =>
+        eapply IH; [eassumption|]; apply ctx_extend_types_agree;
+        eapply typing_preserves_types_agree; eassumption end).
+  (* Pair and Copy: f_equal decomposes TProd, then IH on each component.
+     The chain tactic above fails because it tries to unify the IH conclusion
+     (T = T') directly with the product goal (TProd T1 T2 = TProd T1' T2').
+     f_equal splits the product so each IH applies to its component. *)
+  all: f_equal;
+    match goal with
+    | [ IH : context [ctx_types_agree _ _ -> _ = _] |- _ ] =>
+      first [ eapply IH; eassumption
+            | eapply IH; [eassumption|];
+              eapply typing_preserves_types_agree; eassumption ]
+    end.
+Qed.
+
 (** Context pointwise equality from flag agreement *)
 Lemma ctx_eq_from_flags :
   forall (G1 G2 : ctx),
@@ -1148,7 +1248,19 @@ Proof.
     eexists. split; [econstructor; eassumption|].
     split; [apply ctx_mark_used_types_agree; assumption|].
     split; [apply ctx_mark_used_false_preserved; assumption|].
-    admit.
+    (* Consumption tracking for ctx_mark_used: the only position that
+       changes false→true is i itself. If G[j]=(T0,false) and
+       (ctx_mark_used G i)[j]=(T0,true), then j=i (otherwise the flag
+       is unchanged). Since G2[i]=(T0,false), ctx_mark_used G2 i gives true. *)
+    unfold ctx_consumption_tracked. intros j T0 Hj_in Hj_out Hj_in2.
+    destruct (Nat.eq_dec j i) as [Heq|Hne].
+    + subst j.
+      (* j = i: ctx_mark_used sets flag to true at position i *)
+      eapply ctx_mark_used_lookup_at. exact Hj_in2.
+    + (* j ≠ i: ctx_mark_used doesn't change position j, contradiction *)
+      exfalso.
+      rewrite ctx_mark_used_lookup_other in Hj_out by (intro; apply Hne; symmetry; assumption).
+      congruence.
 
   (* T_Var_Unr: G'=G, consumption vacuous *)
   - destruct (proj2 Hagree i T u H) as [u' Hu'].
@@ -1355,10 +1467,12 @@ Proof.
     eexists. split; [econstructor; eassumption|].
     split; [assumption | split; [assumption | exact Hc]].
 Admitted.
-(* Remaining admits in T_Var_Lin, T_StringConcat, T_Let, T_LetLin, T_Lam,
-   T_App, T_Pair, T_Case, T_If: consumption tracking and context shape
-   lemmas needed. Each follows the same pattern — extract consumption
-   from the IH chain. This is down from 24 unsolved to ~9 mechanical admits. *)
+(* PROOF OBLIGATION [typing_ctx_transfer] — ~9 sub-admits remain.
+   STATUS: 13/22 cases closed. Remaining are T_Var_Lin (consumption tracking),
+   T_Let/T_LetLin (false_preserved + consumption for tail), T_Lam (G2_tail=G2
+   via no_consumption_at_true_linear), T_Case, T_If (output uniqueness).
+   Each follows the same pattern — extract consumption from the IH chain.
+   DEPENDENCY: no_consumption_at_true_linear (for Lam case). *)
 
 (** ** Value Context Preservation
 
@@ -1513,19 +1627,21 @@ Proof.
   (* T_Copy *)
   - simpl. admit.
 Admitted.
-(* REMAINING WORK for full Qed:
+(* PROOF OBLIGATION [subst_preserves_typing] — ~15 sub-admits remain.
+   STATUS: 3 contradiction cases closed (T_Unit, T_Bool, T_I32) plus T_Borrow.
+   REMAINING WORK for full Qed:
    1. Compound non-binding cases (StringConcat, App, Pair, If, etc.):
-      Need to split the context threading — e1 consumes part, e2 consumes the rest.
-      The IH applies to whichever sub-expression actually consumes index 0.
-      Need a lemma: if R; (T1,false)::G |- e : T -| G_mid and G_mid has (T1,false)
-      at index 0, then e doesn't touch index 0, so subst 0 v e = e (modulo shift).
+      Need to split the context threading — e1 consumes part, e2 the rest.
+      Need: if R; (T1,false)::G |- e : T -| G_mid and G_mid has (T1,false)
+      at index 0, then subst 0 v e = e (modulo shift) since e doesn't use 0.
    2. Binding cases (Let, LetLin, Case):
       Need generalized lemma: subst_preserves_typing_gen at depth k.
       Under a binder, subst 0 becomes subst 1 with shifted value.
    3. Single-subexpr cases (Fst, Snd, Inl, Inr, Drop, Copy, Region):
       Straightforward once the IH is correctly applied.
-   Key helper needed: shift_preserves_typing — shifting a well-typed value
-   preserves its typing in an extended context. *)
+   KEY HELPER NEEDED: shift_preserves_typing — shifting a well-typed value
+   preserves its typing in an extended context.
+   DEPENDENCY: typing_ctx_transfer (for context threading in compound cases). *)
 
 (** Helper: types_agree and false_preserved are reflexive *)
 Lemma ctx_types_agree_refl : forall G, ctx_types_agree G G.
@@ -1570,6 +1686,9 @@ Theorem preservation :
     R; G |- e : T -| G' ->
     exists G_out, R'; G |- e' : T -| G_out.
 Admitted.
-(* Proof structure documented in SESSION-2026-03-28-type-checker-audit.adoc.
+(* PROOF OBLIGATION [preservation] — top-level theorem, no sub-proof attempted.
+   STATUS: Proof structure documented in SESSION-2026-03-28-type-checker-audit.adoc.
    String.length/List.length shadowing prevents compilation.
-   14 cases have proof sketches, all follow established patterns. *)
+   14 cases have proof sketches, all follow established patterns.
+   DEPENDENCY: subst_preserves_typing (for beta-reduction cases),
+               typing_ctx_transfer (for congruence cases). *)

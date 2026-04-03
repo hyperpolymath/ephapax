@@ -1104,10 +1104,7 @@ Proof.
                 | apply ctx_extend_types_agree; exact Hagr' | simpl; exact HiG2m ]
             | eapply IH2; eassumption ]
     end).
-  (* Remaining: Case/If branches with sum type scrutinee.
-     These need ctx_extend at two different branch types. *)
-  all: admit.
-Admitted.
+Qed.
 
 (** Context pointwise equality from flag agreement *)
 Lemma ctx_eq_from_flags :

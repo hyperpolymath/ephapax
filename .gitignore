@@ -74,3 +74,8 @@ ai-cli-crash-capture/
 
 # asdf version manager
 .tool-versions
+
+# Compiled shared/static libraries
+*.so
+*.a
+*.dylib

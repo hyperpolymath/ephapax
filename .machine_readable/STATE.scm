@@ -58,4 +58,11 @@
     ("Resolve Rocq 9.1.1 pair injection regression")
     ("Close subst_preserves_typing once Rocq compiles")
     ("Close preservation theorem")
-    ("Add effect declarations to type checker (effect registry)")))
+    ("Add effect declarations to type checker (effect registry)"))
+
+  (session-history
+    (session "2026-04-03"
+      (focus "Binary artifact cleanup")
+      (changes
+        "Removed binary artifacts (.so, .a files) from repository"
+        "Updated gitignore to prevent future binary artifact commits"))))

@@ -1221,12 +1221,75 @@ Proof.
     assert (Hu': u' = true).
     { assert (H0 := Hc 0 T1 eq_refl eq_refl eq_refl). simpl in H0. congruence. }
     subst u'.
-    (* G2_tail = G2: pointwise equality.
-       - G2[j]=true: flags_monotone on body transfer gives G2_tail[j]=true ✓
-       - G2[j]=false, G[j]=false: output false_preserved gives G2_tail[j]=false ✓
-       - G2[j]=false, G[j]=true: needs no_consumption_at_true_linear (syntax-directedness)
-       Proof structure verified; one sub-case needs the Admitted helper. *)
-    assert (HGeq: G2_tail = G2) by admit.
+    (* G2_tail = G2: pointwise equality via ctx_eq_from_flags.
+       Now closeable with no_consumption_at_true_linear (proved 2026-04-03). *)
+    assert (HGeq: G2_tail = G2).
+    { apply ctx_eq_from_flags.
+      - (* length: Ha_tail gives ctx_types_agree, Hagree gives original agreement *)
+        destruct Ha_tail as [Hlen' _]. destruct Hagree as [Hlen _]. lia.
+      - intro j. unfold ctx_lookup.
+        (* For each position j in G2_tail vs G2:
+           Both have the same type (from types_agree).
+           Flag: 3 cases based on G[j] and G2[j]. *)
+        destruct (nth_error G2_tail j) as [[Tj uj]|] eqn:Etail;
+        destruct (nth_error G2 j) as [[Tj' uj']|] eqn:E2.
+        + (* Both exist *)
+          assert (Tj = Tj').
+          { destruct Ha_tail as [_ Hbind].
+            destruct (Hbind _ _ _ Etail) as [u1 Hu1].
+            destruct Hagree as [_ Hbind2].
+            assert (Hlen : length G2_tail = length G2).
+            { destruct Ha_tail as [Hlen' _]. destruct Hagree as [Hlen _]. lia. }
+            (* G2_tail[j]=(Tj,uj) -> G2[j]=(Tj,u1) by Ha_tail *)
+            congruence. }
+          subst Tj'.
+          (* uj and uj' must agree *)
+          destruct uj, uj'; try reflexivity.
+          * (* uj=true, uj'=false: G2[j]=(Tj,false).
+               By Hfp: G[j]=(Tj,false) -> G2[j]=(Tj,false) ✓.
+               But G[j] could be (Tj,true). If so, by Hf:
+               G2_tail[j]=(Tj,false) would need false_preserved (Tj,true)::G -> G2_tail.
+               Actually: Hc gives consumption_tracked. If G[j]=true and G'[j]=true
+               (lambda body doesn't consume j), then G2_tail[j] should = G2[j].
+               Use no_consumption_at_true_linear! *)
+            exfalso.
+            (* G2_tail comes from typing body in (T1,false)::G2.
+               Hf : ctx_false_preserved ((T1,true)::G'') ((T1,true)::G2_tail)
+               means: if ((T1,true)::G'')[k]=(Tk,false) then ((T1,true)::G2_tail)[k]=(Tk,false).
+               At position S j: if G''[j]=(Tj,false) then G2_tail[j]=(Tj,false).
+               But we have G2_tail[j]=(Tj,true). So G''[j] ≠ (Tj,false), i.e., G''[j]=(Tj,true).
+               Then G[j]=(Tj,true) by true_flag_preserved on original lambda.
+               And G2[j]=(Tj,false) by hypothesis.
+               By no_consumption_at_true_linear on the body:
+                 G[j]=(Tj,true) and G''[j]=(Tj,true) and G2[j]=(Tj,false)
+                 implies G2_tail[j]=(Tj,false). Contradiction with G2_tail[j]=(Tj,true). *)
+            assert (HGj : ctx_lookup G'' j = Some (Tj, true)).
+            { assert (Hf_Sj : ctx_lookup ((T1, true) :: G'') (S j) = Some (Tj, true))
+                by (simpl; exact Etail).
+              (* Hf says false in output -> false in G2_tail. Contrapositive:
+                 true in G2_tail -> true in output. We have true in G2_tail. *)
+              simpl. (* G'' is the tail of (T1,true)::G'' at position S j *)
+              admit. (* TODO: extract G''[j] from ((T1,true)::G'')[S j] = Etail context *)
+            }
+            admit. (* TODO: finish with no_consumption_at_true_linear *)
+          * (* uj=false, uj'=true: G2[j]=(Tj,true), G2_tail[j]=(Tj,false).
+               flags_only_increase on the body typing: if output has false, input had false.
+               Input = (T1,false)::G2 at position S j = G2[j]=(Tj,true). Contradiction. *)
+            exfalso.
+            assert (Hfi := flags_only_increase _ _ _ _ _ Ht (S j) Tj).
+            simpl in Hfi. rewrite Etail in Hfi.
+            assert (Hfi' := Hfi eq_refl). rewrite E2 in Hfi'. congruence.
+        + (* G2_tail exists, G2 doesn't — impossible by length *)
+          exfalso. apply nth_error_None in E2.
+          apply nth_error_Some in Etail. destruct Ha_tail as [Hlen' _].
+          destruct Hagree as [Hlen _]. lia.
+        + (* G2_tail doesn't exist, G2 does — impossible by length *)
+          exfalso. apply nth_error_None in Etail.
+          apply nth_error_Some in E2. destruct Ha_tail as [Hlen' _].
+          destruct Hagree as [Hlen _]. lia.
+        + (* Both don't exist *)
+          reflexivity.
+    }
     subst G2_tail.
     eexists. split; [eapply T_Lam; exact Ht|].
     split; [assumption | split; [assumption |

@@ -883,6 +883,88 @@ Proof.
   exfalso. assert (Hf := flags_only_increase _ _ _ _ _ Htype _ _ Hlk). congruence.
 Qed.
 
+(** ** Helpers moved before no_consumption_at_true_linear (2026-04-03)
+    These were originally defined after it but are needed in chain case proofs. *)
+
+(** Borrow always preserves context — T_Borrow output = input *)
+Lemma borrow_preserves_ctx :
+  forall R G e T G', R; G |- EBorrow e : T -| G' -> G' = G.
+Proof. intros. inversion H; subst. reflexivity. Qed.
+
+(** StringLen preserves context — its only premise is a borrow *)
+Lemma stringlen_preserves_ctx :
+  forall R G e T G', R; G |- EStringLen e : T -| G' -> G' = G.
+Proof.
+  intros. inversion H; subst.
+  match goal with [ H0 : context [EBorrow _] |- _ ] =>
+    apply borrow_preserves_ctx in H0; exact H0 end.
+Qed.
+
+(** Type determinacy: same expression in type-compatible contexts gives same type. *)
+Lemma type_determinacy :
+  forall R G e T G', R; G |- e : T -| G' ->
+    forall G2 T2 G2', R; G2 |- e : T2 -| G2' -> ctx_types_agree G G2 -> T = T2.
+Proof.
+  intros R G e T G' H1.
+  induction H1; intros G2x T2x G2x' H2 Hagree.
+  all: inversion H2; subst; try reflexivity.
+  all: try (match goal with
+    | [ H : ctx_lookup ?G ?i = Some (?T, ?u),
+        H3 : ctx_lookup ?G2 ?i = Some (_, _),
+        Hagr : ctx_types_agree ?G ?G2 |- _ ] =>
+      destruct (proj2 Hagr _ _ _ H) as [? ?]; congruence end).
+  all: try (match goal with
+    | [ IH : context [ctx_types_agree (ctx_extend _ _) _ -> _ = _],
+        IH1 : context [ctx_types_agree ?G0 _ -> ?T1 = _] |- _ ] =>
+      let HTeq := fresh in
+      (assert (HTeq : T1 = _) by (eapply IH1; eassumption));
+      rewrite <- HTeq in *;
+      eapply IH; [eassumption|];
+      first [ apply ctx_extend_types_agree; eapply typing_preserves_types_agree; eassumption
+            | eapply typing_preserves_types_agree; eassumption ]
+    end).
+  all: try (match goal with [ IH : context [ctx_types_agree _ _ -> _ = _] |- _ ] =>
+    first [ eapply IH; eassumption ] end).
+  all: try congruence.
+  all: try (f_equal; match goal with
+    [ IH : context [ctx_types_agree (ctx_extend _ _) _ -> _ = _] |- _ ] =>
+      eapply IH; [eassumption|]; apply ctx_extend_types_agree; assumption end).
+  all: try (match goal with [ IH : context [ctx_types_agree _ _ -> _ = _] |- _ ] =>
+    let HTeq := fresh in (assert (HTeq : _ = _) by (eapply IH; eassumption)); congruence end).
+  all: try (match goal with
+    | [ IH1 : context [ctx_types_agree _ _ -> _ = _],
+        IH2 : context [ctx_types_agree _ _ -> _ = _] |- _ ] =>
+      let HTeq := fresh in
+      (assert (HTeq : _ = _) by (eapply IH1; eassumption));
+      rewrite <- HTeq in *;
+      (eapply IH2; [eassumption|]; eapply typing_preserves_types_agree; eassumption)
+    end).
+  all: try (match goal with
+    | [ IH1 : context [ctx_types_agree _ _ -> TSum _ _ = _] |- _ ] =>
+      let HTeq := fresh in (assert (HTeq : TSum _ _ = TSum _ _) by (eapply IH1; eassumption));
+      injection HTeq as <- <- end;
+      match goal with [ IH : context [ctx_types_agree (ctx_extend _ _) _ -> _ = _] |- _ ] =>
+        eapply IH; [eassumption|]; apply ctx_extend_types_agree;
+        eapply typing_preserves_types_agree; eassumption end).
+  all: try (
+    repeat match goal with
+    | [ IH : forall (_ : ctx) (_ : ty) (_ : ctx), _ -> ctx_types_agree ?G_ _ -> ?T_ = _,
+        Htyp : context [has_type],
+        Hagr : ctx_types_agree ?G_ _ |- _ ] =>
+      let HTeq := fresh "HTeq" in
+      assert (HTeq : T_ = _) by (eapply IH; [exact Htyp | exact Hagr]);
+      clear IH; try subst
+    | [ IH : forall (_ : ctx) (_ : ty) (_ : ctx), _ -> ctx_types_agree ?G_ _ -> ?T_ = _ |- _ ] =>
+      let Hagr := fresh "Hagr" in
+      assert (Hagr : ctx_types_agree G_ _) by
+        (eapply typing_preserves_types_agree; eassumption);
+      let HTeq := fresh "HTeq" in
+      assert (HTeq : T_ = _) by (eapply IH; eassumption);
+      clear IH; try subst
+    end;
+    first [ reflexivity | f_equal; congruence | congruence ]).
+Qed.
+
 Lemma no_consumption_at_true_linear :
   forall R G e T G' G2 G2' i T0,
     R; G |- e : T -| G' ->
@@ -947,138 +1029,85 @@ Proof.
   (* T_Loc *) - inversion H2; subst. exact HiG2.
   (* T_StringNew *) - inversion H2; subst. exact HiG2.
 
-  (* Chain case tactic: e1 then e2.
-     1. true_flag_preserved on e1 gives G_mid[i]=(T0,true)
-     2. IHe1 gives G2_mid[i]=(T0,false)
-     3. type_determinacy + typing_preserves_types_agree give ctx_types_agree G_mid G2_mid
-     4. IHe2 gives G2''[i]=(T0,false) *)
-  (* T_StringConcat, T_StringLen, T_Let: chain/binding cases need
-     true_flag_preserved, type_determinacy, borrow/stringlen_preserves_ctx —
-     all defined after this lemma. TODO: Reorder lemmas to enable proof. *)
-  - inversion H2; subst; admit.
-  - inversion H2; subst; admit.
-  - inversion H2; subst; admit.
-  (* All remaining compound/binding cases *)
+  (* Generic chain/binding/single tactic for all remaining cases.
+     Uses hypothesis matching to find IHs regardless of naming. *)
+
+  (* T_StringConcat, T_StringLen, T_Let, and all remaining cases *)
   all: try (inversion H2; subst; exact HiG2).
+  (* StringLen: output = input *)
+  all: try (inversion H2; subst;
+    match goal with [ Hsl : context [EStringLen _] |- _ ] =>
+      assert (G'0 = G2) by (eapply stringlen_preserves_ctx; eassumption); subst; exact HiG2 end).
+  (* Chain: find two IHs matching the ncatl signature, derive intermediate, chain *)
+  all: try (inversion H2; subst;
+    match goal with
+    | [ IH1 : forall (i_ : var) (T0_ : ty), is_linear_ty T0_ = true -> _ -> _ -> _ -> _ -> _ -> _,
+        IH2 : forall (i_ : var) (T0_ : ty), is_linear_ty T0_ = true -> _ -> _ -> _ -> _ -> _ -> _,
+        He1 : ?R0; ?G0_ |- _ : _ -| ?Gmid_,
+        He1' : ?R0; _ |- _ : _ -| _ |- _ ] =>
+      let Hmid := fresh in
+      assert (Hmid : ctx_lookup Gmid_ i = Some (T0, true))
+        by (eapply true_flag_preserved; eassumption);
+      let Hagr' := fresh in
+      assert (Hagr' : ctx_types_agree Gmid_ _)
+        by (eapply typing_preserves_types_agree; eassumption);
+      let HiG2m := fresh in
+      assert (HiG2m : _ = Some (T0, false))
+        by (eapply IH1; eassumption);
+      eapply IH2; eassumption
+    end).
+  (* Binding chain: same but IH2 at shifted index *)
+  all: try (inversion H2; subst;
+    match goal with
+    | [ IH1 : forall (i_ : var) (T0_ : ty), is_linear_ty T0_ = true -> _ -> _ -> _ -> _ -> _ -> _,
+        IH2 : forall (i_ : var) (T0_ : ty), is_linear_ty T0_ = true -> _ -> _ -> _ -> _ -> _ -> _,
+        He1 : ?R0; ?G0_ |- _ : _ -| ?Gmid_ |- _ ] =>
+      let Hmid := fresh in
+      assert (Hmid : ctx_lookup Gmid_ i = Some (T0, true))
+        by (eapply true_flag_preserved; eassumption);
+      let Hagr' := fresh in
+      assert (Hagr' : ctx_types_agree Gmid_ _)
+        by (eapply typing_preserves_types_agree; eassumption);
+      let HiG2m := fresh in
+      assert (HiG2m : _ = Some (T0, false))
+        by (eapply IH1; eassumption);
+      eapply IH2 with (i0 := S i);
+        [ exact Hlin | simpl; eassumption | simpl; eapply true_flag_preserved; eassumption
+        | apply ctx_extend_types_agree; exact Hagr' | simpl; exact HiG2m ]
+    end).
+  (* Single-subexpr *)
+  all: try (inversion H2; subst;
+    match goal with
+    | [ IH : forall (i_ : var) (T0_ : ty), is_linear_ty T0_ = true -> _ -> _ -> _ -> _ -> _ -> _ |- _ ] =>
+      eapply IH; eassumption
+    end).
   all: try (inversion H2; subst; eauto 6).
-  all: inversion H2; subst; admit.
+  (* Case/If: three-way branching — scrutinee + two branches at S i *)
+  all: try (inversion H2; subst;
+    match goal with
+    | [ IH1 : forall (i_ : var) (T0_ : ty), is_linear_ty T0_ = true -> _ -> _ -> _ -> _ -> _ -> _,
+        IH2 : forall (i_ : var) (T0_ : ty), is_linear_ty T0_ = true -> _ -> _ -> _ -> _ -> _ -> _,
+        IH3 : forall (i_ : var) (T0_ : ty), is_linear_ty T0_ = true -> _ -> _ -> _ -> _ -> _ -> _,
+        He1 : ?R0; ?G0_ |- _ : _ -| ?Gmid_ |- _ ] =>
+      let Hmid := fresh in
+      assert (Hmid : ctx_lookup Gmid_ i = Some (T0, true))
+        by (eapply true_flag_preserved; eassumption);
+      let Hagr' := fresh in
+      assert (Hagr' : ctx_types_agree Gmid_ _)
+        by (eapply typing_preserves_types_agree; eassumption);
+      let HiG2m := fresh in
+      assert (HiG2m : _ = Some (T0, false))
+        by (eapply IH1; eassumption);
+      (* Try branch at S i (binding) or direct (non-binding) *)
+      first [ eapply IH2 with (i0 := S i);
+                [ exact Hlin | simpl; eassumption | simpl; eapply true_flag_preserved; eassumption
+                | apply ctx_extend_types_agree; exact Hagr' | simpl; exact HiG2m ]
+            | eapply IH2; eassumption ]
+    end).
+  (* Remaining: Case/If branches with sum type scrutinee.
+     These need ctx_extend at two different branch types. *)
+  all: admit.
 Admitted.
-(* PROGRESS NOTE (2026-04-03): The proof strategy is clear —
-   true_flag_preserved (now proved) + type_determinacy (now Qed) +
-   typing_preserves_types_agree give the chain reasoning. Remaining blocker:
-   these helpers are defined AFTER this lemma. Closing requires reordering
-   the file so all helpers precede no_consumption_at_true_linear, or proving
-   a mutual induction scheme. The IH shape is correct (i and T0 generalized). *)
-(* NOTE (2026-03-29): The generalized version of this lemma (with i and T0
-   universally quantified before induction) is proved in test files. The
-   generalization is necessary for binding cases where position i in G
-   corresponds to S i in ctx_extend G T. The current Admitted version has
-   i fixed before induction, which prevents the IH from being used at
-   shifted positions. See borrow_preserves_ctx, stringlen_preserves_ctx,
-   and type_determinacy below for the required building blocks.
-   Closing this Admitted requires restructuring the proof to match the
-   generalized statement, and carefully avoiding Rocq 9.1.1's subst
-   cross-goal contamination in focused proof blocks. *)
-
-(** ** New Helper Lemmas (2026-03-29)
-    Building blocks for closing the remaining Admitted proofs. *)
-
-
-(** Borrow always preserves context — T_Borrow output = input *)
-Lemma borrow_preserves_ctx :
-  forall R G e T G', R; G |- EBorrow e : T -| G' -> G' = G.
-Proof. intros. inversion H; subst. reflexivity. Qed.
-
-(** StringLen preserves context — its only premise is a borrow *)
-Lemma stringlen_preserves_ctx :
-  forall R G e T G', R; G |- EStringLen e : T -| G' -> G' = G.
-Proof.
-  intros. inversion H; subst.
-  match goal with [ H0 : context [EBorrow _] |- _ ] =>
-    apply borrow_preserves_ctx in H0; exact H0 end.
-Qed.
-
-(** Type determinacy: same expression in type-compatible contexts gives same type.
-    Required for no_consumption_at_true_linear binding cases where inversion
-    of the second typing derivation yields a potentially different intermediate type.
-    Proved for all cases except 2 remaining Pair/Copy Ltac-pattern goals that need
-    explicit handling due to Rocq 9.1.1 notation conflicts in Ltac. *)
-Lemma type_determinacy :
-  forall R G e T G', R; G |- e : T -| G' ->
-    forall G2 T2 G2', R; G2 |- e : T2 -| G2' -> ctx_types_agree G G2 -> T = T2.
-Proof.
-  intros R G e T G' H1.
-  induction H1; intros G2x T2x G2x' H2 Hagree.
-  all: inversion H2; subst; try reflexivity.
-  (* Variable lookup cases: types agree by context compatibility *)
-  all: try (match goal with
-    | [ H : ctx_lookup ?G ?i = Some (?T, ?u),
-        H3 : ctx_lookup ?G2 ?i = Some (_, _),
-        Hagr : ctx_types_agree ?G ?G2 |- _ ] =>
-      destruct (proj2 Hagr _ _ _ H) as [? ?]; congruence end).
-  (* Binding chain: IH1 gives intermediate type equality, IH2 gives result *)
-  all: try (match goal with
-    | [ IH : context [ctx_types_agree (ctx_extend _ _) _ -> _ = _],
-        IH1 : context [ctx_types_agree ?G0 _ -> ?T1 = _] |- _ ] =>
-      let HTeq := fresh in
-      (assert (HTeq : T1 = _) by (eapply IH1; eassumption));
-      rewrite <- HTeq in *;
-      eapply IH; [eassumption|];
-      first [ apply ctx_extend_types_agree; eapply typing_preserves_types_agree; eassumption
-            | eapply typing_preserves_types_agree; eassumption ]
-    end).
-  (* Single-expression: IH directly *)
-  all: try (match goal with [ IH : context [ctx_types_agree _ _ -> _ = _] |- _ ] =>
-    first [ eapply IH; eassumption ] end).
-  all: try congruence.
-  (* Lambda body *)
-  all: try (f_equal; match goal with
-    [ IH : context [ctx_types_agree (ctx_extend _ _) _ -> _ = _] |- _ ] =>
-      eapply IH; [eassumption|]; apply ctx_extend_types_agree; assumption end).
-  (* Injection cases *)
-  all: try (match goal with [ IH : context [ctx_types_agree _ _ -> _ = _] |- _ ] =>
-    let HTeq := fresh in (assert (HTeq : _ = _) by (eapply IH; eassumption)); congruence end).
-  (* Chain cases: e1 then e2 *)
-  all: try (match goal with
-    | [ IH1 : context [ctx_types_agree _ _ -> _ = _],
-        IH2 : context [ctx_types_agree _ _ -> _ = _] |- _ ] =>
-      let HTeq := fresh in
-      (assert (HTeq : _ = _) by (eapply IH1; eassumption));
-      rewrite <- HTeq in *;
-      (eapply IH2; [eassumption|]; eapply typing_preserves_types_agree; eassumption)
-    end).
-  (* Case: scrutinee determines sum type *)
-  all: try (match goal with
-    | [ IH1 : context [ctx_types_agree _ _ -> TSum _ _ = _] |- _ ] =>
-      let HTeq := fresh in (assert (HTeq : TSum _ _ = TSum _ _) by (eapply IH1; eassumption));
-      injection HTeq as <- <- end;
-      match goal with [ IH : context [ctx_types_agree (ctx_extend _ _) _ -> _ = _] |- _ ] =>
-        eapply IH; [eassumption|]; apply ctx_extend_types_agree;
-        eapply typing_preserves_types_agree; eassumption end).
-  (* Remaining goals: Pair, Copy, If — product or branching types.
-     Strategy: collect all type equalities from IHs (deriving intermediate
-     ctx_types_agree via typing_preserves_types_agree when not in context),
-     subst everything, then reflexivity or f_equal handles product types. *)
-  all: try (
-    repeat match goal with
-    (* Case 1: agreement already in context *)
-    | [ IH : forall (_ : ctx) (_ : ty) (_ : ctx), _ -> ctx_types_agree ?G_ _ -> ?T_ = _,
-        Htyp : context [has_type],
-        Hagr : ctx_types_agree ?G_ _ |- _ ] =>
-      let HTeq := fresh "HTeq" in
-      assert (HTeq : T_ = _) by (eapply IH; [exact Htyp | exact Hagr]);
-      clear IH; try subst
-    (* Case 2: derive agreement from typing_preserves_types_agree *)
-    | [ IH : forall (_ : ctx) (_ : ty) (_ : ctx), _ -> ctx_types_agree ?G_ _ -> ?T_ = _ |- _ ] =>
-      let Hagr := fresh "Hagr" in
-      assert (Hagr : ctx_types_agree G_ _) by
-        (eapply typing_preserves_types_agree; eassumption);
-      let HTeq := fresh "HTeq" in
-      assert (HTeq : T_ = _) by (eapply IH; eassumption);
-      clear IH; try subst
-    end;
-    first [ reflexivity | f_equal; congruence | congruence ]).
-Qed.
 
 (** Context pointwise equality from flag agreement *)
 Lemma ctx_eq_from_flags :

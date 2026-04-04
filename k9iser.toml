@@ -1,0 +1,23 @@
+# SPDX-License-Identifier: PMPL-1.0-or-later
+# Copyright (c) 2026 Jonathan D.A. Jewell (hyperpolymath) <j.d.a.jewell@open.ac.uk>
+#
+# k9iser manifest for ephapax
+# Formal verification library with linear type proofs
+
+[project]
+name = "ephapax"
+safety_tier = "hunt"
+
+[[source]]
+path = "Cargo.toml"
+type = "cargo"
+output = "generated/k9iser/cargo-manifest.k9"
+
+[[source]]
+path = "Justfile"
+type = "justfile"
+output = "generated/k9iser/justfile-recipes.k9"
+
+[[constraint]]
+rule = "build.dependencies has no banned_packages"
+severity = "error"

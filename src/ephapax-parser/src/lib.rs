@@ -1867,7 +1867,7 @@ mod tests {
                 assert_eq!(name.as_str(), "double");
                 assert_eq!(*visibility, Visibility::Public);
             }
-            _ => panic!("Expected Fn decl"),
+            other => panic!("Expected Fn decl, got {other:?}"),
         }
     }
 
@@ -1879,7 +1879,7 @@ mod tests {
             Decl::Fn { visibility, .. } => {
                 assert_eq!(*visibility, Visibility::Private);
             }
-            _ => panic!("Expected Fn decl"),
+            other => panic!("Expected Fn decl, got {other:?}"),
         }
     }
 
@@ -1896,7 +1896,7 @@ mod tests {
                 assert!(matches!(&params[0].1, Ty::Var(v) if v == "T"));
                 assert!(matches!(ret_ty, Ty::Var(v) if v == "T"));
             }
-            _ => panic!("Expected Fn decl"),
+            other => panic!("Expected Fn decl, got {other:?}"),
         }
     }
 
@@ -1910,7 +1910,7 @@ mod tests {
                 assert_eq!(type_params[0].as_str(), "A");
                 assert_eq!(type_params[1].as_str(), "B");
             }
-            _ => panic!("Expected Fn decl"),
+            other => panic!("Expected Fn decl, got {other:?}"),
         }
     }
 
@@ -1923,7 +1923,7 @@ mod tests {
                 assert_eq!(*visibility, Visibility::Public);
                 assert_eq!(type_params.len(), 1);
             }
-            _ => panic!("Expected Fn decl"),
+            other => panic!("Expected Fn decl, got {other:?}"),
         }
     }
 
@@ -1963,7 +1963,7 @@ mod tests {
                 assert_eq!(name.as_str(), "Alias");
                 assert_eq!(*visibility, Visibility::Public);
             }
-            _ => panic!("Expected Type decl"),
+            other => panic!("Expected Type decl, got {other:?}"),
         }
     }
 
@@ -2020,7 +2020,7 @@ mod tests {
                 assert!(clauses[0].op.is_empty()); // return
                 assert_eq!(clauses[1].op.as_str(), "ask");
             }
-            _ => panic!("Expected Handle"),
+            other => panic!("Expected Handle, got {other:?}"),
         }
     }
 }

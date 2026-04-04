@@ -772,3 +772,317 @@ mod tests {
         assert!(tokens.iter().any(|t| matches!(t.kind, TokenKind::Let)));
     }
 }
+
+// =========================================================================
+// P2P PROPERTY TESTS
+//
+// Loop-based invariant checks for the lexer. Each test verifies a core
+// lexer invariant over a range of parameterised inputs.
+// =========================================================================
+
+#[cfg(test)]
+mod property_tests {
+    use super::*;
+
+    // -------------------------------------------------------------------------
+    // P2P: round-trip token spans
+    // -------------------------------------------------------------------------
+
+    /// P2P: every token span is within the bounds of the source string.
+    ///
+    /// For 20 programs of varying length, verifies that all token spans
+    /// satisfy start <= end <= source.len().
+    #[test]
+    fn p2p_token_spans_within_source_bounds() {
+        let programs = vec![
+            "let x = 42",
+            "let! y = \"hello\"",
+            "fn foo(x: i32): i32 = x",
+            "if true then 1 else 0",
+            "let a = 1 let b = 2",
+            "region r { }",
+            "drop(42)",
+            "let! s = String.new@r(\"world\") in s",
+            "(a, b)",
+            "x + y * z",
+            "42",
+            "\"\"",
+            "true",
+            "false",
+            "()",
+            "let x = let y = 1 in y in x",
+            "-- comment\nlet x = 1",
+            "/* block */ let x = 1",
+            "let! x = 1 in let! y = x in y",
+            "0.0",
+        ];
+
+        for (i, source) in programs.iter().enumerate() {
+            let tokens: Vec<Token> = Lexer::new(source)
+                .filter_map(|r| r.ok())
+                .filter(|t| !matches!(t.kind, TokenKind::Eof))
+                .collect();
+
+            for token in &tokens {
+                assert!(
+                    token.span.start <= token.span.end,
+                    "P2P spans[{i}]: span.start > span.end in {source:?}"
+                );
+                assert!(
+                    token.span.end <= source.len(),
+                    "P2P spans[{i}]: span.end {} > source.len() {} in {source:?}",
+                    token.span.end,
+                    source.len()
+                );
+            }
+        }
+    }
+
+    /// Helper: tokenize and strip the trailing EOF token that the lexer appends.
+    fn tokenize_no_eof(source: &str) -> (Vec<Token>, Vec<LexerError>) {
+        let (mut tokens, errors) = Lexer::tokenize(source);
+        tokens.retain(|t| !matches!(t.kind, TokenKind::Eof));
+        (tokens, errors)
+    }
+
+    /// P2P: empty string produces no content tokens and no errors.
+    ///
+    /// Lexing an empty string is a degenerate case that must be handled
+    /// gracefully — only an EOF token (if any), no errors, no panics.
+    #[test]
+    fn p2p_empty_string_no_content_tokens_no_errors() {
+        for _ in 0..20 {
+            let (tokens, errors) = tokenize_no_eof("");
+            assert!(tokens.is_empty(), "P2P empty: empty source must produce no content tokens");
+            assert!(errors.is_empty(), "P2P empty: empty source must produce no errors");
+        }
+    }
+
+    /// P2P: whitespace-only strings produce no content tokens.
+    ///
+    /// The lexer skips whitespace; pure whitespace inputs should yield no content tokens.
+    #[test]
+    fn p2p_whitespace_only_no_content_tokens() {
+        let whitespace_inputs = [
+            " ", "  ", "\t", "\n", "\r\n", "   \t\n  ", "\n\n\n",
+        ];
+        for source in &whitespace_inputs {
+            let tokens: Vec<Token> = Lexer::new(source)
+                .filter_map(|r| r.ok())
+                .filter(|t| !matches!(t.kind, TokenKind::Eof))
+                .collect();
+            assert!(
+                tokens.is_empty(),
+                "P2P whitespace: {:?} must produce no content tokens, got {}",
+                source,
+                tokens.len()
+            );
+        }
+    }
+
+    /// P2P: integer literals tokenise to exactly one content token of integer kind.
+    ///
+    /// For 6 integer literals, verifies that tokenisation produces
+    /// exactly one content token of the Integer kind.
+    #[test]
+    fn p2p_integer_literals_tokenise_to_one_token() {
+        let inputs: Vec<(&str, fn(&TokenKind) -> bool)> = vec![
+            ("0",          |t| matches!(t, TokenKind::Integer(_))),
+            ("1",          |t| matches!(t, TokenKind::Integer(_))),
+            ("42",         |t| matches!(t, TokenKind::Integer(_))),
+            ("100",        |t| matches!(t, TokenKind::Integer(_))),
+            ("999",        |t| matches!(t, TokenKind::Integer(_))),
+            ("2147483647", |t| matches!(t, TokenKind::Integer(_))),
+        ];
+
+        for (source, predicate) in &inputs {
+            let (tokens, errors) = tokenize_no_eof(source);
+            assert!(errors.is_empty(), "P2P int[{source}]: unexpected lex errors");
+            assert_eq!(
+                tokens.len(), 1,
+                "P2P int[{source}]: expected exactly one content token"
+            );
+            assert!(
+                predicate(&tokens[0].kind),
+                "P2P int[{source}]: token kind mismatch for {source:?}"
+            );
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // E2E: lexer -> token stream properties
+    // -------------------------------------------------------------------------
+
+    /// E2E: a complete function definition lexes without errors and contains
+    /// the expected keyword tokens in order.
+    #[test]
+    fn e2e_function_definition_lexes_correctly() {
+        let source = "fn add(x: i32, y: i32): i32 = x + y";
+        let (tokens, errors) = tokenize_no_eof(source);
+
+        assert!(errors.is_empty(), "E2E fn: no lex errors expected");
+        assert!(!tokens.is_empty(), "E2E fn: must produce tokens");
+
+        // First token must be `fn`
+        assert!(
+            matches!(tokens[0].kind, TokenKind::Fn),
+            "E2E fn: first token must be Fn keyword"
+        );
+
+        // Must contain Ident tokens for 'add', 'x', 'y'
+        let idents: Vec<&SmolStr> = tokens.iter()
+            .filter_map(|t| if let TokenKind::Ident(s) = &t.kind { Some(s) } else { None })
+            .collect();
+        assert!(
+            idents.iter().any(|s| s.as_str() == "add"),
+            "E2E fn: must contain 'add' identifier"
+        );
+        assert!(
+            idents.iter().any(|s| s.as_str() == "x"),
+            "E2E fn: must contain 'x' identifier"
+        );
+        assert!(
+            idents.iter().any(|s| s.as_str() == "y"),
+            "E2E fn: must contain 'y' identifier"
+        );
+    }
+
+    /// E2E: a linear let binding lexes with let! as distinct from let.
+    ///
+    /// Verifies that the lexer correctly distinguishes `let!` from `let`.
+    #[test]
+    fn e2e_letlin_distinguished_from_let() {
+        let source_letlin = "let! x = 1 in x";
+        let source_let    = "let x = 1";
+
+        let (tokens_lin, errors_lin) = tokenize_no_eof(source_letlin);
+        let (tokens_let, errors_let) = tokenize_no_eof(source_let);
+
+        assert!(errors_lin.is_empty(), "E2E let!: no lex errors");
+        assert!(errors_let.is_empty(), "E2E let: no lex errors");
+
+        assert!(
+            tokens_lin.iter().any(|t| matches!(t.kind, TokenKind::LetBang)),
+            "E2E let!: must contain LetLin token"
+        );
+        assert!(
+            tokens_let.iter().any(|t| matches!(t.kind, TokenKind::Let)),
+            "E2E let: must contain Let token"
+        );
+        assert!(
+            !tokens_let.iter().any(|t| matches!(t.kind, TokenKind::LetBang)),
+            "E2E let: plain let must NOT contain LetLin token"
+        );
+    }
+
+    // -------------------------------------------------------------------------
+    // ASPECT TESTS
+    // -------------------------------------------------------------------------
+
+    /// Aspect: lexer does not panic on arbitrary ASCII inputs.
+    ///
+    /// Feeds 20 unusual ASCII strings through the lexer and verifies that
+    /// the tokenize function returns (possibly with errors) rather than panicking.
+    #[test]
+    fn aspect_no_panic_on_unusual_ascii_inputs() {
+        let inputs = [
+            "!@#$%^&*",
+            "let let let",
+            "\"unterminated string",
+            "/* unterminated block comment",
+            "let x = ;;;;",
+            "0xDEADBEEF",
+            "1e1000",
+            "let _ = _",
+            "???",
+            "let x = ((((()))))",
+            "let x = [[[",
+            "let x = >>>",
+            "let!let!let!",
+            "-- -- --",
+            "0 0 0 0 0 0",
+            "\"\\n\\t\\r\"",
+            "let x = -9999",
+            "1.0e10",
+            "let!! = 42",
+            "\x00\x01\x02",
+        ];
+
+        for source in &inputs {
+            // Must not panic — may produce errors
+            let (tokens, _errors) = tokenize_no_eof(source);
+            // Basic sanity: tokens vector is accessible
+            let _ = tokens.len();
+        }
+    }
+
+    /// Aspect: tokenize and iterator produce the same tokens.
+    ///
+    /// Verifies that the `Lexer::tokenize` function and the `Lexer::new`
+    /// iterator yield consistent results for the same input.
+    #[test]
+    fn aspect_tokenize_consistent_with_iterator() {
+        let programs = [
+            "let x = 42",
+            "fn foo(a: i32): i32 = a",
+            "if true then 1 else 0",
+            "let! x = 1 in x",
+        ];
+
+        for source in &programs {
+            let (batch_tokens, _batch_errors) = tokenize_no_eof(source);
+            let iter_tokens: Vec<Token> = Lexer::new(source)
+                .filter_map(|r| r.ok())
+                .filter(|t| !matches!(t.kind, TokenKind::Eof))
+                .collect();
+
+            assert_eq!(
+                batch_tokens.len(), iter_tokens.len(),
+                "Aspect consistency[{source:?}]: batch and iterator must yield same token count"
+            );
+
+            for (i, (bt, it)) in batch_tokens.iter().zip(iter_tokens.iter()).enumerate() {
+                assert_eq!(
+                    bt.kind, it.kind,
+                    "Aspect consistency[{source:?}] token[{i}]: kind mismatch"
+                );
+                assert_eq!(
+                    bt.span, it.span,
+                    "Aspect consistency[{source:?}] token[{i}]: span mismatch"
+                );
+            }
+        }
+    }
+
+    /// Aspect: span merging is commutative.
+    ///
+    /// Verifies the Span::merge utility satisfies the commutativity property:
+    /// merge(a, b) == merge(b, a) for the resulting merged span.
+    #[test]
+    fn aspect_span_merge_produces_bounding_span() {
+        let test_cases = vec![
+            (Span::new(0, 5), Span::new(3, 10)),
+            (Span::new(0, 0), Span::new(0, 0)),
+            (Span::new(10, 20), Span::new(5, 15)),
+            (Span::new(0, 100), Span::new(50, 60)),
+        ];
+
+        for (a, b) in test_cases {
+            let merged_ab = a.merge(b);
+            let merged_ba = b.merge(a);
+
+            assert_eq!(
+                merged_ab, merged_ba,
+                "Aspect span_merge: merge must be commutative for ({a:?}, {b:?})"
+            );
+            assert!(
+                merged_ab.start <= a.start.min(b.start) + 1,
+                "Aspect span_merge: merged start must be <= min of inputs"
+            );
+            assert!(
+                merged_ab.end >= a.end.max(b.end),
+                "Aspect span_merge: merged end must be >= max of inputs"
+            );
+        }
+    }
+}

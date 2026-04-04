@@ -468,10 +468,14 @@ impl Interpreter {
             }
 
             ExprKind::Perform { .. } => {
-                todo!("effect perform not yet implemented in interpreter")
+                Err(RuntimeError::Unimplemented(
+                    "effect perform not yet implemented in interpreter".into(),
+                ))
             }
             ExprKind::Handle { .. } => {
-                todo!("effect handle not yet implemented in interpreter")
+                Err(RuntimeError::Unimplemented(
+                    "effect handle not yet implemented in interpreter".into(),
+                ))
             }
         }
     }

@@ -1486,10 +1486,14 @@ impl Codegen {
             }
 
             ExprKind::Perform { .. } => {
-                todo!("effect perform not yet implemented in WASM backend")
+                // Effect perform not yet implemented — emit WASM unreachable
+                // instead of panicking the compiler at codegen time.
+                func.instruction(&wasm_encoder::Instruction::Unreachable);
             }
             ExprKind::Handle { .. } => {
-                todo!("effect handle not yet implemented in WASM backend")
+                // Effect handle not yet implemented — emit WASM unreachable
+                // instead of panicking the compiler at codegen time.
+                func.instruction(&wasm_encoder::Instruction::Unreachable);
             }
         }
     }

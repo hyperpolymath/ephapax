@@ -212,7 +212,7 @@ mod tests {
         let expr = parse_expr_helper("[]").unwrap();
         match expr.kind {
             ExprKind::ListLit(elements) => assert_eq!(elements.len(), 0),
-            _ => panic!("Expected ListLit"),
+            other => panic!("Expected ListLit, got {other:?}"),
         }
     }
 
@@ -221,7 +221,7 @@ mod tests {
         let expr = parse_expr_helper("[1, 2, 3]").unwrap();
         match expr.kind {
             ExprKind::ListLit(elements) => assert_eq!(elements.len(), 3),
-            _ => panic!("Expected ListLit"),
+            other => panic!("Expected ListLit, got {other:?}"),
         }
     }
 
@@ -230,7 +230,7 @@ mod tests {
         let expr = parse_expr_helper("(1, 2, 3)").unwrap();
         match expr.kind {
             ExprKind::TupleLit(elements) => assert_eq!(elements.len(), 3),
-            _ => panic!("Expected TupleLit"),
+            other => panic!("Expected TupleLit, got {other:?}"),
         }
     }
 
@@ -239,7 +239,7 @@ mod tests {
         let expr = parse_expr_helper("()").unwrap();
         match expr.kind {
             ExprKind::Lit(ephapax_syntax::Literal::Unit) => {}
-            _ => panic!("Expected Unit literal"),
+            other => panic!("Expected Unit literal, got {other:?}"),
         }
     }
 
@@ -248,7 +248,7 @@ mod tests {
         let expr = parse_expr_helper("list[0]").unwrap();
         match expr.kind {
             ExprKind::ListIndex { .. } => {}
-            _ => panic!("Expected ListIndex"),
+            other => panic!("Expected ListIndex, got {other:?}"),
         }
     }
 
@@ -257,7 +257,7 @@ mod tests {
         let expr = parse_expr_helper("tuple.0").unwrap();
         match expr.kind {
             ExprKind::TupleIndex { index, .. } => assert_eq!(index, 0),
-            _ => panic!("Expected TupleIndex"),
+            other => panic!("Expected TupleIndex, got {other:?}"),
         }
     }
 }

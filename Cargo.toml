@@ -66,3 +66,6 @@ rustyline = "14"
 # Benchmarking dependencies
 criterion = { version = "0.5", features = ["html_reports"] }
 wasmtime = "36"
+
+# Property-based testing
+proptest = "1.4"

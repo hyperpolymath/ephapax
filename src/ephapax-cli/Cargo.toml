@@ -34,3 +34,4 @@ serde_json.workspace = true
 
 [dev-dependencies]
 wasmtime.workspace = true
+proptest = { workspace = true }

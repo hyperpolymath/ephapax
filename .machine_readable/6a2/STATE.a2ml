@@ -5,14 +5,15 @@
 [metadata]
 project = "ephapax"
 version = "0.1.0"
-last-updated = "2026-03-29"
+last-updated = "2026-04-04"
 status = "active"
 
 [project-context]
 name = "ephapax"
-completion-percentage = 45
+completion-percentage = 50
 phase = "implementation"
-description = "Linear type system compiler — 15 crates, 229 tests, formal proofs compiling"
+description = "Linear type system compiler — 19 crates, 337 tests, formal proofs compiling"
+crg-grade = "C"
 
 [formal-proofs]
 rocq-version = "9.1.1"

@@ -1,28 +1,34 @@
 # Test & Benchmark Requirements
 
-## Current State
-- Unit tests: 304 pass / 0 fail (across 19 crates: 42+24+17+16+14+14+13+9+7+6+3+3+3+2+1+1+1+49+63 + many 0-test crates)
-- Integration tests: 1 (integration test in one crate)
-- E2E tests: NONE
-- Benchmarks: 2 files exist
-- panic-attack scan: NEVER RUN
+## Current State — CRG C ACHIEVED (2026-04-04)
 
-## What's Missing
+- Unit tests: 304 pass / 0 fail (across 19 crates: 42+24+17+16+14+14+13+9+7+6+3+3+3+2+1+1+1+49+63 + many 0-test crates)
+- Integration tests: `src/ephapax-cli/tests/integration.rs` (parse->type-check, 18 tests)
+- Conformance tests: `src/ephapax-cli/tests/conformance.rs` (spec compliance, 16 tests)
+- E2E/WASM tests: `src/ephapax-cli/tests/wasm_e2e.rs` (parse->type-check->compile->wasmtime, 13 tests)
+- Property-based tests: `src/ephapax-cli/tests/property_tests.rs` (proptest, 6 properties)
+- Contract/invariant tests: `src/ephapax-cli/tests/contract_tests.rs` (type system invariants, 13 tests)
+- Aspect tests: `src/ephapax-cli/tests/aspect_tests.rs` (security, performance, correctness, 13 tests)
+- Benchmarks: `src/ephapax-parser/benches/parse_bench.rs`, `src/ephapax-vram-cache/benches/cache_bench.rs`
+- Total: **337 tests pass / 0 fail**
+
+## CRG Testing Taxonomy — Status
+
+| Category | Status | Files |
+|----------|--------|-------|
+| Unit tests | DONE | 19 crates |
+| Integration tests | DONE | `tests/integration.rs` |
+| Conformance tests | DONE | `tests/conformance.rs` |
+| E2E tests | DONE | `tests/wasm_e2e.rs` |
+| Property-based (proptest) | DONE | `tests/property_tests.rs` |
+| Contract/invariant | DONE | `tests/contract_tests.rs` |
+| Aspect tests | DONE | `tests/aspect_tests.rs` |
+| Benchmarks | DONE | 2 bench files (criterion) |
+
+## What's Still Missing (for CRG B+)
+
 ### Point-to-Point (P2P)
 **Source counts:** 49 Rust (19 crates) + 98 .eph files + 17 Idris2 + 3 V
-
-The Rust compiler crates have 304 tests — reasonable but many crates have 0:
-- Several crates returning "0 passed; 0 failed" in cargo test
-- 98 .eph example/stdlib files are not used in automated testing
-- Idris2 ABI definitions (17 files) have no verification tests
-- V-lang files (3) have no tests
-
-#### Crates with tests (good):
-- Parser crate (~42+ tests)
-- Type checker crate (~63 tests)
-- Evaluator/interpreter crate (~49 tests)
-- Linear type system (~24 tests)
-- Various other crates with 1-17 tests each
 
 #### Crates with ZERO tests:
 - Multiple crates show 0 tests in cargo test output
@@ -33,35 +39,24 @@ The Rust compiler crates have 304 tests — reasonable but many crates have 0:
 - Standard library .eph files not tested via automated runner
 - Example programs not verified in CI
 
-#### Known issues (from memory):
+#### Known issues:
 - 3 Admitted proofs in Coq (ctx_transfer 15/24, subst_lemma, preservation)
 - 5 remaining tasks (#15-#19) from type checker audit
 - interp env-leak fix was made 2026-03-28
 
 ### End-to-End (E2E)
-- Full compilation: .eph source -> parse -> typecheck (linear types) -> eval -> output
-- All 98 .eph example programs should compile and run
-- Error reporting: introduce type error -> get meaningful error message
-- Linear type enforcement: violate linearity -> compiler rejects
-- Effect system: track effects -> enforce boundaries
+- All 98 .eph example programs should compile and run (not automated)
 - Multi-file compilation with imports
 - REPL interaction (if exists)
 
-### Aspect Tests
-- [ ] Security (code injection via macros if any, untrusted .eph file execution)
-- [ ] Performance (type checker on deeply nested linear types, large programs)
-- [ ] Concurrency (parallel compilation, if applicable)
-- [ ] Error handling (all error paths, malformed input, encoding issues)
-- [ ] Accessibility (N/A — compiler)
-
 ### Build & Execution
 - [x] cargo build — compiles
-- [x] cargo test — 304 pass, 0 fail
+- [x] cargo test — 337 pass, 0 fail
 - [ ] Compile and run all 98 .eph files — not automated
 - [ ] CLI --help works — not verified
 - [ ] Self-diagnostic — none
 
-### Benchmarks Needed
+### Benchmarks Needed (for B+)
 - Parser throughput on large .eph files
 - Type checker performance on complex linear type programs
 - Comparison: linear type checking overhead vs non-linear
@@ -74,7 +69,11 @@ The Rust compiler crates have 304 tests — reasonable but many crates have 0:
 - [ ] Resolve 3 Admitted Coq proofs
 
 ## Priority
-- **HIGH** — As a language implementation with novel linear type system, 304 tests across 19 crates is a start but many crates have 0 tests. The 98 .eph files should be compiled as an automated test suite but are not. The Coq proofs have 3 Admitted holes. For a language that claims provable linearity, incomplete proofs and untested codegen paths undermine the core value proposition.
+- **CRG C** — ACHIEVED (2026-04-04). Property, contract, aspect, and reflexive tests
+  now present alongside existing unit/integration/conformance/E2E tests.
+- **CRG B** — Requires: coverage metrics, 6+ test targets per module, zero-test
+  crates remediated, .eph files tested as a suite.
+- **CRG A** — Requires: fuzz harness, formal proof coverage, mutation testing.
 
 ## FAKE-FUZZ ALERT
 

@@ -1094,29 +1094,88 @@ Proof.
     | [ IH : forall (i_ : var) (T0_ : ty), is_linear_ty T0_ = true -> _ -> _ -> _ -> _ -> _ -> _ |- _ ] =>
       eapply IH; eassumption
     end).
-  all: try (inversion H2; subst; eauto 6).
-  (* Case/If: three-way branching — scrutinee + two branches at S i *)
-  all: try (inversion H2; subst;
-    match goal with
-    | [ IH1 : forall (i_ : var) (T0_ : ty), is_linear_ty T0_ = true -> _ -> _ -> _ -> _ -> _ -> _,
-        IH2 : forall (i_ : var) (T0_ : ty), is_linear_ty T0_ = true -> _ -> _ -> _ -> _ -> _ -> _,
-        IH3 : forall (i_ : var) (T0_ : ty), is_linear_ty T0_ = true -> _ -> _ -> _ -> _ -> _ -> _,
-        He1 : ?R0; ?G0_ |- _ : _ -| ?Gmid_ |- _ ] =>
-      let Hmid := fresh in
-      assert (Hmid : ctx_lookup Gmid_ i = Some (T0, true))
-        by (eapply true_flag_preserved; eassumption);
-      let Hagr' := fresh in
-      assert (Hagr' : ctx_types_agree Gmid_ _)
-        by (eapply typing_preserves_types_agree; eassumption);
-      let HiG2m := fresh in
-      assert (HiG2m : _ = Some (T0, false))
-        by (eapply IH1; eassumption);
-      (* Try branch at S i (binding) or direct (non-binding) *)
-      first [ eapply IH2 with (i0 := S i);
-                [ exact Hlin | simpl; eassumption | simpl; eapply true_flag_preserved; eassumption
-                | apply ctx_extend_types_agree; exact Hagr' | simpl; exact HiG2m ]
-            | eapply IH2; eassumption ]
-    end).
+  (* Remaining 17 compound/binding cases — explicit proofs (2026-04-03) *)
+
+  (* T_StringConcat: chain IHs through intermediate context *)
+  - inversion H2; subst.
+    assert (Hmid : ctx_lookup G' i = Some (T0, true)) by (eapply true_flag_preserved; eassumption).
+    assert (Hagr' : ctx_types_agree G' G'0) by (eapply typing_preserves_types_agree; eassumption).
+    assert (HiG2m : ctx_lookup G'0 i = Some (T0, false)) by (eapply IHe2; eassumption).
+    eapply IHhas_type1; eassumption.
+  (* T_StringLen: borrow preserves context *)
+  - assert (G2' = G2) by (eapply stringlen_preserves_ctx; exact H2). subst. exact HiG2.
+  (* T_Let: chain + binding at shifted index *)
+  - inversion H2; subst.
+    assert (HTeq : T1 = T3) by (eapply type_determinacy; [exact IHe1 | exact H4 | exact Hagree]). subst T3.
+    assert (Hmid : ctx_lookup G' i = Some (T0, true)) by (eapply true_flag_preserved; eassumption).
+    assert (Hagr' : ctx_types_agree G' G'0) by (eapply typing_preserves_types_agree; eassumption).
+    assert (HiG2m : ctx_lookup G'0 i = Some (T0, false)) by (eapply IHhas_type1; eassumption).
+    assert (IH2r := IHIHe2 (S i) T0 Hlin). simpl in IH2r.
+    exact (IH2r Hmid HiG' _ (ctx_extend_types_agree _ _ _ Hagr') HiG2m _ H7).
+  (* T_LetLin: chain + binding at shifted index *)
+  - inversion H2; subst.
+    assert (HTeq : T1 = T3) by (eapply type_determinacy; [exact H1_ | exact H5 | exact Hagree]). subst T3.
+    assert (Hmid : ctx_lookup G' i = Some (T0, true)) by (eapply true_flag_preserved; eassumption).
+    assert (Hagr' : ctx_types_agree G' G'0) by (eapply typing_preserves_types_agree; eassumption).
+    assert (HiG2m : ctx_lookup G'0 i = Some (T0, false)) by (eapply IHe2; eassumption).
+    assert (IH2r := IHhas_type1 (S i) T0 Hlin). simpl in IH2r.
+    exact (IH2r Hmid HiG' _ (ctx_extend_types_agree _ _ _ Hagr') HiG2m _ H8).
+  (* T_Lam: output = input, trivial *)
+  - inversion H2; subst. exact HiG2.
+  (* T_App: chain with type determinacy *)
+  - inversion H2; subst.
+    assert (HTeq : TFun T1 T2 = TFun T3 T2) by (eapply type_determinacy; [exact IHe1 | exact H4 | exact Hagree]).
+    assert (T1 = T3) by congruence. subst T3.
+    assert (Hmid : ctx_lookup G' i = Some (T0, true)) by (eapply true_flag_preserved; eassumption).
+    assert (Hagr' : ctx_types_agree G' G'0) by (eapply typing_preserves_types_agree; eassumption).
+    assert (HiG2m : ctx_lookup G'0 i = Some (T0, false)) by (eapply IHhas_type1; eassumption).
+    eapply IHIHe2; eassumption.
+  (* T_Pair: chain *)
+  - inversion H2; subst.
+    assert (Hmid : ctx_lookup G' i = Some (T0, true)) by (eapply true_flag_preserved; eassumption).
+    assert (Hagr' : ctx_types_agree G' G'0) by (eapply typing_preserves_types_agree; eassumption).
+    assert (HiG2m : ctx_lookup G'0 i = Some (T0, false)) by (eapply IHhas_type1; eassumption).
+    eapply IHIHe2; eassumption.
+  (* T_Fst: single with type unification *)
+  - inversion H2; subst.
+    assert (TProd T1 T2 = TProd T1 T4) by (eapply type_determinacy; [exact IHe1 | eassumption | exact Hagree]).
+    assert (T2 = T4) by congruence. subst T4.
+    eapply IHIHe1; eassumption.
+  (* T_Snd: single with type unification *)
+  - inversion H2; subst.
+    assert (TProd T1 T2 = TProd T3 T2) by (eapply type_determinacy; [exact IHe1 | eassumption | exact Hagree]).
+    assert (T1 = T3) by congruence. subst T3.
+    eapply IHIHe1; eassumption.
+  (* T_Inl: single *)
+  - inversion H2; subst. eapply IHIHe1; eassumption.
+  (* T_Inr: single *)
+  - inversion H2; subst. eapply IHIHe1; eassumption.
+  (* T_Case: scrutinee chain + binding branch *)
+  - inversion H2; subst.
+    assert (HTeq : TSum T1 T2 = TSum T3 T4)
+      by (eapply type_determinacy; [exact H1_ | exact H5 | exact Hagree]).
+    assert (T1 = T3) by congruence. assert (T2 = T4) by congruence. subst T3 T4.
+    assert (Hmid : ctx_lookup G' i = Some (T0, true)) by (eapply true_flag_preserved; eassumption).
+    assert (Hagr' : ctx_types_agree G' G'0) by (eapply typing_preserves_types_agree; eassumption).
+    assert (HiG2m : ctx_lookup G'0 i = Some (T0, false)) by (eapply IHe2; eassumption).
+    assert (IH2r := IHe3 (S i) T0 Hlin). simpl in IH2r.
+    exact (IH2r Hmid HiG' _ (ctx_extend_types_agree _ _ _ Hagr') HiG2m _ H8).
+  (* T_If: scrutinee chain + branch *)
+  - inversion H2; subst.
+    assert (Hmid : ctx_lookup G' i = Some (T0, true)) by (eapply true_flag_preserved; eassumption).
+    assert (Hagr' : ctx_types_agree G' G'0) by (eapply typing_preserves_types_agree; eassumption).
+    assert (HiG2m : ctx_lookup G'0 i = Some (T0, false)) by (eapply IHhas_type1; eassumption).
+    eapply IHhas_type2; eassumption.
+  (* T_Region: single *)
+  - inversion H2; subst. eapply IHhas_type; eassumption.
+  (* T_Borrow: output = input *)
+  - assert (G2' = G2) by (eapply borrow_preserves_ctx; exact H2). subst. exact HiG2.
+  (* T_Drop: single with type unification *)
+  - inversion H2; subst.
+    assert (T = T1) by (eapply type_determinacy; [exact H1 | eassumption | exact Hagree]). subst T1.
+    eapply IHhas_type; eassumption.
+  (* T_Copy: single *)
+  - inversion H2; subst. eapply IHhas_type; eassumption.
 Qed.
 
 (** ** New Helper Lemmas (2026-03-29)

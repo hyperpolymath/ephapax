@@ -1,5 +1,7 @@
 # Test & Benchmark Requirements
 
+## CRG Grade: C — ACHIEVED 2026-04-04
+
 ## Current State — CRG C ACHIEVED (2026-04-04)
 
 - Unit tests: 304 pass / 0 fail (across 19 crates: 42+24+17+16+14+14+13+9+7+6+3+3+3+2+1+1+1+49+63 + many 0-test crates)

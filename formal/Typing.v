@@ -150,6 +150,14 @@ Inductive has_type : region_env -> ctx -> expr -> ty -> ctx -> Prop :=
       ctx_lookup G i = Some (T, false) ->
       R; G |- EBorrow (EVar i) : TBorrow T -| G
 
+  (** Borrow a value — needed for substitution: subst k v (EBorrow (EVar k))
+      produces EBorrow v, which must type. Sound because values do not
+      consume resources (value_context_unchanged). *)
+  | T_Borrow_Val : forall R G v T,
+      is_value v ->
+      R; G |- v : T -| G ->
+      R; G |- EBorrow v : TBorrow T -| G
+
   (** ===== Explicit Resource Management ===== *)
 
   | T_Drop : forall R G G' e T,

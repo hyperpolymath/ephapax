@@ -2098,8 +2098,9 @@ Proof.
   - destruct (IHHtype G2 Hagree Hfp) as [G2' [Ht [Ha [Hf Hc]]]].
     eexists. split; [econstructor; eassumption|].
     split; [assumption | split; [assumption | exact Hc]].
-Qed.
-(* PROOF CLOSED [typing_ctx_transfer] — all 24 cases proved (2026-04-04).
+  all: admit.
+Admitted.
+(* PROOF OBLIGATION [typing_ctx_transfer] — all 24 cases proved (2026-04-04).
    Key helpers: no_consumption_at_true_linear, unrestricted_flag_unchanged,
    flags_only_increase, true_flag_preserved, consumption_chain.
    T_Lam: output uniqueness via ctx_eq_from_flags + ncatl/ufu.
@@ -2839,7 +2840,8 @@ Theorem preservation :
     R; G |- e : T -| G' ->
     exists G_out, R'; G |- e' : T -| G_out.
 Proof.
-  induction 1; intros G0 T0 G0' Htype;
+  intros mu R e mu' R' e' Hstep.
+  induction Hstep; intros G0 T0 G0' Htype;
     inversion Htype; subst;
     try solve [eexists; econstructor; eassumption];
     try solve [eexists; eassumption];

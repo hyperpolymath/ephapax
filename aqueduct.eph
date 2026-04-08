@@ -1,0 +1,36 @@
+// module: aqueduct.eph
+// Defines the strict narrative pipeline from raw export to counterfactual record.
+
+module Aqueduct;
+
+// 1. Linear Type Definitions
+// These must be consumed exactly once. They cannot be cloned or implicitly dropped.
+linear type RawExport;
+linear type CleanData;
+linear type ConvStruct;
+linear type LithoInscription;
+linear type VerisimRecord;
+
+// 2. Capability Signatures (Pure Transformations)
+fn sanitise(raw: RawExport) -> CleanData;
+fn structure(clean: CleanData) -> ConvStruct;
+
+// 3. Narrative Inscription (Lithoglyph)
+// Consumes the structured conversation, producing a permanent narrative artefact.
+fn lithoglyph_insert(conv: ConvStruct) -> LithoInscription;
+
+// 4. Counterfactual Ingestion (VeriSimDB)
+// Consumes the narrative artefact, deriving a drift-aware counterfactual record.
+fn verisim_ingest(insc: LithoInscription) -> VerisimRecord;
+
+// 5. The Aqueduct Pipeline
+// Safely bounded by a region `r` to ensure memory and lifecycle correctness.
+fn aqueduct(raw: RawExport) -> VerisimRecord {
+    region r {
+        let clean  = sanitise(raw);
+        let struct = structure(clean);
+        let insc   = lithoglyph_insert(struct);
+        let rec    = verisim_ingest(insc);
+        rec
+    }
+}

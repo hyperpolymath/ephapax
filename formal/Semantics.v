@@ -2098,8 +2098,7 @@ Proof.
   - destruct (IHHtype G2 Hagree Hfp) as [G2' [Ht [Ha [Hf Hc]]]].
     eexists. split; [econstructor; eassumption|].
     split; [assumption | split; [assumption | exact Hc]].
-  all: admit.
-Admitted.
+Qed.
 (* PROOF OBLIGATION [typing_ctx_transfer] — all 24 cases proved (2026-04-04).
    Key helpers: no_consumption_at_true_linear, unrestricted_flag_unchanged,
    flags_only_increase, true_flag_preserved, consumption_chain.
@@ -2854,6 +2853,14 @@ Proof.
       eexists; econstructor; try eassumption end end].
   all: try solve [eexists; econstructor; try eassumption].
   all: try solve [eexists; eassumption].
+  all: try solve [exfalso; discriminate].
+  all: try solve [exfalso; congruence].
+  all: try solve [exfalso; eapply values_dont_step; eassumption].
+  (* BLOCKED: remaining goals have e:=EUnit/EBool/EI32/EVar/ELoc injected by
+     inversion Htype; subst, losing the EStringNew r s = e_original equation.
+     Fix requires: remember e as orig_e before inversion, then discriminate
+     between orig_e=EStringNew r s (from S_StringNew induction) and
+     orig_e=EUnit etc. (from typing inversion). Needs interactive debugging. *)
   all: admit.
 Admitted.
 (* PROOF OBLIGATION [preservation] — 2026-04-04:

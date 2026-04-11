@@ -5,26 +5,34 @@
 [metadata]
 project = "ephapax"
 version = "0.1.0"
-last-updated = "2026-04-04"
+last-updated = "2026-04-11"
 status = "active"
 
 [project-context]
 name = "ephapax"
-completion-percentage = 55
+completion-percentage = 65
 phase = "implementation"
-description = "Linear type system compiler — 19 crates, 337 tests, formal proofs compiling"
+description = "Linear type system compiler — 19 crates, formal proofs FULLY CLOSED (67 Qed, 0 Admitted)"
 crg-grade = "C"
 
 [formal-proofs]
 rocq-version = "9.1.1"
 compiles-clean = true
-qed-count = 47
-admitted-count = 2
-admit-sub-goals = 1
-# Admitted: subst_preserves_typing (substitution lemma), preservation (type preservation)
-# Key wins this session (2026-04-04):
-#   - no_consumption_at_true_linear: broken Qed → working Qed (Rocq 9.1.1 Ltac fix)
-#   - typing_ctx_transfer: Admitted → Qed (added unrestricted_flag_unchanged helper, closed T_Lam/T_Case/T_If)
-#   - shift_typing_gen: new lemma, fully proved (Qed)
-#   - subst_typing_gen: scaffolded (Admitted, blocks subst_preserves_typing)
-# Remaining: subst_typing_gen compound+binding cases, then preservation is mechanical
+qed-count = 67
+admitted-count = 0
+admit-sub-goals = 0
+# FULLY VERIFIED — all theorems closed as of 2026-04-11 audit
+# Final closures (post 2026-04-04):
+#   - subst_typing_gen: Admitted → Qed (bea3ac8, 47→64 Qed)
+#   - preservation: last Admitted closed (a1a93d1, debug artifacts cleaned)
+# Type system is now formally verified end-to-end:
+#   subst_typing_gen → subst_preserves_typing → preservation (all Qed)
+
+[next-priorities]
+# P1 (DONE): Formal proofs — 0 Admitted remaining
+# P2: PipeWire proving ground — wire real PipeWire session through type checker
+#     Spec: memory/ephapax-pipewire-project.md
+# P3: typed-wasm compilation target — ensure Ephapax IR compatible with typed-wasm ABI
+#     Spec: /var/mnt/eclipse/repos/typed-wasm/docs/architecture/AGGREGATE-LIBRARY-VISION.adoc
+# P4: Toolchain merge with AffineScript — shared modules where possible
+#     Spec: docs/specs/DYADIC-VISION.adoc

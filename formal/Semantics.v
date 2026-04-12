@@ -224,11 +224,10 @@ Inductive step : config -> config -> Prop :=
       (mu, R, e) -->> (mu', R', e') ->
       (mu, R, ERegion r e) -->> (mu', R', ERegion r e')
 
-  (** Borrowing *)
-  | S_Borrow_Val : forall mu R v,
-      is_value v ->
-      (mu, R, EBorrow v) -->> (mu, R, v)
-
+  (** Borrowing — EBorrow v is a value (VBorrow) when v is a value,
+      so there is no S_Borrow_Val reduction rule: EBorrow v is already
+      in normal form. S_Borrow_Step reduces the inner expression until
+      it becomes a value, at which point EBorrow v is itself a value. *)
   | S_Borrow_Step : forall mu R e e' mu' R',
       (mu, R, e) -->> (mu', R', e') ->
       (mu, R, EBorrow e) -->> (mu', R', EBorrow e')
@@ -510,7 +509,8 @@ Proof.
   1: eapply IHHtype; exact Hlookup.
   1: chain_shift IHHtype1 IHHtype2 idx Ty uf Hlookup.
   1: chain_ih IHHtype1 IHHtype2 Hlookup.
-  1: eapply IHHtype; exact Hlookup.
+  1: eapply IHHtype; exact Hlookup. (* T_Region *)
+  1: eapply IHHtype; exact Hlookup. (* T_Region_Active *)
   1: eexists; exact Hlookup.
   1: eexists; exact Hlookup. (* T_Borrow_Val: G'=G *)
   1: eapply IHHtype; exact Hlookup.
@@ -1024,6 +1024,7 @@ Proof.
     | ? ? ? ? ? ? ? ? ? IHe1 ? IHe2 ? IHe3 (* T_Case *)
     | ? ? ? ? ? ? ? ? IHe1 ? IHe2 ? IHe3 (* T_If *)
     | ? ? ? ? ? ? IHe1 (* T_Region *)
+    | ? ? ? ? ? ? IHe1 (* T_Region_Active *)
     | ? ? j0 ? ? (* T_Borrow *)
     | ? ? ? ? ? ? IHe1 (* T_Borrow_Val *)
     | ? ? ? ? ? IHe1 (* T_Drop *)
@@ -1198,9 +1199,13 @@ Proof.
     assert (Hmid : ctx_lookup G' i = Some (T0, true))
       by (eapply true_flag_preserved; eassumption).
     ncatl_unify_rewrite. ncatl_mid_agree. ncatl_ih1_false. ncatl_ih_final.
-  (* 21: T_Region — single IH *)
-  - inversion H2; subst. ncatl_ih_final.
-  (* 22: T_Borrow — identity *)
+  (* 21: T_Region — H1 has ~ In r R; H2 inverts to T_Region (consistent) or
+     T_Region_Active (In r R contradicts ~ In r R → exfalso; tauto). *)
+  - inversion H2; subst; [ncatl_ih_final | exfalso; tauto].
+  (* 22: T_Region_Active — H1 has In r R; H2 inverts to T_Region (~ In r R
+     contradicts In r R → exfalso; tauto) or T_Region_Active (consistent). *)
+  - inversion H2; subst; [exfalso; tauto | ncatl_ih_final].
+  (* 23: T_Borrow — identity *)
   - inversion H2; subst;
       try exact HiG2;
       try (exfalso; match goal with [ H : is_value (EVar _) |- _ ] => inversion H end).
@@ -1301,6 +1306,8 @@ Proof.
   - eapply IHHtype2. exact Hnlin. eapply IHHtype1. exact Hnlin. exact Hlk.
   (* T_Region *)
   - eapply IHHtype. exact Hnlin. exact Hlk.
+  (* T_Region_Active *)
+  - eapply IHHtype. exact Hnlin. exact Hlk.
   (* T_Borrow *)     - exact Hlk.
   (* T_Borrow_Val *)  - exact Hlk.
   (* T_Drop *)
@@ -1334,6 +1341,7 @@ Proof.
   - eapply IHHval. eassumption.
   (* VInr *)
   - eapply IHHval. eassumption.
+  (* VBorrow: both T_Borrow and T_Borrow_Val give G'=G, closed by try reflexivity above. *)
 Qed.
 
 Lemma typing_ctx_transfer :
@@ -2075,6 +2083,11 @@ Proof.
     eexists. split; [econstructor; [assumption | exact Ht]|].
     split; [assumption | split; [assumption | exact Hc]].
 
+  (* T_Region_Active: same structure, uses T_Region_Active in conclusion *)
+  - destruct (IHHtype G2 Hagree Hfp) as [G2' [Ht [Ha [Hf Hc]]]].
+    eexists. split; [eapply T_Region_Active; [assumption | exact Ht]|].
+    split; [assumption | split; [assumption | exact Hc]].
+
   (* T_Borrow: G'=G *)
   - assert (Hlk2: ctx_lookup G2 i = Some (T, false)) by (apply Hfp; assumption).
     eexists. split; [econstructor; exact Hlk2|].
@@ -2350,6 +2363,11 @@ Proof.
 
   (* T_Region *)
   - econstructor.
+    + assumption.
+    + apply IHHtype. assumption.
+
+  (* T_Region_Active *)
+  - eapply T_Region_Active.
     + assumption.
     + apply IHHtype. assumption.
 
@@ -2742,6 +2760,13 @@ Proof.
     eapply IHHtype; try eassumption.
     constructor. right. exact Hregv.
 
+  (* T_Region_Active: same structure as T_Region, but region_active R rv = Hregv is
+     exactly the goal after IHHtype, so eassumption closes it directly (no right-cons
+     step needed since we are in R not r :: R). *)
+  - destruct (linear_value_is_loc _ _ _ _ Hv_type Hval Hlin) as [lv [rv [-> [-> Hregv]]]].
+    eapply T_Region_Active; [exact H |].
+    eapply IHHtype; try eassumption.
+
   (* T_Borrow: EBorrow (EVar i) *)
   - destruct (Nat.eq_dec i k0) as [->|Hne].
     + simpl. rewrite Nat.eqb_refl.
@@ -2841,11 +2866,29 @@ Theorem preservation :
 Proof.
   intros mu R e mu' R' e' Hstep.
   induction Hstep; intros G0 T0 G0' Htype;
+    (* Before inversion: remember the typed expression so that cross-case unification
+       (inversion Htype on a free variable `e`) does not lose the step-case equation.
+       After `induction Hstep; intros ... Htype`, the expression in Htype may still be
+       a free variable `e` with a separate hypothesis `He : e = EStringNew r s` etc.
+       If `inversion Htype; subst` fires for a cross-case typing rule (e.g. T_Unit
+       typing `e := EUnit`), subst can eliminate `e` and consume `He` in a direction
+       that loses the discriminating information. `remember` pins the form as `He_orig`
+       so congruence / discriminate can close all expression-mismatch goals. *)
+    try (match type of Htype with
+         | has_type _ _ ?e_typed _ _ => remember e_typed as e_orig eqn:He_orig
+         end);
     inversion Htype; subst;
     try solve [eexists; econstructor; eassumption];
     try solve [eexists; eassumption];
     try solve [eapply subst_preserves_typing; eassumption];
-    try solve [exfalso; eapply values_dont_step; eassumption].
+    try solve [exfalso; eapply values_dont_step; eassumption];
+    try solve [exfalso; congruence];
+    try solve [exfalso; discriminate];
+    (* EVar cannot step — no step constructor has EVar i as the redex expression.
+       This closes T_Borrow cross-cases in S_Borrow_Step (after inversion gives EVar
+       as the inner expression, the inner step hypothesis is immediately impossible). *)
+    try solve [exfalso;
+               match goal with [ H : (_, _, EVar _) -->> _ |- _ ] => inversion H end].
   (* Congruence: IH + reconstruct *)
   all: try solve [match goal with [ IH : forall _ _ _, _ -> exists _, _ |- _ ] =>
     match goal with [ H : has_type _ _ _ _ _ |- _ ] =>
@@ -2853,27 +2896,45 @@ Proof.
       eexists; econstructor; try eassumption end end].
   all: try solve [eexists; econstructor; try eassumption].
   all: try solve [eexists; eassumption].
-  all: try solve [exfalso; discriminate].
   all: try solve [exfalso; congruence].
+  all: try solve [exfalso; discriminate].
   all: try solve [exfalso; eapply values_dont_step; eassumption].
-  (* BLOCKED: remaining goals have e:=EUnit/EBool/EI32/EVar/ELoc injected by
-     inversion Htype; subst, losing the EStringNew r s = e_original equation.
-     Fix requires: remember e as orig_e before inversion, then discriminate
-     between orig_e=EStringNew r s (from S_StringNew induction) and
-     orig_e=EUnit etc. (from typing inversion). Needs interactive debugging. *)
+  all: try solve [exfalso;
+                  match goal with [ H : (_, _, EVar _) -->> _ |- _ ] => inversion H end].
+  (* S_Region_Step + T_Region and S_Region_Exit + T_Region are contradictory:
+     step premiss has In r R while T_Region requires ~ In r R. `tauto` closes.
+     S_Region_Enter + T_Region_Active is also contradictory (step has ~ In r R,
+     typing has In r R). *)
+  all: try solve [exfalso; tauto].
+  (* S_Region_Enter + T_Region: The step changes region env R to r :: R while the
+     expression stays ERegion r e. T_Region gives (r :: R); G |- e : T -| G'.
+     T_Region_Active applies with In r (r :: R) (left; reflexivity) and that inner
+     typing to produce (r :: R); G |- ERegion r e : T -| G'. *)
+  all: try solve [eexists; eapply T_Region_Active; [left; reflexivity | eassumption]].
+  (* REMAINING CASES (2026-04-12):
+     Two cases involving region exit/step cannot be closed mechanically here:
+
+     (a) S_Region_Step + T_Region_Active: inner step changes R to R'.
+         IH gives R'; G |- e' : T -| G_out. Need R'; G |- ERegion r e' : T -| G_out2.
+         If In r R', apply T_Region_Active. If ~ In r R' (inner step removed r via
+         nested S_Region_Exit for same region), need T_Region, which requires
+         (r :: R'); G |- e' : T -| G_out — not derivable from R'; G |- e' without
+         a region env weakening lemma. Region env weakening fails in general because
+         T_Region requires ~ In r R (which fails when r is newly added to env).
+         This case only arises from ERegion r (ERegion r v) in intermediate states
+         (not reachable from initial well-typed programs at R=[]).
+
+     (b) S_Region_Exit + T_Region_Active: exit changes R to remove_first r R.
+         Typing has R; G |- v : T -| G'. Need (remove_first r R); G |- v : T -| G_out.
+         If T does not contain r (no region escape), this follows from region-agnostic
+         typing of values. But the current T_Region_Active has no "T does not mention r"
+         restriction, so the proof requires an additional region-escape-free lemma.
+
+     Both cases require a region-escape-freedom property (the result type T of
+     ERegion r e cannot contain r as an active region reference). This is a standard
+     requirement in region type systems (e.g., Tofte-Talpin "region does not escape")
+     but has not yet been added to the Ephapax typing rules. Adding a "r ∉ free_regions T"
+     premise to T_Region and T_Region_Active, plus a free_regions function and associated
+     lemmas, would close these cases. *)
   all: admit.
 Admitted.
-(* PROOF OBLIGATION [preservation] — 2026-04-04:
-   subst_typing_gen is now Qed. The remaining admits in preservation
-   are from T_Borrow_Val cross-cases generated by `inversion Htype`.
-   Fix: restructure proof to handle T_Borrow_Val inversion per-case
-   rather than globally. The cross-cases are all either:
-   (a) expression mismatch (discriminable), or
-   (b) value-stepping contradiction (values_dont_step).
-   Previously (before T_Borrow_Val):
-   The simple cases (identity reductions, value reductions) are closeable
-   by econstructor + eassumption. The remaining cases are:
-   1. Congruence cases (step inside sub-expression): need typing_ctx_transfer
-   2. Beta-reduction cases (Let_Val, App_Fun, Case_Inl/Inr): need subst_preserves_typing
-   3. Region cases: need region typing manipulation
-   DEPENDENCIES: subst_typing_gen (Qed above), typing_ctx_transfer (Qed). *)

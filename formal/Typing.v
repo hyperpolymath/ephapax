@@ -143,6 +143,14 @@ Inductive has_type : region_env -> ctx -> expr -> ty -> ctx -> Prop :=
       (r :: R); G |- e : T -| G' ->
       R; G |- ERegion r e : T -| G'
 
+  (** ERegion r e when r is already active. Needed for preservation of
+      S_Region_Enter: after entering the region, the outer env becomes
+      r :: R (r now active), and the expression is still ERegion r e. *)
+  | T_Region_Active : forall R G G' r e T,
+      In r R ->
+      R; G |- e : T -| G' ->
+      R; G |- ERegion r e : T -| G'
+
   (** ===== Borrowing ===== *)
 
   (** Borrow requires a variable (De Bruijn index). *)

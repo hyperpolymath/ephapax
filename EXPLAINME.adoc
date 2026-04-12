@@ -87,6 +87,33 @@ Test `test_region_string_allocation` verifies in-region allocation.
 | *Zig* | FFI implementation (C-compatible, cross-compilation)
 |===
 
+== Dogfooded Across The Account
+
+[cols="1,2,2", options="header"]
+|===
+| Technology / Pattern | Role in Ephapax | Also Used In
+
+| *Dyadic type discipline (let / let!)*
+| Core language design — affine (`let`) and linear (`let!`) bindings enforced by the type checker in `src/ephapax-typing/src/lib.rs`
+| gossamer (`src/core/Bridge.eph` uses `let!` for window handles and IPC channels); all Ephapax-backed applications in the account
+
+| *Coq formal proofs*
+| `formal/` — progress and preservation theorems for the core calculus; two-layer AST keeps proofs stable as surface language grows
+| ephapax-pipewire proving ground (PipeWire filter-node linearity); proven repo (`formal/coq/` — 48 Qed / 1 Admitted estate-wide)
+
+| *Idris2 ABI + Zig FFI standard*
+| `idris2/` ABI definitions; Zig FFI layer per the hyperpolymath ABI/FFI universal standard
+| gossamer (HandleLinearity.idr, IPCIntegrity.idr), burble (src/Burble/ABI/), verisimdb, typed-wasm, standards monorepo
+
+| *Two-layer AST (Surface / Core)*
+| `src/ephapax-surface/` → `src/ephapax-desugar/` → `src/ephapax-syntax/`; proofs target core only so new surface features never invalidate them
+| AffineScript (surface/core split in the OCaml compiler); 007 (dual-AST safety design pattern)
+
+| *Pattern matching desugared to binary sums*
+| `src/ephapax-desugar/` encodes N-variant ADTs as right-nested `() + a + b + ...`; `match` becomes nested `case/inl/inr`
+| Tangle language (braid-word case trees); k9-rs (sum-type dispatch)
+|===
+
 == File Map
 
 [cols="1,2"]

@@ -19,9 +19,9 @@ checker and WASM code generation are in progress.
 
 **Dual formalisation status:**
 
-* **Coq** (`formal/`): `no_leaks` (Qed), `memory_safety` (Qed), `progress` (92%),
-  `preservation` (50%). Three `Admitted` proofs remain: `ctx_transfer` (15/24 cases),
-  `subst_lemma`, `preservation`.
+* **Coq** (`formal/`): `no_leaks` (Qed), `typing_ctx_transfer` (Qed),
+  `subst_preserves_typing` (Qed), `preservation` currently `Admitted`.
+* Coq admitted proofs remaining: 1
 * **Idris2** (`src/formal/`): `noEscapeTheorem`, `regionSafetyTheorem`, `noGCTheorem`,
   `orthogonalityLemma` -- all complete with zero unsafe patterns.
 
@@ -45,9 +45,9 @@ chain are sound.
 * [x] Conformance test suite (pass/fail cases)
 * [ ] Type checker completion (`ephapax-typing`)
 * [ ] WASM code generation: lambda/app compilation (closure conversion)
-* [ ] Coq: close `ctx_transfer` proof (9 remaining cases of 24)
-* [ ] Coq: close `subst_lemma` proof
-* [ ] Coq: close `preservation` proof (currently 50%)
+* [x] Coq: close `ctx_transfer` proof
+* [x] Coq: close `subst_lemma` proof
+* [ ] Coq: close `preservation` proof (currently `Admitted`)
 * [ ] Coq: `progress` proof completion (currently 92%)
 
 == v0.2.0 -- Backend Maturity

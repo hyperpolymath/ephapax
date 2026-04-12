@@ -12,7 +12,8 @@
 - Contract/invariant tests: `src/ephapax-cli/tests/contract_tests.rs` (type system invariants, 13 tests)
 - Aspect tests: `src/ephapax-cli/tests/aspect_tests.rs` (security, performance, correctness, 13 tests)
 - Benchmarks: `src/ephapax-parser/benches/parse_bench.rs`, `src/ephapax-vram-cache/benches/cache_bench.rs`
-- Total: **337 tests pass / 0 fail**
+- Total: **357 tests pass / 0 fail** (`cargo test --all-targets`)
+- Documented all-target tests: 357
 
 ## CRG Testing Taxonomy — Status
 
@@ -42,7 +43,7 @@
 - Example programs not verified in CI
 
 #### Known issues:
-- 3 Admitted proofs in Coq (ctx_transfer 15/24, subst_lemma, preservation)
+- 1 Admitted proof in Coq (`preservation`)
 - 5 remaining tasks (#15-#19) from type checker audit
 - interp env-leak fix was made 2026-03-28
 
@@ -53,7 +54,7 @@
 
 ### Build & Execution
 - [x] cargo build — compiles
-- [x] cargo test — 337 pass, 0 fail
+- [x] cargo test --all-targets — 357 pass, 0 fail
 - [ ] Compile and run all 98 .eph files — not automated
 - [ ] CLI --help works — not verified
 - [ ] Self-diagnostic — none
@@ -68,7 +69,7 @@
 ### Self-Tests
 - [ ] panic-attack assail on own repo
 - [ ] Compile all .eph stdlib files as test suite
-- [ ] Resolve 3 Admitted Coq proofs
+- [ ] Resolve remaining Admitted Coq proof (`preservation`)
 
 ## Priority
 - **CRG C** — ACHIEVED (2026-04-04). Property, contract, aspect, and reflexive tests

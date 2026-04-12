@@ -20,6 +20,10 @@ test:
 conformance:
     cargo test --test conformance
 
+# Fail if proof/test counts in docs drift from repo state
+status-gate:
+    ./scripts/status-gate.sh
+
 # Build Idris2 formal proofs
 idris-build:
     cd src/formal && idris2 --build ephapax-formal.ipkg
@@ -77,14 +81,14 @@ doctor:
     check "just"              just      "1.25" 
     check "git"               git       "2.40" 
     check "Rust (cargo)"      cargo     "1.80" 
-# Optional tools
-if command -v panic-attack >/dev/null 2>&1; then
-    echo "  [OK]   panic-attack — available"
-    PASS=$((PASS + 1))
-else
-    echo "  [WARN] panic-attack — not found (pre-commit scanner)"
-    WARN=$((WARN + 1))
-fi
+    # Optional tools
+    if command -v panic-attack >/dev/null 2>&1; then
+        echo "  [OK]   panic-attack — available"
+        PASS=$((PASS + 1))
+    else
+        echo "  [WARN] panic-attack — not found (pre-commit scanner)"
+        WARN=$((WARN + 1))
+    fi
     echo ""
     echo "  Result: $PASS passed, $FAIL failed, $WARN warnings"
     if [ "$FAIL" -gt 0 ]; then
@@ -100,15 +104,15 @@ heal:
     echo "  Ephapax Heal — Automatic Tool Installation"
     echo "═══════════════════════════════════════════════════"
     echo ""
-if ! command -v cargo >/dev/null 2>&1; then
-    echo "Installing Rust via rustup..."
-    curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
-    source "$HOME/.cargo/env"
-fi
-if ! command -v just >/dev/null 2>&1; then
-    echo "Installing just..."
-    cargo install just 2>/dev/null || echo "Install just from https://just.systems"
-fi
+    if ! command -v cargo >/dev/null 2>&1; then
+        echo "Installing Rust via rustup..."
+        curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+        source "$HOME/.cargo/env"
+    fi
+    if ! command -v just >/dev/null 2>&1; then
+        echo "Installing just..."
+        cargo install just 2>/dev/null || echo "Install just from https://just.systems"
+    fi
     echo ""
     echo "Heal complete. Run 'just doctor' to verify."
 
@@ -145,20 +149,20 @@ help-me:
     echo "  Ephapax — Common Workflows"
     echo "═══════════════════════════════════════════════════"
     echo ""
-echo "FIRST TIME SETUP:"
-echo "  just doctor           Check toolchain"
-echo "  just heal             Fix missing tools"
-echo "" 
+    echo "FIRST TIME SETUP:"
+    echo "  just doctor           Check toolchain"
+    echo "  just heal             Fix missing tools"
+    echo ""
     echo "DEVELOPMENT:" 
     echo "  cargo build           Build the project" 
     echo "  cargo test            Run tests" 
     echo "" 
-echo "PRE-COMMIT:"
-echo "  just assail           Run panic-attacker scan"
-echo ""
-echo "LEARN:"
-echo "  just tour             Guided project tour"
-echo "  just default          List all recipes" 
+    echo "PRE-COMMIT:"
+    echo "  just assail           Run panic-attacker scan"
+    echo ""
+    echo "LEARN:"
+    echo "  just tour             Guided project tour"
+    echo "  just default          List all recipes"
 
 
 # Print the current CRG grade (reads from READINESS.md '**Current Grade:** X' line)

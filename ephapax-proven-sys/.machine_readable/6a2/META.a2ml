@@ -1,109 +1,27 @@
-;; SPDX-License-Identifier: PMPL-1.0-or-later
-;; META.scm - Meta-level information for ephapax-proven-sys
+# SPDX-License-Identifier: PMPL-1.0-or-later
+# Copyright (c) 2026 Jonathan D.A. Jewell (hyperpolymath) <j.d.a.jewell@open.ac.uk>
+#
+# META.a2ml — Ephapax Proven Sys meta-level information
+[metadata]
+version = "0.1.0"
+last-updated = "2026-04-11"
 
-(define-module (ephapax-proven-sys meta)
-  #:version "1.0.0")
+[project-info]
+license = "PMPL-1.0-or-later"
+author = "Jonathan D.A. Jewell (hyperpolymath)"
 
-;;; ===========================================================================
-;;; Architecture Decisions
-;;; ===========================================================================
+[architecture-decisions]
+decisions = [
+  # No ADRs recorded
+]
 
-(architecture-decisions
-  (adr-001
-    (status accepted)
-    (date "2026-01-24")
-    (context "Need Rust bindings for Zig FFI library")
-    (decision "Follow -sys crate pattern (unsafe raw bindings)")
-    (consequences
-      (positive
-        "Standard Rust FFI pattern - familiar to ecosystem"
-        "Allows safe wrapper crate to build on top"
-        "Minimal dependencies - just raw bindings")
-      (negative
-        "All functions unsafe - not ergonomic for end users"
-        "Requires separate safe wrapper crate"
-        "Manual memory management burden on callers")))
+[development-practices]
+versioning = "SemVer"
+documentation = "AsciiDoc"
+build-tool = "just"
 
-  (adr-002
-    (status accepted)
-    (date "2026-01-24")
-    (context "How to handle library linking?")
-    (decision "Use build.rs with EPHAPAX_PROVEN_LIB env var")
-    (consequences
-      (positive
-        "Flexible - users can override library path"
-        "Works with local development and CI"
-        "Standard Cargo build script pattern")
-      (negative
-        "Requires ephapax-proven-ffi built before Rust crate"
-        "CI must orchestrate Zig build → Rust build")))
-
-  (adr-003
-    (status accepted)
-    (date "2026-01-24")
-    (context "Should we use bindgen to auto-generate bindings?")
-    (decision "Hand-write bindings (no bindgen)")
-    (consequences
-      (positive
-        "No C header files needed - Zig library is pure"
-        "Full control over safety documentation"
-        "Simpler build - no bindgen dependency")
-      (negative
-        "Manual sync required if Zig API changes"
-        "More verbose - must declare every function"))))
-
-;;; ===========================================================================
-;;; Development Practices
-;;; ===========================================================================
-
-(development-practices
-  (code-style
-    (language "Rust")
-    (formatting "rustfmt (Rust 2021 edition)")
-    (linting "clippy with -D warnings")
-    (naming "snake_case for functions, opaque types for FFI handles"))
-
-  (safety
-    (unsafe-code "All FFI functions are unsafe - documented thoroughly")
-    (null-checks "Document that null returns indicate allocation failure")
-    (memory "Callers own memory - must call *_free functions")
-    (thread-safety "Types are !Send and !Sync - not thread-safe"))
-
-  (testing
-    (unit-tests "Basic create/free tests in src/lib.rs")
-    (integration-tests "TODO: Full integration tests with Zig library")
-    (ci-cd ".github/workflows/rust-ci.yml"))
-
-  (versioning
-    (scheme "Semantic Versioning 2.0.0")
-    (stability "0.x.y - unstable during development"))
-
-  (documentation
-    (format "Rustdoc comments, AsciiDoc for README")
-    (safety-docs "Every unsafe function has # Safety section")
-    (examples "Usage examples in README.adoc")))
-
-;;; ===========================================================================
-;;; Design Rationale
-;;; ===========================================================================
-
-(design-rationale
-  (why-sys-crate
-    "-sys pattern is Rust convention for unsafe FFI bindings"
-    "Separates raw bindings from safe wrappers"
-    "Allows multiple safe wrappers with different design choices")
-
-  (why-opaque-types
-    "Opaque structs prevent invalid construction in Rust"
-    "Forces use of FFI functions for all operations"
-    "Matches C FFI best practices")
-
-  (why-manual-bindings
-    "Zig library has no C headers - bindgen not applicable"
-    "Hand-written bindings allow better safety documentation"
-    "Simpler build without bindgen dependency")
-
-  (why-palimpsest-license
-    "Consistent with ephapax-proven-ffi (Zig library)"
-    "Built on MPL-2.0 - copyleft for modifications, permissive for use"
-    "Designed for formal verification and FFI use cases"))
+[maintenance-axes]
+scoping-first = true
+axis-1 = "must > intend > like"
+axis-2 = "corrective > adaptive > perfective"
+axis-3 = "systems > compliance > effects"

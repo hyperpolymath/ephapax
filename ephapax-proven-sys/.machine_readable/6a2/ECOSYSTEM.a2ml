@@ -1,69 +1,20 @@
-;; SPDX-License-Identifier: PMPL-1.0-or-later
-;; ECOSYSTEM.scm - Ecosystem relationships for ephapax-proven-sys
+# SPDX-License-Identifier: PMPL-1.0-or-later
+# Copyright (c) 2026 Jonathan D.A. Jewell (hyperpolymath) <j.d.a.jewell@open.ac.uk>
+#
+# ECOSYSTEM.a2ml — Ephapax Proven Sys ecosystem position
+[metadata]
+version = "1.0.0"
+last-updated = "2026-04-11"
 
-(ecosystem
-  (version "1.0.0")
-  (name "ephapax-proven-sys")
-  (type "library")
-  (purpose "Raw Rust FFI bindings to ephapax-proven-ffi")
+[project]
+name = "Ephapax Proven Sys"
+purpose = "Raw Rust FFI bindings to ephapax-proven-ffi"
+role = "library"
 
-  ;;; Position in Ecosystem
-  (position-in-ecosystem
-    (layer "infrastructure")
-    (role "ffi-bindings")
-    (domain "rust-ffi" "systems-programming"))
+[position-in-ecosystem]
+category = ""
 
-  ;;; Related Projects
-  (related-projects
-    (project
-      (name "ephapax-proven-ffi")
-      (url "https://github.com/hyperpolymath/ephapax-proven-ffi")
-      (relationship foundation-library)
-      (description "Zig FFI library - this crate provides Rust bindings to it")
-      (integration-status "active")
-      (integration-point "Links against libephapax_proven.so"))
-
-    (project
-      (name "ephapax-proven")
-      (url "https://github.com/hyperpolymath/ephapax-proven")
-      (relationship safe-wrapper)
-      (description "Safe Rust wrapper - builds on this -sys crate")
-      (integration-status "planned")
-      (integration-point "Uses this crate for FFI, adds RAII and linear types"))
-
-    (project
-      (name "Ephapax")
-      (url "https://github.com/hyperpolymath/ephapax")
-      (relationship end-consumer)
-      (description "Dyadic language compiler - will use safe wrapper crate")
-      (integration-status "planned")
-      (integration-point "VRAM cache integration via ephapax-proven"))
-
-    (project
-      (name "Proven")
-      (url "https://github.com/usernamehw/proven")
-      (relationship transitive-dependency)
-      (description "Formally verified Idris2 library - foundation of the Zig FFI")
-      (integration-status "transitive")
-      (integration-point "Via ephapax-proven-ffi"))
-
-    (project
-      (name "Palimpsest License")
-      (url "https://github.com/hyperpolymath/palimpsest-license")
-      (relationship license-provider)
-      (description "Licensing framework")
-      (integration-status "active")
-      (integration-point "Palimpsest-1.0-or-later license")))
-
-  ;;; What This Is
-  (what-this-is
-    "Raw unsafe Rust FFI bindings to ephapax-proven-ffi (Zig library)"
-    "Follows Rust -sys crate pattern (unsafe, minimal dependencies)"
-    "Foundation for safe wrapper crate (ephapax-proven)")
-
-  ;;; What This Is Not
-  (what-this-is-not
-    "NOT a safe API - all functions are unsafe"
-    "NOT the Zig library itself - just Rust bindings to it"
-    "NOT ready for direct use - prefer safe wrapper crate when available"
-    "NOT thread-safe - types are !Send and !Sync"))
+[related-projects]
+projects = [
+  # No related projects recorded
+]

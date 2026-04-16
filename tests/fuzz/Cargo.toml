@@ -1,0 +1,28 @@
+[package]
+name = "ephapax-fuzz"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[package.metadata]
+cargo-fuzz = true
+
+
+
+[dependencies]
+libfuzzer-sys = "0.4"
+arbitrary = { version = "1", features = ["derive"] }
+
+[dependencies.ephapax-parser]
+path = "../../src/ephapax-parser"
+
+[dependencies.ephapax-typing]
+path = "../../src/ephapax-typing"
+
+[dependencies.ephapax-wasm]
+path = "../../src/ephapax-wasm"
+
+[dependencies.ephapax-syntax]
+path = "../../src/ephapax-syntax"
+
+

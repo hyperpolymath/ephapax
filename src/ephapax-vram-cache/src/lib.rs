@@ -323,12 +323,12 @@ mod tests {
     #[test]
     #[cfg(feature = "cpu-fallback")]
     fn test_basic_cache_operations() {
-        let mut cache = VramCache::new(1024 * 1024).unwrap(); // 1MB cache
+        let mut cache = VramCache::new(1024 * 1024).expect("TODO: handle error"); // 1MB cache
 
         let test_data = b"test IR data";
-        cache.insert("test.eph", test_data).unwrap();
+        cache.insert("test.eph", test_data).expect("TODO: handle error");
 
-        let retrieved = cache.get("test.eph").unwrap();
+        let retrieved = cache.get("test.eph").expect("TODO: handle error");
         assert_eq!(retrieved, Some(test_data.to_vec()));
 
         assert_eq!(cache.stats().hits, 1);
@@ -338,9 +338,9 @@ mod tests {
     #[test]
     #[cfg(feature = "cpu-fallback")]
     fn test_cache_miss() {
-        let mut cache = VramCache::new(1024 * 1024).unwrap();
+        let mut cache = VramCache::new(1024 * 1024).expect("TODO: handle error");
 
-        let result = cache.get("nonexistent.eph").unwrap();
+        let result = cache.get("nonexistent.eph").expect("TODO: handle error");
         assert_eq!(result, None);
         assert_eq!(cache.stats().misses, 1);
     }
@@ -348,17 +348,17 @@ mod tests {
     #[test]
     #[cfg(feature = "cpu-fallback")]
     fn test_lru_eviction() {
-        let mut cache = VramCache::new(100).unwrap(); // Very small cache
+        let mut cache = VramCache::new(100).expect("TODO: handle error"); // Very small cache
 
-        cache.insert("file1.eph", b"data1").unwrap();
+        cache.insert("file1.eph", b"data1").expect("TODO: handle error");
         std::thread::sleep(std::time::Duration::from_millis(10));
-        cache.insert("file2.eph", b"data2").unwrap();
+        cache.insert("file2.eph", b"data2").expect("TODO: handle error");
 
         // Insert large data that triggers eviction
-        cache.insert("file3.eph", &vec![0u8; 90]).unwrap();
+        cache.insert("file3.eph", &vec![0u8; 90]).expect("TODO: handle error");
 
         // file1 should be evicted (LRU)
-        assert_eq!(cache.get("file1.eph").unwrap(), None);
+        assert_eq!(cache.get("file1.eph").expect("TODO: handle error"), None);
         assert!(cache.stats().evictions > 0);
     }
 }

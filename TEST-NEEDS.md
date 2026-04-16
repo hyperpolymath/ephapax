@@ -78,8 +78,19 @@
   crates remediated, .eph files tested as a suite.
 - **CRG A** — Requires: fuzz harness, formal proof coverage, mutation testing.
 
-## FAKE-FUZZ ALERT
+## FUZZ TESTING STATUS
 
-- `tests/fuzz/placeholder.txt` is a scorecard placeholder inherited from rsr-template-repo — it does NOT provide real fuzz testing
-- Replace with an actual fuzz harness (see rsr-template-repo/tests/fuzz/README.adoc) or remove the file
-- Priority: P2 — creates false impression of fuzz coverage
+- ✅ Real fuzz testing infrastructure added in `tests/fuzz/`
+- ✅ Parser fuzzer implemented (`fuzz_targets/parse_fuzzer.rs`)
+- ✅ Type checker fuzzer implemented (`fuzz_targets/typecheck_fuzzer.rs`)
+- ✅ Seed corpus created with valid and invalid test cases
+- ✅ Integrated into workspace Cargo.toml
+
+**Priority: P1 — Real fuzz coverage now exists**
+
+To run fuzz tests:
+```bash
+cd tests/fuzz
+cargo fuzz run parse_fuzzer -- -max_total_time=60
+cargo fuzz run typecheck_fuzzer -- -max_total_time=60
+```

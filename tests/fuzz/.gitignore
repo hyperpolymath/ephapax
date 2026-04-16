@@ -1,0 +1,4 @@
+# Fuzz testing artifacts
+fuzz/
+corpus/
+artifacts/

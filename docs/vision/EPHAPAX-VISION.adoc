@@ -1,0 +1,120 @@
+// SPDX-License-Identifier: MPL-2.0
+= Ephapax: Design Vision
+Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk>
+:toc:
+:toclevels: 3
+:icons: font
+
+== What Ephapax Is
+
+Ephapax is a *programming language*. Not a proof assistant, not a type checker
+for other languages, not a framework. A language you write programs in, that
+compiles to typed WebAssembly.
+
+It is a *dyadic language* — one language with two strictly enforced type
+disciplines that together form a single unified thing. The two disciplines are
+not modes you toggle. They are not strict-mode vs relaxed-mode. They are two
+genuinely independent members of a dyad that operate as one.
+
+== The Name
+
+Ephapax (ἐφάπαξ) — Greek: *once and only once*. The name carries two meanings
+simultaneously, both true:
+
+. *The linear discipline*: a resource, used once and only once. No more, no
+  less. This is the type-theoretic meaning — the founding constraint of the
+  linear form.
+. *The dyadic unity*: one mother, one child, one dyad. Two that are genuinely
+  independent yet operate as one. Once: the dyad is the unit.
+
+Neither meaning is metaphor for the other. Both are structural to what the
+language is.
+
+== The Dyad
+
+[cols="1,1", options="header"]
+|===
+| Ephapax Linear (the mother) | Ephapax Affine (the child)
+
+| Every resource used *exactly once* | Every resource used *at most once*
+| Hard enforcement — no escape | Hard enforcement — no escape
+| Risk-averse, ordered, precise | Freer, exploratory, adaptive
+| The final authority | The enabler and extender
+| Rejects weakening | Permits weakening (dropping)
+| Smaller set of valid programs | Larger set of valid programs
+|===
+
+Every valid Linear program is a valid Affine program. Not every valid Affine
+program is a valid Linear program. Linear ⊂ Affine in terms of what is accepted.
+
+The mother says *no* when something the child has written drops a resource she
+requires to be used.
+
+The child pushes into territory the mother cannot reach — programs that are
+well-typed affinely but cannot satisfy linear discipline without redesign.
+
+*Crucially*: the child is not deficient. Affine discipline is not "almost
+linear" or "linear in training." It has intrinsic value. There are programs
+that belong in affine permanently. As Ephapax matures, the affine form must
+mature *into itself* — not toward becoming linear.
+
+== One Language, One Feel
+
+Writing in Ephapax Linear and Ephapax Affine feels *identical*. There are no
+different keywords, different idioms, different syntactic forms, or different
+structural patterns. You write Ephapax. The type discipline is a property of
+the context you are compiling in — a project-level declaration — not something
+you express differently in the code itself.
+
+The toolchain is almost entirely shared. It diverges *only* where it must to
+service the different enforcement requirements:
+
+----
+shared:  grammar → parser → AST → type representation → codegen → typed WASM
+                                         ↑
+forks:                    linear enforcer | affine enforcer
+                            (only here, nowhere else unless forced)
+----
+
+== The Workflow
+
+This is the practical power of the dyad:
+
+. *Plan and build in Affine* — write real, properly typed Ephapax code without
+  being blocked by linear obligations you are not ready to address. The affine
+  type checker is doing real work. You have genuine guarantees. You can think,
+  build, get a working thing, without solving problems that are not the
+  current problem.
+
+. *Tighten to Linear when ready* — run the linear enforcer. It does not say
+  "rewrite this." It says precisely what does not satisfy linear discipline.
+  Because the syntax is identical and the code was always truly typed, the
+  path from affine to linear is a targeted, type-guided process — not a
+  rewrite.
+
+You always have truly typed code. The affine stage is not a sketch or a
+prototype you will throw away. It is a typed foundation that the linear
+enforcer can read directly.
+
+*The daughter grows up, but her freedom and adaptiveness must not be lost in
+that growing.*
+
+== Compilation Target
+
+Both forms of Ephapax target *typed WebAssembly* (WasmGC). Types survive into
+the runtime. The binary format is shared.
+
+== Relationship to AffineScript
+
+Independent. Neither language constrains the other's design.
+
+They converge at one point: both compile to typed WebAssembly. This creates
+an opportunity for an aggregate library — shared infrastructure at the WASM
+level (type layout conventions, ABI, stdlib types compiled to typed WASM) that
+neither language owns but both can consume. Interoperability between an
+Ephapax module and an AffineScript module is achievable at the binary level
+because they speak the same bytecode.
+
+The mathematical space of affine type theory is shared ground — Ephapax Affine
+and AffineScript both inhabit it, from different directions, for different
+purposes. This is a design conformance relationship, not a code dependency.

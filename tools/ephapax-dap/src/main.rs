@@ -195,7 +195,7 @@ fn main() -> io::Result<()> {
         if line.starts_with("Content-Length:") {
             let len: usize = line
                 .strip_prefix("Content-Length:")
-                .unwrap()
+                .expect("TODO: handle error")
                 .trim()
                 .parse()
                 .unwrap_or(0);
@@ -210,7 +210,7 @@ fn main() -> io::Result<()> {
 
             if let Ok(msg) = serde_json::from_slice::<DapMessage>(&body) {
                 let response = debugger.handle_request(&msg);
-                let response_json = serde_json::to_string(&response).unwrap();
+                let response_json = serde_json::to_string(&response).expect("TODO: handle error");
                 let header = format!("Content-Length: {}\r\n\r\n", response_json.len());
 
                 let mut out = stdout.lock();

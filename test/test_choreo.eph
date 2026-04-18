@@ -1,0 +1,27 @@
+(** Test file for choreographic sessions *)
+
+(* Valid session declaration *)
+session Transfer(Alice, Bob) {
+    Alice -> Bob: Token;
+    Bob -> Alice: Receipt;
+}
+
+(* Function using the session *)
+fn transfer(s: Session Transfer(Alice, Bob)) -> Receipt {
+    send(s, Bob, token);
+    receive(s, Bob)
+}
+
+(* Three-party session *)
+session AudioMix(Client, Server, Logger) {
+    Client -> Server: AudioFrame;
+    Server -> Client: MixedFrame;
+    Server -> Logger: MixLog;
+}
+
+(* Nested sessions *)
+session Nested(A, B) {
+    A -> B: Session Inner(C, D) {
+        C -> D: Data;
+    };
+}

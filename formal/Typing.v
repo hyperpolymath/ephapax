@@ -18,6 +18,28 @@ Import ListNotations.
 
 Require Import Syntax.
 
+(** ** Free Regions in Types
+
+    Compute the set of regions mentioned in a type. Used to enforce
+    the "region does not escape" invariant in T_Region and T_Region_Active. *)
+
+Fixpoint free_regions (T : ty) : list region_name :=
+  match T with
+  | TBase _ => []
+  | TRef _ T => free_regions T
+  | TFun T1 T2 => free_regions T1 ++ free_regions T2
+  | TProd T1 T2 => free_regions T1 ++ free_regions T2
+  | TSum T1 T2 => free_regions T1 ++ free_regions T2
+  | TString r => [r]
+  | TRegion r T => r :: free_regions T
+  | TBorrow T => free_regions T
+  end.
+
+(* Note: We don't need a separate determinism lemma for free_regions
+   since In_dec is built-in for list types in Coq. *)
+
+Notation "r '∉' L" := (~ In r L) (at level 70, no associativity).
+
 (** ** Linear Typing Judgement *)
 
 Reserved Notation "R ';' G '|-' e ':' T '-|' G'"
@@ -140,6 +162,7 @@ Inductive has_type : region_env -> ctx -> expr -> ty -> ctx -> Prop :=
 
   | T_Region : forall R G G' r e T,
       ~ In r R ->
+      r ∉ free_regions T ->
       (r :: R); G |- e : T -| G' ->
       R; G |- ERegion r e : T -| G'
 
@@ -148,6 +171,7 @@ Inductive has_type : region_env -> ctx -> expr -> ty -> ctx -> Prop :=
       r :: R (r now active), and the expression is still ERegion r e. *)
   | T_Region_Active : forall R G G' r e T,
       In r R ->
+      r ∉ free_regions T ->
       R; G |- e : T -| G' ->
       R; G |- ERegion r e : T -| G'
 

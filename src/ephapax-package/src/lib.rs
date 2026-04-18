@@ -107,21 +107,21 @@ mod tests {
 
     #[test]
     fn test_init_project() {
-        let temp = TempDir::new().unwrap();
-        init_project(temp.path(), "test-project").unwrap();
+        let temp = TempDir::new().expect("TODO: handle error");
+        init_project(temp.path(), "test-project").expect("TODO: handle error");
 
         assert!(temp.path().join("ephapax.toml").exists());
         assert!(temp.path().join("src").exists());
         assert!(temp.path().join("src/main.eph").exists());
 
-        let manifest = Manifest::from_file(&temp.path().join("ephapax.toml")).unwrap();
+        let manifest = Manifest::from_file(&temp.path().join("ephapax.toml")).expect("TODO: handle error");
         assert_eq!(manifest.package.name, "test-project");
     }
 
     #[test]
     fn test_init_project_already_exists() {
-        let temp = TempDir::new().unwrap();
-        std::fs::write(temp.path().join("ephapax.toml"), "").unwrap();
+        let temp = TempDir::new().expect("TODO: handle error");
+        std::fs::write(temp.path().join("ephapax.toml"), "").expect("TODO: handle error");
 
         let result = init_project(temp.path(), "test");
         assert!(result.is_err());

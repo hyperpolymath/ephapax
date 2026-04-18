@@ -605,7 +605,7 @@ impl Desugarer {
         let (_, ctors) = self
             .registry
             .get_type_ctors(info.data_name.as_str())
-            .unwrap();
+            .expect("TODO: handle error");
         let ctors = ctors.clone();
 
         // Wrap in inl/inr chain based on index
@@ -712,7 +712,7 @@ impl Desugarer {
         // Find the data type from constructor patterns
         let data_name = self.find_data_type_from_arms(arms)?;
 
-        let (_, ctors) = self.registry.get_type_ctors(data_name.as_str()).unwrap();
+        let (_, ctors) = self.registry.get_type_ctors(data_name.as_str()).expect("TODO: handle error");
         let ctors = ctors.clone();
 
         // Build an ordered map: constructor index → (pattern bindings, body)
@@ -1081,7 +1081,7 @@ mod tests {
             args: vec![SurfaceTy::Base(BaseTy::I32)],
         };
 
-        let core = ds.desugar_ty(&ty).unwrap();
+        let core = ds.desugar_ty(&ty).expect("TODO: handle error");
         // Option(I32) = () + I32
         assert_eq!(
             core,
@@ -1102,7 +1102,7 @@ mod tests {
             args: vec![],
         };
 
-        let core = ds.desugar_ty(&ty).unwrap();
+        let core = ds.desugar_ty(&ty).expect("TODO: handle error");
         // Color = () + (() + ())
         assert_eq!(
             core,
@@ -1141,7 +1141,7 @@ mod tests {
             args: vec![],
         });
 
-        let core = ds.desugar_expr(&expr).unwrap();
+        let core = ds.desugar_expr(&expr).expect("TODO: handle error");
         // None → inl(())
         assert!(matches!(core.kind, ExprKind::Inl { .. }));
     }
@@ -1156,7 +1156,7 @@ mod tests {
             args: vec![se(SurfaceExprKind::Lit(Literal::I32(42)))],
         });
 
-        let core = ds.desugar_expr(&expr).unwrap();
+        let core = ds.desugar_expr(&expr).expect("TODO: handle error");
         // Some(42) → inr(42)
         assert!(matches!(core.kind, ExprKind::Inr { .. }));
     }
@@ -1171,7 +1171,7 @@ mod tests {
             args: vec![],
         });
 
-        let core = ds.desugar_expr(&expr).unwrap();
+        let core = ds.desugar_expr(&expr).expect("TODO: handle error");
         // Green → inr(inl(()))
         if let ExprKind::Inr { value, .. } = &core.kind {
             assert!(matches!(value.kind, ExprKind::Inl { .. }));
@@ -1190,7 +1190,7 @@ mod tests {
             args: vec![],
         });
 
-        let core = ds.desugar_expr(&expr).unwrap();
+        let core = ds.desugar_expr(&expr).expect("TODO: handle error");
         // Blue → inr(inr(()))
         if let ExprKind::Inr { value, .. } = &core.kind {
             if let ExprKind::Inr { .. } = &value.kind {
@@ -1254,7 +1254,7 @@ mod tests {
             ],
         });
 
-        let core = ds.desugar_expr(&expr).unwrap();
+        let core = ds.desugar_expr(&expr).expect("TODO: handle error");
         // Should produce a case expression
         assert!(matches!(core.kind, ExprKind::Case { .. }));
     }
@@ -1294,7 +1294,7 @@ mod tests {
             ],
         });
 
-        let core = ds.desugar_expr(&expr).unwrap();
+        let core = ds.desugar_expr(&expr).expect("TODO: handle error");
         // Should produce nested case: case c of inl _ => 1 | inr rest => case rest of ...
         if let ExprKind::Case { right_body, .. } = &core.kind {
             assert!(
@@ -1330,7 +1330,7 @@ mod tests {
             ],
         });
 
-        let core = ds.desugar_expr(&expr).unwrap();
+        let core = ds.desugar_expr(&expr).expect("TODO: handle error");
         // Wildcard should fill in the missing Green and Blue arms
         assert!(matches!(core.kind, ExprKind::Case { .. }));
     }
@@ -1407,7 +1407,7 @@ mod tests {
             ],
         };
 
-        let core = desugar(&module).unwrap();
+        let core = desugar(&module).expect("TODO: handle error");
         // Data declaration should not appear in core
         assert_eq!(
             core.decls.len(),
@@ -1486,7 +1486,7 @@ mod tests {
             ],
         };
 
-        let core = desugar(&module).unwrap();
+        let core = desugar(&module).expect("TODO: handle error");
         assert_eq!(core.decls.len(), 1);
 
         let result = type_check_module(&core);
@@ -1549,7 +1549,7 @@ mod tests {
             ],
         };
 
-        let core = desugar(&module).unwrap();
+        let core = desugar(&module).expect("TODO: handle error");
 
         // Print desugared core for debugging
         assert_eq!(core.decls.len(), 1);

@@ -15,6 +15,12 @@ phase = "implementation"
 description = "Linear type system compiler — 19 crates, formal proofs FULLY CLOSED (67 Qed, 0 Admitted)"
 crg-grade = "C"
 
+[dogfooding-status]
+# Populated 2026-04-19 against real on-disk integrations. Each entry must
+# resolve to a grep-hit in the cited path. Per memory: ephapax is the
+# proven-alternatives source, so `proven` is its canonical downstream consumer.
+proven-consumer = "2026-04-19 — proven repo consumes ephapax via Zig bindings (types.zig, ephapax_proven.zig, lru_adapter.zig + lru_impl.zig, buffer_adapter.zig + buffer_impl.zig, resource_adapter.zig + resource_impl.zig, stubs.c + build.zig + DYADIC-FFI-DESIGN.md). Path: verification-ecosystem/proven/bindings/ephapax/"
+
 [formal-proofs]
 rocq-version = "9.1.1"
 compiles-clean = true

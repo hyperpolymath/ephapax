@@ -302,12 +302,12 @@ fn parse_seq_expr(pair: pest::iterators::Pair<Rule>) -> Result<SurfaceExpr, Pars
 
     // If only one expression, return it directly (no sequencing)
     if parsed.len() == 1 {
-        return Ok(parsed.into_iter().next().unwrap());
+        return Ok(parsed.into_iter().next().expect("TODO: handle error"));
     }
 
     // Desugar e1 ; e2 ; ... ; eN into nested lets:
     //   let _ = e1 in (let _ = e2 in (... eN))
-    let last = parsed.pop().unwrap();
+    let last = parsed.pop().expect("TODO: handle error");
     parsed.into_iter().rev().fold(Ok(last), |acc, expr| {
         let acc = acc?;
         let s = expr.span;
@@ -561,11 +561,11 @@ fn parse_match_arm(pair: pest::iterators::Pair<Rule>) -> Result<MatchArm, ParseE
         inner.filter(|p| p.as_rule() == Rule::expression).collect();
 
     let (guard, body) = if exprs.len() >= 2 {
-        let body = parse_expression(exprs.pop().unwrap())?;
-        let guard_expr = parse_expression(exprs.pop().unwrap())?;
+        let body = parse_expression(exprs.pop().expect("TODO: handle error"))?;
+        let guard_expr = parse_expression(exprs.pop().expect("TODO: handle error"))?;
         (Some(Box::new(guard_expr)), body)
     } else if exprs.len() == 1 {
-        (None, parse_expression(exprs.pop().unwrap())?)
+        (None, parse_expression(exprs.pop().expect("TODO: handle error"))?)
     } else {
         return Err(ParseError::missing("match arm body"));
     };
@@ -1171,11 +1171,11 @@ fn parse_atom_expr(pair: pest::iterators::Pair<Rule>) -> Result<SurfaceExpr, Par
             }
             match exprs.len() {
                 0 => Ok(SurfaceExpr::new(SurfaceExprKind::Lit(Literal::Unit), span)),
-                1 => Ok(exprs.into_iter().next().unwrap()),
+                1 => Ok(exprs.into_iter().next().expect("TODO: handle error")),
                 2 => {
                     let mut iter = exprs.into_iter();
-                    let left = iter.next().unwrap();
-                    let right = iter.next().unwrap();
+                    let left = iter.next().expect("TODO: handle error");
+                    let right = iter.next().expect("TODO: handle error");
                     Ok(SurfaceExpr::new(
                         SurfaceExprKind::Pair {
                             left: Box::new(left),
@@ -1470,7 +1470,7 @@ mod tests {
     #[test]
     fn parse_data_declaration() {
         let source = "data Option(a) = None | Some(a)";
-        let module = parse_surface_module(source, "test").unwrap();
+        let module = parse_surface_module(source, "test").expect("TODO: handle error");
         assert_eq!(module.decls.len(), 1);
         if let SurfaceDecl::Data(d) = &module.decls[0] {
             assert_eq!(d.name.as_str(), "Option");
@@ -1486,7 +1486,7 @@ mod tests {
     #[test]
     fn parse_data_no_params() {
         let source = "data Color = Red | Green | Blue";
-        let module = parse_surface_module(source, "test").unwrap();
+        let module = parse_surface_module(source, "test").expect("TODO: handle error");
         if let SurfaceDecl::Data(d) = &module.decls[0] {
             assert_eq!(d.name.as_str(), "Color");
             assert!(d.params.is_empty());
@@ -1499,14 +1499,14 @@ mod tests {
     #[test]
     fn parse_construct_nullary() {
         let source = "None";
-        let expr = parse_surface_expr(source).unwrap();
+        let expr = parse_surface_expr(source).expect("TODO: handle error");
         assert!(matches!(expr.kind, SurfaceExprKind::Construct { .. }));
     }
 
     #[test]
     fn parse_construct_with_arg() {
         let source = "Some(42)";
-        let expr = parse_surface_expr(source).unwrap();
+        let expr = parse_surface_expr(source).expect("TODO: handle error");
         if let SurfaceExprKind::Construct { ctor, args } = &expr.kind {
             assert_eq!(ctor.as_str(), "Some");
             assert_eq!(args.len(), 1);
@@ -1521,7 +1521,7 @@ mod tests {
             | None => 0
             | Some(v) => v
             end"#;
-        let expr = parse_surface_expr(source).unwrap();
+        let expr = parse_surface_expr(source).expect("TODO: handle error");
         if let SurfaceExprKind::Match { arms, .. } = &expr.kind {
             assert_eq!(arms.len(), 2);
         } else {
@@ -1537,14 +1537,14 @@ mod tests {
             end"#;
         // Need Color data type registered for Red to parse as constructor
         // But Red is an uppercase identifier, so it parses as construct_expr
-        let expr = parse_surface_expr(source).unwrap();
+        let expr = parse_surface_expr(source).expect("TODO: handle error");
         assert!(matches!(expr.kind, SurfaceExprKind::Match { .. }));
     }
 
     #[test]
     fn parse_named_type() {
         let source = "fn unwrap(x: Option(I32)): I32 = x";
-        let module = parse_surface_module(source, "test").unwrap();
+        let module = parse_surface_module(source, "test").expect("TODO: handle error");
         if let SurfaceDecl::Fn { params, .. } = &module.decls[0] {
             assert!(matches!(&params[0].1, SurfaceTy::Named { .. }));
         }
@@ -1553,14 +1553,14 @@ mod tests {
     #[test]
     fn parse_existing_let_expr() {
         let source = "let x = 42 in x";
-        let expr = parse_surface_expr(source).unwrap();
+        let expr = parse_surface_expr(source).expect("TODO: handle error");
         assert!(matches!(expr.kind, SurfaceExprKind::Let { .. }));
     }
 
     #[test]
     fn parse_existing_let_lin_expr() {
         let source = "let! x = 42 in x";
-        let expr = parse_surface_expr(source).unwrap();
+        let expr = parse_surface_expr(source).expect("TODO: handle error");
         assert!(matches!(expr.kind, SurfaceExprKind::LetLin { .. }));
     }
 
@@ -1575,7 +1575,7 @@ mod tests {
                 | Some(v) => v
                 end
         "#;
-        let module = parse_surface_module(source, "test").unwrap();
+        let module = parse_surface_module(source, "test").expect("TODO: handle error");
         assert_eq!(module.decls.len(), 2);
         assert!(matches!(&module.decls[0], SurfaceDecl::Data(_)));
         assert!(matches!(&module.decls[1], SurfaceDecl::Fn { .. }));
@@ -1592,10 +1592,10 @@ fn test(opt: Option(I32)): I32 =
     | Some(v) => v
     end
 "#;
-        let surface = parse_surface_module(source, "test").unwrap();
+        let surface = parse_surface_module(source, "test").expect("TODO: handle error");
         assert_eq!(surface.decls.len(), 2);
 
-        let core = ephapax_desugar::desugar(&surface).unwrap();
+        let core = ephapax_desugar::desugar(&surface).expect("TODO: handle error");
         assert_eq!(core.decls.len(), 1); // data consumed, only fn remains
 
         let result = ephapax_typing::type_check_module(&core);

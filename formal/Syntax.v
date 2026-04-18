@@ -111,7 +111,15 @@ Inductive is_value : expr -> Prop :=
   | VPair   : forall v1 v2, is_value v1 -> is_value v2 -> is_value (EPair v1 v2)
   | VInl    : forall T v, is_value v -> is_value (EInl T v)
   | VInr    : forall T v, is_value v -> is_value (EInr T v)
-  | VLoc    : forall l r, is_value (ELoc l r).
+  | VLoc    : forall l r, is_value (ELoc l r)
+  (** EBorrow v is a value when v is a value — a borrow reference is
+      a first-class value of type TBorrow T. This is needed for:
+      (a) preservation of T_Borrow_Val: substitution produces EBorrow v,
+          which must be a value so reduction halts at the reference form,
+          not at v (which would change type from TBorrow T to T).
+      (b) values_dont_step: EBorrow v doesn't reduce further once v is
+          a value — the reference IS the normal form. *)
+  | VBorrow : forall v, is_value v -> is_value (EBorrow v).
 
 (** ** Typing Contexts (De Bruijn) *)
 

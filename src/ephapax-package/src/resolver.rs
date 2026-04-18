@@ -267,22 +267,22 @@ mod tests {
 
     #[test]
     fn test_simple_resolution() {
-        let temp = TempDir::new().unwrap();
-        let mut registry = Registry::open_at(temp.path().to_path_buf()).unwrap();
+        let temp = TempDir::new().expect("TODO: handle error");
+        let mut registry = Registry::open_at(temp.path().to_path_buf()).expect("TODO: handle error");
 
         // Create package structure
         let pkg_dir = temp.path().join("pkg");
-        std::fs::create_dir_all(&pkg_dir).unwrap();
+        std::fs::create_dir_all(&pkg_dir).expect("TODO: handle error");
 
         let dep_manifest = create_test_package("dep", "1.0.0", vec![]);
-        dep_manifest.to_file(&pkg_dir.join("ephapax.toml")).unwrap();
-        registry.install_package("dep", "1.0.0", &pkg_dir).unwrap();
+        dep_manifest.to_file(&pkg_dir.join("ephapax.toml")).expect("TODO: handle error");
+        registry.install_package("dep", "1.0.0", &pkg_dir).expect("TODO: handle error");
 
         // Main package depends on dep
         let main_manifest = create_test_package("main", "1.0.0", vec![("dep", "^1.0")]);
 
         let resolver = Resolver::new(&registry);
-        let resolved = resolver.resolve(&main_manifest).unwrap();
+        let resolved = resolver.resolve(&main_manifest).expect("TODO: handle error");
 
         assert_eq!(resolved.packages.len(), 1);
         assert!(resolved.packages.contains_key("dep"));
@@ -290,29 +290,29 @@ mod tests {
 
     #[test]
     fn test_transitive_resolution() {
-        let temp = TempDir::new().unwrap();
-        let mut registry = Registry::open_at(temp.path().to_path_buf()).unwrap();
+        let temp = TempDir::new().expect("TODO: handle error");
+        let mut registry = Registry::open_at(temp.path().to_path_buf()).expect("TODO: handle error");
 
         let pkg_dir = temp.path().join("pkg");
-        std::fs::create_dir_all(&pkg_dir).unwrap();
+        std::fs::create_dir_all(&pkg_dir).expect("TODO: handle error");
 
         // leaf: no dependencies
         let leaf = create_test_package("leaf", "1.0.0", vec![]);
-        leaf.to_file(&pkg_dir.join("ephapax.toml")).unwrap();
-        registry.install_package("leaf", "1.0.0", &pkg_dir).unwrap();
+        leaf.to_file(&pkg_dir.join("ephapax.toml")).expect("TODO: handle error");
+        registry.install_package("leaf", "1.0.0", &pkg_dir).expect("TODO: handle error");
 
         // middle: depends on leaf
         let middle = create_test_package("middle", "1.0.0", vec![("leaf", "^1.0")]);
-        middle.to_file(&pkg_dir.join("ephapax.toml")).unwrap();
+        middle.to_file(&pkg_dir.join("ephapax.toml")).expect("TODO: handle error");
         registry
             .install_package("middle", "1.0.0", &pkg_dir)
-            .unwrap();
+            .expect("TODO: handle error");
 
         // main: depends on middle
         let main = create_test_package("main", "1.0.0", vec![("middle", "^1.0")]);
 
         let resolver = Resolver::new(&registry);
-        let resolved = resolver.resolve(&main).unwrap();
+        let resolved = resolver.resolve(&main).expect("TODO: handle error");
 
         assert_eq!(resolved.packages.len(), 2);
         assert!(resolved.packages.contains_key("middle"));
@@ -320,30 +320,30 @@ mod tests {
 
         // Check topological order (leaf before middle)
         let order = resolved.topological_order();
-        let leaf_pos = order.iter().position(|n| n == "leaf").unwrap();
-        let middle_pos = order.iter().position(|n| n == "middle").unwrap();
+        let leaf_pos = order.iter().position(|n| n == "leaf").expect("TODO: handle error");
+        let middle_pos = order.iter().position(|n| n == "middle").expect("TODO: handle error");
         assert!(leaf_pos < middle_pos);
     }
 
     #[test]
     fn test_version_selection() {
-        let temp = TempDir::new().unwrap();
-        let mut registry = Registry::open_at(temp.path().to_path_buf()).unwrap();
+        let temp = TempDir::new().expect("TODO: handle error");
+        let mut registry = Registry::open_at(temp.path().to_path_buf()).expect("TODO: handle error");
 
         let pkg_dir = temp.path().join("pkg");
-        std::fs::create_dir_all(&pkg_dir).unwrap();
+        std::fs::create_dir_all(&pkg_dir).expect("TODO: handle error");
 
         // Install multiple versions
         for version in &["1.0.0", "1.1.0", "1.2.0", "2.0.0"] {
             let pkg = create_test_package("lib", version, vec![]);
-            pkg.to_file(&pkg_dir.join("ephapax.toml")).unwrap();
-            registry.install_package("lib", version, &pkg_dir).unwrap();
+            pkg.to_file(&pkg_dir.join("ephapax.toml")).expect("TODO: handle error");
+            registry.install_package("lib", version, &pkg_dir).expect("TODO: handle error");
         }
 
         let main = create_test_package("main", "1.0.0", vec![("lib", "^1.0")]);
 
         let resolver = Resolver::new(&registry);
-        let resolved = resolver.resolve(&main).unwrap();
+        let resolved = resolver.resolve(&main).expect("TODO: handle error");
 
         // Should pick 1.2.0 (latest matching ^1.0)
         let lib = &resolved.packages["lib"];

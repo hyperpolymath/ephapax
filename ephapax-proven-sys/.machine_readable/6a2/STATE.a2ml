@@ -1,138 +1,58 @@
-;; SPDX-License-Identifier: PMPL-1.0-or-later
-;; STATE.scm - Project state for ephapax-proven-sys
+# SPDX-License-Identifier: PMPL-1.0-or-later
+# Copyright (c) 2026 Jonathan D.A. Jewell (hyperpolymath) <j.d.a.jewell@open.ac.uk>
+#
+# STATE.a2ml — Ephapax Proven Sys project state
+[metadata]
+project = "ephapax-proven-sys"
+version = "0.1.0"
+last-updated = "2026-04-11"
+status = "active"
+session = "converted from scheme — 2026-04-11"
 
-(define-module (ephapax-proven-sys state)
-  #:version "0.1.0"
-  #:schema-version "1.0.0"
-  #:created "2026-01-24"
-  #:updated "2026-01-24"
-  #:project "ephapax-proven-sys"
-  #:repo "https://github.com/hyperpolymath/ephapax-proven-sys")
+[project-context]
+name = "Ephapax Proven Sys"
+purpose = """All 21 FFI functions declared"""
+completion-percentage = 80
 
-;;; ===========================================================================
-;;; Project Context
-;;; ===========================================================================
+[position]
+phase = "initial"   # design | implementation | testing | maintenance | archived
+maturity = "experimental"  # experimental | alpha | beta | production | lts
 
-(project-context
-  (name "ephapax-proven-sys")
-  (tagline "Raw Rust FFI bindings to ephapax-proven-ffi")
-  (tech-stack
-    (languages "Rust")
-    (dependencies
-      (ephapax-proven-ffi "https://github.com/hyperpolymath/ephapax-proven-ffi" "Zig FFI library"))
-    (build-system "Cargo")
-    (target "Rust library crate (-sys pattern)")))
+[route-to-mvp]
+milestones = [
+  # No milestones recorded
+]
 
-;;; ===========================================================================
-;;; Current Position
-;;; ===========================================================================
+[blockers-and-issues]
+issues = [
+  "CI needs both Rust and Zig toolchains",
+  "Workflow must build Zig library first, then Rust bindings",
+]
 
-(current-position
-  (phase "alpha" "Raw bindings complete, needs testing")
-  (overall-completion 80)
+[critical-next-actions]
+actions = [
+  "Test with actual Zig library",
+  "Fix CI workflow",
+  "Commit and push to GitHub",
+  "Create safe wrapper crate (ephapax-proven)",
+  "Add comprehensive integration tests",
+  "Verify CI passes",
+  "2026-01-24",
+  "Created Rust -sys crate structure",
+  "Declared all 21 FFI functions with safety docs",
+  "Created build.rs for library linking",
+  "Added basic unit tests",
+  "Created README.adoc with usage examples",
+  "Added RSR template files",
+  "Created CI workflows (Rust + Zig)",
+  "src/lib.rs (275 lines)",
+  "Cargo.toml",
+  "README.adoc",
+  ".github/workflows/rust-ci.yml",
+  "STATE.scm (this file)",
+  "Create safe wrapper crate, test integration",
+]
 
-  (components
-    (ffi-bindings
-      (status "complete")
-      (completion 100)
-      (description "All 21 FFI functions declared")
-      (file "src/lib.rs"))
-
-    (build-script
-      (status "complete")
-      (completion 100)
-      (description "Cargo build integration for linking")
-      (file "build.rs"))
-
-    (tests
-      (status "partial")
-      (completion 30)
-      (description "Basic tests for create/free - need integration tests"))
-
-    (documentation
-      (status "complete")
-      (completion 100)
-      (description "README, API docs, safety documentation")))
-
-  (working-features
-    "LRU Cache FFI (7 functions)"
-    "Buffer FFI (8 functions)"
-    "Resource Handle FFI (6 functions)"
-    "Build script for library linking"
-    "Basic unit tests"))
-
-;;; ===========================================================================
-;;; Route to MVP
-;;; ===========================================================================
-
-(route-to-mvp
-  (milestone "0.1.0 - Initial Release"
-    (item "Complete integration tests with actual Zig library")
-    (item "Verify CI/CD works (Rust + Zig build)")
-    (item "Publish to crates.io")
-    (item "Add examples directory"))
-
-  (milestone "0.2.0 - Production Ready"
-    (item "Comprehensive test coverage")
-    (item "Property-based testing with proptest")
-    (item "Benchmark suite")
-    (item "Safe wrapper crate (ephapax-proven)")))
-
-;;; ===========================================================================
-;;; Blockers and Issues
-;;; ===========================================================================
-
-(blockers-and-issues
-  (high
-    (issue "CI needs both Rust and Zig toolchains"
-      (description "Workflow must build Zig library first, then Rust bindings"))
-
-    (issue "Tests require built Zig library"
-      (description "LD_LIBRARY_PATH must point to ephapax-proven-ffi")))
-
-  (medium
-    (issue "No safe wrappers yet"
-      (description "Need ephapax-proven crate with RAII types")))
-
-  (low
-    (issue "Minimal test coverage"
-      (description "Only basic create/free tests - need comprehensive suite"))))
-
-;;; ===========================================================================
-;;; Critical Next Actions
-;;; ===========================================================================
-
-(critical-next-actions
-  (immediate
-    "Test with actual Zig library"
-    "Fix CI workflow"
-    "Commit and push to GitHub")
-
-  (this-week
-    "Create safe wrapper crate (ephapax-proven)"
-    "Add comprehensive integration tests"
-    "Verify CI passes"))
-
-;;; ===========================================================================
-;;; Session History
-;;; ===========================================================================
-
-(session-history
-  (snapshot
-    (date "2026-01-24")
-    (accomplishments
-      "Created Rust -sys crate structure"
-      "Declared all 21 FFI functions with safety docs"
-      "Created build.rs for library linking"
-      "Added basic unit tests"
-      "Created README.adoc with usage examples"
-      "Added RSR template files"
-      "Created CI workflows (Rust + Zig)")
-    (files-created
-      "src/lib.rs (275 lines)"
-      "build.rs"
-      "Cargo.toml"
-      "README.adoc"
-      ".github/workflows/rust-ci.yml"
-      "STATE.scm (this file)")
-    (next-session "Create safe wrapper crate, test integration")))
+[maintenance-status]
+last-run-utc = "2026-04-11T00:00:00Z"
+last-result = "unknown"  # unknown | pass | warn | fail

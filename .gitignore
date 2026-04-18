@@ -81,3 +81,10 @@ ai-cli-crash-capture/
 *.so
 *.a
 *.dylib
+target/
+node_modules/
+_build/
+deps/
+.elixir_ls/
+.cache/
+dist/

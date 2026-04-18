@@ -12,7 +12,8 @@
 - Contract/invariant tests: `src/ephapax-cli/tests/contract_tests.rs` (type system invariants, 13 tests)
 - Aspect tests: `src/ephapax-cli/tests/aspect_tests.rs` (security, performance, correctness, 13 tests)
 - Benchmarks: `src/ephapax-parser/benches/parse_bench.rs`, `src/ephapax-vram-cache/benches/cache_bench.rs`
-- Total: **337 tests pass / 0 fail**
+- Total: **357 tests pass / 0 fail** (`cargo test --all-targets`)
+- Documented all-target tests: 357
 
 ## CRG Testing Taxonomy — Status
 
@@ -42,7 +43,7 @@
 - Example programs not verified in CI
 
 #### Known issues:
-- 3 Admitted proofs in Coq (ctx_transfer 15/24, subst_lemma, preservation)
+- 1 Admitted proof in Coq (`preservation`)
 - 5 remaining tasks (#15-#19) from type checker audit
 - interp env-leak fix was made 2026-03-28
 
@@ -53,7 +54,7 @@
 
 ### Build & Execution
 - [x] cargo build — compiles
-- [x] cargo test — 337 pass, 0 fail
+- [x] cargo test --all-targets — 357 pass, 0 fail
 - [ ] Compile and run all 98 .eph files — not automated
 - [ ] CLI --help works — not verified
 - [ ] Self-diagnostic — none
@@ -68,7 +69,7 @@
 ### Self-Tests
 - [ ] panic-attack assail on own repo
 - [ ] Compile all .eph stdlib files as test suite
-- [ ] Resolve 3 Admitted Coq proofs
+- [ ] Resolve remaining Admitted Coq proof (`preservation`)
 
 ## Priority
 - **CRG C** — ACHIEVED (2026-04-04). Property, contract, aspect, and reflexive tests
@@ -77,8 +78,19 @@
   crates remediated, .eph files tested as a suite.
 - **CRG A** — Requires: fuzz harness, formal proof coverage, mutation testing.
 
-## FAKE-FUZZ ALERT
+## FUZZ TESTING STATUS
 
-- `tests/fuzz/placeholder.txt` is a scorecard placeholder inherited from rsr-template-repo — it does NOT provide real fuzz testing
-- Replace with an actual fuzz harness (see rsr-template-repo/tests/fuzz/README.adoc) or remove the file
-- Priority: P2 — creates false impression of fuzz coverage
+- ✅ Real fuzz testing infrastructure added in `tests/fuzz/`
+- ✅ Parser fuzzer implemented (`fuzz_targets/parse_fuzzer.rs`)
+- ✅ Type checker fuzzer implemented (`fuzz_targets/typecheck_fuzzer.rs`)
+- ✅ Seed corpus created with valid and invalid test cases
+- ✅ Integrated into workspace Cargo.toml
+
+**Priority: P1 — Real fuzz coverage now exists**
+
+To run fuzz tests:
+```bash
+cd tests/fuzz
+cargo fuzz run parse_fuzzer -- -max_total_time=60
+cargo fuzz run typecheck_fuzzer -- -max_total_time=60
+```

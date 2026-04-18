@@ -1,155 +1,27 @@
-;; SPDX-License-Identifier: PMPL-1.0-or-later
-;; META.scm for ephapax-proven
-;; Media Type: application/meta+scheme
-;; Specification: spec/META-FORMAT-SPEC.adoc
+# SPDX-License-Identifier: PMPL-1.0-or-later
+# Copyright (c) 2026 Jonathan D.A. Jewell (hyperpolymath) <j.d.a.jewell@open.ac.uk>
+#
+# META.a2ml — Ephapax Proven meta-level information
+[metadata]
+version = "0.1.0"
+last-updated = "2026-01-24"
 
-(meta
-  (version "0.1.0")
-  (schema-version "1.0")
-  (created "2026-01-20")
-  (updated "2026-01-24")
+[project-info]
+license = "PMPL-1.0-or-later"
+author = "Jonathan D.A. Jewell (hyperpolymath)"
 
-  (architecture-decisions
-    (adr
-      (id "adr-001")
-      (status accepted)
-      (date "2026-01-20")
-      (title "Use Pure Zig FFI Instead of C")
-      (context "Need to create FFI bindings between Idris2 Proven library and Rust.
-                Traditional approach uses C as FFI layer with headers and build complexity.")
-      (decision "Use pure Zig with C-compatible exports. No C files, no headers, just Zig.")
-      (consequences
-        (positive "Zero C boilerplate, cleaner codebase, Zig's safety features, modern build system")
-        (positive "Zig compiles automatically via build.rs, no manual setup for users")
-        (negative "Requires Zig compiler installed, less familiar to Rust developers")
-        (neutral "Pioneering approach - few examples exist of Zig-only FFI to Rust")))
+[architecture-decisions]
+decisions = [
+  # No ADRs recorded
+]
 
-    (adr
-      (id "adr-002")
-      (status accepted)
-      (date "2026-01-20")
-      (title "Bundle FFI Source in Sys Crate")
-      (context "Users should not need to manually compile Zig library or manage separate repos.")
-      (decision "Include all Zig source files in ephapax-proven-sys/ffi/ directory.
-                 Compile automatically via build.rs using Zig compiler.")
-      (consequences
-        (positive "cargo add ephapax-proven just works, no manual steps")
-        (positive "Version-locked FFI source matches Rust bindings")
-        (negative "Requires Zig compiler at build time")
-        (positive "Published to crates.io as standard Rust crate")))
+[development-practices]
+versioning = "SemVer"
+documentation = "AsciiDoc"
+build-tool = "just"
 
-    (adr
-      (id "adr-003")
-      (status accepted)
-      (date "2026-01-21")
-      (title "Copy Data at FFI Boundary")
-      (context "Zig GPA and Rust allocator are incompatible - cannot free each other's memory.")
-      (decision "Always copy data when crossing FFI boundary. Provide language-specific free functions.")
-      (consequences
-        (positive "Memory safety guaranteed, no allocator conflicts")
-        (negative "Performance cost of copying data")
-        (neutral "Acceptable trade-off for safety in v0.1")
-        (positive "Matches Idris2 Proven immutable semantics")))
-
-    (adr
-      (id "adr-004")
-      (status accepted)
-      (date "2026-01-23")
-      (title "GitHub Wiki for Documentation")
-      (context "Need comprehensive user documentation beyond Rustdoc.")
-      (decision "Use GitHub Wiki with 13 comprehensive pages covering installation, guides, architecture.")
-      (consequences
-        (positive "Searchable, versioned, accessible without building docs")
-        (positive "Separate concerns: Wiki for guides, Rustdoc for API")
-        (negative "Additional maintenance surface")
-        (positive "Lower barrier for community contributions")))
-
-    (adr
-      (id "adr-005")
-      (status accepted)
-      (date "2026-01-24")
-      (title "Criterion for Benchmarking")
-      (context "Need comprehensive performance benchmarks for all modules.")
-      (decision "Use Criterion.rs with HTML reports, throughput metrics, and statistical analysis.")
-      (consequences
-        (positive "Industry-standard benchmarking framework")
-        (positive "HTML reports for visualizing performance")
-        (positive "Detect performance regressions")
-        (neutral "5 benchmark suites, ~30 benchmark groups total"))))
-
-  (development-practices
-    (code-style
-      (formatter "rustfmt")
-      (linter "clippy")
-      (zig-formatter "zig fmt")
-      (conventions "Follow Rust API guidelines, use Result for fallible operations"))
-
-    (security
-      (workflows "SPDX headers, SHA-pinned actions, permissions: read-all")
-      (dependabot "Enabled for Cargo dependencies")
-      (policy "SECURITY.md present, private vulnerability reporting enabled")
-      (goal "Enable OpenSSF Scorecard compliance"))
-
-    (testing
-      (unit-tests "45 tests covering all modules")
-      (integration-tests "17 tests for cross-module behavior")
-      (doc-tests "51 tests in documentation examples")
-      (benchmarks "5 Criterion suites with 30+ benchmark groups")
-      (coverage "Aiming for >80% coverage"))
-
-    (versioning
-      (scheme "SemVer 2.0")
-      (current "0.1.0")
-      (stability "All 6 modules production-ready but API may change")
-      (breaking-changes "Expected before 1.0.0"))
-
-    (documentation
-      (rustdoc "API documentation with examples")
-      (wiki "13 comprehensive guides (6,632 lines)")
-      (readme "Project overview and quick start")
-      (contributing "Step-by-step contribution guide")
-      (faq "50+ common questions answered"))
-
-    (branching
-      (model "trunk-based development")
-      (main-branch "main")
-      (protection "Not yet enabled")
-      (ci "Rust CI on all pushes")))
-
-  (design-rationale
-    (why-formally-verified
-      "Mathematical proofs of correctness from Idris2 dependent types.
-       Eliminates entire classes of bugs at compile time.
-       Critical for safety/security applications where failures are catastrophic.")
-
-    (why-three-layers
-      "Separation of concerns:
-       - Idris2: Formal proofs and specifications
-       - Zig FFI: Fast C-compatible implementation
-       - Rust: Safe ergonomic API with RAII
-       Each layer optimized for its purpose.")
-
-    (why-zig-not-c
-      "Zig provides safety features (comptime, bounds checking) without C's pitfalls.
-       No header files, no build complexity, modern tooling.
-       Compiles to C ABI for compatibility but with better DX.")
-
-    (why-six-modules-first
-      "Start with diverse module types to prove architecture:
-       - LRU Cache: Complex data structure
-       - Buffer: Simple memory management
-       - Resource: Reference counting
-       - Queue: Two implementations (bounded/unbounded)
-       - Set: Sorted collections with operations
-       - Hex: String encoding/decoding
-       Covers major use cases before expanding to 87 total modules.")
-
-    (why-copy-at-boundary
-      "Safety over performance for v0.1.
-       Prevents allocator mismatch bugs.
-       Future: zero-copy optimization for large buffers.")
-
-    (why-criterion-benchmarks
-      "Need objective performance data before optimizing.
-       Criterion provides statistical rigor, regression detection, HTML visualization.
-       Establishes baseline for future improvements.")))
+[maintenance-axes]
+scoping-first = true
+axis-1 = "must > intend > like"
+axis-2 = "corrective > adaptive > perfective"
+axis-3 = "systems > compliance > effects"

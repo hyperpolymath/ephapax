@@ -1,208 +1,76 @@
-;; SPDX-License-Identifier: PMPL-1.0-or-later
-;; STATE.scm - Project state tracking for Ephapax ↔ Proven FFI
+# SPDX-License-Identifier: PMPL-1.0-or-later
+# Copyright (c) 2026 Jonathan D.A. Jewell (hyperpolymath) <j.d.a.jewell@open.ac.uk>
+#
+# STATE.a2ml — Ephapax Proven Ffi project state
+[metadata]
+project = "ephapax-proven-ffi"
+version = "0.1.0"
+last-updated = "2026-04-11"
+status = "active"
+session = "converted from scheme — 2026-04-11"
 
-(define-module (ephapax-proven-ffi state)
-  #:version "0.1.0"
-  #:schema-version "1.0.0"
-  #:created "2026-01-24"
-  #:updated "2026-01-24"
-  #:project "Ephapax ↔ Proven FFI"
-  #:repo "https://github.com/hyperpolymath/ephapax-proven-ffi")
+[project-context]
+name = "Ephapax Proven Ffi"
+purpose = """Pure Zig FFI with pub export functions"""
+completion-percentage = 60
 
-;;; ===========================================================================
-;;; Project Context
-;;; ===========================================================================
+[position]
+phase = "initial"   # design | implementation | testing | maintenance | archived
+maturity = "experimental"  # experimental | alpha | beta | production | lts
 
-(project-context
-  (name "Ephapax ↔ Proven FFI")
-  (tagline "Bidirectional Zig FFI/ABI for formally verified code")
-  (tech-stack
-    (languages "Zig" "C (tests only)" "Guile Scheme (metadata)")
-    (dependencies
-      (proven "https://github.com/usernamehw/proven" "Formally verified Idris2 library")
-      (ephapax "Internal - compiler integration pending")
-      (zig "0.16.0-dev" "Systems programming language"))
-    (build-system "GNU Make + Zig build-lib")
-    (target "Shared library (.so) with C-compatible ABI")))
+[route-to-mvp]
+milestones = [
+  # No milestones recorded
+]
 
-;;; ===========================================================================
-;;; Current Position
-;;; ===========================================================================
+[blockers-and-issues]
+issues = [
+  # No blockers recorded
+]
 
-(current-position
-  (phase "alpha" "Core FFI working, ready for integration")
-  (overall-completion 60)
+[critical-next-actions]
+actions = [
+  "Create Rust FFI wrapper crate for Ephapax",
+  "Add CI/CD workflow (build, test, scorecard)",
+  "Create GitHub repo and push code",
+  "Implement Rust bindings with linear type safety",
+  "Integrate with Ephapax VRAM cache PR",
+  "Add SafeMap and SafeQueue modules",
+  "Set up OpenSSF Scorecard",
+  "Compile actual Idris2 Proven code and replace stubs",
+  "Add WebGPU buffer integration examples",
+  "Benchmark verified vs unverified implementations",
+  "Package for Zig package manager",
+  "2026-01-24",
+  "Built pure Zig FFI from scratch (no C files)",
+  "Fixed Zig symbol export issue (pub export + comptime references)",
+  "All FFI functions tested and working",
+  "Created standalone repo with full documentation",
+  "Added DYADIC-FFI-DESIGN.md explaining single FFI for both modes",
+  "Validated FFI with C test suite - all tests pass",
+  "Zig build.zig API unstable in 0.16.0-dev",
+  "callconv(.C) syntax deprecated - export functions get C ABI by default",
+  "Symbols not exported until pub export + comptime references added",
+  "src/ephapax_proven.zig",
+  "src/lru_impl.zig",
+  "src/buffer_impl.zig",
+  "src/resource_impl.zig",
+  "README.adoc",
+  "DYADIC-FFI-DESIGN.md",
+  "STATE.scm (this file)",
+  ".gitignore",
+  "Create Rust bindings, integrate with Ephapax compiler",
+  "Returns overall project completion as percentage",
+  "Returns list of blocking issues",
+  "Zig stubs not Idris2 implementations",
+  "Returns current milestone target",
+  "0.5.0 - Ephapax Integration",
+  "Returns immediate action items",
+  "Create Rust FFI wrapper crate for Ephapax",
+  "Add CI/CD workflow (build, test, scorecard)",
+  "Create GitHub repo and push code",
+]
 
-  (components
-    (ffi-adapter
-      (status "complete")
-      (completion 100)
-      (description "Pure Zig FFI with pub export functions")
-      (files "src/ephapax_proven.zig" "src/lru_impl.zig"
-             "src/buffer_impl.zig" "src/resource_impl.zig"))
-
-    (proven-modules
-      (status "partial")
-      (completion 3)  ;; 3 of 87 modules
-      (description "SafeLRU, SafeBuffer, SafeResource implemented")
-      (remaining "84 modules not yet wrapped"))
-
-    (testing
-      (status "complete")
-      (completion 100)
-      (description "C test suite validates all FFI functions")
-      (file "test_simple.c"))
-
-    (documentation
-      (status "complete")
-      (completion 100)
-      (description "README.adoc, DYADIC-FFI-DESIGN.md, API docs")
-      (files "README.adoc" "DYADIC-FFI-DESIGN.md"))
-
-    (ephapax-integration
-      (status "pending")
-      (completion 0)
-      (description "Rust bindings for Ephapax compiler")
-      (blocker "Waiting for compiler VRAM cache PR")))
-
-  (working-features
-    "Pure Zig FFI compilation (no C files)"
-    "Symbol export with pub export functions"
-    "LRU cache FFI (new, put, get, contains, size, is_full, free)"
-    "Buffer FFI (new, write, read, capacity, size, remaining, is_full, free)"
-    "Resource handle FFI (new, mark_acquired, mark_released, is_held, get_state, free)"
-    "C test suite validates all operations"
-    "Makefile build system (Zig build.zig API too unstable)"))
-
-;;; ===========================================================================
-;;; Route to MVP
-;;; ===========================================================================
-
-(route-to-mvp
-  (milestone "1.0.0 - Production-Ready FFI"
-    (item "Add 10-20 more Proven modules (SafeMap, SafeQueue, SafeVector)")
-    (item "Replace Zig stubs with actual Idris2-compiled implementations")
-    (item "Rust bindings for Ephapax compiler integration")
-    (item "WebGPU buffer integration examples")
-    (item "Benchmark suite (verified vs unverified)")
-    (item "CI/CD pipeline (build, test, release)")
-    (item "Package for Zig package manager"))
-
-  (milestone "0.5.0 - Ephapax Integration"
-    (item "Create Rust FFI wrapper crate")
-    (item "VRAM cache integration in Ephapax compiler")
-    (item "Linear type validation (ensure no double-free)")
-    (item "Affine type support (implicit cleanup)")
-    (item "Example programs using both dyadic modes"))
-
-  (milestone "0.3.0 - Expanded Module Support"
-    (item "SafeMap implementation")
-    (item "SafeQueue implementation")
-    (item "SafeVector implementation")
-    (item "SafeSet implementation")
-    (item "Integration tests for all modules")))
-
-;;; ===========================================================================
-;;; Blockers and Issues
-;;; ===========================================================================
-
-(blockers-and-issues
-  (critical
-    ;; None - FFI is working
-    )
-
-  (high
-    (issue "Zig stubs not Idris2 implementations"
-      (description "Current implementations are Zig stubs - need to compile Idris2 Proven code and link"))
-
-  (medium
-    (issue "Only 3 of 87 Proven modules supported"
-      (description "Need to expand module coverage based on Ephapax needs"))
-
-    (issue "No Rust bindings yet"
-      (description "Ephapax compiler (Rust) needs safe wrappers"))
-
-    (issue "No CI/CD pipeline"
-      (description "Should have GitHub Actions for build/test/release")))
-
-  (low
-    (issue "Zig build.zig unstable"
-      (description "Using Makefile instead - consider revisiting when Zig stabilizes"))
-
-    (issue "No fuzzing or property testing"
-      (description "Should fuzz FFI boundary for edge cases"))))
-
-;;; ===========================================================================
-;;; Critical Next Actions
-;;; ===========================================================================
-
-(critical-next-actions
-  (immediate
-    "Create Rust FFI wrapper crate for Ephapax"
-    "Add CI/CD workflow (build, test, scorecard)"
-    "Create GitHub repo and push code")
-
-  (this-week
-    "Implement Rust bindings with linear type safety"
-    "Integrate with Ephapax VRAM cache PR"
-    "Add SafeMap and SafeQueue modules"
-    "Set up OpenSSF Scorecard")
-
-  (this-month
-    "Compile actual Idris2 Proven code and replace stubs"
-    "Add WebGPU buffer integration examples"
-    "Benchmark verified vs unverified implementations"
-    "Package for Zig package manager"))
-
-;;; ===========================================================================
-;;; Session History
-;;; ===========================================================================
-
-(session-history
-  (snapshot
-    (date "2026-01-24")
-    (accomplishments
-      "Built pure Zig FFI from scratch (no C files)"
-      "Fixed Zig symbol export issue (pub export + comptime references)"
-      "All FFI functions tested and working"
-      "Created standalone repo with full documentation"
-      "Added DYADIC-FFI-DESIGN.md explaining single FFI for both modes"
-      "Validated FFI with C test suite - all tests pass")
-    (issues-encountered
-      "Zig build.zig API unstable in 0.16.0-dev"
-      "callconv(.C) syntax deprecated - export functions get C ABI by default"
-      "Symbols not exported until pub export + comptime references added")
-    (files-created
-      "src/ephapax_proven.zig"
-      "src/lru_impl.zig"
-      "src/buffer_impl.zig"
-      "src/resource_impl.zig"
-      "Makefile"
-      "README.adoc"
-      "DYADIC-FFI-DESIGN.md"
-      "LICENSE"
-      "STATE.scm (this file)"
-      ".gitignore")
-    (next-session "Create Rust bindings, integrate with Ephapax compiler")))
-
-;;; ===========================================================================
-;;; Helper Functions
-;;; ===========================================================================
-
-(define (get-completion-percentage)
-  "Returns overall project completion as percentage"
-  60)
-
-(define (get-blockers)
-  "Returns list of blocking issues"
-  '("Zig stubs not Idris2 implementations"))
-
-(define (get-milestone)
-  "Returns current milestone target"
-  "0.5.0 - Ephapax Integration")
-
-(define (get-critical-next-actions)
-  "Returns immediate action items"
-  '("Create Rust FFI wrapper crate for Ephapax"
-    "Add CI/CD workflow (build, test, scorecard)"
-    "Create GitHub repo and push code"))
+[maintenance-status]
+last-run-utc = "2026-04-11T00:00:00Z"
+last-result = "unknown"  # unknown | pass | warn | fail

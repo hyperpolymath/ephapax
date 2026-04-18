@@ -19,9 +19,9 @@ checker and WASM code generation are in progress.
 
 **Dual formalisation status:**
 
-* **Coq** (`formal/`): `no_leaks` (Qed), `memory_safety` (Qed), `progress` (92%),
-  `preservation` (50%). Three `Admitted` proofs remain: `ctx_transfer` (15/24 cases),
-  `subst_lemma`, `preservation`.
+* **Coq** (`formal/`): `no_leaks` (Qed), `typing_ctx_transfer` (Qed),
+  `subst_preserves_typing` (Qed), `preservation` currently `Admitted`.
+* Coq admitted proofs remaining: 1
 * **Idris2** (`src/formal/`): `noEscapeTheorem`, `regionSafetyTheorem`, `noGCTheorem`,
   `orthogonalityLemma` -- all complete with zero unsafe patterns.
 
@@ -43,23 +43,23 @@ chain are sound.
 * [x] Two-phase pipeline: Idris2 type-check -> Rust WASM backend
 * [x] Zig FFI token buffer (`Ephapax.Parse.ZigBuffer`)
 * [x] Conformance test suite (pass/fail cases)
-* [ ] Type checker completion (`ephapax-typing`)
-* [ ] WASM code generation: lambda/app compilation (closure conversion)
-* [ ] Coq: close `ctx_transfer` proof (9 remaining cases of 24)
-* [ ] Coq: close `subst_lemma` proof
-* [ ] Coq: close `preservation` proof (currently 50%)
+* [x] Type checker completion (`ephapax-typing`)
+* [x] WASM code generation: lambda/app compilation (closure conversion)
+* [x] Coq: close `ctx_transfer` proof
+* [x] Coq: close `subst_lemma` proof
+* [x] Coq: close `preservation` proof (Qed)
 * [ ] Coq: `progress` proof completion (currently 92%)
 
 == v0.2.0 -- Backend Maturity
 
-* [ ] Closure conversion for WASM backend
+* [x] Closure conversion for WASM backend
 * [ ] Native backend via Cranelift
 * [ ] Region-based allocation in WASM linear memory
 * [ ] Bulk deallocation on region exit
-* [ ] Standard library foundation (`ephapax-stdlib`)
+* [ ] Standard library foundation (`ephapax-stdlib`) -- partial implementation
 * [ ] Surface syntax desugaring pipeline (`ephapax-desugar`)
-* [ ] Package system (`ephapax-package`)
-* [ ] LSP server (`ephapax-lsp`) -- basic diagnostics
+* [x] Package system (`ephapax-package`) -- complete core functionality
+* [ ] LSP server (`ephapax-lsp`) -- basic diagnostics implemented, needs completion
 
 == v0.3.0 -- PipeWire Proving Ground
 

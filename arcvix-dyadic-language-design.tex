@@ -224,11 +224,11 @@ to disciplines $D_1$ and $D_2$ if the following properties hold:
     guarantees provided by $D_1$ to bindings governed by $D_1$ are identical
     whether or not $P$ also contains bindings governed by $D_2$, and
     symmetrically for $D_2$.
-    \[
-      \forall P.\; \text{guarantees}(D_1, P) = \text{guarantees}(D_1, P|_{D_1})
+    \begin{multline*}
+      \forall P.\; \text{guarantees}(D_1, P) = \text{guarantees}(D_1, P|_{D_1}) \\
       \quad \wedge \quad
       \text{guarantees}(D_2, P) = \text{guarantees}(D_2, P|_{D_2})
-    \]
+    \end{multline*}
 
   \item \label{prop:emergence}
     \textbf{Emergence.} There exists a property $\phi$ of $\mathcal{L}$ that
@@ -390,8 +390,7 @@ in-place mutation.
 \section{Ephapax: A Dyadic Language}
 \label{sec:ephapax}
 
-\Ephapax{}\footnote{From Greek \textit{ephapax} (\greektext{\'ef'apax}\latintext{}),
-``once for all''---a term evoking the finality of linear consumption.} is a
+\Ephapax{}\footnote{From Greek \textit{ephapax}, ``once for all''---a term evoking the finality of linear consumption.} is a
 programming language designed from the ground up around the dyadic principle,
 instantiated with linear and affine types as the co-swimming disciplines. The
 central architectural decision is \textbf{per-binding discipline choice}: every
@@ -902,7 +901,7 @@ Of the 56 SIGABRT crashes:
 \centering
 \begin{tabular}{lrr}
 \toprule
-\textbf{Category} & \textbf{Count} & \textbf{Prevented by} \lstinline{let!}? \\
+\textbf{Category} & \textbf{Count} & \textbf{Prevented by \texttt{let!}?} \\
 \midrule
 Connection handle leaked on normal path & 31 & Yes \\
 Connection handle leaked on error path  & 18 & Yes \\
@@ -1070,8 +1069,8 @@ let! sample = observe(temperature, 21.5)
 
 \subsection{Toward a Taxonomy of Dyadic Pairs}
 
-The four dyadic pairs we have discussed---linear/affine, eager/lazy,
-sync/async, deterministic/probabilistic---suggest a pattern. Each pair consists
+The four dyadic pairs we have discussed---linear\slash{}affine, eager\slash{}lazy,
+sync\slash{}async, deterministic\slash{}probabilistic---suggest a pattern. Each pair consists
 of:
 
 \begin{enumerate}
@@ -1257,12 +1256,14 @@ an entire class of resource-leak failures (56 SIGABRT crashes) that
 monodisciplinary affine designs admit. The fix is zero-cost: linearity is
 enforced at compile time, with no runtime overhead.
 
+\begin{sloppypar}
 Looking forward, we sketched three further dyadic pairs---eager/lazy, sync/async,
 and deterministic/probabilistic---arguing that the principle generalizes to any
 design tension that is currently resolved by a global architectural commitment.
 The dyadic principle offers a different resolution: \emph{don't choose; let the
 programmer choose, per binding, and let the type system enforce both choices
 simultaneously.}
+\end{sloppypar}
 
 Like the mother dolphin and her calf, the two disciplines swim together: never
 less than one, together more than two.

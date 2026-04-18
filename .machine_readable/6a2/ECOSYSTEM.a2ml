@@ -1,10 +1,26 @@
 # SPDX-License-Identifier: PMPL-1.0-or-later
 # ECOSYSTEM.a2ml — Ecosystem position
-# Converted from ECOSYSTEM.scm on 2026-03-15
+# Converted from ECOSYSTEM.scm on 2026-04-12
 
 [metadata]
 project = "ephapax"
 ecosystem = "hyperpolymath"
 
 [position]
-type = "component"
+type = "programming-language"
+purpose = "A dyadic linear/affine language targeting WebAssembly with dual formalisation (Coq + Idris2)"
+
+[pipeline]
+position = "co-product"
+chain = "katagoria → typell → typed-wasm → PanLL"
+notes = "Ephapax compiles to typed WasmGC. TypeLL principles ground its dyadic type design, and typed-wasm provides shared binary layout/ABI conventions."
+coordination = "nextgen-typing"
+
+[related-projects]
+projects = [
+  { name = "nextgen-typing", relationship = "coordination-parent", notes = "Canonical architecture and pipeline context for the type theory stack." },
+  { name = "typed-wasm", relationship = "aggregate-library", notes = "Shared binary layout conventions for WasmGC cross-language calls." },
+  { name = "typell", relationship = "type-theory-foundation", notes = "TypeLL open-ended progressive framework informs Ephapax type-system evolution." },
+  { name = "affinescript", relationship = "sibling-wasm-target", notes = "Both compile to typed WasmGC and converge via typed-wasm layout conventions." },
+  { name = "katagoria", relationship = "research-upstream", notes = "Future type-theory level candidates can originate there before pipeline promotion." },
+]

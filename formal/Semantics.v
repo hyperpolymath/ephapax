@@ -24,10 +24,8 @@ Require Import Lia.
 Require Import Program.Equality.
 Import ListNotations.
 
-Require Import Ephapax.Syntax.
-Require Import Ephapax.Typing.
-
-Open Scope string_scope.
+From Ephapax Require Import Syntax.
+From Ephapax Require Import Typing.
 
 (** ** Memory Model *)
 
@@ -218,6 +216,7 @@ Inductive step : config -> config -> Prop :=
   | S_Region_Exit : forall mu R r v,
       is_value v ->
       In r R ->
+      expr_free_of_region r v ->
       (mu, R, ERegion r v) -->>
         (mem_free_region mu r, remove_first r R, v)
 
@@ -2082,7 +2081,12 @@ Proof.
 
   (* T_Region *)
   - destruct (IHHtype G2 Hagree Hfp) as [G2' [Ht [Ha [Hf Hc]]]].
-    eexists. split; [econstructor; [assumption | exact Ht]|].
+    eexists. split; [eapply T_Region; [assumption | assumption | exact Ht]|].
+    split; [assumption | split; [assumption | exact Hc]].
+
+  (* T_Region_Active: same structure, uses T_Region_Active in conclusion *)
+  - destruct (IHHtype G2 Hagree Hfp) as [G2' [Ht [Ha [Hf Hc]]]].
+    eexists. split; [eapply T_Region_Active; [assumption | assumption | exact Ht]|].
     split; [assumption | split; [assumption | exact Hc]].
 
   (* T_Region_Active: same structure, uses T_Region_Active in conclusion *)
@@ -2364,7 +2368,14 @@ Proof.
       assert (Hlen := typing_preserves_length _ _ _ _ _ Htype1). lia.
 
   (* T_Region *)
-  - econstructor.
+  - eapply T_Region.
+    + assumption.
+    + assumption.
+    + apply IHHtype. assumption.
+
+  (* T_Region_Active *)
+  - eapply T_Region_Active.
+    + assumption.
     + assumption.
     + apply IHHtype. assumption.
 
@@ -2758,7 +2769,7 @@ Proof.
 
   (* T_Region *)
   - destruct (linear_value_is_loc _ _ _ _ Hv_type Hval Hlin) as [lv [rv [-> [-> Hregv]]]].
-    eapply T_Region; [exact H |].
+    eapply T_Region; [exact H | assumption |].
     eapply IHHtype; try eassumption.
     constructor. right. exact Hregv.
 
@@ -2766,7 +2777,7 @@ Proof.
      exactly the goal after IHHtype, so eassumption closes it directly (no right-cons
      step needed since we are in R not r :: R). *)
   - destruct (linear_value_is_loc _ _ _ _ Hv_type Hval Hlin) as [lv [rv [-> [-> Hregv]]]].
-    eapply T_Region_Active; [exact H |].
+    eapply T_Region_Active; [exact H | assumption |].
     eapply IHHtype; try eassumption.
 
   (* T_Borrow: EBorrow (EVar i) *)
@@ -2864,6 +2875,150 @@ Qed.
     regions do not escape their scope. This addresses the two remaining
     cases in the original preservation proof. *)
 
+(** ** Region-shrink lemmas
+
+    [remove_first_preserves_other] says that removing one region name
+    doesn't affect membership of a distinct name. Used when re-typing
+    under a shrunken region env. *)
+
+Lemma remove_first_preserves_other :
+  forall r r' R,
+    r <> r' ->
+    In r' R ->
+    In r' (remove_first r R).
+Proof.
+  intros r r' R Hne. induction R as [|r0 R' IH]; intros Hin.
+  - inversion Hin.
+  - simpl. destruct (String.eqb r r0) eqn:Heq.
+    + apply String.eqb_eq in Heq. subst r0.
+      destruct Hin as [Heq' | Hin]; [subst; contradiction | exact Hin].
+    + destruct Hin as [Heq' | Hin].
+      * subst. left. reflexivity.
+      * right. apply IH. exact Hin.
+Qed.
+
+(** [region_shrink_preserves_typing]: if an expression is typed at [R]
+    and makes no syntactic reference to region [r], then its typing
+    survives removing the first occurrence of [r] from [R].
+
+    The key insight is that the typing rules depend on [R] only via
+    [region_active R r' := In r' R] for specific [r']. As long as every
+    [r'] the expression needs is preserved under [remove_first r], the
+    derivation transports. [expr_free_of_region r e] guarantees no [r']
+    demanded by [e] equals [r], so [remove_first_preserves_other]
+    discharges each case. *)
+
+Lemma region_shrink_in_preserves :
+  forall r r0 R,
+    r <> r0 ->
+    (In r0 R <-> In r0 (remove_first r R)).
+Proof.
+  intros r r0 R Hne. induction R as [|r' R' IH]; simpl.
+  - reflexivity.
+  - destruct (String.eqb r r') eqn:Heq.
+    + apply String.eqb_eq in Heq. subst r'.
+      split; intros.
+      * destruct H; [subst; contradiction | exact H].
+      * right. exact H.
+    + simpl. split; intros.
+      * destruct H as [->|Hin]; [left; reflexivity | right; apply IH; exact Hin].
+      * destruct H as [->|Hin]; [left; reflexivity | right; apply IH; exact Hin].
+Qed.
+
+Lemma remove_first_not_in_id :
+  forall r R, ~ In r R -> remove_first r R = R.
+Proof.
+  intros r R Hnot. induction R as [|r' R' IH]; simpl.
+  - reflexivity.
+  - destruct (String.eqb r r') eqn:Heq.
+    + apply String.eqb_eq in Heq. subst r'.
+      exfalso. apply Hnot. left. reflexivity.
+    + f_equal. apply IH. intros Hin. apply Hnot. right. exact Hin.
+Qed.
+
+Lemma remove_first_subset :
+  forall r r0 R,
+    In r0 (remove_first r R) -> In r0 R.
+Proof.
+  intros r r0 R. induction R as [|r' R' IH]; simpl; intros Hin.
+  - exact Hin.
+  - destruct (String.eqb r r') eqn:Heq.
+    + apply String.eqb_eq in Heq. subst r'. right. exact Hin.
+    + destruct Hin as [->|Hin']; [left; reflexivity | right; apply IH; exact Hin'].
+Qed.
+
+Lemma region_shrink_notin_preserves :
+  forall r r0 R,
+    ~ In r0 R ->
+    ~ In r0 (remove_first r R).
+Proof.
+  intros r r0 R Hnot Hin. apply Hnot.
+  apply remove_first_subset with (r := r). exact Hin.
+Qed.
+
+Lemma region_shrink_preserves_typing :
+  forall R G e T G' r,
+    R; G |- e : T -| G' ->
+    expr_free_of_region r e ->
+    (remove_first r R); G |- e : T -| G'.
+Proof.
+  intros R G e T G' r Htype.
+  induction Htype; intros Hfree; simpl in Hfree.
+  - apply T_Unit.
+  - apply T_Bool.
+  - apply T_I32.
+  - eapply T_Var_Lin; eauto.
+  - eapply T_Var_Unr; eauto.
+  - apply T_Loc. unfold region_active in *.
+    apply (proj1 (region_shrink_in_preserves r r0 R Hfree)). exact H.
+  - apply T_StringNew. unfold region_active in *.
+    apply (proj1 (region_shrink_in_preserves r r0 R Hfree)). exact H.
+  - destruct Hfree as [Hf1 Hf2]. eapply T_StringConcat; auto.
+  - eapply T_StringLen; auto.
+  - destruct Hfree as [Hf1 Hf2]. eapply T_Let; auto.
+  - destruct Hfree as [Hf1 Hf2]. eapply T_LetLin.
+    + exact H.
+    + apply IHHtype1. exact Hf1.
+    + apply IHHtype2. exact Hf2.
+  - eapply T_Lam. apply IHHtype. exact Hfree.
+  - destruct Hfree as [Hf1 Hf2]. eapply T_App; auto.
+  - destruct Hfree as [Hf1 Hf2]. eapply T_Pair; auto.
+  - eapply T_Fst; eauto.
+  - eapply T_Snd; eauto.
+  - eapply T_Inl; auto.
+  - eapply T_Inr; auto.
+  - destruct Hfree as [Hf1 [Hf2 Hf3]]. eapply T_Case; auto.
+  - destruct Hfree as [Hf1 [Hf2 Hf3]]. eapply T_If; auto.
+  - (* T_Region *)
+    destruct (String.eqb r r0) eqn:Heq.
+    + (* r = r0: shadowed. Hfree is True. Use remove_first_not_in_id
+         since ~ In r R gives remove_first r R = R. *)
+      apply String.eqb_eq in Heq. subst r0.
+      rewrite (remove_first_not_in_id r R H).
+      eapply T_Region; [exact H | exact H0 | exact Htype].
+    + (* r <> r0: descend *)
+      eapply T_Region.
+      * apply region_shrink_notin_preserves. exact H.
+      * exact H0.
+      * specialize (IHHtype Hfree). simpl in IHHtype.
+        rewrite Heq in IHHtype. exact IHHtype.
+  - (* T_Region_Active *)
+    destruct (String.eqb r r0) eqn:Heq.
+    + apply String.eqb_eq in Heq. subst r0.
+      (* r = r0 active. Same weakening issue. Admit. *)
+      admit.
+    + eapply T_Region_Active.
+      * apply region_shrink_in_preserves.
+        -- intros ->. rewrite String.eqb_refl in Heq. discriminate.
+        -- exact H.
+      * exact H0.
+      * apply IHHtype. exact Hfree.
+  - eapply T_Borrow. exact H.
+  - eapply T_Borrow_Val; [exact H|apply IHHtype; exact Hfree].
+  - eapply T_Drop; [exact H|apply IHHtype; exact Hfree].
+  - eapply T_Copy; [exact H|apply IHHtype; exact Hfree].
+Admitted.
+
 Theorem preservation :
   forall mu R e mu' R' e',
     (mu, R, e) -->> (mu', R', e') ->
@@ -2917,7 +3072,7 @@ Proof.
      expression stays ERegion r e. T_Region gives (r :: R); G |- e : T -| G'.
      T_Region_Active applies with In r (r :: R) (left; reflexivity) and that inner
      typing to produce (r :: R); G |- ERegion r e : T -| G'. *)
-  all: try solve [eexists; eapply T_Region_Active; [left; reflexivity | eassumption]].
+  all: try solve [eexists; eapply T_Region_Active; [left; reflexivity | assumption | eassumption]].
   (* T_Borrow cross-cases generated by inversion Htype in S_Borrow_Val / S_Borrow_Step:
      (a) S_Borrow_Val / T_Borrow: after subst v = EVar i, have is_value (EVar i) — impossible.
          Close by inversion on is_value (EVar _) which has no matching constructor.
@@ -2926,91 +3081,43 @@ Proof.
          Use `solve [inversion H]` which only succeeds when inversion closes the goal (0 cases). *)
   all: try solve [match goal with [H: is_value (EVar _) |- _] => inversion H end].
   all: try solve [match goal with [H: step _ _ |- _] => inversion H end].
-  (* REMAINING CASES (2026-04-12):
-     Two cases involving region exit/step cannot be closed mechanically here:
+  (* REMAINING CASE (2026-04-19, post Option-B scaffolding):
 
-     (a) S_Region_Step + T_Region_Active: inner step changes R to R'.
-         IH gives R'; G |- e' : T -| G_out. Need R'; G |- ERegion r e' : T -| G_out2.
-         If In r R', apply T_Region_Active. If ~ In r R' (inner step removed r via
-         nested S_Region_Exit for same region), need T_Region, which requires
-         (r :: R'); G |- e' : T -| G_out — not derivable from R'; G |- e' without
-         a region env weakening lemma. Region env weakening fails in general because
-         T_Region requires ~ In r R (which fails when r is newly added to env).
-         This case only arises from ERegion r (ERegion r v) in intermediate states
-         (not reachable from initial well-typed programs at R=[]).
+     Only ONE case remains open: S_Region_Step + T_Region_Active.
 
-     (b) S_Region_Exit + T_Region_Active: exit changes R to remove_first r R.
-         Typing has R; G |- v : T -| G'. Need (remove_first r R); G |- v : T -| G_out.
-         If T does not contain r (no region escape), this follows from region-agnostic
-         typing of values. But the current T_Region_Active has no "T does not mention r"
-         restriction, so the proof requires an additional region-escape-free lemma.
+     Given: inner step (mu, R, e) -->> (mu', R', e') with `In r R`
+     (from T_Region_Active) and `~ In r (free_regions T)`.
+     IH: exists G_out, R'; G |- e' : T -| G_out.
+     Goal: exists G_out', R'; G |- ERegion r e' : T -| G_out'.
 
-     Both cases require a region-escape-freedom property (the result type T of
-     ERegion r e cannot contain r as an active region reference). This is a standard
-     requirement in region type systems (e.g., Tofte-Talpin "region does not escape")
-     and has now been added to the Ephapax typing rules via the "r ∉ free_regions T"
-     premise in both T_Region and T_Region_Active. *)
-  (* Case (a): S_Region_Step + T_Region_Active *)
-  (* Inner step changes R to R'. From T_Region_Active we have:
-     - In r R (region r is active in outer env)
-     - r ∉ free_regions T (region r does not escape in result type)
-     - R; G |- e : T -| G' (inner expression typing)
-     By IH on the inner step: R'; G |- e' : T -| G_out.
-     Need: R'; G |- ERegion r e' : T -| G_out2.
-     If In r R', apply T_Region_Active with the same premises.
-     If ~ In r R', apply T_Region — but this requires r ∉ free_regions T (which we have)
-     and (r :: R'); G |- e' : T -| G_out. However, we only have R'; G |- e' : T -| G_out.
-     This case should not arise in practice because region removal via S_Region_Exit
-     only happens when the region is empty, and ERegion r e' with r ∉ free_regions T
-     means the region r is not mentioned in the result type, so it's safe. *)
-  all: try solve [eapply T_Region_Active; [assumption | eassumption | eassumption]].
-  all: try solve [eapply T_Region; [assumption | eassumption | eassumption]].
-  (* Case (b): S_Region_Exit + T_Region_Active *)
-  (* Exit changes R to remove_first r R. From T_Region_Active we have:
-     - In r R (region r is active)
-     - r ∉ free_regions T (region r does not escape)
-     - R; G |- v : T -| G' (value typing, so G' = G by value_context_unchanged)
-     Need: (remove_first r R); G |- v : T -| G_out.
-     Since v is a value and r ∉ free_regions T, the region r is not mentioned in T,
-     so the typing is region-agnostic and holds under remove_first r R. *)
-  all: try solve [eapply T_Region_Active; [assumption | eassumption | eassumption]].
-  all: try solve [eapply T_Region; [assumption | eassumption | eassumption]].
-  (* Any remaining cases can be closed by the existing tactics or require interactive proof. *)
-  (* For any remaining open goals, we use a fallback tactic that tries to apply
-     the region typing rules with the new premises, or use existing lemmas. *)
-  all: try solve [
-    (* Try region typing rules with escape-freedom premises *)
-    eapply T_Region_Active; [assumption | eassumption | eassumption];
-    [reflexivity | eassumption]
-    || eapply T_Region; [assumption | eassumption | eassumption];
-    [reflexivity | eassumption]
-    || (* Try other typing rules *)
-    eapply T_Var_Lin; eassumption
-    || eapply T_Var_Unr; eassumption
-    || eapply T_Let; eassumption
-    || eapply T_App; eassumption
-    || eapply T_Pair; eassumption
-    || eapply T_Fst; eassumption
-    || eapply T_Snd; eassumption
-    || (* Use induction hypothesis *)
-    eapply IHHtype; eassumption
-    || (* Fallback: use existing preservation lemmas *)
-    apply typing_preserves_length; eassumption
-    || apply value_context_unchanged; eassumption
-  ].
-  (* If all else fails, these cases may require deeper interactive proof.
-     For now, we admit them to keep the proof pipeline working. *)
-  all: try solve [
-    (* Debug: show what goals remain *)
-    idtac "Remaining goal:";
-    (* idtac (goal 1); *) (* Disabled - goal is not a function *)
-    admit
-  ].
-Qed.
-(* PROOF STATUS [preservation] — significantly completed (2026-04-15).
-   The region-escape-freedom premises have been added to T_Region and T_Region_Active.
-   - T_Region and T_Region_Active now include "r ∉ free_regions T" premises
-   - free_regions function defined and proven deterministic
-   - Most preservation cases handled automatically
-   - Remaining cases have structured fallback tactics
-   - Any truly remaining goals are admitted with debug info for future interactive completion. *)
+     Case-split on `In r R'`:
+     - If In r R': reapply T_Region_Active.
+     - If ~ In r R': need T_Region with `(r :: R'); G |- e' : T -| G_out`,
+       but IH only gives `R'; G |- e' : T -| G_out`. Requires region-env
+       WEAKENING (add r to R') — a lemma in the opposite direction from
+       the shrink lemma and not obviously valid without extra
+       invariants on e'.
+
+     S_Region_Exit + T_Region_Active IS NOW CLOSED (see "try solve"
+     above), using:
+       - expr_free_of_region r v  (new premise on S_Region_Exit, landed
+         this session as Option B)
+       - region_shrink_preserves_typing (proven above, 1 remaining admit
+         for T_Region_Active shadowing case inside the lemma itself).
+
+     Full closure of this preservation admit now blocks on the
+     region-env weakening lemma for non-values, which is a narrower,
+     better-understood piece of work than the original language-design
+     question. *)
+  (* S_Region_Exit + T_Region_Active closes via region_shrink_preserves_typing
+     using the new step-premise expr_free_of_region. *)
+  all: try solve [eexists; eapply region_shrink_preserves_typing;
+                  [eassumption | assumption]].
+  (* S_Region_Step + T_Region_Active: remaining — requires case-split on
+     whether r is still in R'. Not closed yet. *)
+  all: admit.
+Admitted.
+(* PROOF STATUS [preservation] — explicitly admitted (2026-04-12).
+   The script above currently leaves open goals on this toolchain.
+   Keeping this as [Admitted] makes proof debt explicit and keeps
+   the formal pipeline reproducible while the remaining cases are closed. *)

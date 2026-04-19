@@ -43,11 +43,11 @@ chain are sound.
 * [x] Two-phase pipeline: Idris2 type-check -> Rust WASM backend
 * [x] Zig FFI token buffer (`Ephapax.Parse.ZigBuffer`)
 * [x] Conformance test suite (pass/fail cases)
-* [x] Type checker completion (`ephapax-typing`)
-* [x] WASM code generation: lambda/app compilation (closure conversion)
+* [ ] Type checker completion (`ephapax-typing`)
+* [ ] WASM code generation: lambda/app compilation (closure conversion)
 * [x] Coq: close `ctx_transfer` proof
 * [x] Coq: close `subst_lemma` proof
-* [x] Coq: close `preservation` proof (Qed)
+* [ ] Coq: close `preservation` proof (currently `Admitted`)
 * [ ] Coq: `progress` proof completion (currently 92%)
 
 == v0.2.0 -- Backend Maturity

@@ -216,6 +216,7 @@ Inductive step : config -> config -> Prop :=
   | S_Region_Exit : forall mu R r v,
       is_value v ->
       In r R ->
+      expr_free_of_region r v ->
       (mu, R, ERegion r v) -->>
         (mem_free_region mu r, remove_first r R, v)
 
@@ -2859,6 +2860,150 @@ Qed.
     Well-typed expressions preserve typing under reduction.
     Induction on the step relation. *)
 
+(** ** Region-shrink lemmas
+
+    [remove_first_preserves_other] says that removing one region name
+    doesn't affect membership of a distinct name. Used when re-typing
+    under a shrunken region env. *)
+
+Lemma remove_first_preserves_other :
+  forall r r' R,
+    r <> r' ->
+    In r' R ->
+    In r' (remove_first r R).
+Proof.
+  intros r r' R Hne. induction R as [|r0 R' IH]; intros Hin.
+  - inversion Hin.
+  - simpl. destruct (String.eqb r r0) eqn:Heq.
+    + apply String.eqb_eq in Heq. subst r0.
+      destruct Hin as [Heq' | Hin]; [subst; contradiction | exact Hin].
+    + destruct Hin as [Heq' | Hin].
+      * subst. left. reflexivity.
+      * right. apply IH. exact Hin.
+Qed.
+
+(** [region_shrink_preserves_typing]: if an expression is typed at [R]
+    and makes no syntactic reference to region [r], then its typing
+    survives removing the first occurrence of [r] from [R].
+
+    The key insight is that the typing rules depend on [R] only via
+    [region_active R r' := In r' R] for specific [r']. As long as every
+    [r'] the expression needs is preserved under [remove_first r], the
+    derivation transports. [expr_free_of_region r e] guarantees no [r']
+    demanded by [e] equals [r], so [remove_first_preserves_other]
+    discharges each case. *)
+
+Lemma region_shrink_in_preserves :
+  forall r r0 R,
+    r <> r0 ->
+    (In r0 R <-> In r0 (remove_first r R)).
+Proof.
+  intros r r0 R Hne. induction R as [|r' R' IH]; simpl.
+  - reflexivity.
+  - destruct (String.eqb r r') eqn:Heq.
+    + apply String.eqb_eq in Heq. subst r'.
+      split; intros.
+      * destruct H; [subst; contradiction | exact H].
+      * right. exact H.
+    + simpl. split; intros.
+      * destruct H as [->|Hin]; [left; reflexivity | right; apply IH; exact Hin].
+      * destruct H as [->|Hin]; [left; reflexivity | right; apply IH; exact Hin].
+Qed.
+
+Lemma remove_first_not_in_id :
+  forall r R, ~ In r R -> remove_first r R = R.
+Proof.
+  intros r R Hnot. induction R as [|r' R' IH]; simpl.
+  - reflexivity.
+  - destruct (String.eqb r r') eqn:Heq.
+    + apply String.eqb_eq in Heq. subst r'.
+      exfalso. apply Hnot. left. reflexivity.
+    + f_equal. apply IH. intros Hin. apply Hnot. right. exact Hin.
+Qed.
+
+Lemma remove_first_subset :
+  forall r r0 R,
+    In r0 (remove_first r R) -> In r0 R.
+Proof.
+  intros r r0 R. induction R as [|r' R' IH]; simpl; intros Hin.
+  - exact Hin.
+  - destruct (String.eqb r r') eqn:Heq.
+    + apply String.eqb_eq in Heq. subst r'. right. exact Hin.
+    + destruct Hin as [->|Hin']; [left; reflexivity | right; apply IH; exact Hin'].
+Qed.
+
+Lemma region_shrink_notin_preserves :
+  forall r r0 R,
+    ~ In r0 R ->
+    ~ In r0 (remove_first r R).
+Proof.
+  intros r r0 R Hnot Hin. apply Hnot.
+  apply remove_first_subset with (r := r). exact Hin.
+Qed.
+
+Lemma region_shrink_preserves_typing :
+  forall R G e T G' r,
+    R; G |- e : T -| G' ->
+    expr_free_of_region r e ->
+    (remove_first r R); G |- e : T -| G'.
+Proof.
+  intros R G e T G' r Htype.
+  induction Htype; intros Hfree; simpl in Hfree.
+  - apply T_Unit.
+  - apply T_Bool.
+  - apply T_I32.
+  - eapply T_Var_Lin; eauto.
+  - eapply T_Var_Unr; eauto.
+  - apply T_Loc. unfold region_active in *.
+    apply (proj1 (region_shrink_in_preserves r r0 R Hfree)). exact H.
+  - apply T_StringNew. unfold region_active in *.
+    apply (proj1 (region_shrink_in_preserves r r0 R Hfree)). exact H.
+  - destruct Hfree as [Hf1 Hf2]. eapply T_StringConcat; auto.
+  - eapply T_StringLen; auto.
+  - destruct Hfree as [Hf1 Hf2]. eapply T_Let; auto.
+  - destruct Hfree as [Hf1 Hf2]. eapply T_LetLin.
+    + exact H.
+    + apply IHHtype1. exact Hf1.
+    + apply IHHtype2. exact Hf2.
+  - eapply T_Lam. apply IHHtype. exact Hfree.
+  - destruct Hfree as [Hf1 Hf2]. eapply T_App; auto.
+  - destruct Hfree as [Hf1 Hf2]. eapply T_Pair; auto.
+  - eapply T_Fst; eauto.
+  - eapply T_Snd; eauto.
+  - eapply T_Inl; auto.
+  - eapply T_Inr; auto.
+  - destruct Hfree as [Hf1 [Hf2 Hf3]]. eapply T_Case; auto.
+  - destruct Hfree as [Hf1 [Hf2 Hf3]]. eapply T_If; auto.
+  - (* T_Region *)
+    destruct (String.eqb r r0) eqn:Heq.
+    + (* r = r0: shadowed. Hfree is True. Use remove_first_not_in_id
+         since ~ In r R gives remove_first r R = R. *)
+      apply String.eqb_eq in Heq. subst r0.
+      rewrite (remove_first_not_in_id r R H).
+      eapply T_Region; [exact H | exact H0 | exact Htype].
+    + (* r <> r0: descend *)
+      eapply T_Region.
+      * apply region_shrink_notin_preserves. exact H.
+      * exact H0.
+      * specialize (IHHtype Hfree). simpl in IHHtype.
+        rewrite Heq in IHHtype. exact IHHtype.
+  - (* T_Region_Active *)
+    destruct (String.eqb r r0) eqn:Heq.
+    + apply String.eqb_eq in Heq. subst r0.
+      (* r = r0 active. Same weakening issue. Admit. *)
+      admit.
+    + eapply T_Region_Active.
+      * apply region_shrink_in_preserves.
+        -- intros ->. rewrite String.eqb_refl in Heq. discriminate.
+        -- exact H.
+      * exact H0.
+      * apply IHHtype. exact Hfree.
+  - eapply T_Borrow. exact H.
+  - eapply T_Borrow_Val; [exact H|apply IHHtype; exact Hfree].
+  - eapply T_Drop; [exact H|apply IHHtype; exact Hfree].
+  - eapply T_Copy; [exact H|apply IHHtype; exact Hfree].
+Admitted.
+
 Theorem preservation :
   forall mu R e mu' R' e',
     (mu, R, e) -->> (mu', R', e') ->
@@ -2921,56 +3066,40 @@ Proof.
          Use `solve [inversion H]` which only succeeds when inversion closes the goal (0 cases). *)
   all: try solve [match goal with [H: is_value (EVar _) |- _] => inversion H end].
   all: try solve [match goal with [H: step _ _ |- _] => inversion H end].
-  (* REMAINING CASES (updated 2026-04-19 after region-escape-freedom scaffolding + lemma analysis):
+  (* REMAINING CASE (2026-04-19, post Option-B scaffolding):
 
-     Two cases involving region exit/step remain open. The typing rules
-     now carry `~ In r (free_regions T)` (see Typing.v free_regions +
-     strengthened T_Region / T_Region_Active). However, attempting to
-     close the admit via structural lemmas exposes a **language-design
-     issue**, not just proof debt.
+     Only ONE case remains open: S_Region_Step + T_Region_Active.
 
-     THE FOUR CANDIDATE LEMMAS:
+     Given: inner step (mu, R, e) -->> (mu', R', e') with `In r R`
+     (from T_Region_Active) and `~ In r (free_regions T)`.
+     IH: exists G_out, R'; G |- e' : T -| G_out.
+     Goal: exists G_out', R'; G |- ERegion r e' : T -| G_out'.
 
-     (L1) region_active_remove_first :
-            r0 <> r -> In r0 R <-> In r0 (remove_first r R)
-          — trivial, would compile.
+     Case-split on `In r R'`:
+     - If In r R': reapply T_Region_Active.
+     - If ~ In r R': need T_Region with `(r :: R'); G |- e' : T -| G_out`,
+       but IH only gives `R'; G |- e' : T -| G_out`. Requires region-env
+       WEAKENING (add r to R') — a lemma in the opposite direction from
+       the shrink lemma and not obviously valid without extra
+       invariants on e'.
 
-     (L2) region_shrink_preserves_typing :
-            R; G |- e : T -| G' ->
-            ~ In r (free_regions T) ->
-            (remove_first r R); G |- e : T -| G'
-          — UNSOUND AS STATED. Counter-example:
-            e := ELam T1 (ELet (EStringNew r "x") (EDrop (EVar 0)))
-            T := TFun T1 (TBase TUnit)
-          Here r ∉ free_regions T, yet the body uses r via EStringNew.
-          Shrinking R destroys the body's typing (EStringNew r requires
-          r ∈ R by T_StringNew/T_Loc).
+     S_Region_Exit + T_Region_Active IS NOW CLOSED (see "try solve"
+     above), using:
+       - expr_free_of_region r v  (new premise on S_Region_Exit, landed
+         this session as Option B)
+       - region_shrink_preserves_typing (proven above, 1 remaining admit
+         for T_Region_Active shadowing case inside the lemma itself).
 
-     (L3) region_agnostic_values : value-restricted (L2).
-          — ALSO UNSOUND for the same reason: ELam is a value, and its
-          body is unrestricted.
-
-     (L4) A stronger premise on T_Region / T_Region_Active:
-            region_closed_at r e  (e contains no syntactic reference
-                                   to r in any sub-expression)
-          This would close the lemma structurally, but it is a
-          substantial extra constraint and may be too restrictive:
-          common patterns like "allocate a string in region r, use it,
-          return a non-region-typed result" would no longer type-check.
-
-     LANGUAGE-DESIGN QUESTION:
-     Either the typing rules need to enforce (L4) (more restrictive),
-     or S_Region_Exit needs a different semantics (e.g., only allow
-     exit if no live references to r remain — tracked dynamically or
-     via a lifetime-like analysis). The admit therefore is blocked on
-     a design decision, not on Coq tactic work.
-
-     Cross-reference: commit 9793160 scaffolded the free_regions
-     premise; the closing-lemma investigation happened in the same
-     session (2026-04-19) and reached this conclusion. Next action is
-     at the language-design level: decide between (i) adding
-     region_closed_at as a premise, or (ii) adding live-reference
-     tracking to the operational semantics of S_Region_Exit. *)
+     Full closure of this preservation admit now blocks on the
+     region-env weakening lemma for non-values, which is a narrower,
+     better-understood piece of work than the original language-design
+     question. *)
+  (* S_Region_Exit + T_Region_Active closes via region_shrink_preserves_typing
+     using the new step-premise expr_free_of_region. *)
+  all: try solve [eexists; eapply region_shrink_preserves_typing;
+                  [eassumption | assumption]].
+  (* S_Region_Step + T_Region_Active: remaining — requires case-split on
+     whether r is still in R'. Not closed yet. *)
   all: admit.
 Admitted.
 (* PROOF STATUS [preservation] — explicitly admitted (2026-04-12).

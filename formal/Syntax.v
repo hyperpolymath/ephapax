@@ -121,6 +121,37 @@ Inductive is_value : expr -> Prop :=
           a value — the reference IS the normal form. *)
   | VBorrow : forall v, is_value v -> is_value (EBorrow v).
 
+(** ** Syntactic Region-Closure
+
+    [expr_free_of_region r e] holds when [e] has no syntactic reference
+    to region [r] — no [EStringNew r _], no [ELoc _ r], and no sub-expression
+    that does. Used by [S_Region_Exit] to ensure that a value leaving a
+    region scope cannot later demand that region to be active (e.g., a
+    lambda body that would need [r] at application time).
+
+    [ERegion r' e] shadows the name [r] inside [e] when [r = r'], so such
+    a sub-term is trivially region-free in the outer sense. Shadowing is
+    handled by short-circuiting the recursion in that case. *)
+
+Fixpoint expr_free_of_region (r : region_name) (e : expr) : Prop :=
+  match e with
+  | EUnit | EBool _ | EI32 _ | EVar _ => True
+  | EStringNew r' _ => r <> r'
+  | EStringConcat e1 e2 | ELet e1 e2 | ELetLin e1 e2
+  | EApp e1 e2 | EPair e1 e2 =>
+      expr_free_of_region r e1 /\ expr_free_of_region r e2
+  | EStringLen e' | EFst e' | ESnd e' | EInl _ e' | EInr _ e'
+  | EBorrow e' | EDeref e' | EDrop e' | ECopy e' | ELam _ e' =>
+      expr_free_of_region r e'
+  | EIf e1 e2 e3 | ECase e1 e2 e3 =>
+      expr_free_of_region r e1 /\ expr_free_of_region r e2
+      /\ expr_free_of_region r e3
+  | ERegion r' e' =>
+      if String.eqb r r' then True
+      else expr_free_of_region r e'
+  | ELoc _ r' => r <> r'
+  end.
+
 (** ** Typing Contexts (De Bruijn) *)
 
 (** A typing context is a list of (type, used?) pairs.

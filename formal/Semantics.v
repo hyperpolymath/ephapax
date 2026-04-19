@@ -2921,31 +2921,38 @@ Proof.
          Use `solve [inversion H]` which only succeeds when inversion closes the goal (0 cases). *)
   all: try solve [match goal with [H: is_value (EVar _) |- _] => inversion H end].
   all: try solve [match goal with [H: step _ _ |- _] => inversion H end].
-  (* REMAINING CASES (2026-04-12):
-     Two cases involving region exit/step cannot be closed mechanically here:
+  (* REMAINING CASES (updated 2026-04-19 after region-escape-freedom scaffolding):
+
+     Two cases involving region exit/step remain open. The typing rules now
+     carry the `~ In r (free_regions T)` premise (see Typing.v free_regions
+     + strengthened T_Region / T_Region_Active), so the information needed
+     to close them is available by inversion — but the structural lemmas
+     using that information are still to be proved.
 
      (a) S_Region_Step + T_Region_Active: inner step changes R to R'.
-         IH gives R'; G |- e' : T -| G_out. Need R'; G |- ERegion r e' : T -| G_out2.
-         If In r R', apply T_Region_Active. If ~ In r R' (inner step removed r via
-         nested S_Region_Exit for same region), need T_Region, which requires
-         (r :: R'); G |- e' : T -| G_out — not derivable from R'; G |- e' without
-         a region env weakening lemma. Region env weakening fails in general because
-         T_Region requires ~ In r R (which fails when r is newly added to env).
-         This case only arises from ERegion r (ERegion r v) in intermediate states
-         (not reachable from initial well-typed programs at R=[]).
+         With the new premise, the inversion of T_Region_Active provides
+         `H : ~ In r (free_regions T)`. A `region_shrink_preserves_typing`
+         lemma of the form
+            R; G |- e : T -| G' ->
+            ~ In r (free_regions T) ->
+            (remove_first r R); G |- e : T -| G'
+         would close the ~ In r R' sub-case by rewriting the inner typing
+         into the shrunken region env.
 
-     (b) S_Region_Exit + T_Region_Active: exit changes R to remove_first r R.
-         Typing has R; G |- v : T -| G'. Need (remove_first r R); G |- v : T -| G_out.
-         If T does not contain r (no region escape), this follows from region-agnostic
-         typing of values. But the current T_Region_Active has no "T does not mention r"
-         restriction, so the proof requires an additional region-escape-free lemma.
+     (b) S_Region_Exit + T_Region_Active: exit changes R to remove_first r R
+         at a value v. Needs a `region_agnostic_values` lemma
+            R1; G |- v : T -| G' ->
+            is_value v ->
+            ~ In r (free_regions T) ->
+            (remove_first r R1); G |- v : T -| G'
+         which is a value-restricted specialisation of (a).
 
-     Both cases require a region-escape-freedom property (the result type T of
-     ERegion r e cannot contain r as an active region reference). This is a standard
-     requirement in region type systems (e.g., Tofte-Talpin "region does not escape")
-     but has not yet been added to the Ephapax typing rules. Adding a "r ∉ free_regions T"
-     premise to T_Region and T_Region_Active, plus a free_regions function and associated
-     lemmas, would close these cases. *)
+     Both lemmas now have their input premise made available by the
+     strengthened typing rules. Admit retained until those lemmas land.
+
+     Cross-reference: commit 9793160 ("feat(ephapax/coq): scaffold
+     region-escape-freedom for preservation") added the premise; the
+     closing lemmas are the remaining work item. *)
   all: admit.
 Admitted.
 (* PROOF STATUS [preservation] — explicitly admitted (2026-04-12).

@@ -273,8 +273,8 @@ mod tests {
 
     #[test]
     fn test_registry_creation() {
-        let temp = TempDir::new().unwrap();
-        let registry = Registry::open_at(temp.path().to_path_buf()).unwrap();
+        let temp = TempDir::new().expect("TODO: handle error");
+        let registry = Registry::open_at(temp.path().to_path_buf()).expect("TODO: handle error");
 
         assert!(temp.path().join("packages").exists());
         assert!(temp.path().join("cache").exists());
@@ -283,15 +283,15 @@ mod tests {
 
     #[test]
     fn test_package_installation() {
-        let temp = TempDir::new().unwrap();
-        let mut registry = Registry::open_at(temp.path().to_path_buf()).unwrap();
+        let temp = TempDir::new().expect("TODO: handle error");
+        let mut registry = Registry::open_at(temp.path().to_path_buf()).expect("TODO: handle error");
 
-        let source = TempDir::new().unwrap();
-        std::fs::write(source.path().join("test.eph"), "fn main(): I32 = 42").unwrap();
+        let source = TempDir::new().expect("TODO: handle error");
+        std::fs::write(source.path().join("test.eph"), "fn main(): I32 = 42").expect("TODO: handle error");
 
         registry
             .install_package("test-lib", "1.0.0", source.path())
-            .unwrap();
+            .expect("TODO: handle error");
 
         assert!(registry.has_package("test-lib", "1.0.0"));
         let versions = registry.get_versions("test-lib");
@@ -300,16 +300,16 @@ mod tests {
 
     #[test]
     fn test_package_search() {
-        let temp = TempDir::new().unwrap();
-        let mut registry = Registry::open_at(temp.path().to_path_buf()).unwrap();
+        let temp = TempDir::new().expect("TODO: handle error");
+        let mut registry = Registry::open_at(temp.path().to_path_buf()).expect("TODO: handle error");
 
-        let source = TempDir::new().unwrap();
+        let source = TempDir::new().expect("TODO: handle error");
         registry
             .install_package("linear-collections", "1.0.0", source.path())
-            .unwrap();
+            .expect("TODO: handle error");
         registry
             .install_package("affine-utils", "0.5.0", source.path())
-            .unwrap();
+            .expect("TODO: handle error");
 
         let results = registry.search("linear");
         assert_eq!(results, vec!["linear-collections"]);

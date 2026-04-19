@@ -52,14 +52,14 @@ chain are sound.
 
 == v0.2.0 -- Backend Maturity
 
-* [ ] Closure conversion for WASM backend
+* [x] Closure conversion for WASM backend
 * [ ] Native backend via Cranelift
 * [ ] Region-based allocation in WASM linear memory
 * [ ] Bulk deallocation on region exit
-* [ ] Standard library foundation (`ephapax-stdlib`)
+* [ ] Standard library foundation (`ephapax-stdlib`) -- partial implementation
 * [ ] Surface syntax desugaring pipeline (`ephapax-desugar`)
-* [ ] Package system (`ephapax-package`)
-* [ ] LSP server (`ephapax-lsp`) -- basic diagnostics
+* [x] Package system (`ephapax-package`) -- complete core functionality
+* [ ] LSP server (`ephapax-lsp`) -- basic diagnostics implemented, needs completion
 
 == v0.3.0 -- PipeWire Proving Ground
 

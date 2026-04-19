@@ -1554,7 +1554,7 @@ mod tests {
     fn test_literal_typing() {
         let mut tc = TypeChecker::new();
         let expr = dummy_expr(ExprKind::Lit(Literal::I32(42)));
-        assert_eq!(tc.check(&expr).unwrap(), Ty::Base(BaseTy::I32));
+        assert_eq!(tc.check(&expr).expect("TODO: handle error"), Ty::Base(BaseTy::I32));
     }
 
     #[test]
@@ -1723,7 +1723,7 @@ mod tests {
             value: Box::new(dummy_expr(ExprKind::Lit(Literal::I32(42)))),
             body: Box::new(dummy_expr(ExprKind::Var("x".into()))),
         });
-        assert_eq!(tc.check(&expr).unwrap(), Ty::Base(BaseTy::I32));
+        assert_eq!(tc.check(&expr).expect("TODO: handle error"), Ty::Base(BaseTy::I32));
     }
 
     #[test]
@@ -1749,7 +1749,7 @@ mod tests {
             right: Box::new(dummy_expr(ExprKind::Lit(Literal::Bool(true)))),
         });
         assert_eq!(
-            tc.check(&expr).unwrap(),
+            tc.check(&expr).expect("TODO: handle error"),
             Ty::Prod {
                 left: Box::new(Ty::Base(BaseTy::I32)),
                 right: Box::new(Ty::Base(BaseTy::Bool)),
@@ -1764,7 +1764,7 @@ mod tests {
             left: Box::new(dummy_expr(ExprKind::Lit(Literal::I32(1)))),
             right: Box::new(dummy_expr(ExprKind::Lit(Literal::Bool(true)))),
         }))));
-        assert_eq!(tc.check(&expr).unwrap(), Ty::Base(BaseTy::I32));
+        assert_eq!(tc.check(&expr).expect("TODO: handle error"), Ty::Base(BaseTy::I32));
     }
 
     #[test]
@@ -1792,7 +1792,7 @@ mod tests {
             value: Box::new(dummy_expr(ExprKind::Lit(Literal::I32(42)))),
         });
         assert_eq!(
-            tc.check(&expr).unwrap(),
+            tc.check(&expr).expect("TODO: handle error"),
             Ty::Sum {
                 left: Box::new(Ty::Base(BaseTy::I32)),
                 right: Box::new(Ty::Base(BaseTy::Bool)),
@@ -1813,7 +1813,7 @@ mod tests {
             right_var: "y".into(),
             right_body: Box::new(dummy_expr(ExprKind::Lit(Literal::I32(0)))),
         });
-        assert_eq!(tc.check(&expr).unwrap(), Ty::Base(BaseTy::I32));
+        assert_eq!(tc.check(&expr).expect("TODO: handle error"), Ty::Base(BaseTy::I32));
     }
 
     #[test]
@@ -1877,7 +1877,7 @@ mod tests {
             body: Box::new(dummy_expr(ExprKind::Var("x".into()))),
         });
         assert_eq!(
-            tc.check(&expr).unwrap(),
+            tc.check(&expr).expect("TODO: handle error"),
             Ty::Fun {
                 param: Box::new(Ty::Base(BaseTy::I32)),
                 ret: Box::new(Ty::Base(BaseTy::I32)),
@@ -1896,7 +1896,7 @@ mod tests {
             })),
             arg: Box::new(dummy_expr(ExprKind::Lit(Literal::I32(42)))),
         });
-        assert_eq!(tc.check(&expr).unwrap(), Ty::Base(BaseTy::I32));
+        assert_eq!(tc.check(&expr).expect("TODO: handle error"), Ty::Base(BaseTy::I32));
     }
 
     #[test]
@@ -1923,7 +1923,7 @@ mod tests {
             Literal::I32(42),
         )))));
         assert_eq!(
-            tc.check(&expr).unwrap(),
+            tc.check(&expr).expect("TODO: handle error"),
             Ty::Prod {
                 left: Box::new(Ty::Base(BaseTy::I32)),
                 right: Box::new(Ty::Base(BaseTy::I32)),
@@ -1957,7 +1957,7 @@ mod tests {
         let expr = dummy_expr(ExprKind::Drop(Box::new(dummy_expr(ExprKind::Var(
             "s".into(),
         )))));
-        assert_eq!(tc.check(&expr).unwrap(), Ty::Base(BaseTy::Unit));
+        assert_eq!(tc.check(&expr).expect("TODO: handle error"), Ty::Base(BaseTy::Unit));
     }
 
     #[test]
@@ -2156,7 +2156,7 @@ mod tests {
             left: Box::new(dummy_expr(ExprKind::Lit(Literal::I32(1)))),
             right: Box::new(dummy_expr(ExprKind::Lit(Literal::I32(2)))),
         });
-        assert_eq!(tc.check(&expr).unwrap(), Ty::Base(BaseTy::I32));
+        assert_eq!(tc.check(&expr).expect("TODO: handle error"), Ty::Base(BaseTy::I32));
     }
 
     #[test]
@@ -2167,7 +2167,7 @@ mod tests {
             left: Box::new(dummy_expr(ExprKind::Lit(Literal::I32(1)))),
             right: Box::new(dummy_expr(ExprKind::Lit(Literal::I32(2)))),
         });
-        assert_eq!(tc.check(&expr).unwrap(), Ty::Base(BaseTy::Bool));
+        assert_eq!(tc.check(&expr).expect("TODO: handle error"), Ty::Base(BaseTy::Bool));
     }
 
     #[test]
@@ -2177,7 +2177,7 @@ mod tests {
             op: UnaryOp::Neg,
             operand: Box::new(dummy_expr(ExprKind::Lit(Literal::I32(42)))),
         });
-        assert_eq!(tc.check(&expr).unwrap(), Ty::Base(BaseTy::I32));
+        assert_eq!(tc.check(&expr).expect("TODO: handle error"), Ty::Base(BaseTy::I32));
     }
 
     #[test]
@@ -2504,10 +2504,10 @@ mod tests {
         let mut registry = ModuleRegistry::new();
 
         // Type check lib first
-        type_check_module_with_registry(&lib_module, &mut registry).unwrap();
+        type_check_module_with_registry(&lib_module, &mut registry).expect("TODO: handle error");
 
         // Type check main — imports double from lib
-        type_check_module_with_registry(&main_module, &mut registry).unwrap();
+        type_check_module_with_registry(&main_module, &mut registry).expect("TODO: handle error");
     }
 
     #[test]
@@ -2546,7 +2546,7 @@ mod tests {
         };
 
         let mut registry = ModuleRegistry::new();
-        type_check_module_with_registry(&lib_module, &mut registry).unwrap();
+        type_check_module_with_registry(&lib_module, &mut registry).expect("TODO: handle error");
         // Should fail — "secret" is private
         assert!(type_check_module_with_registry(&main_module, &mut registry).is_err());
     }
@@ -2590,7 +2590,7 @@ mod tests {
         };
 
         let mut registry = ModuleRegistry::new();
-        type_check_module_with_registry(&lib_module, &mut registry).unwrap();
-        type_check_module_with_registry(&main_module, &mut registry).unwrap();
+        type_check_module_with_registry(&lib_module, &mut registry).expect("TODO: handle error");
+        type_check_module_with_registry(&main_module, &mut registry).expect("TODO: handle error");
     }
 }

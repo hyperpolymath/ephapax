@@ -2089,6 +2089,11 @@ Proof.
     eexists. split; [eapply T_Region_Active; [assumption | assumption | exact Ht]|].
     split; [assumption | split; [assumption | exact Hc]].
 
+  (* T_Region_Active: same structure, uses T_Region_Active in conclusion *)
+  - destruct (IHHtype G2 Hagree Hfp) as [G2' [Ht [Ha [Hf Hc]]]].
+    eexists. split; [eapply T_Region_Active; [assumption | exact Ht]|].
+    split; [assumption | split; [assumption | exact Hc]].
+
   (* T_Borrow: G'=G *)
   - assert (Hlk2: ctx_lookup G2 i = Some (T, false)) by (apply Hfp; assumption).
     eexists. split; [econstructor; exact Hlk2|].
@@ -2371,6 +2376,11 @@ Proof.
   (* T_Region_Active *)
   - eapply T_Region_Active.
     + assumption.
+    + assumption.
+    + apply IHHtype. assumption.
+
+  (* T_Region_Active *)
+  - eapply T_Region_Active.
     + assumption.
     + apply IHHtype. assumption.
 
@@ -2858,7 +2868,12 @@ Qed.
 (** ** Preservation
 
     Well-typed expressions preserve typing under reduction.
-    Induction on the step relation. *)
+    Induction on the step relation.
+    
+    NOTE (2026-04-15): T_Region and T_Region_Active now include the
+    region-escape-freedom premise "r ∉ free_regions T" to ensure that
+    regions do not escape their scope. This addresses the two remaining
+    cases in the original preservation proof. *)
 
 (** ** Region-shrink lemmas
 

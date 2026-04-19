@@ -21,6 +21,7 @@ members = [
     "ephapax-linear",
     "src/ephapax-surface",
     "src/ephapax-desugar",
+    "tests/fuzz",
     # "src/ephapax-vram-cache",  # Disabled: requires ephapax-proven repo
 ]
 

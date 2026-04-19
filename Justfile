@@ -2,6 +2,8 @@
 # Ephapax build recipes
 
 # Default recipe
+import? "contractile.just"
+
 default: build
 
 # Build all Rust crates

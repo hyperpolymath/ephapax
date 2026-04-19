@@ -2921,38 +2921,56 @@ Proof.
          Use `solve [inversion H]` which only succeeds when inversion closes the goal (0 cases). *)
   all: try solve [match goal with [H: is_value (EVar _) |- _] => inversion H end].
   all: try solve [match goal with [H: step _ _ |- _] => inversion H end].
-  (* REMAINING CASES (updated 2026-04-19 after region-escape-freedom scaffolding):
+  (* REMAINING CASES (updated 2026-04-19 after region-escape-freedom scaffolding + lemma analysis):
 
-     Two cases involving region exit/step remain open. The typing rules now
-     carry the `~ In r (free_regions T)` premise (see Typing.v free_regions
-     + strengthened T_Region / T_Region_Active), so the information needed
-     to close them is available by inversion — but the structural lemmas
-     using that information are still to be proved.
+     Two cases involving region exit/step remain open. The typing rules
+     now carry `~ In r (free_regions T)` (see Typing.v free_regions +
+     strengthened T_Region / T_Region_Active). However, attempting to
+     close the admit via structural lemmas exposes a **language-design
+     issue**, not just proof debt.
 
-     (a) S_Region_Step + T_Region_Active: inner step changes R to R'.
-         With the new premise, the inversion of T_Region_Active provides
-         `H : ~ In r (free_regions T)`. A `region_shrink_preserves_typing`
-         lemma of the form
+     THE FOUR CANDIDATE LEMMAS:
+
+     (L1) region_active_remove_first :
+            r0 <> r -> In r0 R <-> In r0 (remove_first r R)
+          — trivial, would compile.
+
+     (L2) region_shrink_preserves_typing :
             R; G |- e : T -| G' ->
             ~ In r (free_regions T) ->
             (remove_first r R); G |- e : T -| G'
-         would close the ~ In r R' sub-case by rewriting the inner typing
-         into the shrunken region env.
+          — UNSOUND AS STATED. Counter-example:
+            e := ELam T1 (ELet (EStringNew r "x") (EDrop (EVar 0)))
+            T := TFun T1 (TBase TUnit)
+          Here r ∉ free_regions T, yet the body uses r via EStringNew.
+          Shrinking R destroys the body's typing (EStringNew r requires
+          r ∈ R by T_StringNew/T_Loc).
 
-     (b) S_Region_Exit + T_Region_Active: exit changes R to remove_first r R
-         at a value v. Needs a `region_agnostic_values` lemma
-            R1; G |- v : T -| G' ->
-            is_value v ->
-            ~ In r (free_regions T) ->
-            (remove_first r R1); G |- v : T -| G'
-         which is a value-restricted specialisation of (a).
+     (L3) region_agnostic_values : value-restricted (L2).
+          — ALSO UNSOUND for the same reason: ELam is a value, and its
+          body is unrestricted.
 
-     Both lemmas now have their input premise made available by the
-     strengthened typing rules. Admit retained until those lemmas land.
+     (L4) A stronger premise on T_Region / T_Region_Active:
+            region_closed_at r e  (e contains no syntactic reference
+                                   to r in any sub-expression)
+          This would close the lemma structurally, but it is a
+          substantial extra constraint and may be too restrictive:
+          common patterns like "allocate a string in region r, use it,
+          return a non-region-typed result" would no longer type-check.
 
-     Cross-reference: commit 9793160 ("feat(ephapax/coq): scaffold
-     region-escape-freedom for preservation") added the premise; the
-     closing lemmas are the remaining work item. *)
+     LANGUAGE-DESIGN QUESTION:
+     Either the typing rules need to enforce (L4) (more restrictive),
+     or S_Region_Exit needs a different semantics (e.g., only allow
+     exit if no live references to r remain — tracked dynamically or
+     via a lifetime-like analysis). The admit therefore is blocked on
+     a design decision, not on Coq tactic work.
+
+     Cross-reference: commit 9793160 scaffolded the free_regions
+     premise; the closing-lemma investigation happened in the same
+     session (2026-04-19) and reached this conclusion. Next action is
+     at the language-design level: decide between (i) adding
+     region_closed_at as a premise, or (ii) adding live-reference
+     tracking to the operational semantics of S_Region_Exit. *)
   all: admit.
 Admitted.
 (* PROOF STATUS [preservation] — explicitly admitted (2026-04-12).

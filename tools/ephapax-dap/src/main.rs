@@ -193,12 +193,11 @@ fn main() -> io::Result<()> {
 
         // DAP uses Content-Length headers like LSP
         if line.starts_with("Content-Length:") {
-            let len: usize = line
-                .strip_prefix("Content-Length:")
-                .expect("TODO: handle error")
-                .trim()
-                .parse()
-                .unwrap_or(0);
+            let len_str = match line.strip_prefix("Content-Length:") {
+                Some(s) => s.trim(),
+                None => continue, // should not happen if startswith check passed, but be safe
+            };
+            let len: usize = len_str.parse().unwrap_or(0);
 
             // Read empty line
             let mut empty = String::new();
@@ -210,7 +209,10 @@ fn main() -> io::Result<()> {
 
             if let Ok(msg) = serde_json::from_slice::<DapMessage>(&body) {
                 let response = debugger.handle_request(&msg);
-                let response_json = serde_json::to_string(&response).expect("TODO: handle error");
+                let response_json = match serde_json::to_string(&response) {
+                    Ok(json) => json,
+                    Err(_) => continue, // skip if JSON serialization fails
+                };
                 let header = format!("Content-Length: {}\r\n\r\n", response_json.len());
 
                 let mut out = stdout.lock();

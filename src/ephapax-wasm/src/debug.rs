@@ -163,7 +163,7 @@ mod tests {
         let metadata = generate_mode_metadata(&debug_info);
         assert!(!metadata.is_empty());
 
-        let decoded: serde_json::Value = serde_json::from_slice(&metadata).expect("TODO: handle error");
+        let decoded: serde_json::Value = serde_json::from_slice(&metadata).unwrap();
         assert_eq!(decoded["mode"], "affine");
         assert_eq!(decoded["variables"][0]["name"], "x");
     }

@@ -209,7 +209,7 @@ mod tests {
 
     #[test]
     fn test_parse_empty_list() {
-        let expr = parse_expr_helper("[]").expect("TODO: handle error");
+        let expr = parse_expr_helper("[]").unwrap();
         match expr.kind {
             ExprKind::ListLit(elements) => assert_eq!(elements.len(), 0),
             other => panic!("Expected ListLit, got {other:?}"),
@@ -218,7 +218,7 @@ mod tests {
 
     #[test]
     fn test_parse_list_literal() {
-        let expr = parse_expr_helper("[1, 2, 3]").expect("TODO: handle error");
+        let expr = parse_expr_helper("[1, 2, 3]").unwrap();
         match expr.kind {
             ExprKind::ListLit(elements) => assert_eq!(elements.len(), 3),
             other => panic!("Expected ListLit, got {other:?}"),
@@ -227,7 +227,7 @@ mod tests {
 
     #[test]
     fn test_parse_tuple_literal() {
-        let expr = parse_expr_helper("(1, 2, 3)").expect("TODO: handle error");
+        let expr = parse_expr_helper("(1, 2, 3)").unwrap();
         match expr.kind {
             ExprKind::TupleLit(elements) => assert_eq!(elements.len(), 3),
             other => panic!("Expected TupleLit, got {other:?}"),
@@ -236,7 +236,7 @@ mod tests {
 
     #[test]
     fn test_parse_unit() {
-        let expr = parse_expr_helper("()").expect("TODO: handle error");
+        let expr = parse_expr_helper("()").unwrap();
         match expr.kind {
             ExprKind::Lit(ephapax_syntax::Literal::Unit) => {}
             other => panic!("Expected Unit literal, got {other:?}"),
@@ -245,7 +245,7 @@ mod tests {
 
     #[test]
     fn test_parse_list_index() {
-        let expr = parse_expr_helper("list[0]").expect("TODO: handle error");
+        let expr = parse_expr_helper("list[0]").unwrap();
         match expr.kind {
             ExprKind::ListIndex { .. } => {}
             other => panic!("Expected ListIndex, got {other:?}"),
@@ -254,7 +254,7 @@ mod tests {
 
     #[test]
     fn test_parse_tuple_index() {
-        let expr = parse_expr_helper("tuple.0").expect("TODO: handle error");
+        let expr = parse_expr_helper("tuple.0").unwrap();
         match expr.kind {
             ExprKind::TupleIndex { index, .. } => assert_eq!(index, 0),
             other => panic!("Expected TupleIndex, got {other:?}"),

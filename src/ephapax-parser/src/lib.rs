@@ -578,10 +578,12 @@ fn parse_seq_expr_core(pair: pest::iterators::Pair<Rule>) -> Result<Expr, ParseE
     }
 
     if parsed.len() == 1 {
-        return Ok(parsed.into_iter().next().expect("TODO: handle error"));
+        // invariant: len() == 1 guarantees next() returns Some
+        return Ok(parsed.into_iter().next().expect("invariant: parsed.len() == 1"));
     }
 
-    let last = parsed.pop().expect("TODO: handle error");
+    // invariant: loop above ensures parsed is not empty before we enter this block
+    let last = parsed.pop().expect("invariant: parsed is not empty");
     parsed.into_iter().rev().fold(Ok(last), |acc, expr| {
         let acc = acc?;
         let s = expr.span;
@@ -2014,7 +2016,7 @@ mod tests {
         end"#;
         let result = parse(source);
         assert!(result.is_ok(), "should parse handle with op: {:?}", result.err());
-        match result.expect("TODO: handle error").kind {
+        match result.unwrap().kind {
             ExprKind::Handle { clauses, .. } => {
                 assert_eq!(clauses.len(), 2);
                 assert!(clauses[0].op.is_empty()); // return

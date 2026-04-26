@@ -195,7 +195,8 @@ fn is_valid_package_name(name: &str) -> bool {
     }
 
     // Must start with letter
-    if !name.chars().next().expect("TODO: handle error").is_ascii_lowercase() {
+    // invariant: we already checked !is_empty(), so chars().next() cannot fail
+    if !name.chars().next().expect("invariant: name is not empty").is_ascii_lowercase() {
         return false;
     }
 
@@ -221,7 +222,7 @@ license = "PMPL-1.0-or-later"
 linear-collections = "1.0"
 "#;
 
-        let manifest = Manifest::parse(toml).expect("TODO: handle error");
+        let manifest = Manifest::parse(toml).unwrap();
         assert_eq!(manifest.package.name, "my-lib");
         assert_eq!(manifest.package.version, "0.1.0");
         assert_eq!(manifest.dependencies.len(), 1);
@@ -242,7 +243,7 @@ local-lib = { path = "../local" }
 git-lib = { git = "https://github.com/example/lib", tag = "v1.0" }
 "#;
 
-        let manifest = Manifest::parse(toml).expect("TODO: handle error");
+        let manifest = Manifest::parse(toml).unwrap();
         assert_eq!(manifest.dependencies.len(), 3);
 
         let affine = &manifest.dependencies["affine-utils"];

@@ -3309,22 +3309,19 @@ Proof.
      Use `eassumption` to feed the correct has_type hyp into the IH.
      Then case-split; construct T_Region or T_Region_Active. *)
   (* Apply IH to get body typing in R'.
-     Use specialize to avoid hypothesis-matching brittleness. *)
+     Debug: use a maximally permissive match to see what's in context. *)
   all: match goal with
-    | [ IH : forall _ _ _, has_type _ _ _ _ _ -> _,
-        Hfr : ~ In _ (free_regions _) |- exists _, has_type _ _ (ERegion _ _) _ _ ] =>
+    | [ IH : forall _ _ _, has_type _ _ _ _ _ -> exists _ : ctx, has_type _ _ _ _ _,
+        Hbody : has_type _ _ _ _ _ |- exists _ : ctx, _ ] =>
+        let G_out := fresh "G_out" in
+        let Hout := fresh "Hout" in
+        destruct (IH _ _ _ Hbody) as [G_out Hout];
         match goal with
-        | [ Hbody : has_type _ _ _ _ _ |- _ ] =>
-            let Hout := fresh "Hout" in
-            let G_out := fresh "G_out" in
-            destruct (IH _ _ _ Hbody) as [G_out Hout];
-            match goal with
-            | [ |- exists _, has_type ?R2' _ (ERegion ?rr _) _ _ ] =>
-                destruct (in_dec string_dec rr R2') as [Hin' | Hnotin'];
-                [ eexists; eapply T_Region_Active; [exact Hin' | exact Hfr | exact Hout]
-                | eexists; eapply T_Region;
-                  [ exact Hnotin' | exact Hfr | apply region_add_typing; exact Hout ] ]
-            end
+        | [ Hfr : ~ In _ (free_regions _) |- exists _ : ctx, has_type ?R2' _ (ERegion ?rr _) _ _ ] =>
+            destruct (in_dec string_dec rr R2') as [Hin' | Hnotin'];
+            [ eexists; eapply T_Region_Active; [exact Hin' | exact Hfr | exact Hout]
+            | eexists; eapply T_Region;
+              [ exact Hnotin' | exact Hfr | apply region_add_typing; exact Hout ] ]
         end
     end.
 Qed.

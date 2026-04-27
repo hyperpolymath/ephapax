@@ -1,0 +1,21 @@
+# ⚓ ANCHOR: ephapax
+# Canonical authority and project recalibration trigger for ephapax.
+# Template from: https://github.com/hyperpolymath/standards
+
+id: "org.hyperpolymath.ephapax"
+version: "1.0.0"
+clade: "foundation-language"
+status: "active"
+
+# SSG Configuration (Unified boj-server build)
+ssg:
+  engine: "casket"
+  output_dir: "public"
+  boj_trigger: true
+  cartridge: "ssg-mcp"
+
+# Relationships
+parents:
+  - "org.hyperpolymath.standards"
+  - "org.hyperpolymath.boj-server"
+  - "org.hyperpolymath.nextgen-languages"

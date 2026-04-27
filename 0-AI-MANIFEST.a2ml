@@ -1,19 +1,70 @@
-;; SPDX-License-Identifier: PMPL-1.0-or-later
-;; 0-AI-MANIFEST.a2ml — AI Agent Entry Point
-;; Repository: hyperpolymath/ephapax
+# STOP - CRITICAL READING REQUIRED
 
-@abstract:
-AI manifest for ephapax. Read this file first before any other work.
-@end
+**THIS FILE MUST BE READ FIRST BY ALL AI AGENTS**
 
-;; === CANONICAL LOCATIONS ===
-;; Machine-readable state: .machine_readable/
-;; Documentation: docs/
-;; Source code: src/
-;; Tests: verification/tests/ or tests/
+## WHAT IS THIS?
 
-;; === CRITICAL INVARIANTS ===
-;; - SPDX headers on ALL files (PMPL-1.0-or-later)
-;; - No believe_me, assert_total, sorry, Admitted, unsafeCoerce, Obj.magic
-;; - SCM files ONLY in .machine_readable/ (never root)
-;; - Author: Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk>
+This is the AI manifest for **ephapax**. It declares:
+- Canonical file locations (where things MUST be, and nowhere else)
+- Critical invariants (rules that must NEVER be violated)
+- Repository structure and organization
+
+## CANONICAL LOCATIONS (UNIVERSAL RULE)
+
+### Machine-Readable Metadata: `.machine_readable/6a2/` ONLY
+
+These 6 A2ML files MUST exist in `.machine_readable/6a2/` directory ONLY:
+1. **STATE.a2ml** - Project state, progress, blockers
+2. **META.a2ml** - Architecture decisions, governance
+3. **ECOSYSTEM.a2ml** - Position in ecosystem, relationships
+4. **AGENTIC.a2ml** - AI agent interaction patterns
+5. **NEUROSYM.a2ml** - Neurosymbolic integration config
+6. **PLAYBOOK.a2ml** - Operational runbook
+
+## CORE INVARIANTS
+
+1. **Formal Proof Integrity** - No `Admitted` in Coq or `believe_me`/`assert_total` in Idris2. All proofs MUST remain closed (67/67 Qed).
+2. **Dyadic Separation** - The boundary between affine and linear types must be strictly enforced.
+3. **SPDX Headers** - All source files MUST carry `SPDX-License-Identifier: PMPL-1.0-or-later`.
+4. **Author Attribution** - Always "Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk>".
+
+## REPOSITORY STRUCTURE
+
+```
+ephapax/
+├── 0-AI-MANIFEST.a2ml         # THIS FILE (start here)
+├── README.adoc                # Project overview
+├── src/                       # Rust implementation
+├── formal/                    # Coq formalization
+├── src/formal/                # Idris2 formalization
+├── .machine_readable/
+│   ├── 6a2/                   # A2ML files (6 files)
+│   └── contractiles/          # MUST, TRUST, DUST, ADJUST, BUST, INTEND
+└── .bot_directives/            # Bot instructions
+```
+
+## LIFECYCLE HOOKS
+
+### on-enter (Session Start)
+
+1. Read and acknowledge this manifest.
+2. Read `.machine_readable/6a2/STATE.a2ml` for current status and v2 phase.
+3. State understanding of the **Proof Integrity** invariant.
+
+### on-exit (Session End)
+
+1. Update `.machine_readable/6a2/STATE.a2ml` (v2 format).
+2. Run `just golden` to ensure no proof regressions.
+
+## ATTESTATION PROOF
+
+After reading this file, demonstrate understanding by stating:
+
+**"I have read the AI manifest. I understand the Proof Integrity invariant and that A2ML files are located in `.machine_readable/6a2/` ONLY."**
+
+## META
+
+- **Format Version:** 1.0.0
+- **Last Updated:** 2026-04-23
+- **Maintained By:** Jonathan D.A. Jewell (hyperpolymath)
+- **License:** PMPL-1.0-or-later

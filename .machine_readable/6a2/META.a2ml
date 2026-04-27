@@ -1,9 +1,42 @@
 # SPDX-License-Identifier: PMPL-1.0-or-later
-# META.a2ml — Project meta-information
-# Converted from META.scm on 2026-03-15
+# META.a2ml - Project metadata and architectural decisions for ephapax
+# Template from: https://github.com/hyperpolymath/standards
 
-[metadata]
-project = "ephapax"
-author = "Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk>"
-license = "PMPL-1.0-or-later"
-standard = "RSR 2026"
+# ── Project Identity ───────────────────────────────────────────────────────
+[project-meta]
+version = "1.0.0"
+name = "ephapax"
+
+# ── Architecture Decisions ─────────────────────────────────────────────────
+[project-meta.architecture-decisions]
+
+[project-meta.architecture-decisions.adr-001]
+status = "accepted"
+date = "2026-03-10"
+context = "Need safe memory management without a garbage collector for WASM targets."
+decision = "Dyadic type system: one part affine, the other linear."
+consequences = "Guaranteed no use-after-free and no memory leaks at compile time."
+
+[project-meta.architecture-decisions.adr-002]
+status = "accepted"
+date = "2026-04-11"
+context = "Formal verification of the type system is required for high-assurance use."
+decision = "Dual formalization in Coq (operational semantics) and Idris2 (type structure)."
+consequences = "Fully closed proofs (67 Qed) ensuring the correctness of the linear logic engine."
+
+# ── Development Practices ──────────────────────────────────────────────────
+[project-meta.development-practices]
+code-style = "rsr-strict"
+security = "formal-verification"
+testing = "golden-path-tests"
+versioning = "semver"
+documentation = "asciidoc"
+branching = "trunk-based"
+
+# ── Design Rationale ──────────────────────────────────────────────────────
+[project-meta.design-rationale]
+# ephapax (ἐφάπαξ — once for all) ensures every linear resource is used
+# exactly once. This is foundational for high-performance, crash-proof
+# systems where memory leaks or use-after-free are unacceptable.
+last-modified-at = "2026-04-23T13:00:00Z"
+modification-summary = "Updated to 1.0.0 template standards and recorded dual-formalization milestone"

@@ -3308,22 +3308,22 @@ Proof.
      remains: S_Region_Step + T_Region_Active.
      Use `eassumption` to feed the correct has_type hyp into the IH.
      Then case-split; construct T_Region or T_Region_Active. *)
-  (* Apply IH to get body typing in R'.
-     Debug: use a maximally permissive match to see what's in context. *)
-  all: match goal with
-    | [ IH : forall _ _ _, has_type _ _ _ _ _ -> exists _ : ctx, has_type _ _ _ _ _,
-        Hbody : has_type _ _ _ _ _ |- exists _ : ctx, _ ] =>
-        let G_out := fresh "G_out" in
-        let Hout := fresh "Hout" in
-        destruct (IH _ _ _ Hbody) as [G_out Hout];
+  (* S_Region_Step + T_Region_Active: the final goal.
+     IHHstep is the IH from induction on the inner step of S_Region_Step.
+     It has type: forall G T G', R; G |- e : T -| G' -> exists G_out, R'; G |- e' : T -| G_out.
+     Apply it to the body typing from T_Region_Active inversion. *)
+  all: try (
+    match goal with
+    | [ |- exists _ : ctx, has_type _ _ (ERegion _ _) _ _ ] =>
         match goal with
-        | [ Hfr : ~ In _ (free_regions _) |- exists _ : ctx, has_type ?R2' _ (ERegion ?rr _) _ _ ] =>
-            destruct (in_dec string_dec rr R2') as [Hin' | Hnotin'];
+        | [ Hbody : has_type _ _ _ _ _, Hfr : ~ In _ (free_regions _) |- _ ] =>
+            destruct (IHHstep _ _ _ Hbody) as [G_out Hout];
+            destruct (in_dec string_dec r R') as [Hin' | Hnotin'];
             [ eexists; eapply T_Region_Active; [exact Hin' | exact Hfr | exact Hout]
             | eexists; eapply T_Region;
               [ exact Hnotin' | exact Hfr | apply region_add_typing; exact Hout ] ]
         end
-    end.
+    end).
 Qed.
 (* PROOF STATUS [preservation] — FULLY CLOSED (2026-04-27). Zero Admitted.
    region_env_perm_typing: Qed (new lemma — transfers typing across region-env permutations).

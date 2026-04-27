@@ -2089,11 +2089,6 @@ Proof.
     eexists. split; [eapply T_Region_Active; [assumption | assumption | exact Ht]|].
     split; [assumption | split; [assumption | exact Hc]].
 
-  (* T_Region_Active: same structure, uses T_Region_Active in conclusion *)
-  - destruct (IHHtype G2 Hagree Hfp) as [G2' [Ht [Ha [Hf Hc]]]].
-    eexists. split; [eapply T_Region_Active; [assumption | exact Ht]|].
-    split; [assumption | split; [assumption | exact Hc]].
-
   (* T_Borrow: G'=G *)
   - assert (Hlk2: ctx_lookup G2 i = Some (T, false)) by (apply Hfp; assumption).
     eexists. split; [econstructor; exact Hlk2|].
@@ -2376,11 +2371,6 @@ Proof.
   (* T_Region_Active *)
   - eapply T_Region_Active.
     + assumption.
-    + assumption.
-    + apply IHHtype. assumption.
-
-  (* T_Region_Active *)
-  - eapply T_Region_Active.
     + assumption.
     + apply IHHtype. assumption.
 
@@ -2956,6 +2946,162 @@ Proof.
   apply remove_first_subset with (r := r). exact Hin.
 Qed.
 
+(** [region_membership_eq_preserves_typing]: typing depends on the region
+    environment only via [In]-membership of region names. So if [R'] agrees
+    with [R] on which names are present, every typing derivation transports
+    from [R] to [R']. Used to close the T_Region_Active shadowing case in
+    [region_shrink_preserves_typing], where [R] and [remove_first r R]
+    (or [r :: remove_first r R]) agree on [In]-membership. *)
+Lemma region_membership_eq_preserves_typing :
+  forall R G e T G',
+    R; G |- e : T -| G' ->
+    forall R',
+      (forall r0, In r0 R <-> In r0 R') ->
+      R'; G |- e : T -| G'.
+Proof.
+  intros R G e T G' Htype.
+  induction Htype; intros R' Heq.
+  - apply T_Unit.
+  - apply T_Bool.
+  - apply T_I32.
+  - eapply T_Var_Lin; eassumption.
+  - eapply T_Var_Unr; eassumption.
+  - apply T_Loc. unfold region_active in *. apply Heq. exact H.
+  - apply T_StringNew. unfold region_active in *. apply Heq. exact H.
+  - eapply T_StringConcat;
+      [apply IHHtype1; exact Heq | apply IHHtype2; exact Heq].
+  - eapply T_StringLen. apply IHHtype. exact Heq.
+  - eapply T_Let;
+      [apply IHHtype1; exact Heq | apply IHHtype2; exact Heq].
+  - eapply T_LetLin;
+      [exact H | apply IHHtype1; exact Heq | apply IHHtype2; exact Heq].
+  - eapply T_Lam. apply IHHtype. exact Heq.
+  - eapply T_App;
+      [apply IHHtype1; exact Heq | apply IHHtype2; exact Heq].
+  - eapply T_Pair;
+      [apply IHHtype1; exact Heq | apply IHHtype2; exact Heq].
+  - eapply T_Fst; [apply IHHtype; exact Heq | assumption].
+  - eapply T_Snd; [apply IHHtype; exact Heq | assumption].
+  - eapply T_Inl. apply IHHtype. exact Heq.
+  - eapply T_Inr. apply IHHtype. exact Heq.
+  - eapply T_Case;
+      [apply IHHtype1; exact Heq
+      | apply IHHtype2; exact Heq
+      | apply IHHtype3; exact Heq].
+  - eapply T_If;
+      [apply IHHtype1; exact Heq
+      | apply IHHtype2; exact Heq
+      | apply IHHtype3; exact Heq].
+  - (* T_Region *)
+    eapply T_Region.
+    + intros Hin. apply H. apply Heq. exact Hin.
+    + exact H0.
+    + apply IHHtype. intros r1. simpl.
+      split; intros [Heq'|Hin]; [left; exact Heq' | right; apply Heq; exact Hin
+                                | left; exact Heq' | right; apply Heq; exact Hin].
+  - (* T_Region_Active *)
+    eapply T_Region_Active.
+    + apply Heq. exact H.
+    + exact H0.
+    + apply IHHtype. exact Heq.
+  - eapply T_Borrow. exact H.
+  - eapply T_Borrow_Val; [exact H | apply IHHtype; exact Heq].
+  - eapply T_Drop; [exact H | apply IHHtype; exact Heq].
+  - eapply T_Copy; [exact H | apply IHHtype; exact Heq].
+Qed.
+
+(** [region_extension_preserves_typing_when_free]: the symmetric
+    counterpart of [region_shrink_preserves_typing]. If an expression is
+    typed at [R] and makes no syntactic reference to region [r], then its
+    typing survives prepending [r] to [R]. Used by the preservation proof
+    for the S_Region_Step + T_Region_Active case where the inner step
+    drops the only occurrence of [r] from the env. *)
+Lemma region_extension_preserves_typing_when_free :
+  forall R G e T G' r,
+    R; G |- e : T -| G' ->
+    expr_free_of_region r e ->
+    (r :: R); G |- e : T -| G'.
+Proof.
+  intros R G e T G' r Htype.
+  induction Htype; intros Hfree; simpl in Hfree.
+  - apply T_Unit.
+  - apply T_Bool.
+  - apply T_I32.
+  - eapply T_Var_Lin; eassumption.
+  - eapply T_Var_Unr; eassumption.
+  - apply T_Loc. unfold region_active in *. right. exact H.
+  - apply T_StringNew. unfold region_active in *. right. exact H.
+  - destruct Hfree as [Hf1 Hf2].
+    eapply T_StringConcat;
+      [apply IHHtype1; exact Hf1 | apply IHHtype2; exact Hf2].
+  - eapply T_StringLen. apply IHHtype. exact Hfree.
+  - destruct Hfree as [Hf1 Hf2].
+    eapply T_Let;
+      [apply IHHtype1; exact Hf1 | apply IHHtype2; exact Hf2].
+  - destruct Hfree as [Hf1 Hf2].
+    eapply T_LetLin;
+      [exact H | apply IHHtype1; exact Hf1 | apply IHHtype2; exact Hf2].
+  - eapply T_Lam. apply IHHtype. exact Hfree.
+  - destruct Hfree as [Hf1 Hf2].
+    eapply T_App;
+      [apply IHHtype1; exact Hf1 | apply IHHtype2; exact Hf2].
+  - destruct Hfree as [Hf1 Hf2].
+    eapply T_Pair;
+      [apply IHHtype1; exact Hf1 | apply IHHtype2; exact Hf2].
+  - eapply T_Fst; [apply IHHtype; exact Hfree | assumption].
+  - eapply T_Snd; [apply IHHtype; exact Hfree | assumption].
+  - eapply T_Inl. apply IHHtype. exact Hfree.
+  - eapply T_Inr. apply IHHtype. exact Hfree.
+  - destruct Hfree as [Hf1 [Hf2 Hf3]].
+    eapply T_Case;
+      [apply IHHtype1; exact Hf1
+      | apply IHHtype2; exact Hf2
+      | apply IHHtype3; exact Hf3].
+  - destruct Hfree as [Hf1 [Hf2 Hf3]].
+    eapply T_If;
+      [apply IHHtype1; exact Hf1
+      | apply IHHtype2; exact Hf2
+      | apply IHHtype3; exact Hf3].
+  - (* T_Region: original env R, extends to r0 :: R *)
+    destruct (String.eqb r r0) eqn:Heq.
+    + (* sub-case a: r = r0. ERegion r e is shadowing. Hfree = True (trivial).
+         Original Htype : (r :: R); G |- e : T -| G'. Apply T_Region_Active. *)
+      apply String.eqb_eq in Heq. subst r0.
+      eapply T_Region_Active.
+      * left. reflexivity.
+      * exact H0.
+      * exact Htype.
+    + (* sub-case b: r ≠ r0. Apply T_Region; swap (r :: r0 :: R) <-> (r0 :: r :: R) via membership-eq. *)
+      apply String.eqb_neq in Heq.
+      eapply T_Region.
+      * intros [Heq' | HinR];
+          [apply Heq; exact Heq' | apply H; exact HinR].
+      * exact H0.
+      * eapply region_membership_eq_preserves_typing.
+        -- apply IHHtype. exact Hfree.
+        -- intros r2. simpl. tauto.
+  - (* T_Region_Active: original env R, In r0 R, no extension *)
+    destruct (String.eqb r r0) eqn:Heq.
+    + (* sub-case a: r = r0. Use membership-eq to transport from R to (r :: R)
+         since In r R already. *)
+      apply String.eqb_eq in Heq. subst r0.
+      eapply region_membership_eq_preserves_typing.
+      * eapply T_Region_Active; [exact H | exact H0 | exact Htype].
+      * intros r2. simpl. split.
+        -- intros HinR. right. exact HinR.
+        -- intros [Heq' | HinR]; [subst; exact H | exact HinR].
+    + (* sub-case b: r ≠ r0. Apply T_Region_Active; In r0 (r :: R) via right-disj. *)
+      apply String.eqb_neq in Heq.
+      eapply T_Region_Active.
+      * right. exact H.
+      * exact H0.
+      * apply IHHtype. exact Hfree.
+  - eapply T_Borrow. exact H.
+  - eapply T_Borrow_Val; [exact H | apply IHHtype; exact Hfree].
+  - eapply T_Drop; [exact H | apply IHHtype; exact Hfree].
+  - eapply T_Copy; [exact H | apply IHHtype; exact Hfree].
+Qed.
+
 Lemma region_shrink_preserves_typing :
   forall R G e T G' r,
     R; G |- e : T -| G' ->
@@ -3005,8 +3151,41 @@ Proof.
   - (* T_Region_Active *)
     destruct (String.eqb r r0) eqn:Heq.
     + apply String.eqb_eq in Heq. subst r0.
-      (* r = r0 active. Same weakening issue. Admit. *)
-      admit.
+      (* r = r0 active: outer ERegion r e shadows the outer r. Hfree is
+         trivially True. Case-split on whether r still appears in
+         (remove_first r R) (multiplicity > 1) or not (= 1). Both branches
+         transport Htype via region_membership_eq_preserves_typing, since
+         R and {remove_first r R | r :: remove_first r R} agree on
+         In-membership in their respective cases. *)
+      destruct (in_dec String.string_dec r (remove_first r R)) as [Hin | Hnin].
+      * (* multiplicity > 1: r still active after one removal. Apply T_Region_Active. *)
+        eapply T_Region_Active.
+        -- exact Hin.
+        -- exact H0.
+        -- eapply region_membership_eq_preserves_typing; [exact Htype|].
+           intros r1.
+           destruct (String.eqb r r1) eqn:Hreq.
+           ++ apply String.eqb_eq in Hreq. subst r1.
+              split; intros _; assumption.
+           ++ apply String.eqb_neq in Hreq.
+              apply region_shrink_in_preserves. exact Hreq.
+      * (* multiplicity = 1: r removed. Apply T_Region (re-binds r afresh). *)
+        eapply T_Region.
+        -- exact Hnin.
+        -- exact H0.
+        -- eapply region_membership_eq_preserves_typing; [exact Htype|].
+           intros r1. simpl.
+           destruct (String.eqb r r1) eqn:Hreq.
+           ++ apply String.eqb_eq in Hreq. subst r1.
+              split; [intros _; left; reflexivity | intros _; exact H].
+           ++ apply String.eqb_neq in Hreq.
+              assert (Hsh : In r1 R <-> In r1 (remove_first r R)).
+              { apply region_shrink_in_preserves. exact Hreq. }
+              split.
+              ** intros HinR. right. apply Hsh. exact HinR.
+              ** intros [HeqR1|HinRem].
+                 --- exfalso. apply Hreq. exact HeqR1.
+                 --- apply Hsh. exact HinRem.
     + eapply T_Region_Active.
       * apply region_shrink_in_preserves.
         -- intros ->. rewrite String.eqb_refl in Heq. discriminate.
@@ -3017,7 +3196,7 @@ Proof.
   - eapply T_Borrow_Val; [exact H|apply IHHtype; exact Hfree].
   - eapply T_Drop; [exact H|apply IHHtype; exact Hfree].
   - eapply T_Copy; [exact H|apply IHHtype; exact Hfree].
-Admitted.
+Qed.
 
 Theorem preservation :
   forall mu R e mu' R' e',

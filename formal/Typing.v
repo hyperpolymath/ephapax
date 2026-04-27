@@ -41,23 +41,6 @@ Fixpoint free_regions (T : ty) : list region_name :=
   | TBorrow T'       => free_regions T'
   end.
 
-(** ** Free Regions in Types
-
-    Compute the set of regions mentioned in a type. Used to enforce
-    the "region does not escape" invariant in T_Region and T_Region_Active. *)
-
-Fixpoint free_regions (T : ty) : list region_name :=
-  match T with
-  | TBase _ => []
-  | TRef _ T => free_regions T
-  | TFun T1 T2 => free_regions T1 ++ free_regions T2
-  | TProd T1 T2 => free_regions T1 ++ free_regions T2
-  | TSum T1 T2 => free_regions T1 ++ free_regions T2
-  | TString r => [r]
-  | TRegion r T => r :: free_regions T
-  | TBorrow T => free_regions T
-  end.
-
 (* Note: We don't need a separate determinism lemma for free_regions
    since In_dec is built-in for list types in Coq. *)
 

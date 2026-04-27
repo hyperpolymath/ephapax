@@ -1,0 +1,25 @@
+# SPDX-License-Identifier: PMPL-1.0-or-later
+# NEUROSYM.a2ml — Neurosymbolic integration metadata for ephapax
+# Template from: https://github.com/hyperpolymath/standards
+
+[metadata]
+version = "1.0.0"
+last-updated = "2026-04-23"
+
+[hypatia-config]
+scan-enabled = true
+scan-depth = "standard"
+report-format = "logtalk"
+rulesets = ["rsr-baseline", "linear-logic-safety", "license-compliance"]
+
+[symbolic-rules]
+rules = [
+  { name = "no-use-after-free", pattern = "linear resource consumption followed by access", severity = "critical" },
+  { name = "no-unsafe-idris", pattern = "believe_me|assert_total", severity = "critical" },
+  { name = "no-unsafe-coq", pattern = "Admitted", severity = "critical" },
+]
+
+[neural-config]
+confidence-threshold = 0.95
+model = "hypatia-v2-formal"
+notes = "Uses the formal-verification specialized model to ensure linear logic invariants hold across the implementation."

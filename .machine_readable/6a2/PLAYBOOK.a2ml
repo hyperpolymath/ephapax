@@ -1,0 +1,36 @@
+# SPDX-License-Identifier: PMPL-1.0-or-later
+# PLAYBOOK.a2ml — Operational playbook for ephapax
+# Template from: https://github.com/hyperpolymath/standards
+
+[metadata]
+version = "1.0.0"
+last-updated = "2026-04-23"
+
+[deployment]
+method = "ci-triggered"
+target = "wasm"
+notes = "Primary target is wasm32-unknown-unknown for safe memory resource management."
+
+[incident-response]
+steps = [
+  "1. Read 0-AI-MANIFEST.a2ml for canonical locations.",
+  "2. Check .machine_readable/6a2/STATE.a2ml for active blockers or proof debt.",
+  "3. Run `just test` to verify current implementation state.",
+  "4. Run `just proofs` to verify Coq operational semantics.",
+  "5. Run `just idris-build` to verify type-theoretic proofs.",
+]
+
+[release-process]
+steps = [
+  "1. Update version and last-updated in all 6A2 files and Cargo.toml.",
+  "2. Run `just golden` to ensure tests and proofs are 100% closed.",
+  "3. Verify RSR compliance with `just validate-rsr`.",
+  "4. Tag the release with `vX.Y.Z`.",
+  "5. Push tags and update the 'last-updated' field in META.a2ml.",
+]
+
+[maintenance-operations]
+audit = "just maint-audit"
+hard-pass = "just maint-hard-pass"
+proof-verification = "just golden"
+wasm-conformance = "just conformance"

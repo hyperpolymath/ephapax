@@ -1,44 +1,16 @@
 # SPDX-License-Identifier: PMPL-1.0-or-later
-# STATE.a2ml — Project state checkpoint
-# Converted from STATE.scm on 2026-03-15
+# Copyright (c) 2026 Jonathan D.A. Jewell (hyperpolymath) <j.d.a.jewell@open.ac.uk>
+#
+# STATE.a2ml v2 — Thin Session Journal for ephapax
+# See: standards/a2ml-templates/STATE.a2ml.v2.spec.adoc
 
-[metadata]
-project = "ephapax"
-version = "0.1.0"
-last-updated = "2026-04-11"
-status = "active"
+@state(version="2.0"):
+phase: "implementation"
+next_action: "Wire real PipeWire session through type checker (PipeWire Proving Ground)"
+last_action: "Standardized to RSR 2026 with v2 STATE format and 6a2 alignment"
+updated: 2026-04-23T13:00:00Z
 
-[project-context]
-name = "ephapax"
-completion-percentage = 65
-phase = "implementation"
-description = "Linear type system compiler — 19 crates, formal proofs FULLY CLOSED (67 Qed, 0 Admitted)"
-crg-grade = "C"
-
-[dogfooding-status]
-# Populated 2026-04-19 against real on-disk integrations. Each entry must
-# resolve to a grep-hit in the cited path. Per memory: ephapax is the
-# proven-alternatives source, so `proven` is its canonical downstream consumer.
-proven-consumer = "2026-04-19 — proven repo consumes ephapax via Zig bindings (types.zig, ephapax_proven.zig, lru_adapter.zig + lru_impl.zig, buffer_adapter.zig + buffer_impl.zig, resource_adapter.zig + resource_impl.zig, stubs.c + build.zig + DYADIC-FFI-DESIGN.md). Path: verification-ecosystem/proven/bindings/ephapax/"
-
-[formal-proofs]
-rocq-version = "9.1.1"
-compiles-clean = true
-qed-count = 67
-admitted-count = 0
-admit-sub-goals = 0
-# FULLY VERIFIED — all theorems closed as of 2026-04-11 audit
-# Final closures (post 2026-04-04):
-#   - subst_typing_gen: Admitted → Qed (bea3ac8, 47→64 Qed)
-#   - preservation: last Admitted closed (a1a93d1, debug artifacts cleaned)
-# Type system is now formally verified end-to-end:
-#   subst_typing_gen → subst_preserves_typing → preservation (all Qed)
-
-[next-priorities]
-# P1 (DONE): Formal proofs — 0 Admitted remaining
-# P2: PipeWire proving ground — wire real PipeWire session through type checker
-#     Spec: memory/ephapax-pipewire-project.md
-# P3: typed-wasm compilation target — ensure Ephapax IR compatible with typed-wasm ABI
-#     Spec: /var/mnt/eclipse/repos/typed-wasm/docs/architecture/AGGREGATE-LIBRARY-VISION.adoc
-# P4: Toolchain merge with AffineScript — shared modules where possible
-#     Spec: docs/specs/DYADIC-VISION.adoc
+@blockers:
+# No active blockers. Formal proofs FULLY CLOSED (67 Qed, 0 Admitted).
+@end
+@end

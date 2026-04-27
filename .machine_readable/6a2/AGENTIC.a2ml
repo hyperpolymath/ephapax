@@ -1,0 +1,36 @@
+# SPDX-License-Identifier: PMPL-1.0-or-later
+# AGENTIC.a2ml - AI agent interaction patterns for ephapax
+# Template from: https://github.com/hyperpolymath/standards
+
+# ── Agent Configuration ────────────────────────────────────────────────────
+[agentic-config]
+version = "1.0.0"
+project = "ephapax"
+
+# ── Claude Code Settings ──────────────────────────────────────────────────
+[agentic-config.claude-code]
+model = "claude-opus-4-5-20251101"
+tools = ["read", "edit", "bash", "grep", "glob"]
+permissions = "read-all"
+
+# ── Coding Patterns ───────────────────────────────────────────────────────
+[agentic-config.patterns]
+code-review = "thorough"
+refactoring = "conservative"
+testing = "comprehensive"
+documentation = "inline"
+
+# ── Language Constraints ──────────────────────────────────────────────────
+[agentic-config.constraints]
+# Allowed languages for the project
+languages = ["rust", "zig", "idris2", "coq", "bash", "just"]
+# Organization-wide banned languages
+banned = ["typescript", "go", "python", "makefile"]
+
+# ── Project-Specific Overrides ────────────────────────────────────────────
+[agentic-config.project-specific]
+# NEVER modify formal proofs (Coq/Idris2) without verifying them.
+# Always run `just golden` before committing to ensure proof closure.
+# Respect the dyadic boundary: affine vs linear must be explicitly handled.
+last-modified-at = "2026-04-23T13:00:00Z"
+modification-summary = "Initial creation from 1.0.0 template"

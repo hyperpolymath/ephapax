@@ -57,11 +57,18 @@ use std::collections::HashMap;
 
 use ephapax_surface::{
     ConstructorDef, DataDecl, MatchArm, Pattern, Span, SurfaceDecl, SurfaceExpr, SurfaceExprKind,
-    SurfaceModule, SurfaceTy,
+    SurfaceModule, SurfaceTy, SurfaceVisibility,
 };
 use ephapax_syntax::{BaseTy, Decl, Expr, ExprKind, Literal, Module, Ty, Visibility};
 use smol_str::SmolStr;
 use thiserror::Error;
+
+fn lower_visibility(v: SurfaceVisibility) -> Visibility {
+    match v {
+        SurfaceVisibility::Public => Visibility::Public,
+        SurfaceVisibility::Private => Visibility::Private,
+    }
+}
 
 /// Desugaring errors.
 #[derive(Debug, Clone, Error)]
@@ -206,6 +213,19 @@ impl Desugarer {
         Self { registry }
     }
 
+    /// Borrow the underlying data registry — useful when the caller is
+    /// running a multi-module compile and needs to read out the data
+    /// types / extern types accumulated so far.
+    pub fn registry(&self) -> &DataRegistry {
+        &self.registry
+    }
+
+    /// Take the underlying data registry, leaving an empty one behind.
+    /// Used to chain registries across modules in a multi-file compile.
+    pub fn take_registry(&mut self) -> DataRegistry {
+        std::mem::take(&mut self.registry)
+    }
+
     /// Desugar a complete surface module to a core module.
     ///
     /// First pass: collect all data declarations into the registry.
@@ -234,6 +254,7 @@ impl Desugarer {
             match decl {
                 SurfaceDecl::Fn {
                     name,
+                    visibility,
                     params,
                     ret_ty,
                     body,
@@ -246,17 +267,21 @@ impl Desugarer {
                     let core_body = self.desugar_expr(body)?;
                     core_decls.push(Decl::Fn {
                         name: name.clone(),
-                        visibility: Visibility::Private,
+                        visibility: lower_visibility(*visibility),
                         type_params: vec![],
                         params: core_params,
                         ret_ty: core_ret,
                         body: core_body,
                     });
                 }
-                SurfaceDecl::Type { name, ty } => {
+                SurfaceDecl::Type {
+                    name,
+                    visibility,
+                    ty,
+                } => {
                     core_decls.push(Decl::Type {
                         name: name.clone(),
-                        visibility: Visibility::Private,
+                        visibility: lower_visibility(*visibility),
                         ty: self.desugar_ty(ty)?,
                     });
                 }
@@ -295,9 +320,19 @@ impl Desugarer {
             }
         }
 
+        // Propagate surface imports into the core module so cross-module
+        // resolution (in `type_check_module_with_registry`) can see them.
+        let core_imports = module
+            .imports
+            .iter()
+            .map(|i| ephapax_syntax::Import {
+                module: i.module.clone(),
+                names: i.names.clone(),
+            })
+            .collect();
         Ok(Module {
             name: module.name.clone(),
-            imports: vec![],
+            imports: core_imports,
             decls: core_decls,
         })
     }

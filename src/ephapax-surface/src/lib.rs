@@ -393,13 +393,20 @@ pub enum SurfaceDecl {
     /// Function definition (same as core, but with surface types/exprs)
     Fn {
         name: Var,
+        #[serde(default, skip_serializing_if = "SurfaceVisibility::is_private")]
+        visibility: SurfaceVisibility,
         params: Vec<(Var, SurfaceTy)>,
         ret_ty: SurfaceTy,
         body: SurfaceExpr,
     },
 
     /// Type alias (same as core, but with surface types)
-    Type { name: Var, ty: SurfaceTy },
+    Type {
+        name: Var,
+        #[serde(default, skip_serializing_if = "SurfaceVisibility::is_private")]
+        visibility: SurfaceVisibility,
+        ty: SurfaceTy,
+    },
 
     /// Data type declaration (surface-only)
     Data(DataDecl),
@@ -432,10 +439,41 @@ pub enum ExternItem {
     },
 }
 
+/// Surface-level visibility — matches `ephapax_syntax::Visibility` but
+/// kept local so the surface AST doesn't need to depend on it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum SurfaceVisibility {
+    /// Accessible from other modules.
+    Public,
+    /// Module-private (default).
+    #[default]
+    Private,
+}
+
+impl SurfaceVisibility {
+    pub fn is_private(&self) -> bool {
+        matches!(self, SurfaceVisibility::Private)
+    }
+}
+
+/// An `import a/b/c` declaration on a surface module.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct SurfaceImport {
+    /// Module path as written in the source. Slashes are preferred but
+    /// dot-form (`Foo.Bar.Baz`) is also accepted by the grammar; downstream
+    /// resolvers normalise to slashes.
+    pub module: SmolStr,
+    /// Specific names imported. Empty = import everything public.
+    pub names: Vec<SmolStr>,
+}
+
 /// A complete surface-level module.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct SurfaceModule {
     pub name: SmolStr,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub imports: Vec<SurfaceImport>,
     pub decls: Vec<SurfaceDecl>,
 }
 

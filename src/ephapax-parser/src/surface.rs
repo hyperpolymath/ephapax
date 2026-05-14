@@ -12,7 +12,8 @@
 
 use ephapax_surface::{
     BaseTy, BinOp, ConstructorDef, DataDecl, ExternBlock, ExternItem, Literal, MatchArm, Pattern,
-    Span, SurfaceDecl, SurfaceExpr, SurfaceExprKind, SurfaceModule, SurfaceTy, UnaryOp,
+    Span, SurfaceDecl, SurfaceExpr, SurfaceExprKind, SurfaceImport, SurfaceModule, SurfaceTy,
+    SurfaceVisibility, UnaryOp,
 };
 use pest::Parser;
 use smol_str::SmolStr;
@@ -42,17 +43,50 @@ pub fn parse_surface_module(source: &str, name: &str) -> Result<SurfaceModule, V
         .ok_or_else(|| vec![ParseError::unexpected_end("module")])?;
 
     let mut decls = Vec::new();
+    let mut imports = Vec::new();
+    let mut module_name = SmolStr::new(name);
 
     for inner in pair.into_inner() {
-        if inner.as_rule() == Rule::declaration {
-            decls.push(parse_surface_declaration(inner).map_err(|e| vec![e])?);
+        match inner.as_rule() {
+            Rule::declaration => {
+                decls.push(parse_surface_declaration(inner).map_err(|e| vec![e])?);
+            }
+            Rule::import_decl => {
+                imports.push(parse_surface_import(inner).map_err(|e| vec![e])?);
+            }
+            Rule::module_decl => {
+                // `module a/b/c` — the qualified_name is the only child.
+                if let Some(qn) = inner.into_inner().next() {
+                    module_name = SmolStr::new(qn.as_str());
+                }
+            }
+            _ => {}
         }
     }
 
     Ok(SurfaceModule {
-        name: SmolStr::new(name),
+        name: module_name,
+        imports,
         decls,
     })
+}
+
+fn parse_surface_import(
+    pair: pest::iterators::Pair<Rule>,
+) -> Result<SurfaceImport, ParseError> {
+    let mut inner = pair.into_inner();
+    let module_pair = inner
+        .next()
+        .ok_or_else(|| ParseError::missing("import module path"))?;
+    let module = SmolStr::new(module_pair.as_str());
+
+    let mut names = Vec::new();
+    for item in inner {
+        if item.as_rule() == Rule::identifier {
+            names.push(SmolStr::new(item.as_str()));
+        }
+    }
+    Ok(SurfaceImport { module, names })
 }
 
 /// Parse a single expression into surface AST.
@@ -272,20 +306,22 @@ fn parse_data_variant(pair: pest::iterators::Pair<Rule>) -> Result<ConstructorDe
 }
 
 fn parse_fn_decl(pair: pest::iterators::Pair<Rule>) -> Result<SurfaceDecl, ParseError> {
-    let mut inner = pair.into_inner();
+    let inner = pair.into_inner();
 
-    let name = parse_identifier(
-        inner
-            .next()
-            .ok_or_else(|| ParseError::missing("function name"))?,
-    );
-
+    let mut visibility = SurfaceVisibility::Private;
+    let mut name: Option<ephapax_surface::Var> = None;
     let mut params = Vec::new();
     let mut ret_ty = None;
     let mut body = None;
 
     for item in inner {
         match item.as_rule() {
+            Rule::visibility => {
+                visibility = SurfaceVisibility::Public;
+            }
+            Rule::identifier if name.is_none() => {
+                name = Some(parse_identifier(item));
+            }
             Rule::param_list => {
                 for param in item.into_inner() {
                     if param.as_rule() == Rule::param {
@@ -317,7 +353,8 @@ fn parse_fn_decl(pair: pest::iterators::Pair<Rule>) -> Result<SurfaceDecl, Parse
     }
 
     Ok(SurfaceDecl::Fn {
-        name,
+        name: name.ok_or_else(|| ParseError::missing("function name"))?,
+        visibility,
         params,
         ret_ty: ret_ty.unwrap_or(SurfaceTy::Base(BaseTy::Unit)),
         body: body.unwrap_or_else(|| SurfaceExpr::dummy(SurfaceExprKind::Lit(Literal::Unit))),
@@ -325,20 +362,26 @@ fn parse_fn_decl(pair: pest::iterators::Pair<Rule>) -> Result<SurfaceDecl, Parse
 }
 
 fn parse_type_decl(pair: pest::iterators::Pair<Rule>) -> Result<SurfaceDecl, ParseError> {
-    let mut inner = pair.into_inner();
-    let name = parse_identifier(
-        inner
-            .next()
-            .ok_or_else(|| ParseError::missing("type name"))?,
-    );
+    let inner = pair.into_inner();
 
-    let next = inner
-        .next()
-        .ok_or_else(|| ParseError::missing("type definition"))?;
+    let mut visibility = SurfaceVisibility::Private;
+    let mut name: Option<ephapax_surface::Var> = None;
+    let mut ty: Option<SurfaceTy> = None;
 
-    let ty = parse_type(next)?;
+    for item in inner {
+        match item.as_rule() {
+            Rule::visibility => visibility = SurfaceVisibility::Public,
+            Rule::identifier if name.is_none() => name = Some(parse_identifier(item)),
+            Rule::ty if ty.is_none() => ty = Some(parse_type(item)?),
+            _ => {}
+        }
+    }
 
-    Ok(SurfaceDecl::Type { name, ty })
+    Ok(SurfaceDecl::Type {
+        name: name.ok_or_else(|| ParseError::missing("type name"))?,
+        visibility,
+        ty: ty.ok_or_else(|| ParseError::missing("type definition"))?,
+    })
 }
 
 // =========================================================================

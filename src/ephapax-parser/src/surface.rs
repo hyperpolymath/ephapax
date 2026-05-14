@@ -356,6 +356,7 @@ fn parse_expression(pair: pest::iterators::Pair<Rule>) -> Result<SurfaceExpr, Pa
         Rule::seq_expr => parse_seq_expr(inner),
         // Legacy: if expression directly contains a single_expr child
         Rule::single_expr => parse_single_expr(inner),
+        Rule::block_expr => parse_block_expr(inner),
         Rule::let_expr => parse_let_expr(inner),
         Rule::let_lin_expr => parse_let_lin_expr(inner),
         Rule::lambda_expr => parse_lambda_expr(inner),
@@ -425,6 +426,7 @@ fn parse_single_expr(pair: pest::iterators::Pair<Rule>) -> Result<SurfaceExpr, P
         .ok_or_else(|| ParseError::unexpected_end("single expression"))?;
 
     match inner.as_rule() {
+        Rule::block_expr => parse_block_expr(inner),
         Rule::let_expr => parse_let_expr(inner),
         Rule::let_lin_expr => parse_let_lin_expr(inner),
         Rule::lambda_expr => parse_lambda_expr(inner),
@@ -435,6 +437,107 @@ fn parse_single_expr(pair: pest::iterators::Pair<Rule>) -> Result<SurfaceExpr, P
         Rule::or_expr => parse_or_expr(inner),
         _ => Err(ParseError::Syntax {
             message: format!("Unexpected single_expr rule: {:?}", inner.as_rule()),
+            span,
+        }),
+    }
+}
+
+/// Parse an implicit-`in` block: a chain of `let`/`let!` bindings without
+/// trailing `in` followed by a result expression. Folds into nested
+/// `Let` / `LetLin` AST nodes.
+fn parse_block_expr(pair: pest::iterators::Pair<Rule>) -> Result<SurfaceExpr, ParseError> {
+    let span = span_from_pair(&pair);
+    let children: Vec<_> = pair.into_inner().collect();
+
+    // Children: zero or more `sequential_let` pairs, then exactly one final
+    // `expression`. The grammar guarantees `sequential_let+`, so we can
+    // unwrap the trailing expression.
+    let (lets, trailing): (Vec<_>, Vec<_>) = children
+        .into_iter()
+        .partition(|p| p.as_rule() == Rule::sequential_let);
+    let trailing_expr = trailing
+        .into_iter()
+        .find(|p| p.as_rule() == Rule::expression)
+        .ok_or_else(|| ParseError::missing("block trailing expression"))?;
+    let mut body = parse_expression(trailing_expr)?;
+
+    // Fold from the right: the last let wraps the trailing expression as
+    // its body, the previous let wraps that, etc.
+    for stmt in lets.into_iter().rev() {
+        body = parse_sequential_let(stmt, body, span)?;
+    }
+    Ok(body)
+}
+
+/// Parse one `sequential_let` (a `let` / `let!` without trailing `in`)
+/// against an already-parsed body expression. Reuses the tuple-binder
+/// lowering from [`match_arm_from_tuple_binder`].
+fn parse_sequential_let(
+    pair: pest::iterators::Pair<Rule>,
+    body: SurfaceExpr,
+    span: Span,
+) -> Result<SurfaceExpr, ParseError> {
+    // The first token (`let` or `let!`) is consumed by the grammar but
+    // doesn't appear as a Pair — we detect it from the source slice.
+    let src = pair.as_str();
+    let is_linear = src.trim_start().starts_with("let!");
+
+    let mut inner = pair.into_inner();
+    let binder = parse_let_binder(
+        inner
+            .next()
+            .ok_or_else(|| ParseError::missing("sequential let binder"))?,
+    )?;
+
+    let mut ty = None;
+    let mut value = None;
+    for item in inner {
+        match item.as_rule() {
+            Rule::ty if ty.is_none() => ty = Some(parse_type(item)?),
+            Rule::block_rhs if value.is_none() => value = Some(parse_block_rhs(item)?),
+            _ => {}
+        }
+    }
+    let value = value.ok_or_else(|| ParseError::missing("sequential let value"))?;
+
+    Ok(match (binder, is_linear) {
+        (LetBinder::Single(name), false) => SurfaceExpr::new(
+            SurfaceExprKind::Let {
+                name,
+                ty,
+                value: Box::new(value),
+                body: Box::new(body),
+            },
+            span,
+        ),
+        (LetBinder::Single(name), true) => SurfaceExpr::new(
+            SurfaceExprKind::LetLin {
+                name,
+                ty,
+                value: Box::new(value),
+                body: Box::new(body),
+            },
+            span,
+        ),
+        (LetBinder::Tuple(names), _) => match_arm_from_tuple_binder(names, value, body, span),
+    })
+}
+
+fn parse_block_rhs(pair: pest::iterators::Pair<Rule>) -> Result<SurfaceExpr, ParseError> {
+    let span = span_from_pair(&pair);
+    let inner = pair
+        .into_inner()
+        .next()
+        .ok_or_else(|| ParseError::unexpected_end("block rhs"))?;
+    match inner.as_rule() {
+        Rule::lambda_expr => parse_lambda_expr(inner),
+        Rule::if_expr => parse_if_expr(inner),
+        Rule::region_expr => parse_region_expr(inner),
+        Rule::match_expr => parse_match_expr(inner),
+        Rule::case_expr => parse_case_expr(inner),
+        Rule::or_expr => parse_or_expr(inner),
+        other => Err(ParseError::Syntax {
+            message: format!("Unexpected block rhs rule: {:?}", other),
             span,
         }),
     }

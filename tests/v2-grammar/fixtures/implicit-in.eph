@@ -1,0 +1,12 @@
+// SPDX-License-Identifier: PMPL-1.0-or-later
+// Implicit-`in` between sequential `let` bindings. Each `let` / `let!`
+// is followed by another let or by the final expression — no `in`
+// keyword needed. Equivalent to the bridge.eph style.
+
+module hyperpolymath/ephapax/test
+
+fn entry(): I32 =
+  let a = 1
+  let b = 2
+  let c = 3
+  a

@@ -167,9 +167,46 @@ expression = {
 seq_expr = { single_expr ~ (";" ~ single_expr)* }
 
 single_expr = {
-    let_lin_expr
+    // Implicit-`in` block: a chain of `let`/`let!` bindings without `in`
+    // keywords, followed by a final result expression. Each binding's body
+    // is "everything that comes after it inside this block." Tried first so
+    // that bridge-eph-style sequences like
+    //
+    //   let! (ch2, msg_bytes) = ipc_recv(ch)
+    //   let msg: Msg = decode_msg(msg_bytes)
+    //   run(ch2, msg)
+    //
+    // parse without explicit `in` keywords. PEG ordering means the legacy
+    // `let x = e in body` form still works — if the parser sees `in` after
+    // the rhs, this rule fails and `let_expr` (next in the list) succeeds.
+    block_expr
+    | let_lin_expr
     | let_expr
     | lambda_expr
+    | if_expr
+    | region_expr
+    | match_expr
+    | case_expr
+    | handle_expr
+    | or_expr
+}
+
+// One or more `sequential_let`s followed by a trailing result expression.
+// The trailing expression can itself be any `expression` (which folds back
+// through `seq_expr` / `single_expr`), so nested block forms and explicit
+// `let ... in ...` both compose normally.
+block_expr = { sequential_let+ ~ expression }
+
+sequential_let = {
+    ("let!" | "let") ~ let_binder ~ (":" ~ ty)? ~ "=" ~ block_rhs
+}
+
+// A `sequential_let`'s rhs may be any expression form *except* a top-level
+// `let`/`let!` — those participate in the block via the next iteration of
+// `sequential_let`. Parenthesised lets and lets inside lambdas still parse
+// because their parens / lambda contexts route through `expression` again.
+block_rhs = {
+    lambda_expr
     | if_expr
     | region_expr
     | match_expr

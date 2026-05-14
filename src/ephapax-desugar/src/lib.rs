@@ -122,6 +122,12 @@ pub struct DataRegistry {
     constructors: HashMap<SmolStr, ConstructorInfo>,
     /// Data type name → (params, constructors)
     types: HashMap<SmolStr, (Vec<SmolStr>, Vec<ConstructorDef>)>,
+    /// Extern-declared opaque types — `extern "abi" { type Foo }`. They
+    /// have no constructors visible to the surface language; their core
+    /// representation is `I32` (the host runtime treats them as handles
+    /// or pointers). Listed separately from `types` because they don't
+    /// participate in `Construct`/`Match` desugaring.
+    extern_types: HashMap<SmolStr, ()>,
 }
 
 impl DataRegistry {
@@ -151,6 +157,13 @@ impl DataRegistry {
         );
     }
 
+    /// Register an opaque type from an `extern "abi" { type Foo }` block.
+    /// Subsequent `SurfaceTy::Named { name: "Foo" }` references resolve
+    /// to `Ty::Base(BaseTy::I32)` (host handle representation).
+    pub fn register_extern_type(&mut self, name: SmolStr) {
+        self.extern_types.insert(name, ());
+    }
+
     /// Look up a constructor by name.
     fn get_ctor(&self, name: &str) -> Option<&ConstructorInfo> {
         self.constructors.get(name)
@@ -159,6 +172,11 @@ impl DataRegistry {
     /// Get the constructors for a data type (in order).
     fn get_type_ctors(&self, name: &str) -> Option<&(Vec<SmolStr>, Vec<ConstructorDef>)> {
         self.types.get(name)
+    }
+
+    /// `true` if `name` was declared as an extern opaque type.
+    fn is_extern_type(&self, name: &str) -> bool {
+        self.extern_types.contains_key(name)
     }
 }
 
@@ -193,10 +211,20 @@ impl Desugarer {
     /// First pass: collect all data declarations into the registry.
     /// Second pass: desugar all declarations.
     pub fn desugar_module(&mut self, module: &SurfaceModule) -> Result<Module, DesugarError> {
-        // First pass: register all data types
+        // First pass: register all data types AND extern opaque types so
+        // subsequent `desugar_ty` calls (against fn signatures, etc.) can
+        // resolve `Window` / `IpcChannel` / etc. as `I32` handles.
         for decl in &module.decls {
-            if let SurfaceDecl::Data(data) = decl {
-                self.registry.register(data);
+            match decl {
+                SurfaceDecl::Data(data) => self.registry.register(data),
+                SurfaceDecl::Extern(block) => {
+                    for item in &block.items {
+                        if let ephapax_surface::ExternItem::Type(name) = item {
+                            self.registry.register_extern_type(name.clone());
+                        }
+                    }
+                }
+                _ => {}
             }
         }
 
@@ -498,6 +526,47 @@ impl Desugarer {
     /// `Option(I32)` → `() + I32`
     /// `Result(I32, Bool)` → `I32 + Bool`
     fn desugar_named_type(&self, name: &SmolStr, args: &[SurfaceTy]) -> Result<Ty, DesugarError> {
+        // Built-in type aliases that aren't (yet) keywords in the lexer.
+        // `Unit` is the type-position spelling of the literal `()`; bridge.eph
+        // and other ML-adjacent corpora write it freely.
+        if name.as_str() == "Unit" {
+            if !args.is_empty() {
+                return Err(DesugarError::TypeArityMismatch {
+                    name: name.to_string(),
+                    expected: 0,
+                    got: args.len(),
+                });
+            }
+            return Ok(Ty::Base(BaseTy::Unit));
+        }
+        // `Bytes` is the conventional name for a host-managed buffer. Until
+        // the stdlib publishes a real `Bytes` ADT, treat it as an I32 handle
+        // (the wasm host passes pointer/length pairs across `__ffi` calls;
+        // for direct extern-fn signatures the handle alone is enough).
+        if name.as_str() == "Bytes" {
+            if !args.is_empty() {
+                return Err(DesugarError::TypeArityMismatch {
+                    name: name.to_string(),
+                    expected: 0,
+                    got: args.len(),
+                });
+            }
+            return Ok(Ty::Base(BaseTy::I32));
+        }
+
+        // Opaque extern types resolve to `I32` (host handle / pointer).
+        // They take no type arguments — extern types are monomorphic.
+        if self.registry.is_extern_type(name.as_str()) {
+            if !args.is_empty() {
+                return Err(DesugarError::TypeArityMismatch {
+                    name: name.to_string(),
+                    expected: 0,
+                    got: args.len(),
+                });
+            }
+            return Ok(Ty::Base(BaseTy::I32));
+        }
+
         let (params, ctors) = self.registry.get_type_ctors(name.as_str()).ok_or_else(|| {
             DesugarError::UnknownType {
                 name: name.to_string(),

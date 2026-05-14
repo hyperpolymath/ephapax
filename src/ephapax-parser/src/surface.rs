@@ -42,15 +42,24 @@ pub fn parse_surface_module(source: &str, name: &str) -> Result<SurfaceModule, V
         .ok_or_else(|| vec![ParseError::unexpected_end("module")])?;
 
     let mut decls = Vec::new();
+    let mut module_name = SmolStr::new(name);
 
     for inner in pair.into_inner() {
-        if inner.as_rule() == Rule::declaration {
-            decls.push(parse_surface_declaration(inner).map_err(|e| vec![e])?);
+        match inner.as_rule() {
+            Rule::module_decl => {
+                if let Some(qn) = inner.into_inner().next() {
+                    module_name = SmolStr::new(qn.as_str());
+                }
+            }
+            Rule::declaration => {
+                decls.push(parse_surface_declaration(inner).map_err(|e| vec![e])?);
+            }
+            _ => {}
         }
     }
 
     Ok(SurfaceModule {
-        name: SmolStr::new(name),
+        name: module_name,
         decls,
     })
 }
@@ -1570,6 +1579,37 @@ mod tests {
         let source = "let! x = 42 in x";
         let expr = parse_surface_expr(source).unwrap();
         assert!(matches!(expr.kind, SurfaceExprKind::LetLin { .. }));
+    }
+
+    /// Slash-separated module paths (the `hypatia/ui/bridge` shape used by
+    /// downstream consumers) must parse alongside the historical dot form.
+    #[test]
+    fn parse_module_with_slash_path() {
+        let source = "module hypatia/ui/bridge\n\nfn one(): I32 = 1";
+        let module = parse_surface_module(source, "<input>").unwrap();
+        assert_eq!(module.name.as_str(), "hypatia/ui/bridge");
+        assert_eq!(module.decls.len(), 1);
+    }
+
+    /// Dot-separated module paths continue to work — the new rule admits
+    /// both segment separators and the surface walker preserves whichever
+    /// the file used.
+    #[test]
+    fn parse_module_with_dot_path() {
+        let source = "module Foo.Bar.Baz\n\nfn two(): I32 = 2";
+        let module = parse_surface_module(source, "<input>").unwrap();
+        assert_eq!(module.name.as_str(), "Foo.Bar.Baz");
+        assert_eq!(module.decls.len(), 1);
+    }
+
+    /// When the source has no `module` decl the surface walker falls back
+    /// to the filename passed in, matching the pre-refactor behaviour.
+    #[test]
+    fn parse_module_without_decl_uses_filename() {
+        let source = "fn three(): I32 = 3";
+        let module = parse_surface_module(source, "fallback-name").unwrap();
+        assert_eq!(module.name.as_str(), "fallback-name");
+        assert_eq!(module.decls.len(), 1);
     }
 
     #[test]

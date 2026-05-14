@@ -19,8 +19,8 @@
 pub mod discipline;
 
 use ephapax_syntax::{
-    BaseTy, BinOp, Decl, Expr, ExprKind, Literal, Module, RegionName, Span, Ty, UnaryOp, Var,
-    Visibility,
+    BaseTy, BinOp, Decl, Expr, ExprKind, ExternItem, Literal, Module, RegionName, Span, Ty,
+    UnaryOp, Var, Visibility,
 };
 use std::collections::HashMap;
 use std::fmt;
@@ -1369,12 +1369,33 @@ impl ModuleRegistry {
                     let const_ty = ty.clone().unwrap_or(Ty::Base(BaseTy::Unit));
                     entries.push((name.clone(), const_ty, Visibility::Private));
                 }
-                // TODO(ephapax#43 phase 2B): register extern items as
-                // ambient bindings — extern types become opaque nominal
-                // types, extern fns get their declared signature in the
-                // module env. For phase 2A we accept the declaration
-                // syntactically but don't expose it through the registry.
-                Decl::Extern { .. } => {}
+                // Cross-module export of extern fn signatures. Extern
+                // type items are nominal — they exist in the type
+                // namespace, not the value namespace, so they have no
+                // entry here. Extern fns are exposed publicly so a
+                // dependent module that imports this one sees the same
+                // signatures the local code sees. Wired in phase 2B-i
+                // alongside the local type-environment registration in
+                // `type_check_module_inner`.
+                Decl::Extern { items, .. } => {
+                    for item in items {
+                        if let ExternItem::Fn {
+                            name,
+                            params,
+                            ret_ty,
+                        } = item
+                        {
+                            let fn_ty = params.iter().rev().fold(
+                                ret_ty.clone(),
+                                |acc, (_, param_ty)| Ty::Fun {
+                                    param: Box::new(param_ty.clone()),
+                                    ret: Box::new(acc),
+                                },
+                            );
+                            entries.push((name.clone(), fn_ty, Visibility::Public));
+                        }
+                    }
+                }
             }
         }
         self.modules.insert(module.name.clone(), entries);
@@ -1457,28 +1478,62 @@ fn type_check_module_inner(
     tc: &mut TypeChecker,
     module: &Module,
 ) -> Result<(), SpannedTypeError> {
-    // First pass: collect all function signatures
+    // First pass: collect all function signatures (regular + extern)
     for decl in &module.decls {
-        if let Decl::Fn {
-            name,
-            params,
-            ret_ty,
-            type_params,
-            ..
-        } = decl
-        {
-            let fn_ty = params
-                .iter()
-                .rev()
-                .fold(ret_ty.clone(), |acc, (_, param_ty)| Ty::Fun {
-                    param: Box::new(param_ty.clone()),
-                    ret: Box::new(acc),
+        match decl {
+            Decl::Fn {
+                name,
+                params,
+                ret_ty,
+                type_params,
+                ..
+            } => {
+                let fn_ty =
+                    params
+                        .iter()
+                        .rev()
+                        .fold(ret_ty.clone(), |acc, (_, param_ty)| Ty::Fun {
+                            param: Box::new(param_ty.clone()),
+                            ret: Box::new(acc),
+                        });
+                let poly_ty = type_params.iter().rev().fold(fn_ty, |acc, tv| Ty::ForAll {
+                    var: tv.clone(),
+                    body: Box::new(acc),
                 });
-            let poly_ty = type_params.iter().rev().fold(fn_ty, |acc, tv| Ty::ForAll {
-                var: tv.clone(),
-                body: Box::new(acc),
-            });
-            tc.ctx.extend(name.clone(), poly_ty, BindingForm::Let);
+                tc.ctx.extend(name.clone(), poly_ty, BindingForm::Let);
+            }
+            // Extern fn items are registered as ambient bindings with
+            // their declared signatures so regular fn bodies that call
+            // them type-check. Extern type items are nominal (resolved
+            // by the desugar pass to `Ty::Var`) and need no binding
+            // entry here — they exist in the type namespace, not the
+            // value namespace.
+            //
+            // Phase 2B-ii will wire wasm codegen to emit `(import …)`
+            // directives for each extern fn item and route call sites
+            // to the import index. Until then the binding type-checks
+            // but the generated wasm has no actual import — the
+            // declaration is observed but not yet honoured by codegen.
+            Decl::Extern { items, .. } => {
+                for item in items {
+                    if let ExternItem::Fn {
+                        name,
+                        params,
+                        ret_ty,
+                    } = item
+                    {
+                        let fn_ty = params.iter().rev().fold(
+                            ret_ty.clone(),
+                            |acc, (_, param_ty)| Ty::Fun {
+                                param: Box::new(param_ty.clone()),
+                                ret: Box::new(acc),
+                            },
+                        );
+                        tc.ctx.extend(name.clone(), fn_ty, BindingForm::Let);
+                    }
+                }
+            }
+            _ => {}
         }
     }
 
@@ -2604,5 +2659,158 @@ mod tests {
         let mut registry = ModuleRegistry::new();
         type_check_module_with_registry(&lib_module, &mut registry).unwrap();
         type_check_module_with_registry(&main_module, &mut registry).unwrap();
+    }
+
+    // =========================================================================
+    // Extern blocks (#43 phase 2B-i)
+    // =========================================================================
+    //
+    // These tests cover the typechecker's handling of `extern "abi" {
+    // ... }` declarations: extern types are registered as nominal
+    // opaque types (resolved by the desugar pass to `Ty::Var(name)`),
+    // and extern fn signatures are added to the type environment so
+    // regular fn bodies can call them.
+
+    /// A module with an extern block + a regular fn that returns an
+    /// extern fn's value type-checks successfully. The extern fn is
+    /// nullary (`open_handle(): Window`) so its type is just
+    /// `Ty::Var("Window")` after the signature fold — referencing it
+    /// directly in the body should produce that opaque type.
+    #[test]
+    fn typecheck_extern_nullary_fn_callable() {
+        // extern "gossamer" { fn open_handle(): Window }
+        // fn entry(): Window = open_handle
+        let module = Module {
+            name: "test".into(),
+            imports: vec![],
+            decls: vec![
+                Decl::Extern {
+                    abi: "gossamer".to_string(),
+                    items: vec![ExternItem::Fn {
+                        name: "open_handle".into(),
+                        params: vec![],
+                        ret_ty: Ty::Var("Window".into()),
+                    }],
+                },
+                Decl::Fn {
+                    name: "entry".into(),
+                    visibility: Visibility::Private,
+                    type_params: vec![],
+                    params: vec![],
+                    ret_ty: Ty::Var("Window".into()),
+                    body: Expr::dummy(ExprKind::Var("open_handle".into())),
+                },
+            ],
+        };
+
+        type_check_module(&module).expect("extern reference should type-check");
+    }
+
+    /// A unary extern fn called with the correct argument type-checks;
+    /// the result flows back through the regular fn's return.
+    #[test]
+    fn typecheck_extern_unary_fn_applied() {
+        // extern "gossamer" { fn open(h: I32): Window }
+        // fn entry(): Window = open(7)
+        let module = Module {
+            name: "test".into(),
+            imports: vec![],
+            decls: vec![
+                Decl::Extern {
+                    abi: "gossamer".to_string(),
+                    items: vec![ExternItem::Fn {
+                        name: "open".into(),
+                        params: vec![("h".into(), Ty::Base(BaseTy::I32))],
+                        ret_ty: Ty::Var("Window".into()),
+                    }],
+                },
+                Decl::Fn {
+                    name: "entry".into(),
+                    visibility: Visibility::Private,
+                    type_params: vec![],
+                    params: vec![],
+                    ret_ty: Ty::Var("Window".into()),
+                    body: Expr::dummy(ExprKind::App {
+                        func: Box::new(Expr::dummy(ExprKind::Var("open".into()))),
+                        arg: Box::new(Expr::dummy(ExprKind::Lit(Literal::I32(7)))),
+                    }),
+                },
+            ],
+        };
+
+        type_check_module(&module).expect("unary extern call should type-check");
+    }
+
+    /// Calling an extern fn with the wrong argument type is rejected.
+    /// Here the extern signature is `(I32) -> Window`, but the call
+    /// passes a `Bool` — must surface as a typing error rather than
+    /// silently succeed.
+    #[test]
+    fn typecheck_extern_fn_arg_mismatch_rejected() {
+        let module = Module {
+            name: "test".into(),
+            imports: vec![],
+            decls: vec![
+                Decl::Extern {
+                    abi: "gossamer".to_string(),
+                    items: vec![ExternItem::Fn {
+                        name: "open".into(),
+                        params: vec![("h".into(), Ty::Base(BaseTy::I32))],
+                        ret_ty: Ty::Var("Window".into()),
+                    }],
+                },
+                Decl::Fn {
+                    name: "entry".into(),
+                    visibility: Visibility::Private,
+                    type_params: vec![],
+                    params: vec![],
+                    ret_ty: Ty::Var("Window".into()),
+                    body: Expr::dummy(ExprKind::App {
+                        func: Box::new(Expr::dummy(ExprKind::Var("open".into()))),
+                        arg: Box::new(Expr::dummy(ExprKind::Lit(Literal::Bool(true)))),
+                    }),
+                },
+            ],
+        };
+
+        assert!(
+            type_check_module(&module).is_err(),
+            "passing Bool to a fn expecting I32 must fail"
+        );
+    }
+
+    /// Two distinct extern types are nominal — they do not unify with
+    /// each other or with base types. `Window` and `IpcChannel` are
+    /// both `Ty::Var(name)` rigid types from the type checker's view;
+    /// declaring `entry: Window` but returning `IpcChannel` must fail.
+    #[test]
+    fn typecheck_distinct_extern_types_do_not_unify() {
+        let module = Module {
+            name: "test".into(),
+            imports: vec![],
+            decls: vec![
+                Decl::Extern {
+                    abi: "gossamer".to_string(),
+                    items: vec![ExternItem::Fn {
+                        name: "open_ipc".into(),
+                        params: vec![],
+                        ret_ty: Ty::Var("IpcChannel".into()),
+                    }],
+                },
+                Decl::Fn {
+                    name: "entry".into(),
+                    visibility: Visibility::Private,
+                    type_params: vec![],
+                    params: vec![],
+                    ret_ty: Ty::Var("Window".into()),
+                    body: Expr::dummy(ExprKind::Var("open_ipc".into())),
+                },
+            ],
+        };
+
+        assert!(
+            type_check_module(&module).is_err(),
+            "Ty::Var(\"IpcChannel\") must not unify with Ty::Var(\"Window\")"
+        );
     }
 }

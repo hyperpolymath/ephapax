@@ -50,7 +50,7 @@ pub use debug::{DebugInfo, VariableMetadata};
 
 use ephapax_ir::module_from_sexpr;
 use ephapax_syntax::{
-    BaseTy, BinOp, Decl, Expr, ExprKind, Literal, Module as AstModule, Ty, UnaryOp,
+    BaseTy, BinOp, Decl, Expr, ExprKind, ExternItem, Literal, Module as AstModule, Ty, UnaryOp,
 };
 use std::collections::HashMap;
 use wasm_encoder::{
@@ -76,31 +76,41 @@ pub const INITIAL_PAGES: u64 = 1;
 pub const MAX_PAGES: u64 = 256;
 
 // ---------------------------------------------------------------------------
-// Fixed function indices -- these are *after* the 2 host imports.
+// Function indices — DYNAMIC since v2-grammar phase 2B-ii (#43).
 // ---------------------------------------------------------------------------
+//
+// Wasm function indices are determined by emission order: the import
+// section is consumed first, then the function section. When the module
+// includes `extern "abi" { fn ... }` blocks, each fn item becomes a
+// wasm import — which means the runtime helpers and user fns shift
+// down by the number of extern imports.
+//
+// The constants below capture the *static* parts: the number of host
+// imports we always emit (`NUM_BUILTIN_IMPORTS`), the per-helper offsets
+// inside the runtime helper block (`OFFSET_*`), and the runtime helper
+// count (`NUM_RUNTIME_FNS`). The runtime *index* of each helper is then
+// `self.import_count() + OFFSET_*`, where `import_count` is
+// `NUM_BUILTIN_IMPORTS + extern_imports.len()` for module compiles, or
+// just `NUM_BUILTIN_IMPORTS` for the standalone-expression path.
 
-/// Number of host imports (print_i32, print_string)
-const NUM_IMPORTS: u32 = 2;
+/// Number of always-on host imports (print_i32, print_string).
+const NUM_BUILTIN_IMPORTS: u32 = 2;
 
-/// Indices of the built-in runtime helpers (2..11 inclusive)
-const FN_BUMP_ALLOC: u32 = 2;
-const FN_STRING_NEW: u32 = 3;
-const FN_STRING_LEN: u32 = 4;
-const FN_STRING_CONCAT: u32 = 5;
-const FN_STRING_DROP: u32 = 6;
-const FN_REGION_ENTER: u32 = 7;
-const FN_REGION_EXIT: u32 = 8;
-/// Alias for bump allocation within the current region.
-const FN_REGION_ALLOC: u32 = FN_BUMP_ALLOC;
-const FN_LIST_NEW: u32 = 9;
-const FN_LIST_APPEND: u32 = 10;
-const FN_LIST_GET: u32 = 11;
+/// Offsets of the built-in runtime helpers inside the helper block.
+/// The wasm function index = `self.import_count() + OFFSET_*`.
+const OFFSET_BUMP_ALLOC: u32 = 0;
+const OFFSET_STRING_NEW: u32 = 1;
+const OFFSET_STRING_LEN: u32 = 2;
+const OFFSET_STRING_CONCAT: u32 = 3;
+const OFFSET_STRING_DROP: u32 = 4;
+const OFFSET_REGION_ENTER: u32 = 5;
+const OFFSET_REGION_EXIT: u32 = 6;
+const OFFSET_LIST_NEW: u32 = 7;
+const OFFSET_LIST_APPEND: u32 = 8;
+const OFFSET_LIST_GET: u32 = 9;
 
-/// Number of runtime helper functions
+/// Number of runtime helper functions emitted in the code section.
 const NUM_RUNTIME_FNS: u32 = 10;
-
-/// First user function index
-const FIRST_USER_FN: u32 = NUM_IMPORTS + NUM_RUNTIME_FNS; // 12
 
 // ---------------------------------------------------------------------------
 // Well-known WASM type indices
@@ -288,6 +298,36 @@ pub struct Codegen {
     /// Next available function index for imports.
     /// Starts after the built-in function indices.
     next_import_idx: u32,
+
+    /// Imports declared via `extern "abi" { ... }` blocks. Populated by
+    /// `collect_extern_imports` before user-fn collection so the
+    /// runtime helper and user-fn indices can be shifted past them.
+    /// Order = emission order in the import section.
+    extern_imports: Vec<ExternImport>,
+
+    /// Lookup: extern fn name -> wasm function index.
+    /// `compile_expr` consults this to resolve `Var(name)` references
+    /// that come from extern blocks; calls become `Call(idx)` into the
+    /// import.
+    extern_fn_indices: HashMap<String, u32>,
+
+    /// Names of extern types declared in the AST. Used only as a
+    /// presence check during typecheck-style queries; the wasm layer
+    /// itself treats extern types as opaque i32 handles.
+    #[allow(dead_code)]
+    extern_type_names: std::collections::HashSet<String>,
+}
+
+/// A single extern fn declaration captured during AST scanning, ready
+/// to be emitted as a wasm `(import "<abi>" "<name>" (func ...))`.
+#[derive(Debug, Clone)]
+struct ExternImport {
+    /// ABI / module name, e.g. `"gossamer"`.
+    abi: String,
+    /// Function name as declared in the source.
+    name: String,
+    /// Wasm type-section index for this function's signature.
+    wasm_type_idx: u32,
 }
 
 /// Information about a compiled lambda
@@ -340,7 +380,65 @@ impl Codegen {
             optimize_closures: false,
             ffi_imports: HashMap::new(),
             next_import_idx: 100, // Start after built-in function indices
+            extern_imports: Vec::new(),
+            extern_fn_indices: HashMap::new(),
+            extern_type_names: std::collections::HashSet::new(),
         }
+    }
+
+    // -----------------------------------------------------------------------
+    // Dynamic function indices (phase 2B-ii of #43)
+    //
+    // The runtime helpers and user fns live AFTER all imports in the
+    // wasm function index space. `import_count()` returns the total
+    // number of imports we emit, so every helper / user fn index is
+    // `import_count() + OFFSET_*`.
+    // -----------------------------------------------------------------------
+
+    /// Total number of imports the module emits: builtins + extern.
+    /// FFI imports are NOT yet included — see the phase-2C note in
+    /// `ensure_ffi_import`.
+    fn import_count(&self) -> u32 {
+        NUM_BUILTIN_IMPORTS + self.extern_imports.len() as u32
+    }
+
+    fn fn_bump_alloc(&self) -> u32 {
+        self.import_count() + OFFSET_BUMP_ALLOC
+    }
+    fn fn_string_new(&self) -> u32 {
+        self.import_count() + OFFSET_STRING_NEW
+    }
+    fn fn_string_len(&self) -> u32 {
+        self.import_count() + OFFSET_STRING_LEN
+    }
+    fn fn_string_concat(&self) -> u32 {
+        self.import_count() + OFFSET_STRING_CONCAT
+    }
+    fn fn_string_drop(&self) -> u32 {
+        self.import_count() + OFFSET_STRING_DROP
+    }
+    fn fn_region_enter(&self) -> u32 {
+        self.import_count() + OFFSET_REGION_ENTER
+    }
+    fn fn_region_exit(&self) -> u32 {
+        self.import_count() + OFFSET_REGION_EXIT
+    }
+    fn fn_list_new(&self) -> u32 {
+        self.import_count() + OFFSET_LIST_NEW
+    }
+    fn fn_list_append(&self) -> u32 {
+        self.import_count() + OFFSET_LIST_APPEND
+    }
+    fn fn_list_get(&self) -> u32 {
+        self.import_count() + OFFSET_LIST_GET
+    }
+    /// Region allocation aliases bump-allocation today.
+    fn fn_region_alloc(&self) -> u32 {
+        self.fn_bump_alloc()
+    }
+    /// First user-defined fn index, after imports and runtime helpers.
+    fn first_user_fn(&self) -> u32 {
+        self.import_count() + NUM_RUNTIME_FNS
     }
 
     /// Register an FFI symbol as a WASM import from the "env" module.
@@ -424,7 +522,7 @@ impl Codegen {
         self.user_fns.insert(
             "main".into(),
             UserFnInfo {
-                wasm_fn_idx: FIRST_USER_FN,
+                wasm_fn_idx: self.first_user_fn(),
                 wasm_type_idx: TYPE_VOID_VOID,
                 param_names: Vec::new(),
                 param_linear: Vec::new(),
@@ -436,7 +534,7 @@ impl Codegen {
         let mut code_sec = CodeSection::new();
         self.append_runtime_funcs(&mut func_sec, &mut code_sec);
 
-        // Main function (index FIRST_USER_FN)
+        // Main function (index self.first_user_fn())
         func_sec.function(TYPE_VOID_VOID);
         self.locals = LocalTracker::new(0);
         let mut main_func = Function::new(vec![(16, ValType::I32)]);
@@ -456,7 +554,7 @@ impl Codegen {
 
         let mut exports = ExportSection::new();
         self.add_runtime_exports(&mut exports);
-        exports.export("main", ExportKind::Func, FIRST_USER_FN);
+        exports.export("main", ExportKind::Func, self.first_user_fn());
         self.module.section(&exports);
 
         self.emit_elements();
@@ -480,6 +578,10 @@ impl Codegen {
     /// 3. If a `main` function exists, exports it.
     pub fn compile_ast_module(&mut self, ast: &AstModule) -> Result<Vec<u8>, CodegenError> {
         // ----- Phase 1: collect function metadata --------------------------
+        // Extern imports MUST be collected first so the import_count
+        // is correct before any runtime helper or user fn indices are
+        // assigned. See phase 2B-ii of #43.
+        self.collect_extern_imports(ast);
         self.collect_user_fns(ast)?;
 
         // ----- Phase 2: emit sections --------------------------------------
@@ -529,7 +631,7 @@ impl Codegen {
 
         self.append_runtime_funcs(&mut func_sec, &mut code_sec);
 
-        // Main function (index FIRST_USER_FN)
+        // Main function (index self.first_user_fn())
         func_sec.function(TYPE_VOID_VOID);
 
         self.locals = LocalTracker::new(0);
@@ -549,7 +651,7 @@ impl Codegen {
 
         let mut exports = ExportSection::new();
         self.add_runtime_exports(&mut exports);
-        exports.export("main", ExportKind::Func, FIRST_USER_FN);
+        exports.export("main", ExportKind::Func, self.first_user_fn());
         self.module.section(&exports);
 
         self.emit_elements();
@@ -564,7 +666,7 @@ impl Codegen {
     // -----------------------------------------------------------------------
 
     fn collect_user_fns(&mut self, ast: &AstModule) -> Result<(), CodegenError> {
-        let mut idx = FIRST_USER_FN;
+        let mut idx = self.first_user_fn();
         for decl in &ast.decls {
             match decl {
                 Decl::Fn {
@@ -696,7 +798,68 @@ impl Codegen {
             "print_string",
             wasm_encoder::EntityType::Function(TYPE_I32_I32_VOID),
         );
+        // Imports 2..: extern fn declarations from
+        // `extern "abi" { fn name(...): ret }` blocks. Emission order
+        // matches `collect_extern_imports` registration order so the
+        // index recorded in `extern_fn_indices` matches the actual
+        // wasm import slot. Phase 2B-ii of #43.
+        for info in &self.extern_imports {
+            imports.import(
+                &info.abi,
+                &info.name,
+                wasm_encoder::EntityType::Function(info.wasm_type_idx),
+            );
+        }
         self.module.section(&imports);
+    }
+
+    /// Walk the AST for `Decl::Extern` items, register each fn item's
+    /// wasm type, and record its import index. Must run BEFORE
+    /// `collect_user_fns` so the runtime helper and user fn indices
+    /// shift correctly past the extern imports. Type items declare
+    /// nominal opaques and need no wasm-level representation; they're
+    /// recorded for diagnostic completeness only.
+    fn collect_extern_imports(&mut self, ast: &AstModule) {
+        for decl in &ast.decls {
+            if let Decl::Extern { abi, items } = decl {
+                for item in items {
+                    match item {
+                        ExternItem::Type { name } => {
+                            self.extern_type_names.insert(name.to_string());
+                        }
+                        ExternItem::Fn {
+                            name,
+                            params,
+                            ret_ty,
+                        } => {
+                            let wasm_params: Vec<ValType> =
+                                params.iter().map(|(_, ty)| ty_to_valtype(ty)).collect();
+                            let wasm_results = if matches!(ret_ty, Ty::Base(BaseTy::Unit)) {
+                                vec![]
+                            } else {
+                                vec![ty_to_valtype(ret_ty)]
+                            };
+                            let type_idx = self.register_type(wasm_params, wasm_results);
+
+                            // The wasm import index for this fn is its
+                            // position among ALL imports: builtin host
+                            // imports occupy 0..NUM_BUILTIN_IMPORTS,
+                            // then this extern fn takes the next slot.
+                            let import_idx =
+                                NUM_BUILTIN_IMPORTS + self.extern_imports.len() as u32;
+
+                            self.extern_imports.push(ExternImport {
+                                abi: abi.clone(),
+                                name: name.to_string(),
+                                wasm_type_idx: type_idx,
+                            });
+                            self.extern_fn_indices
+                                .insert(name.to_string(), import_idx);
+                        }
+                    }
+                }
+            }
+        }
     }
 
     fn emit_memory(&mut self) {
@@ -1001,17 +1164,17 @@ impl Codegen {
     }
 
     fn add_runtime_exports(&self, exports: &mut ExportSection) {
-        exports.export("__ephapax_bump_alloc", ExportKind::Func, FN_BUMP_ALLOC);
-        exports.export("__ephapax_string_new", ExportKind::Func, FN_STRING_NEW);
-        exports.export("__ephapax_string_len", ExportKind::Func, FN_STRING_LEN);
+        exports.export("__ephapax_bump_alloc", ExportKind::Func, self.fn_bump_alloc());
+        exports.export("__ephapax_string_new", ExportKind::Func, self.fn_string_new());
+        exports.export("__ephapax_string_len", ExportKind::Func, self.fn_string_len());
         exports.export(
             "__ephapax_string_concat",
             ExportKind::Func,
-            FN_STRING_CONCAT,
+            self.fn_string_concat(),
         );
-        exports.export("__ephapax_string_drop", ExportKind::Func, FN_STRING_DROP);
-        exports.export("__ephapax_region_enter", ExportKind::Func, FN_REGION_ENTER);
-        exports.export("__ephapax_region_exit", ExportKind::Func, FN_REGION_EXIT);
+        exports.export("__ephapax_string_drop", ExportKind::Func, self.fn_string_drop());
+        exports.export("__ephapax_region_enter", ExportKind::Func, self.fn_region_enter());
+        exports.export("__ephapax_region_exit", ExportKind::Func, self.fn_region_exit());
         exports.export("memory", ExportKind::Memory, 0);
     }
 
@@ -1082,7 +1245,7 @@ impl Codegen {
         // Allocate 8-byte header
         f.instruction(&Instruction::I32Const(STRING_SIZE as i32));
         f.instruction(&Instruction::I32Const(0));
-        f.instruction(&Instruction::Call(FN_BUMP_ALLOC));
+        f.instruction(&Instruction::Call(self.fn_bump_alloc()));
         f.instruction(&Instruction::LocalSet(2));
 
         // Store ptr at handle+0
@@ -1144,7 +1307,7 @@ impl Codegen {
         f.instruction(&Instruction::LocalGet(5));
         f.instruction(&Instruction::I32Add);
         f.instruction(&Instruction::I32Const(0));
-        f.instruction(&Instruction::Call(FN_BUMP_ALLOC));
+        f.instruction(&Instruction::Call(self.fn_bump_alloc()));
         f.instruction(&Instruction::LocalSet(6));
 
         // memory.copy(new_ptr, ptr1, len1)
@@ -1170,7 +1333,7 @@ impl Codegen {
         // Allocate new handle
         f.instruction(&Instruction::I32Const(STRING_SIZE as i32));
         f.instruction(&Instruction::I32Const(0));
-        f.instruction(&Instruction::Call(FN_BUMP_ALLOC));
+        f.instruction(&Instruction::Call(self.fn_bump_alloc()));
         f.instruction(&Instruction::LocalSet(7));
 
         // Store ptr
@@ -1270,7 +1433,7 @@ impl Codegen {
 
         // Allocate memory
         f.instruction(&Instruction::I32Const(0)); // align param (unused)
-        f.instruction(&Instruction::Call(FN_BUMP_ALLOC));
+        f.instruction(&Instruction::Call(self.fn_bump_alloc()));
         f.instruction(&Instruction::LocalSet(1)); // handle
 
         // Store capacity at handle+0
@@ -1317,7 +1480,7 @@ impl Codegen {
         f.instruction(&Instruction::LocalGet(2));
         f.instruction(&Instruction::I32Const(2));
         f.instruction(&Instruction::I32Mul); // new_capacity = capacity * 2
-        f.instruction(&Instruction::Call(FN_LIST_NEW));
+        f.instruction(&Instruction::Call(self.fn_list_new()));
         f.instruction(&Instruction::LocalSet(4)); // new_handle
 
         // Copy existing elements from old handle to new handle.
@@ -1558,18 +1721,18 @@ impl Codegen {
         let (ptr, len) = self.add_string_literal(value);
         func.instruction(&Instruction::I32Const(ptr as i32));
         func.instruction(&Instruction::I32Const(len as i32));
-        func.instruction(&Instruction::Call(FN_STRING_NEW));
+        func.instruction(&Instruction::Call(self.fn_string_new()));
     }
 
     fn compile_string_concat(&mut self, func: &mut Function, left: &Expr, right: &Expr) {
         self.compile_expr(func, left);
         self.compile_expr(func, right);
-        func.instruction(&Instruction::Call(FN_STRING_CONCAT));
+        func.instruction(&Instruction::Call(self.fn_string_concat()));
     }
 
     fn compile_string_len(&mut self, func: &mut Function, inner: &Expr) {
         self.compile_expr(func, inner);
-        func.instruction(&Instruction::Call(FN_STRING_LEN));
+        func.instruction(&Instruction::Call(self.fn_string_len()));
     }
 
     fn compile_let(
@@ -1760,9 +1923,10 @@ impl Codegen {
         // 2. Lambda functions take (env_ptr, param) -> result
         let lambda_type_idx = TYPE_CLOSURE_CALL;
 
-        // 3. Calculate function index for this lambda
-        let lambda_fn_idx = NUM_IMPORTS
-            + NUM_RUNTIME_FNS
+        // 3. Calculate function index for this lambda. Lambdas live
+        // after the first user fn block, shifted forward by any
+        // dynamic imports (extern / FFI) registered earlier.
+        let lambda_fn_idx = self.first_user_fn()
             + self.user_fns.len() as u32
             + self.lambda_fns.len() as u32;
 
@@ -1791,7 +1955,7 @@ impl Codegen {
         // Allocate env block via bump allocator
         func.instruction(&Instruction::I32Const(env_size as i32));
         func.instruction(&Instruction::I32Const(0)); // alignment
-        func.instruction(&Instruction::Call(FN_BUMP_ALLOC));
+        func.instruction(&Instruction::Call(self.fn_bump_alloc()));
 
         let env_local = self.locals.temp();
         func.instruction(&Instruction::LocalSet(env_local));
@@ -1812,7 +1976,7 @@ impl Codegen {
         // 7. Allocate closure cell: (table_idx: i32, env_ptr: i32)
         func.instruction(&Instruction::I32Const(CLOSURE_SIZE as i32));
         func.instruction(&Instruction::I32Const(0)); // alignment
-        func.instruction(&Instruction::Call(FN_BUMP_ALLOC));
+        func.instruction(&Instruction::Call(self.fn_bump_alloc()));
 
         let closure_local = self.locals.temp();
         func.instruction(&Instruction::LocalTee(closure_local));
@@ -1831,12 +1995,29 @@ impl Codegen {
     }
 
     fn compile_app(&mut self, func: &mut Function, fn_expr: &Expr, arg: &Expr) {
-        // Check if the function expression is a named function we know about.
-        if let ExprKind::Var(name) = &fn_expr.kind {
-            if let Some(info) = self.user_fns.get(name.as_str()).cloned() {
-                // Direct call to a known function
-                self.compile_expr(func, arg);
-                func.instruction(&Instruction::Call(info.wasm_fn_idx));
+        // Try to recognise the head of a curried call chain:
+        //   `f(a, b, c)` parses to `App(App(App(f, a), b), c)`.
+        // If the head is a user fn name (with arity 1) or an extern
+        // import (any arity), emit a direct `Call` with the args
+        // pushed in order. Multi-arg user fns currently fall through
+        // to the indirect closure path below to preserve existing
+        // behaviour — that path can be promoted to direct calls later.
+        if let Some((head, args)) = flatten_app_chain(fn_expr, arg) {
+            if args.len() == 1 {
+                if let Some(info) = self.user_fns.get(head).cloned() {
+                    self.compile_expr(func, args[0]);
+                    func.instruction(&Instruction::Call(info.wasm_fn_idx));
+                    return;
+                }
+            }
+            // Direct call to an extern import (phase 2B-ii of #43).
+            // Extern fns are wasm imports — their index lives in
+            // `extern_fn_indices` after `collect_extern_imports` runs.
+            if let Some(&import_idx) = self.extern_fn_indices.get(head) {
+                for a in args {
+                    self.compile_expr(func, a);
+                }
+                func.instruction(&Instruction::Call(import_idx));
                 return;
             }
         }
@@ -1880,7 +2061,7 @@ impl Codegen {
         // Allocate 8 bytes for pair (2 x i32)
         func.instruction(&Instruction::I32Const(8));
         func.instruction(&Instruction::I32Const(0));
-        func.instruction(&Instruction::Call(FN_BUMP_ALLOC));
+        func.instruction(&Instruction::Call(self.fn_bump_alloc()));
 
         let pair_local = self.locals.temp();
         func.instruction(&Instruction::LocalTee(pair_local));
@@ -1912,7 +2093,7 @@ impl Codegen {
         // Sum types: tag (i32) + value (i32) = 8 bytes
         func.instruction(&Instruction::I32Const(8));
         func.instruction(&Instruction::I32Const(0));
-        func.instruction(&Instruction::Call(FN_BUMP_ALLOC));
+        func.instruction(&Instruction::Call(self.fn_bump_alloc()));
 
         let sum_local = self.locals.temp();
         func.instruction(&Instruction::LocalTee(sum_local));
@@ -1932,7 +2113,7 @@ impl Codegen {
     fn compile_inr(&mut self, func: &mut Function, value: &Expr) {
         func.instruction(&Instruction::I32Const(8));
         func.instruction(&Instruction::I32Const(0));
-        func.instruction(&Instruction::Call(FN_BUMP_ALLOC));
+        func.instruction(&Instruction::Call(self.fn_bump_alloc()));
 
         let sum_local = self.locals.temp();
         func.instruction(&Instruction::LocalTee(sum_local));
@@ -2008,9 +2189,9 @@ impl Codegen {
     }
 
     fn compile_region(&mut self, func: &mut Function, body: &Expr) {
-        func.instruction(&Instruction::Call(FN_REGION_ENTER));
+        func.instruction(&Instruction::Call(self.fn_region_enter()));
         self.compile_expr(func, body);
-        func.instruction(&Instruction::Call(FN_REGION_EXIT));
+        func.instruction(&Instruction::Call(self.fn_region_exit()));
     }
 
     fn compile_copy(&mut self, func: &mut Function, inner: &Expr) {
@@ -2021,7 +2202,7 @@ impl Codegen {
         // Allocate pair (8 bytes) and store value twice
         func.instruction(&Instruction::I32Const(8));
         func.instruction(&Instruction::I32Const(0));
-        func.instruction(&Instruction::Call(FN_BUMP_ALLOC));
+        func.instruction(&Instruction::Call(self.fn_bump_alloc()));
 
         let pair_local = self.locals.temp();
         func.instruction(&Instruction::LocalSet(pair_local)); // save pair ptr
@@ -2094,7 +2275,7 @@ impl Codegen {
         // Create list with capacity = length
         let capacity = elements.len() as i32;
         func.instruction(&Instruction::I32Const(capacity));
-        func.instruction(&Instruction::Call(FN_LIST_NEW));
+        func.instruction(&Instruction::Call(self.fn_list_new()));
 
         // list_new returns handle on stack
         // For each element: dup handle, append element, drop status, keep new handle
@@ -2106,7 +2287,7 @@ impl Codegen {
             self.compile_expr(func, elem);
 
             // Call list_append (consumes handle + element, returns new handle)
-            func.instruction(&Instruction::Call(FN_LIST_APPEND));
+            func.instruction(&Instruction::Call(self.fn_list_append()));
 
             // list_append returns new handle on stack
         }
@@ -2122,7 +2303,7 @@ impl Codegen {
         self.compile_expr(func, index);
 
         // Call list_get(handle, idx) -> element
-        func.instruction(&Instruction::Call(FN_LIST_GET));
+        func.instruction(&Instruction::Call(self.fn_list_get()));
     }
 
     fn compile_tuple_lit(&mut self, func: &mut Function, elements: &[Expr]) {
@@ -2152,7 +2333,7 @@ impl Codegen {
             // Large tuples: allocate in memory (8 bytes per element + 4 header)
             let size = 4 + (elements.len() as i32) * 8;
             func.instruction(&Instruction::I32Const(size));
-            func.instruction(&Instruction::Call(FN_REGION_ALLOC));
+            func.instruction(&Instruction::Call(self.fn_region_alloc()));
             // Store count header
             func.instruction(&Instruction::LocalTee(self.locals.scratch_local()));
             func.instruction(&Instruction::I32Const(elements.len() as i32));
@@ -2213,7 +2394,7 @@ impl Codegen {
 
         self.append_runtime_funcs(&mut func_sec, &mut code_sec);
 
-        // Main function (index FIRST_USER_FN = 9)
+        // Main function (index self.first_user_fn() = 9)
         func_sec.function(TYPE_VOID_VOID);
 
         let (ptr, len) = self.add_string_literal(message);
@@ -2231,7 +2412,7 @@ impl Codegen {
 
         let mut exports = ExportSection::new();
         self.add_runtime_exports(&mut exports);
-        exports.export("main", ExportKind::Func, FIRST_USER_FN);
+        exports.export("main", ExportKind::Func, self.first_user_fn());
         self.module.section(&exports);
 
         self.module.section(&code_sec);
@@ -2269,6 +2450,40 @@ fn ty_to_valtype(ty: &Ty) -> ValType {
         Ty::Base(BaseTy::F64) => ValType::F64,
         // Everything else (I32, Bool, Unit, String handles, pointers) => i32
         _ => ValType::I32,
+    }
+}
+
+/// Walk a curried `App` chain and extract `(head_name, args_in_order)`
+/// if the leftmost expression is a `Var`.
+///
+/// `f(a)` → `App(f, a)` → `Some(("f", [a]))`
+/// `f(a, b, c)` → `App(App(App(f, a), b), c)` → `Some(("f", [a, b, c]))`
+/// `(lambda...)(x)` → `None` (head is not a variable)
+///
+/// Used by `compile_app` (and `collect_extern_imports`-aware callers)
+/// to recognise direct calls to named functions even when the surface
+/// parser has curried the call into nested `App` nodes.
+fn flatten_app_chain<'a>(
+    fn_expr: &'a Expr,
+    arg: &'a Expr,
+) -> Option<(&'a str, Vec<&'a Expr>)> {
+    let mut args: Vec<&Expr> = vec![arg];
+    let mut current = fn_expr;
+    loop {
+        match &current.kind {
+            ExprKind::Var(name) => {
+                args.reverse();
+                return Some((name.as_str(), args));
+            }
+            ExprKind::App {
+                func,
+                arg: inner_arg,
+            } => {
+                args.push(inner_arg);
+                current = func;
+            }
+            _ => return None,
+        }
     }
 }
 
@@ -3447,5 +3662,169 @@ mod tests {
     #[test]
     fn ty_to_valtype_string() {
         assert_eq!(ty_to_valtype(&Ty::String("r".into())), ValType::I32);
+    }
+
+    // -----------------------------------------------------------------------
+    // Extern imports (#43 phase 2B-ii)
+    // -----------------------------------------------------------------------
+
+    /// Helper: parse a compiled wasm module's import section and return
+    /// the list of `(module, name)` pairs in emission order.
+    fn parse_imports(wasm: &[u8]) -> Vec<(String, String)> {
+        use wasmparser::{Parser, Payload};
+        let mut imports = Vec::new();
+        for payload in Parser::new(0).parse_all(wasm) {
+            if let Payload::ImportSection(reader) = payload.unwrap() {
+                for import in reader {
+                    let import = import.unwrap();
+                    imports.push((import.module.to_string(), import.name.to_string()));
+                }
+            }
+        }
+        imports
+    }
+
+    /// A module with an `extern "gossamer" { ... }` block emits each
+    /// extern fn as a wasm import in the import section, *after* the
+    /// 2 builtin host imports (print_i32, print_string).
+    #[test]
+    fn extern_block_emits_wasm_imports() {
+        // extern "gossamer" {
+        //     type Window
+        //     fn window_open(title: I32, body: I32): I32
+        //     fn window_close(w: I32): ()
+        // }
+        // fn entry(): I32 = window_open(1, 2)
+        let module = AstModule {
+            name: "test".into(),
+            imports: vec![],
+            decls: vec![
+                Decl::Extern {
+                    abi: "gossamer".to_string(),
+                    items: vec![
+                        ExternItem::Type {
+                            name: "Window".into(),
+                        },
+                        ExternItem::Fn {
+                            name: "window_open".into(),
+                            params: vec![
+                                ("title".into(), Ty::Base(BaseTy::I32)),
+                                ("body".into(), Ty::Base(BaseTy::I32)),
+                            ],
+                            ret_ty: Ty::Base(BaseTy::I32),
+                        },
+                        ExternItem::Fn {
+                            name: "window_close".into(),
+                            params: vec![("w".into(), Ty::Base(BaseTy::I32))],
+                            ret_ty: Ty::Base(BaseTy::Unit),
+                        },
+                    ],
+                },
+                Decl::Fn {
+                    name: "entry".into(),
+                    visibility: Visibility::Private,
+                    type_params: vec![],
+                    params: vec![],
+                    ret_ty: Ty::Base(BaseTy::I32),
+                    body: e(ExprKind::App {
+                        func: Box::new(e(ExprKind::App {
+                            func: Box::new(e(ExprKind::Var("window_open".into()))),
+                            arg: Box::new(e(ExprKind::Lit(Literal::I32(1)))),
+                        })),
+                        arg: Box::new(e(ExprKind::Lit(Literal::I32(2)))),
+                    }),
+                },
+            ],
+        };
+
+        let wasm = compile_module(&module).expect("module must compile");
+        assert_wasm_header(&wasm);
+        validate_wasm(&wasm);
+
+        let imports = parse_imports(&wasm);
+        // 2 builtin host imports + 2 extern fns (the `type` item is
+        // not an import, only fns are).
+        assert_eq!(imports.len(), 4, "expected 4 imports, got: {imports:?}");
+        assert_eq!(imports[0], ("env".to_string(), "print_i32".to_string()));
+        assert_eq!(imports[1], ("env".to_string(), "print_string".to_string()));
+        assert_eq!(
+            imports[2],
+            ("gossamer".to_string(), "window_open".to_string())
+        );
+        assert_eq!(
+            imports[3],
+            ("gossamer".to_string(), "window_close".to_string())
+        );
+    }
+
+    /// A module with NO extern block emits only the 2 builtin host
+    /// imports. The dynamic-import refactor must not regress the
+    /// pre-extern baseline.
+    #[test]
+    fn module_without_extern_keeps_two_builtin_imports_only() {
+        let module = AstModule {
+            name: "test".into(),
+            imports: vec![],
+            decls: vec![Decl::Fn {
+                name: "entry".into(),
+                visibility: Visibility::Private,
+                type_params: vec![],
+                params: vec![],
+                ret_ty: Ty::Base(BaseTy::I32),
+                body: e(ExprKind::Lit(Literal::I32(42))),
+            }],
+        };
+
+        let wasm = compile_module(&module).expect("module must compile");
+        validate_wasm(&wasm);
+        let imports = parse_imports(&wasm);
+        assert_eq!(imports.len(), 2, "expected only the 2 host imports");
+        assert_eq!(imports[0].1, "print_i32");
+        assert_eq!(imports[1].1, "print_string");
+    }
+
+    /// A user fn that calls an extern fn emits a direct `Call`
+    /// instruction with the correct import index (== position in the
+    /// import section). The index for the first extern fn is
+    /// `NUM_BUILTIN_IMPORTS + 0` = 2.
+    #[test]
+    fn extern_fn_call_uses_correct_import_index() {
+        let module = AstModule {
+            name: "test".into(),
+            imports: vec![],
+            decls: vec![
+                Decl::Extern {
+                    abi: "host".to_string(),
+                    items: vec![ExternItem::Fn {
+                        name: "do_thing".into(),
+                        params: vec![("x".into(), Ty::Base(BaseTy::I32))],
+                        ret_ty: Ty::Base(BaseTy::I32),
+                    }],
+                },
+                Decl::Fn {
+                    name: "entry".into(),
+                    visibility: Visibility::Private,
+                    type_params: vec![],
+                    params: vec![],
+                    ret_ty: Ty::Base(BaseTy::I32),
+                    body: e(ExprKind::App {
+                        func: Box::new(e(ExprKind::Var("do_thing".into()))),
+                        arg: Box::new(e(ExprKind::Lit(Literal::I32(5)))),
+                    }),
+                },
+            ],
+        };
+
+        let wasm = compile_module(&module).expect("must compile");
+        validate_wasm(&wasm);
+
+        // Inspect codegen state to verify the index assignment.
+        let mut codegen = Codegen::new();
+        codegen.collect_extern_imports(&module);
+        assert_eq!(
+            codegen.extern_fn_indices.get("do_thing").copied(),
+            Some(NUM_BUILTIN_IMPORTS),
+            "first extern fn must occupy import slot 2 (right after the 2 builtin imports)"
+        );
     }
 }

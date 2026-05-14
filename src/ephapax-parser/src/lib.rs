@@ -16,7 +16,8 @@
 //! ```
 
 use ephapax_syntax::{
-    BaseTy, BinOp, Decl, Expr, ExprKind, Import, Literal, Module, Span, Ty, UnaryOp, Visibility,
+    BaseTy, BinOp, Decl, Expr, ExprKind, ExternItem, Import, Literal, Module, Span, Ty, UnaryOp,
+    Visibility,
 };
 use pest::Parser;
 use pest_derive::Parser;
@@ -145,11 +146,110 @@ fn parse_declaration(pair: pest::iterators::Pair<Rule>) -> Result<Decl, ParseErr
         Rule::type_decl => parse_type_decl(inner),
         Rule::data_decl => parse_type_decl(inner), // data decls are a form of type decl
         Rule::const_decl => parse_const_decl(inner),
+        Rule::extern_block => parse_extern_block(inner),
         _ => Err(ParseError::Syntax {
             message: format!("Unexpected declaration: {:?}", inner.as_rule()),
             span: span_from_pair(&inner),
         }),
     }
+}
+
+/// Parse an `extern "abi" { ... }` block into a `Decl::Extern`.
+///
+/// The grammar splits items into `extern_type_item` (`type Foo`) and
+/// `extern_fn_item` (`fn name(params): ret`); both are gathered into
+/// the `items` vector with type information already lowered to core
+/// `Ty` (this is the core parser path).
+fn parse_extern_block(pair: pest::iterators::Pair<Rule>) -> Result<Decl, ParseError> {
+    let mut inner = pair.into_inner();
+
+    let abi_pair = inner
+        .next()
+        .ok_or_else(|| ParseError::missing("extern ABI string"))?;
+    let abi = unquote_string_literal(abi_pair.as_str());
+
+    let mut items = Vec::new();
+    for item_pair in inner {
+        if item_pair.as_rule() == Rule::extern_item {
+            items.push(parse_extern_item(item_pair)?);
+        }
+    }
+
+    Ok(Decl::Extern { abi, items })
+}
+
+fn parse_extern_item(pair: pest::iterators::Pair<Rule>) -> Result<ExternItem, ParseError> {
+    let inner = pair
+        .into_inner()
+        .next()
+        .ok_or_else(|| ParseError::unexpected_end("extern item"))?;
+
+    match inner.as_rule() {
+        Rule::extern_type_item => {
+            let name_pair = inner
+                .into_inner()
+                .next()
+                .ok_or_else(|| ParseError::missing("extern type name"))?;
+            Ok(ExternItem::Type {
+                name: parse_identifier(name_pair),
+            })
+        }
+        Rule::extern_fn_item => {
+            let mut bits = inner.into_inner();
+            let name = parse_identifier(
+                bits.next()
+                    .ok_or_else(|| ParseError::missing("extern fn name"))?,
+            );
+            let mut params: Vec<(SmolStr, Ty)> = Vec::new();
+            let mut ret_ty: Option<Ty> = None;
+            for sub in bits {
+                match sub.as_rule() {
+                    Rule::param_list => {
+                        for p in sub.into_inner() {
+                            if p.as_rule() == Rule::param {
+                                let mut parts = p.into_inner();
+                                let pn = parse_identifier(
+                                    parts
+                                        .next()
+                                        .ok_or_else(|| ParseError::missing("extern param name"))?,
+                                );
+                                let pt = parse_type(
+                                    parts
+                                        .next()
+                                        .ok_or_else(|| ParseError::missing("extern param type"))?,
+                                )?;
+                                params.push((pn, pt));
+                            }
+                        }
+                    }
+                    Rule::ty => {
+                        if ret_ty.is_none() {
+                            ret_ty = Some(parse_type(sub)?);
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            Ok(ExternItem::Fn {
+                name,
+                params,
+                ret_ty: ret_ty.unwrap_or(Ty::Base(BaseTy::Unit)),
+            })
+        }
+        other => Err(ParseError::Syntax {
+            message: format!("Unexpected extern item: {other:?}"),
+            span: Span::dummy(),
+        }),
+    }
+}
+
+/// Strip the surrounding double quotes (and unescape) a pest `string`
+/// literal. The grammar guarantees the input starts and ends with `"`.
+fn unquote_string_literal(raw: &str) -> String {
+    let trimmed = raw.trim_matches('"');
+    // Minimal unescape: only `\"` and `\\` are commonly used in ABI
+    // tags. Extend if more escape forms become relevant.
+    trimmed.replace("\\\"", "\"").replace("\\\\", "\\")
 }
 
 fn parse_fn_decl(pair: pest::iterators::Pair<Rule>) -> Result<Decl, ParseError> {
@@ -1876,6 +1976,34 @@ mod tests {
         let module = parse_module(source, "<input>").expect("should parse");
         assert_eq!(module.name.as_str(), "Foo.Bar.Baz");
         assert_eq!(module.decls.len(), 1);
+    }
+
+    /// `extern "abi" { … }` parses through the core parser too, with
+    /// items lowered straight to core `ExternItem` (types in the
+    /// `params`/`ret_ty` are `Ty`, not `SurfaceTy`).
+    #[test]
+    fn test_parse_extern_block_core() {
+        let source = "extern \"gossamer\" {
+            type Window
+            fn window_open(title: String, body: String): Window
+            fn window_close(w: Window): ()
+        }";
+        let module = parse_module(source, "<input>").expect("should parse");
+        assert_eq!(module.decls.len(), 1);
+        match &module.decls[0] {
+            Decl::Extern { abi, items } => {
+                assert_eq!(abi, "gossamer");
+                assert_eq!(items.len(), 3);
+                assert!(matches!(&items[0], ExternItem::Type { name } if name.as_str() == "Window"));
+                if let ExternItem::Fn { name, params, .. } = &items[1] {
+                    assert_eq!(name.as_str(), "window_open");
+                    assert_eq!(params.len(), 2);
+                } else {
+                    panic!("expected ExternItem::Fn, got {:?}", &items[1]);
+                }
+            }
+            other => panic!("expected Decl::Extern, got {other:?}"),
+        }
     }
 
     // ===== New feature parsing tests =====

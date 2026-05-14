@@ -12,7 +12,7 @@
 
 use ephapax_surface::{
     BaseTy, BinOp, ConstructorDef, DataDecl, Literal, MatchArm, Pattern, Span, SurfaceDecl,
-    SurfaceExpr, SurfaceExprKind, SurfaceModule, SurfaceTy, UnaryOp,
+    SurfaceExpr, SurfaceExprKind, SurfaceExternItem, SurfaceModule, SurfaceTy, UnaryOp,
 };
 use pest::Parser;
 use smol_str::SmolStr;
@@ -116,11 +116,106 @@ fn parse_surface_declaration(pair: pest::iterators::Pair<Rule>) -> Result<Surfac
         Rule::data_decl => parse_data_decl(inner),
         Rule::fn_decl => parse_fn_decl(inner),
         Rule::type_decl => parse_type_decl(inner),
+        Rule::extern_block => parse_extern_block(inner),
         _ => Err(ParseError::Syntax {
             message: format!("Unexpected declaration: {:?}", inner.as_rule()),
             span: span_from_pair(&inner),
         }),
     }
+}
+
+/// Parse an `extern "abi" { ... }` block into a `SurfaceDecl::Extern`.
+///
+/// Mirror of the core parser's `parse_extern_block`, but types stay
+/// in surface form (`SurfaceTy`) until the desugar pass.
+fn parse_extern_block(pair: pest::iterators::Pair<Rule>) -> Result<SurfaceDecl, ParseError> {
+    let span = span_from_pair(&pair);
+    let mut inner = pair.into_inner();
+
+    let abi_pair = inner
+        .next()
+        .ok_or_else(|| ParseError::missing("extern ABI string"))?;
+    let abi = unquote_string_literal(abi_pair.as_str());
+
+    let mut items: Vec<SurfaceExternItem> = Vec::new();
+    for item_pair in inner {
+        if item_pair.as_rule() == Rule::extern_item {
+            items.push(parse_extern_item(item_pair)?);
+        }
+    }
+
+    Ok(SurfaceDecl::Extern { abi, items, span })
+}
+
+fn parse_extern_item(pair: pest::iterators::Pair<Rule>) -> Result<SurfaceExternItem, ParseError> {
+    let inner = pair
+        .into_inner()
+        .next()
+        .ok_or_else(|| ParseError::unexpected_end("extern item"))?;
+
+    match inner.as_rule() {
+        Rule::extern_type_item => {
+            let name_pair = inner
+                .into_inner()
+                .next()
+                .ok_or_else(|| ParseError::missing("extern type name"))?;
+            Ok(SurfaceExternItem::Type {
+                name: parse_identifier(name_pair),
+            })
+        }
+        Rule::extern_fn_item => {
+            let mut bits = inner.into_inner();
+            let name = parse_identifier(
+                bits.next()
+                    .ok_or_else(|| ParseError::missing("extern fn name"))?,
+            );
+            let mut params: Vec<(SmolStr, SurfaceTy)> = Vec::new();
+            let mut ret_ty: Option<SurfaceTy> = None;
+            for sub in bits {
+                match sub.as_rule() {
+                    Rule::param_list => {
+                        for p in sub.into_inner() {
+                            if p.as_rule() == Rule::param {
+                                let mut parts = p.into_inner();
+                                let pn = parse_identifier(
+                                    parts
+                                        .next()
+                                        .ok_or_else(|| ParseError::missing("extern param name"))?,
+                                );
+                                let pt = parse_type(
+                                    parts
+                                        .next()
+                                        .ok_or_else(|| ParseError::missing("extern param type"))?,
+                                )?;
+                                params.push((pn, pt));
+                            }
+                        }
+                    }
+                    Rule::ty => {
+                        if ret_ty.is_none() {
+                            ret_ty = Some(parse_type(sub)?);
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            Ok(SurfaceExternItem::Fn {
+                name,
+                params,
+                ret_ty: ret_ty.unwrap_or(SurfaceTy::Base(BaseTy::Unit)),
+            })
+        }
+        other => Err(ParseError::Syntax {
+            message: format!("Unexpected extern item: {other:?}"),
+            span: Span::dummy(),
+        }),
+    }
+}
+
+/// Strip the surrounding double quotes from a pest `string` literal.
+fn unquote_string_literal(raw: &str) -> String {
+    let trimmed = raw.trim_matches('"');
+    trimmed.replace("\\\"", "\"").replace("\\\\", "\\")
 }
 
 fn parse_data_decl(pair: pest::iterators::Pair<Rule>) -> Result<SurfaceDecl, ParseError> {
@@ -1610,6 +1705,75 @@ mod tests {
         let module = parse_surface_module(source, "fallback-name").unwrap();
         assert_eq!(module.name.as_str(), "fallback-name");
         assert_eq!(module.decls.len(), 1);
+    }
+
+    /// Empty extern block — must parse, must carry the ABI tag, no items.
+    #[test]
+    fn parse_empty_extern_block() {
+        let source = "extern \"gossamer\" { }\n";
+        let module = parse_surface_module(source, "<input>").unwrap();
+        assert_eq!(module.decls.len(), 1);
+        match &module.decls[0] {
+            SurfaceDecl::Extern { abi, items, .. } => {
+                assert_eq!(abi, "gossamer");
+                assert!(items.is_empty(), "no items expected");
+            }
+            other => panic!("expected SurfaceDecl::Extern, got {other:?}"),
+        }
+    }
+
+    /// Extern block with type + fn items — the canonical hypatia
+    /// `bridge.eph` shape. Asserts both item kinds round-trip into
+    /// the surface AST.
+    #[test]
+    fn parse_extern_block_with_type_and_fn_items() {
+        let source = "extern \"gossamer\" {
+            type Window
+            fn window_open(title: String, body: String): Window
+        }";
+        let module = parse_surface_module(source, "<input>").unwrap();
+        match &module.decls[0] {
+            SurfaceDecl::Extern { abi, items, .. } => {
+                assert_eq!(abi, "gossamer");
+                assert_eq!(items.len(), 2);
+                match &items[0] {
+                    SurfaceExternItem::Type { name } => {
+                        assert_eq!(name.as_str(), "Window");
+                    }
+                    other => panic!("expected Type item, got {other:?}"),
+                }
+                match &items[1] {
+                    SurfaceExternItem::Fn { name, params, .. } => {
+                        assert_eq!(name.as_str(), "window_open");
+                        assert_eq!(params.len(), 2);
+                        assert_eq!(params[0].0.as_str(), "title");
+                        assert_eq!(params[1].0.as_str(), "body");
+                    }
+                    other => panic!("expected Fn item, got {other:?}"),
+                }
+            }
+            other => panic!("expected SurfaceDecl::Extern, got {other:?}"),
+        }
+    }
+
+    /// Full module shape: slash-pathed module + import + extern block
+    /// + regular fn declaration. Covers the bridge.eph prelude.
+    #[test]
+    fn parse_bridge_eph_shaped_prelude() {
+        let source = "module hypatia/ui/bridge
+
+extern \"gossamer\" {
+    type Window
+    fn window_open(title: String, body: String): Window
+    fn window_close(w: Window): ()
+}
+
+fn entry(): I32 = 0";
+        let module = parse_surface_module(source, "<input>").unwrap();
+        assert_eq!(module.name.as_str(), "hypatia/ui/bridge");
+        assert_eq!(module.decls.len(), 2, "extern block + fn decl");
+        assert!(matches!(&module.decls[0], SurfaceDecl::Extern { .. }));
+        assert!(matches!(&module.decls[1], SurfaceDecl::Fn { .. }));
     }
 
     #[test]

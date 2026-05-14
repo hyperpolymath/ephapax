@@ -277,6 +277,45 @@ fn decl_to_sexpr(decl: &Decl) -> SExpr {
             ty.as_ref().map(ty_to_sexpr).unwrap_or(SExpr::Atom("_".into())),
             expr_to_sexpr(value),
         ]),
+        // Render `extern "abi" { ... }` as a tagged s-expr so the IR
+        // round-trip preserves the declaration. Item shape mirrors the
+        // wasm view that codegen will eventually consume:
+        //   (extern "abi" ((extern-type Foo) (extern-fn name ((p T)...) R)))
+        Decl::Extern { abi, items } => SExpr::List(vec![
+            SExpr::Atom("extern".into()),
+            SExpr::Atom(format!("{abi:?}")),
+            SExpr::List(
+                items
+                    .iter()
+                    .map(|item| match item {
+                        ephapax_syntax::ExternItem::Type { name } => SExpr::List(vec![
+                            SExpr::Atom("extern-type".into()),
+                            SExpr::Atom(escape_atom(name)),
+                        ]),
+                        ephapax_syntax::ExternItem::Fn {
+                            name,
+                            params,
+                            ret_ty,
+                        } => SExpr::List(vec![
+                            SExpr::Atom("extern-fn".into()),
+                            SExpr::Atom(escape_atom(name)),
+                            SExpr::List(
+                                params
+                                    .iter()
+                                    .map(|(p, t)| {
+                                        SExpr::List(vec![
+                                            SExpr::Atom(escape_atom(p)),
+                                            ty_to_sexpr(t),
+                                        ])
+                                    })
+                                    .collect(),
+                            ),
+                            ty_to_sexpr(ret_ty),
+                        ]),
+                    })
+                    .collect(),
+            ),
+        ]),
     }
 }
 

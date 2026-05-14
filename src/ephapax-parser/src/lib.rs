@@ -135,9 +135,11 @@ fn parse_import(pair: pest::iterators::Pair<Rule>) -> Result<Import, ParseError>
 }
 
 fn parse_declaration(pair: pest::iterators::Pair<Rule>) -> Result<Decl, ParseError> {
+    // Skip leading `@identifier` annotations — they're parser-only metadata
+    // today; see the `annotation` rule in ephapax.pest.
     let inner = pair
         .into_inner()
-        .next()
+        .find(|p| p.as_rule() != Rule::annotation)
         .ok_or_else(|| ParseError::unexpected_end("declaration"))?;
 
     match inner.as_rule() {

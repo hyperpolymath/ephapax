@@ -737,6 +737,19 @@ impl Desugarer {
 
         let core_scrutinee = self.desugar_expr(scrutinee)?;
 
+        // Fast path: a single-arm match whose pattern is not a constructor
+        // is structural destructuring (typically from a tuple-binder
+        // `let (a, b) = e in body` lowered at parse time). Delegate to
+        // `bind_single_pattern`, which handles `Pair`, `Wildcard`, `Var`,
+        // etc. directly without going through the sum-type case tree.
+        if arms.len() == 1
+            && !matches!(arms[0].pattern, Pattern::Constructor { .. })
+            && arms[0].guard.is_none()
+        {
+            let body = self.desugar_expr(&arms[0].body)?;
+            return self.bind_single_pattern(&core_scrutinee, &arms[0].pattern, body, span);
+        }
+
         // Find the data type from constructor patterns
         let data_name = self.find_data_type_from_arms(arms)?;
 

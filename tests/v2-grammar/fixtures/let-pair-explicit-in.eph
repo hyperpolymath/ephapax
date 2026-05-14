@@ -1,0 +1,13 @@
+// SPDX-License-Identifier: PMPL-1.0-or-later
+// Tuple-binder destructuring with explicit `in`. Parser lowers
+// `let (a, b) = e in body` to a 1-arm `match e of | (a, b) => body end`,
+// which the desugar fast-path now folds into nested fst/snd binds.
+// The pair type `(I32, I32)` resolves to `SurfaceTy::Prod` (binary
+// product) to match the value-side `(1, 2)` convention.
+
+module hyperpolymath/ephapax/test
+
+fn entry(): I32 =
+  let p: (I32, I32) = (10, 20) in
+  let (a, b) = p in
+  a

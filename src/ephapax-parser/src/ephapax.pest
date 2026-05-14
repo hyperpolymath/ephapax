@@ -31,7 +31,15 @@ import_decl = {
 // Declarations
 // ============================================================================
 
-declaration = { extern_block | data_decl | fn_decl | type_decl | const_decl }
+declaration = { annotation* ~ (extern_block | data_decl | fn_decl | type_decl | const_decl) }
+
+// `@identifier` decorators attached to top-level declarations. Currently
+// parser-only — annotations are parsed and stored on the surface AST so
+// they survive round-tripping, but the typechecker and codegen ignore
+// them. They exist so that downstream tools (hypatia's `@tail_recursive`,
+// future `@inline`, `@no_mangle`, etc.) can hang metadata off a decl
+// without breaking the parser today.
+annotation = { "@" ~ identifier }
 
 // ============================================================================
 // Extern blocks (host-provided functions / opaque types from another ABI)
@@ -196,12 +204,23 @@ var_pattern = { identifier }
 pattern_list = { pattern ~ ("," ~ pattern)* }
 
 let_expr = {
-    "let" ~ identifier ~ (":" ~ ty)? ~ "=" ~ expression ~ "in" ~ expression
+    "let" ~ let_binder ~ (":" ~ ty)? ~ "=" ~ expression ~ "in" ~ expression
 }
 
 let_lin_expr = {
-    "let!" ~ identifier ~ (":" ~ ty)? ~ "=" ~ expression ~ "in" ~ expression
+    "let!" ~ let_binder ~ (":" ~ ty)? ~ "=" ~ expression ~ "in" ~ expression
 }
+
+// Either a single identifier (the common case) or a parenthesised tuple
+// of identifiers for destructuring binds:
+//
+//   let (a, b) = pair() in ...
+//   let! (ch2, msg_bytes) = ipc_recv(ch) in ...
+//
+// Tuple binders desugar to a 1-arm `match scrutinee of | (a, b) => body end`
+// at parse time, reusing the existing pair-pattern handling.
+let_binder = { tuple_binder | identifier }
+tuple_binder = { "(" ~ identifier ~ ("," ~ identifier)+ ~ ")" }
 
 lambda_expr = {
     "fn" ~ "(" ~ identifier ~ ":" ~ ty ~ ")" ~ "->" ~ expression

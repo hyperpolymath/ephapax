@@ -98,9 +98,13 @@ fn parse_constructor_name(pair: pest::iterators::Pair<Rule>) -> SmolStr {
 // =========================================================================
 
 fn parse_surface_declaration(pair: pest::iterators::Pair<Rule>) -> Result<SurfaceDecl, ParseError> {
+    // A `declaration` is now `annotation* ~ (data_decl | fn_decl | type_decl
+    // | extern_block | const_decl)`. Skip past any leading annotations to
+    // find the actual decl pair. Annotation metadata is dropped at the
+    // parser layer for now — see the `annotation` rule in ephapax.pest.
     let inner = pair
         .into_inner()
-        .next()
+        .find(|p| p.as_rule() != Rule::annotation)
         .ok_or_else(|| ParseError::unexpected_end("declaration"))?;
 
     match inner.as_rule() {
@@ -436,15 +440,82 @@ fn parse_single_expr(pair: pest::iterators::Pair<Rule>) -> Result<SurfaceExpr, P
     }
 }
 
+/// A parsed `let_binder` — either a single identifier or a list of
+/// identifiers from a `tuple_binder`. Tuple binders are lowered to a
+/// 1-arm match at the parse site.
+enum LetBinder {
+    Single(ephapax_surface::Var),
+    Tuple(Vec<ephapax_surface::Var>),
+}
+
+fn parse_let_binder(pair: pest::iterators::Pair<Rule>) -> Result<LetBinder, ParseError> {
+    // `let_binder = { tuple_binder | identifier }`
+    let inner = pair
+        .into_inner()
+        .next()
+        .ok_or_else(|| ParseError::unexpected_end("let binder"))?;
+    match inner.as_rule() {
+        Rule::identifier => Ok(LetBinder::Single(parse_identifier(inner))),
+        Rule::tuple_binder => {
+            let names: Vec<_> = inner
+                .into_inner()
+                .filter(|p| p.as_rule() == Rule::identifier)
+                .map(parse_identifier)
+                .collect();
+            if names.len() < 2 {
+                return Err(ParseError::Syntax {
+                    message: "tuple binder must have at least 2 names".into(),
+                    span: Span::dummy(),
+                });
+            }
+            Ok(LetBinder::Tuple(names))
+        }
+        other => Err(ParseError::Syntax {
+            message: format!("Unexpected let binder: {:?}", other),
+            span: Span::dummy(),
+        }),
+    }
+}
+
+/// Build a 1-arm `match scrutinee of | (a, b, ...) => body end` from a
+/// tuple-binder lowering. For N=2 the pattern is `Pattern::Pair`; for N>2
+/// it becomes a right-nested chain of `Pattern::Pair`s to match ephapax's
+/// existing binary-product encoding.
+fn match_arm_from_tuple_binder(
+    binders: Vec<ephapax_surface::Var>,
+    scrutinee: SurfaceExpr,
+    body: SurfaceExpr,
+    span: Span,
+) -> SurfaceExpr {
+    // Build the pair pattern from the right: (a, b, c) → Pair(a, Pair(b, c)).
+    let mut iter = binders.into_iter().rev();
+    let last = iter.next().expect("at least 2 binders");
+    let mut pat = Pattern::Var(last);
+    for name in iter {
+        pat = Pattern::Pair(Box::new(Pattern::Var(name)), Box::new(pat));
+    }
+    SurfaceExpr::new(
+        SurfaceExprKind::Match {
+            scrutinee: Box::new(scrutinee),
+            arms: vec![MatchArm {
+                pattern: pat,
+                guard: None,
+                body,
+            }],
+        },
+        span,
+    )
+}
+
 fn parse_let_expr(pair: pest::iterators::Pair<Rule>) -> Result<SurfaceExpr, ParseError> {
     let span = span_from_pair(&pair);
     let mut inner = pair.into_inner();
 
-    let name = parse_identifier(
+    let binder = parse_let_binder(
         inner
             .next()
-            .ok_or_else(|| ParseError::missing("let name"))?,
-    );
+            .ok_or_else(|| ParseError::missing("let binder"))?,
+    )?;
 
     let mut ty = None;
     let mut value = None;
@@ -459,26 +530,32 @@ fn parse_let_expr(pair: pest::iterators::Pair<Rule>) -> Result<SurfaceExpr, Pars
         }
     }
 
-    Ok(SurfaceExpr::new(
-        SurfaceExprKind::Let {
-            name,
-            ty,
-            value: Box::new(value.ok_or_else(|| ParseError::missing("let value"))?),
-            body: Box::new(body.ok_or_else(|| ParseError::missing("let body"))?),
-        },
-        span,
-    ))
+    let value = value.ok_or_else(|| ParseError::missing("let value"))?;
+    let body = body.ok_or_else(|| ParseError::missing("let body"))?;
+
+    match binder {
+        LetBinder::Single(name) => Ok(SurfaceExpr::new(
+            SurfaceExprKind::Let {
+                name,
+                ty,
+                value: Box::new(value),
+                body: Box::new(body),
+            },
+            span,
+        )),
+        LetBinder::Tuple(names) => Ok(match_arm_from_tuple_binder(names, value, body, span)),
+    }
 }
 
 fn parse_let_lin_expr(pair: pest::iterators::Pair<Rule>) -> Result<SurfaceExpr, ParseError> {
     let span = span_from_pair(&pair);
     let mut inner = pair.into_inner();
 
-    let name = parse_identifier(
+    let binder = parse_let_binder(
         inner
             .next()
-            .ok_or_else(|| ParseError::missing("let! name"))?,
-    );
+            .ok_or_else(|| ParseError::missing("let! binder"))?,
+    )?;
 
     let mut ty = None;
     let mut value = None;
@@ -493,15 +570,21 @@ fn parse_let_lin_expr(pair: pest::iterators::Pair<Rule>) -> Result<SurfaceExpr, 
         }
     }
 
-    Ok(SurfaceExpr::new(
-        SurfaceExprKind::LetLin {
-            name,
-            ty,
-            value: Box::new(value.ok_or_else(|| ParseError::missing("let! value"))?),
-            body: Box::new(body.ok_or_else(|| ParseError::missing("let! body"))?),
-        },
-        span,
-    ))
+    let value = value.ok_or_else(|| ParseError::missing("let! value"))?;
+    let body = body.ok_or_else(|| ParseError::missing("let! body"))?;
+
+    match binder {
+        LetBinder::Single(name) => Ok(SurfaceExpr::new(
+            SurfaceExprKind::LetLin {
+                name,
+                ty,
+                value: Box::new(value),
+                body: Box::new(body),
+            },
+            span,
+        )),
+        LetBinder::Tuple(names) => Ok(match_arm_from_tuple_binder(names, value, body, span)),
+    }
 }
 
 fn parse_lambda_expr(pair: pest::iterators::Pair<Rule>) -> Result<SurfaceExpr, ParseError> {
@@ -1479,12 +1562,26 @@ fn parse_type_atom(pair: pest::iterators::Pair<Rule>) -> Result<SurfaceTy, Parse
             Ok(SurfaceTy::List(Box::new(elem_ty)))
         }
         Rule::product_ty => {
-            let tys: Vec<SurfaceTy> = inner
+            let mut tys: Vec<SurfaceTy> = inner
                 .into_inner()
                 .filter(|p| p.as_rule() == Rule::ty)
                 .map(parse_type)
                 .collect::<Result<_, _>>()?;
-            Ok(SurfaceTy::Tuple(tys))
+            // Match the value-side convention in `paren_or_pair`: exactly two
+            // elements form a binary product (`Prod`, matched by `fst`/`snd`
+            // and `Pattern::Pair`); three or more elements form a TupleLit /
+            // SurfaceTy::Tuple. This keeps `(I32, I32)` as a type compatible
+            // with `(1, 2)` as a value.
+            if tys.len() == 2 {
+                let right = tys.remove(1);
+                let left = tys.remove(0);
+                Ok(SurfaceTy::Prod {
+                    left: Box::new(left),
+                    right: Box::new(right),
+                })
+            } else {
+                Ok(SurfaceTy::Tuple(tys))
+            }
         }
         Rule::named_ty => {
             let mut parts = inner.into_inner();

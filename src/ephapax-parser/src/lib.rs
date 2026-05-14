@@ -1857,6 +1857,27 @@ mod tests {
         assert_eq!(module.decls.len(), 2);
     }
 
+    /// Slash-separated module paths (`module hypatia/ui/bridge`) must
+    /// parse; the core parser surfaces the path verbatim as the module
+    /// name. Companion to the surface-parser test of the same shape.
+    #[test]
+    fn test_parse_module_with_slash_path() {
+        let source = "module hypatia/ui/bridge\n\nfn one(): I32 = 1";
+        let module = parse_module(source, "<input>").expect("should parse");
+        assert_eq!(module.name.as_str(), "hypatia/ui/bridge");
+        assert_eq!(module.decls.len(), 1);
+    }
+
+    /// Dot-separated module paths continue to work — both separators are
+    /// accepted by the same `qualified_name` rule.
+    #[test]
+    fn test_parse_module_with_dot_path() {
+        let source = "module Foo.Bar.Baz\n\nfn two(): I32 = 2";
+        let module = parse_module(source, "<input>").expect("should parse");
+        assert_eq!(module.name.as_str(), "Foo.Bar.Baz");
+        assert_eq!(module.decls.len(), 1);
+    }
+
     // ===== New feature parsing tests =====
 
     #[test]

@@ -15,8 +15,12 @@ expression_only = { SOI ~ expression ~ EOI }
 
 module_decl = { "module" ~ qualified_name }
 
-// Qualified name: Foo.Bar.Baz
-qualified_name = @{ (ASCII_ALPHA | "_") ~ (ASCII_ALPHANUMERIC | "_" | ".")* }
+// Qualified name: Foo.Bar.Baz OR Foo/Bar/Baz (slash- and dot-segments both
+// allowed and treated as equivalent at the AST level — see canonicalisation
+// in `parse_module` / `parse_surface_module`). Slash-paths matter for the
+// `hypatia/ui/bridge` style used by downstream consumers; dot-paths are
+// historical.
+qualified_name = @{ (ASCII_ALPHA | "_") ~ (ASCII_ALPHANUMERIC | "_" | "." | "/")* }
 
 // ============================================================================
 // Imports

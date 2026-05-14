@@ -11,8 +11,8 @@
 //! are parsed directly to surface AST.
 
 use ephapax_surface::{
-    BaseTy, BinOp, ConstructorDef, DataDecl, Literal, MatchArm, Pattern, Span, SurfaceDecl,
-    SurfaceExpr, SurfaceExprKind, SurfaceModule, SurfaceTy, UnaryOp,
+    BaseTy, BinOp, ConstructorDef, DataDecl, ExternBlock, ExternItem, Literal, MatchArm, Pattern,
+    Span, SurfaceDecl, SurfaceExpr, SurfaceExprKind, SurfaceModule, SurfaceTy, UnaryOp,
 };
 use pest::Parser;
 use smol_str::SmolStr;
@@ -107,9 +107,96 @@ fn parse_surface_declaration(pair: pest::iterators::Pair<Rule>) -> Result<Surfac
         Rule::data_decl => parse_data_decl(inner),
         Rule::fn_decl => parse_fn_decl(inner),
         Rule::type_decl => parse_type_decl(inner),
+        Rule::extern_block => parse_extern_block(inner),
         _ => Err(ParseError::Syntax {
             message: format!("Unexpected declaration: {:?}", inner.as_rule()),
             span: span_from_pair(&inner),
+        }),
+    }
+}
+
+fn parse_extern_block(pair: pest::iterators::Pair<Rule>) -> Result<SurfaceDecl, ParseError> {
+    let mut inner = pair.into_inner();
+
+    let abi_pair = inner
+        .next()
+        .ok_or_else(|| ParseError::missing("extern ABI string"))?;
+    // The ABI token is a `string` (which is `"..."` quoted) — strip the
+    // surrounding quotes.
+    let abi_raw = abi_pair.as_str();
+    let abi = SmolStr::new(abi_raw.trim_start_matches('"').trim_end_matches('"'));
+
+    let mut items = Vec::new();
+    for item in inner {
+        if item.as_rule() == Rule::extern_item {
+            items.push(parse_extern_item(item)?);
+        }
+    }
+
+    Ok(SurfaceDecl::Extern(ExternBlock { abi, items }))
+}
+
+fn parse_extern_item(pair: pest::iterators::Pair<Rule>) -> Result<ExternItem, ParseError> {
+    let inner = pair
+        .into_inner()
+        .next()
+        .ok_or_else(|| ParseError::unexpected_end("extern item"))?;
+
+    match inner.as_rule() {
+        Rule::extern_type => {
+            let name_pair = inner
+                .into_inner()
+                .next()
+                .ok_or_else(|| ParseError::missing("extern type name"))?;
+            Ok(ExternItem::Type(parse_identifier(name_pair)))
+        }
+        Rule::extern_fn => {
+            let mut parts = inner.into_inner();
+            let name = parse_identifier(
+                parts
+                    .next()
+                    .ok_or_else(|| ParseError::missing("extern fn name"))?,
+            );
+
+            let mut params = Vec::new();
+            let mut ret_ty = None;
+
+            for item in parts {
+                match item.as_rule() {
+                    Rule::param_list => {
+                        for param in item.into_inner() {
+                            if param.as_rule() == Rule::param {
+                                let mut pp = param.into_inner();
+                                let pname = parse_identifier(
+                                    pp.next()
+                                        .ok_or_else(|| ParseError::missing("extern param name"))?,
+                                );
+                                let pty = parse_type(
+                                    pp.next()
+                                        .ok_or_else(|| ParseError::missing("extern param type"))?,
+                                )?;
+                                params.push((pname, pty));
+                            }
+                        }
+                    }
+                    Rule::ty => {
+                        if ret_ty.is_none() {
+                            ret_ty = Some(parse_type(item)?);
+                        }
+                    }
+                    _ => {}
+                }
+            }
+
+            Ok(ExternItem::Fn {
+                name,
+                params,
+                ret_ty: ret_ty.unwrap_or(SurfaceTy::Base(BaseTy::Unit)),
+            })
+        }
+        other => Err(ParseError::Syntax {
+            message: format!("Unexpected extern item: {:?}", other),
+            span: Span::dummy(),
         }),
     }
 }

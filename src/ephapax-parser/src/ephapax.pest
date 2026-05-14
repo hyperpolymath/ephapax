@@ -15,8 +15,9 @@ expression_only = { SOI ~ expression ~ EOI }
 
 module_decl = { "module" ~ qualified_name }
 
-// Qualified name: Foo.Bar.Baz
-qualified_name = @{ (ASCII_ALPHA | "_") ~ (ASCII_ALPHANUMERIC | "_" | ".")* }
+// Qualified name: Foo.Bar.Baz  OR  foo/bar/baz (slash-segmented module paths
+// also accepted, used by the gossamer/hypatia .eph corpus).
+qualified_name = @{ (ASCII_ALPHA | "_") ~ (ASCII_ALPHANUMERIC | "_" | "." | "/")* }
 
 // ============================================================================
 // Imports
@@ -30,7 +31,32 @@ import_decl = {
 // Declarations
 // ============================================================================
 
-declaration = { data_decl | fn_decl | type_decl | const_decl }
+declaration = { extern_block | data_decl | fn_decl | type_decl | const_decl }
+
+// ============================================================================
+// Extern blocks (host-provided functions / opaque types from another ABI)
+// ============================================================================
+//
+//   extern "gossamer" {
+//     type Window
+//     fn window_open(title: String, body: String): Window
+//   }
+//
+// The ABI name is a string literal — `"gossamer"`, `"wasm"`, `"c"`. Items
+// are either opaque types (`type Foo`) or function signatures (`fn name(..): T`).
+// Bodies are deliberately absent: extern items are declarations only; the
+// implementation lives in the host runtime or is wired up by wasm imports.
+extern_block = {
+    "extern" ~ string ~ "{" ~ extern_item* ~ "}"
+}
+
+extern_item = { extern_fn | extern_type }
+
+extern_type = { "type" ~ identifier }
+
+extern_fn = {
+    "fn" ~ identifier ~ "(" ~ param_list? ~ ")" ~ (":" | "->") ~ ty
+}
 
 // Top-level constant binding: let NAME = expr
 const_decl = { "let" ~ identifier ~ (":" ~ ty)? ~ "=" ~ expression }
@@ -367,6 +393,7 @@ keyword_boundary = {
     | "region" | "case" | "of" | "inl" | "inr" | "end"
     | "fst" | "snd" | "drop" | "copy" | "type" | "data" | "match"
     | "true" | "false" | "pub" | "import" | "module" | "linear"
+    | "extern"
     | "perform" | "handle" | "with" | "return" | "resume" | "once" | "multi"
     | "Bool" | "I32" | "I64" | "F32" | "F64" | "String"
     ) ~ !(ASCII_ALPHANUMERIC | "_")
@@ -377,6 +404,7 @@ keyword = {
     | "region" | "case" | "of" | "inl" | "inr" | "end"
     | "fst" | "snd" | "drop" | "copy" | "type" | "data" | "match"
     | "true" | "false" | "pub" | "import" | "module" | "linear"
+    | "extern"
     | "perform" | "handle" | "with" | "return" | "resume" | "once" | "multi"
     | "Bool" | "I32" | "I64" | "F32" | "F64" | "String"
 }

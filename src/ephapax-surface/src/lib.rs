@@ -403,6 +403,33 @@ pub enum SurfaceDecl {
 
     /// Data type declaration (surface-only)
     Data(DataDecl),
+
+    /// `extern "abi" { ... }` block — host-provided types and functions
+    /// with no body. The implementation lives in the host runtime (for
+    /// `"gossamer"`) or is wired via wasm imports (for `"wasm"`).
+    Extern(ExternBlock),
+}
+
+/// An `extern "abi" { ... }` block.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct ExternBlock {
+    /// ABI name, e.g. `"gossamer"`, `"wasm"`, `"c"`.
+    pub abi: SmolStr,
+    pub items: Vec<ExternItem>,
+}
+
+/// A single declaration inside an `extern` block.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum ExternItem {
+    /// Opaque type: `type Foo`. No constructors visible to the checker.
+    Type(SmolStr),
+    /// Function signature: `fn name(p1: T1, ..) : R`. No body.
+    Fn {
+        name: SmolStr,
+        params: Vec<(SmolStr, SurfaceTy)>,
+        ret_ty: SurfaceTy,
+    },
 }
 
 /// A complete surface-level module.

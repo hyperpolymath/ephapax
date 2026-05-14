@@ -236,6 +236,12 @@ impl Desugarer {
                 // as core declarations. The type information lives in the
                 // registry and is used to desugar Construct/Match nodes.
                 SurfaceDecl::Data(_) => {}
+                // `extern` blocks describe host-provided items. They have
+                // no body to lower. For now they are dropped from the core
+                // module; ambient-binding registration into the typechecker
+                // env (and wasm import-directive emit in codegen) lands in
+                // the follow-up phase. Tracking: hyperpolymath/ephapax#43.
+                SurfaceDecl::Extern(_) => {}
             }
         }
 

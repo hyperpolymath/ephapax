@@ -537,6 +537,36 @@ fn extract_declarations(module: &Module, _source: &str) -> Vec<DeclInfo> {
                 params: Vec::new(),
                 return_type: ty.as_ref().map(|t| format_ty(t)),
             },
+            Decl::Extern {
+                name,
+                abi,
+                params,
+                ret_ty,
+            } => {
+                let param_strs: Vec<(String, String)> = params
+                    .iter()
+                    .map(|(n, t)| (n.to_string(), format_ty(t)))
+                    .collect();
+                let sig = format!(
+                    "extern \"{}\" fn {}({}) -> {}",
+                    abi,
+                    name,
+                    param_strs
+                        .iter()
+                        .map(|(n, t)| format!("{}: {}", n, t))
+                        .collect::<Vec<_>>()
+                        .join(", "),
+                    format_ty(ret_ty)
+                );
+                DeclInfo {
+                    name: name.to_string(),
+                    kind: DeclKind::Function,
+                    span: Span::dummy(),
+                    signature: sig,
+                    params: param_strs,
+                    return_type: Some(format_ty(ret_ty)),
+                }
+            }
         })
         .collect()
 }

@@ -277,6 +277,23 @@ fn decl_to_sexpr(decl: &Decl) -> SExpr {
             ty.as_ref().map(ty_to_sexpr).unwrap_or(SExpr::Atom("_".into())),
             expr_to_sexpr(value),
         ]),
+        Decl::Extern {
+            name,
+            abi,
+            params,
+            ret_ty,
+        } => SExpr::List(vec![
+            SExpr::Atom("extern".into()),
+            SExpr::Atom(escape_string(abi)),
+            SExpr::Atom(escape_atom(name)),
+            SExpr::List(
+                params
+                    .iter()
+                    .map(|(p, t)| SExpr::List(vec![SExpr::Atom(escape_atom(p)), ty_to_sexpr(t)]))
+                    .collect(),
+            ),
+            ty_to_sexpr(ret_ty),
+        ]),
     }
 }
 
@@ -329,6 +346,33 @@ fn decode_decl(expr: &SExpr) -> Result<Decl, SExprError> {
             name: SmolStr::new(name),
             visibility: Visibility::Private,
             ty,
+        })
+    } else if is_atom(&list[0], "extern") {
+        if list.len() != 5 {
+            return Err(SExprError::Invalid(
+                "extern decl shape: (extern \"abi\" name (params) ret)".into(),
+            ));
+        }
+        let abi = atom_string(&list[1])?;
+        let name = atom_string(&list[2])?;
+        let params = match &list[3] {
+            SExpr::List(items) => items
+                .iter()
+                .map(|p| match p {
+                    SExpr::List(parts) if parts.len() == 2 => {
+                        Ok((SmolStr::new(atom_string(&parts[0])?), decode_ty(&parts[1])?))
+                    }
+                    _ => Err(SExprError::Invalid("extern param must be (name ty)".into())),
+                })
+                .collect::<Result<Vec<_>, _>>()?,
+            _ => return Err(SExprError::Invalid("extern params must be list".into())),
+        };
+        let ret_ty = decode_ty(&list[4])?;
+        Ok(Decl::Extern {
+            name: SmolStr::new(name),
+            abi: SmolStr::new(abi),
+            params,
+            ret_ty,
         })
     } else {
         Err(SExprError::Invalid("unknown decl".into()))

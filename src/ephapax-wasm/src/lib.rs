@@ -598,6 +598,12 @@ impl Codegen {
                 }
                 Decl::Type { .. } => { /* type aliases are erased at runtime */ }
                 Decl::Const { .. } => { /* constants inlined at compile time */ }
+                // Extern items become wasm import directives. Phase C of
+                // hyperpolymath/ephapax#43 wires that up; for Phase B they
+                // are skipped — a program that actually *calls* an extern
+                // fn will fail wasm validation, but a program that only
+                // declares them will compile.
+                Decl::Extern { .. } => {}
             }
         }
         Ok(())
@@ -870,6 +876,9 @@ impl Codegen {
                 }
                 Decl::Type { .. } => {}
                 Decl::Const { .. } => {} // constants inlined
+                // Extern items: no body to emit. Wasm import directives
+                // land in Phase C of hyperpolymath/ephapax#43.
+                Decl::Extern { .. } => {}
             }
         }
         Ok(())

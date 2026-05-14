@@ -579,6 +579,24 @@ pub enum Decl {
         ty: Option<Ty>,
         value: Expr,
     },
+
+    /// Externally provided function — body lives in a host runtime or is
+    /// resolved via a wasm import. Carries the same shape as a `Fn`
+    /// signature, with no body and no polymorphism (extern items are
+    /// declared at concrete types).
+    ///
+    /// Lowered from `SurfaceDecl::Extern(ExternBlock)` one entry per
+    /// `ExternItem::Fn`. Type checking registers the declared signature in
+    /// the module environment. Codegen emits a wasm import directive
+    /// (Phase C of hyperpolymath/ephapax#43).
+    Extern {
+        name: Var,
+        /// ABI namespace, e.g. `"gossamer"`, `"wasm"`, `"c"`. Passed
+        /// through to the wasm `(import "<abi>" "<name>" ...)` directive.
+        abi: SmolStr,
+        params: Vec<(Var, Ty)>,
+        ret_ty: Ty,
+    },
 }
 
 /// Helper for serde skip_serializing_if.

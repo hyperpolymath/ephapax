@@ -1369,6 +1369,25 @@ impl ModuleRegistry {
                     let const_ty = ty.clone().unwrap_or(Ty::Base(BaseTy::Unit));
                     entries.push((name.clone(), const_ty, Visibility::Private));
                 }
+                Decl::Extern {
+                    name,
+                    abi: _,
+                    params,
+                    ret_ty,
+                } => {
+                    // Extern items are publicly available to importers — the
+                    // host runtime / wasm imports resolve them; we don't gate
+                    // visibility at the language level here.
+                    let fn_ty =
+                        params
+                            .iter()
+                            .rev()
+                            .fold(ret_ty.clone(), |acc, (_, param_ty)| Ty::Fun {
+                                param: Box::new(param_ty.clone()),
+                                ret: Box::new(acc),
+                            });
+                    entries.push((name.clone(), fn_ty, Visibility::Public));
+                }
             }
         }
         self.modules.insert(module.name.clone(), entries);
@@ -1451,28 +1470,46 @@ fn type_check_module_inner(
     tc: &mut TypeChecker,
     module: &Module,
 ) -> Result<(), SpannedTypeError> {
-    // First pass: collect all function signatures
+    // First pass: collect all function signatures, including externs.
     for decl in &module.decls {
-        if let Decl::Fn {
-            name,
-            params,
-            ret_ty,
-            type_params,
-            ..
-        } = decl
-        {
-            let fn_ty = params
-                .iter()
-                .rev()
-                .fold(ret_ty.clone(), |acc, (_, param_ty)| Ty::Fun {
-                    param: Box::new(param_ty.clone()),
-                    ret: Box::new(acc),
+        match decl {
+            Decl::Fn {
+                name,
+                params,
+                ret_ty,
+                type_params,
+                ..
+            } => {
+                let fn_ty = params
+                    .iter()
+                    .rev()
+                    .fold(ret_ty.clone(), |acc, (_, param_ty)| Ty::Fun {
+                        param: Box::new(param_ty.clone()),
+                        ret: Box::new(acc),
+                    });
+                let poly_ty = type_params.iter().rev().fold(fn_ty, |acc, tv| Ty::ForAll {
+                    var: tv.clone(),
+                    body: Box::new(acc),
                 });
-            let poly_ty = type_params.iter().rev().fold(fn_ty, |acc, tv| Ty::ForAll {
-                var: tv.clone(),
-                body: Box::new(acc),
-            });
-            tc.ctx.extend(name.clone(), poly_ty, BindingForm::Let);
+                tc.ctx.extend(name.clone(), poly_ty, BindingForm::Let);
+            }
+            Decl::Extern {
+                name,
+                abi: _,
+                params,
+                ret_ty,
+            } => {
+                let fn_ty =
+                    params
+                        .iter()
+                        .rev()
+                        .fold(ret_ty.clone(), |acc, (_, param_ty)| Ty::Fun {
+                            param: Box::new(param_ty.clone()),
+                            ret: Box::new(acc),
+                        });
+                tc.ctx.extend(name.clone(), fn_ty, BindingForm::Let);
+            }
+            Decl::Type { .. } | Decl::Const { .. } => {}
         }
     }
 
@@ -1516,6 +1553,8 @@ fn type_check_module_inner(
             }
             Decl::Type { .. } => {}
             Decl::Const { .. } => {} // Constants are handled in module registration
+            // Extern items have no body to check — registered in first pass.
+            Decl::Extern { .. } => {}
         }
     }
 

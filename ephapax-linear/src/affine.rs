@@ -80,6 +80,8 @@ impl AffineChecker {
                 }
             }
             Decl::Type { .. } | Decl::Const { .. } => {}
+            // Extern items declare a host signature with no body; nothing to walk.
+            Decl::Extern { .. } => {}
         }
     }
 

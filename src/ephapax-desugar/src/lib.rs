@@ -236,12 +236,34 @@ impl Desugarer {
                 // as core declarations. The type information lives in the
                 // registry and is used to desugar Construct/Match nodes.
                 SurfaceDecl::Data(_) => {}
-                // `extern` blocks describe host-provided items. They have
-                // no body to lower. For now they are dropped from the core
-                // module; ambient-binding registration into the typechecker
-                // env (and wasm import-directive emit in codegen) lands in
-                // the follow-up phase. Tracking: hyperpolymath/ephapax#43.
-                SurfaceDecl::Extern(_) => {}
+                // `extern` blocks describe host-provided items. Each `fn`
+                // item becomes a `Decl::Extern` carrying the ABI string +
+                // signature; the typechecker registers it as an ambient
+                // binding. `type` items are deferred — see Phase B+ of
+                // hyperpolymath/ephapax#43.
+                SurfaceDecl::Extern(block) => {
+                    for item in &block.items {
+                        if let ephapax_surface::ExternItem::Fn {
+                            name,
+                            params,
+                            ret_ty,
+                        } = item
+                        {
+                            let core_params: Vec<_> = params
+                                .iter()
+                                .map(|(n, t)| Ok((n.clone(), self.desugar_ty(t)?)))
+                                .collect::<Result<_, DesugarError>>()?;
+                            let core_ret = self.desugar_ty(ret_ty)?;
+                            core_decls.push(Decl::Extern {
+                                name: name.clone(),
+                                abi: block.abi.clone(),
+                                params: core_params,
+                                ret_ty: core_ret,
+                            });
+                        }
+                        // ExternItem::Type is dropped for now; see #43.
+                    }
+                }
             }
         }
 

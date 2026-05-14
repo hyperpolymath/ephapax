@@ -90,6 +90,8 @@ impl LinearChecker {
                 }
             }
             Decl::Type { .. } | Decl::Const { .. } => { /* no discipline check needed */ }
+            // Extern items declare a host signature with no body; no discipline check.
+            Decl::Extern { .. } => {}
         }
     }
 

@@ -80,6 +80,9 @@ impl AffineChecker {
                 }
             }
             Decl::Type { .. } | Decl::Const { .. } => {}
+            // Extern declarations have no body — no affine discipline
+            // applies. The signatures only exist to inform codegen.
+            Decl::Extern { .. } => {}
         }
     }
 

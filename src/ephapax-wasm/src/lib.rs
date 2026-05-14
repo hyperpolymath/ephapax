@@ -598,6 +598,13 @@ impl Codegen {
                 }
                 Decl::Type { .. } => { /* type aliases are erased at runtime */ }
                 Decl::Const { .. } => { /* constants inlined at compile time */ }
+                // TODO(ephapax#43 phase 2B): emit `(import "<abi>" "<name>"
+                // (func ...))` directives for `Decl::Extern { abi, items }`
+                // fn items and treat type items as opaque (i32) externs.
+                // For phase 2A the declaration is accepted by the parser
+                // and stored in the AST but codegen does not yet emit
+                // wasm imports for it.
+                Decl::Extern { .. } => {}
             }
         }
         Ok(())
@@ -870,6 +877,11 @@ impl Codegen {
                 }
                 Decl::Type { .. } => {}
                 Decl::Const { .. } => {} // constants inlined
+                // TODO(ephapax#43 phase 2B): emit no body for extern fns
+                // (they're resolved as `(import …)` directives in the
+                // import section, not via the code section). Until that
+                // wiring lands, phase 2A just skips them here.
+                Decl::Extern { .. } => {}
             }
         }
         Ok(())

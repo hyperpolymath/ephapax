@@ -57,9 +57,9 @@ use std::collections::HashMap;
 
 use ephapax_surface::{
     ConstructorDef, DataDecl, MatchArm, Pattern, Span, SurfaceDecl, SurfaceExpr, SurfaceExprKind,
-    SurfaceModule, SurfaceTy,
+    SurfaceExternItem, SurfaceModule, SurfaceTy,
 };
-use ephapax_syntax::{BaseTy, Decl, Expr, ExprKind, Literal, Module, Ty, Visibility};
+use ephapax_syntax::{BaseTy, Decl, Expr, ExprKind, ExternItem, Literal, Module, Ty, Visibility};
 use smol_str::SmolStr;
 use thiserror::Error;
 
@@ -236,6 +236,39 @@ impl Desugarer {
                 // as core declarations. The type information lives in the
                 // registry and is used to desugar Construct/Match nodes.
                 SurfaceDecl::Data(_) => {}
+                // Extern blocks lower their items' surface types to core
+                // types and keep them as `Decl::Extern`. The type checker
+                // and codegen pick them up from there. No body to desugar.
+                SurfaceDecl::Extern { abi, items, .. } => {
+                    let mut core_items: Vec<ExternItem> = Vec::with_capacity(items.len());
+                    for item in items {
+                        match item {
+                            SurfaceExternItem::Type { name } => {
+                                core_items.push(ExternItem::Type { name: name.clone() });
+                            }
+                            SurfaceExternItem::Fn {
+                                name,
+                                params,
+                                ret_ty,
+                            } => {
+                                let core_params: Vec<(SmolStr, Ty)> = params
+                                    .iter()
+                                    .map(|(n, t)| Ok((n.clone(), self.desugar_ty(t)?)))
+                                    .collect::<Result<_, DesugarError>>()?;
+                                let core_ret = self.desugar_ty(ret_ty)?;
+                                core_items.push(ExternItem::Fn {
+                                    name: name.clone(),
+                                    params: core_params,
+                                    ret_ty: core_ret,
+                                });
+                            }
+                        }
+                    }
+                    core_decls.push(Decl::Extern {
+                        abi: abi.clone(),
+                        items: core_items,
+                    });
+                }
             }
         }
 
@@ -1023,7 +1056,7 @@ mod tests {
     use super::*;
     use ephapax_surface::{
         BaseTy, ConstructorDef, DataDecl, Literal, MatchArm, Pattern, Span, SurfaceDecl,
-        SurfaceExpr, SurfaceExprKind, SurfaceModule, SurfaceTy,
+        SurfaceExpr, SurfaceExprKind, SurfaceExternItem, SurfaceModule, SurfaceTy,
     };
 
     fn se(kind: SurfaceExprKind) -> SurfaceExpr {
@@ -1578,6 +1611,54 @@ mod tests {
             } else {
                 panic!("expected Case, got: {:?}", body.kind);
             }
+        }
+    }
+
+    /// `SurfaceDecl::Extern` lowers to `Decl::Extern` with item types
+    /// converted from `SurfaceTy` to core `Ty`. Phase 2A: the
+    /// declaration survives desugar intact; downstream typecheck and
+    /// codegen accept it but currently treat it as a no-op (phase 2B
+    /// will wire those).
+    #[test]
+    fn desugar_extern_block() {
+        let module = SurfaceModule {
+            name: "test".into(),
+            decls: vec![SurfaceDecl::Extern {
+                abi: "gossamer".to_string(),
+                items: vec![
+                    SurfaceExternItem::Type {
+                        name: "Window".into(),
+                    },
+                    SurfaceExternItem::Fn {
+                        name: "window_open".into(),
+                        params: vec![("title".into(), SurfaceTy::String("r".into()))],
+                        ret_ty: SurfaceTy::Base(BaseTy::I32),
+                    },
+                ],
+                span: Span::dummy(),
+            }],
+        };
+
+        let core = desugar(&module).unwrap();
+        assert_eq!(core.decls.len(), 1);
+        match &core.decls[0] {
+            Decl::Extern { abi, items } => {
+                assert_eq!(abi, "gossamer");
+                assert_eq!(items.len(), 2);
+                assert!(matches!(
+                    &items[0],
+                    ExternItem::Type { name } if name.as_str() == "Window"
+                ));
+                if let ExternItem::Fn { name, params, ret_ty } = &items[1] {
+                    assert_eq!(name.as_str(), "window_open");
+                    assert_eq!(params.len(), 1);
+                    assert_eq!(params[0].0.as_str(), "title");
+                    assert_eq!(*ret_ty, Ty::Base(BaseTy::I32));
+                } else {
+                    panic!("expected ExternItem::Fn, got {:?}", &items[1]);
+                }
+            }
+            other => panic!("expected Decl::Extern, got {other:?}"),
         }
     }
 }

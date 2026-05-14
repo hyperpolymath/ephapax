@@ -1369,6 +1369,12 @@ impl ModuleRegistry {
                     let const_ty = ty.clone().unwrap_or(Ty::Base(BaseTy::Unit));
                     entries.push((name.clone(), const_ty, Visibility::Private));
                 }
+                // TODO(ephapax#43 phase 2B): register extern items as
+                // ambient bindings — extern types become opaque nominal
+                // types, extern fns get their declared signature in the
+                // module env. For phase 2A we accept the declaration
+                // syntactically but don't expose it through the registry.
+                Decl::Extern { .. } => {}
             }
         }
         self.modules.insert(module.name.clone(), entries);
@@ -1516,6 +1522,12 @@ fn type_check_module_inner(
             }
             Decl::Type { .. } => {}
             Decl::Const { .. } => {} // Constants are handled in module registration
+            // TODO(ephapax#43 phase 2B): typecheck extern items —
+            // register extern types as opaque nominal types and extern
+            // fns with their declared signatures. For phase 2A the
+            // declaration parses but does not affect the type
+            // environment.
+            Decl::Extern { .. } => {}
         }
     }
 

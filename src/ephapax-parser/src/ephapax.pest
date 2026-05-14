@@ -34,7 +34,26 @@ import_decl = {
 // Declarations
 // ============================================================================
 
-declaration = { data_decl | fn_decl | type_decl | const_decl }
+declaration = { extern_block | data_decl | fn_decl | type_decl | const_decl }
+
+// ============================================================================
+// Extern Blocks
+// ============================================================================
+//
+// `extern "abi" { items... }` declares foreign types and function
+// signatures. Items have no body; codegen lowers fn items to host
+// `import` directives and treats type items as opaque externs.
+//
+// Example:
+//   extern "gossamer" {
+//       type Window
+//       fn window_open(title: String, body: String): Window
+//   }
+
+extern_block = { "extern" ~ string ~ "{" ~ extern_item* ~ "}" }
+extern_item = { extern_type_item | extern_fn_item }
+extern_type_item = { "type" ~ identifier }
+extern_fn_item = { "fn" ~ identifier ~ "(" ~ param_list? ~ ")" ~ (":" | "->") ~ ty }
 
 // Top-level constant binding: let NAME = expr
 const_decl = { "let" ~ identifier ~ (":" ~ ty)? ~ "=" ~ expression }
@@ -370,6 +389,7 @@ keyword_boundary = {
     ( "let!" | "let" | "in" | "fn" | "if" | "then" | "else"
     | "region" | "case" | "of" | "inl" | "inr" | "end"
     | "fst" | "snd" | "drop" | "copy" | "type" | "data" | "match"
+    | "extern"
     | "true" | "false" | "pub" | "import" | "module" | "linear"
     | "perform" | "handle" | "with" | "return" | "resume" | "once" | "multi"
     | "Bool" | "I32" | "I64" | "F32" | "F64" | "String"
@@ -380,6 +400,7 @@ keyword = {
     "let" | "let!" | "in" | "fn" | "if" | "then" | "else"
     | "region" | "case" | "of" | "inl" | "inr" | "end"
     | "fst" | "snd" | "drop" | "copy" | "type" | "data" | "match"
+    | "extern"
     | "true" | "false" | "pub" | "import" | "module" | "linear"
     | "perform" | "handle" | "with" | "return" | "resume" | "once" | "multi"
     | "Bool" | "I32" | "I64" | "F32" | "F64" | "String"

@@ -36,3 +36,4 @@ serde_json.workspace = true
 wasmtime.workspace = true
 proptest = { workspace = true }
 wasmparser = "0.221"
+tempfile = "3"

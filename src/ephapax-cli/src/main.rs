@@ -73,7 +73,14 @@ enum Commands {
         mode: String,
     },
 
-    /// Compile to WebAssembly
+    /// Compile to WebAssembly.
+    ///
+    /// Aliased as `compile-eph` and `compile-affine` for downstream
+    /// consumers (notably hypatia's `build-gossamer-gui` workflow, which
+    /// probes for these names in order). All three names route to the same
+    /// surface-parse → desugar → typecheck → wasm pipeline.
+    /// Closes hyperpolymath/ephapax#36.
+    #[command(alias = "compile-eph", alias = "compile-affine")]
     Compile {
         /// Input file
         file: PathBuf,

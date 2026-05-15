@@ -469,6 +469,296 @@ fn right_nested_sum(payloads: &[Ty]) -> Ty {
     }
 }
 
+// ---------------------------------------------------------------------------
+// Maranget-style usefulness for `check_exhaustiveness`.
+//
+// We model each match as a 1-column pattern matrix and ask: is the row `[_]`
+// useful with respect to the matrix? A "yes" witness is a missing case
+// (non-exhaustive); a "no" answer means every value is covered.
+//
+// Specialization grows the column count (one constructor with N args yields
+// N sub-columns); default reduction shrinks it. We recover the column's
+// nominal data type from the first non-wildcard pattern actually used in
+// that column, since `Ty` itself carries no nominal info in this codebase.
+// ---------------------------------------------------------------------------
+
+/// Constructor identifier for the usefulness algorithm.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+enum Tag {
+    Bool(bool),
+    Unit,
+    Pair,
+    Tuple(usize),
+    Data(SmolStr),
+    LitI32(i32),
+    LitI64(i64),
+    /// Float literals compared by bit pattern (NaN matches itself by bits).
+    LitF32(u32),
+    LitF64(u64),
+}
+
+/// A reconstructed pattern showing a missing case.
+#[derive(Clone, Debug)]
+enum Witness {
+    Wildcard,
+    Unit,
+    Bool(bool),
+    Pair(Box<Witness>, Box<Witness>),
+    Tuple(Vec<Witness>),
+    Ctor { name: SmolStr, args: Vec<Witness> },
+    LitI32(i32),
+    LitI64(i64),
+    LitF32(f32),
+    LitF64(f64),
+}
+
+fn pretty_witness(w: &Witness) -> String {
+    match w {
+        Witness::Wildcard => "_".to_string(),
+        Witness::Unit => "()".to_string(),
+        Witness::Bool(b) => b.to_string(),
+        Witness::Pair(a, b) => format!("({}, {})", pretty_witness(a), pretty_witness(b)),
+        Witness::Tuple(parts) => {
+            let inner: Vec<String> = parts.iter().map(pretty_witness).collect();
+            format!("({})", inner.join(", "))
+        }
+        Witness::Ctor { name, args } => {
+            if args.is_empty() {
+                name.to_string()
+            } else {
+                let inner: Vec<String> = args.iter().map(pretty_witness).collect();
+                format!("{}({})", name, inner.join(", "))
+            }
+        }
+        Witness::LitI32(n) => n.to_string(),
+        Witness::LitI64(n) => n.to_string(),
+        Witness::LitF32(f) => f.to_string(),
+        Witness::LitF64(f) => f.to_string(),
+    }
+}
+
+fn reconstruct_witness(tag: &Tag, args: Vec<Witness>) -> Witness {
+    match tag {
+        Tag::Bool(b) => Witness::Bool(*b),
+        Tag::Unit => Witness::Unit,
+        Tag::Pair => Witness::Pair(Box::new(args[0].clone()), Box::new(args[1].clone())),
+        Tag::Tuple(_) => Witness::Tuple(args),
+        Tag::Data(name) => Witness::Ctor {
+            name: name.clone(),
+            args,
+        },
+        Tag::LitI32(n) => Witness::LitI32(*n),
+        Tag::LitI64(n) => Witness::LitI64(*n),
+        Tag::LitF32(bits) => Witness::LitF32(f32::from_bits(*bits)),
+        Tag::LitF64(bits) => Witness::LitF64(f64::from_bits(*bits)),
+    }
+}
+
+fn tag_of_pattern(p: &Pattern) -> Option<Tag> {
+    match p {
+        Pattern::Wildcard | Pattern::Var(_) => None,
+        Pattern::Unit => Some(Tag::Unit),
+        Pattern::Pair(_, _) => Some(Tag::Pair),
+        Pattern::Tuple(parts) => Some(Tag::Tuple(parts.len())),
+        Pattern::Constructor { ctor, .. } => Some(Tag::Data(ctor.clone())),
+        Pattern::Literal(Literal::Unit) => Some(Tag::Unit),
+        Pattern::Literal(Literal::Bool(b)) => Some(Tag::Bool(*b)),
+        Pattern::Literal(Literal::I32(n)) => Some(Tag::LitI32(*n)),
+        Pattern::Literal(Literal::I64(n)) => Some(Tag::LitI64(*n)),
+        Pattern::Literal(Literal::F32(f)) => Some(Tag::LitF32(f.to_bits())),
+        Pattern::Literal(Literal::F64(f)) => Some(Tag::LitF64(f.to_bits())),
+        // Unallocated string literals are rejected earlier; treat as no tag.
+        Pattern::Literal(Literal::String(_)) => None,
+    }
+}
+
+fn pattern_matches_tag(p: &Pattern, tag: &Tag) -> bool {
+    match (p, tag) {
+        (Pattern::Wildcard | Pattern::Var(_), _) => true,
+        (Pattern::Unit | Pattern::Literal(Literal::Unit), Tag::Unit) => true,
+        (Pattern::Literal(Literal::Bool(a)), Tag::Bool(b)) => a == b,
+        (Pattern::Literal(Literal::I32(a)), Tag::LitI32(b)) => a == b,
+        (Pattern::Literal(Literal::I64(a)), Tag::LitI64(b)) => a == b,
+        (Pattern::Literal(Literal::F32(a)), Tag::LitF32(b)) => a.to_bits() == *b,
+        (Pattern::Literal(Literal::F64(a)), Tag::LitF64(b)) => a.to_bits() == *b,
+        (Pattern::Pair(_, _), Tag::Pair) => true,
+        (Pattern::Tuple(parts), Tag::Tuple(n)) => parts.len() == *n,
+        (Pattern::Constructor { ctor, .. }, Tag::Data(name)) => ctor == name,
+        _ => false,
+    }
+}
+
+/// Sub-patterns exposed when a row's head matches `tag`. Wildcard/Var
+/// expand to `arity` wildcards; concrete patterns return their args.
+fn sub_patterns_for(p: &Pattern, arity: usize) -> Vec<Pattern> {
+    match p {
+        Pattern::Wildcard | Pattern::Var(_) => vec![Pattern::Wildcard; arity],
+        Pattern::Pair(a, b) => vec![(**a).clone(), (**b).clone()],
+        Pattern::Tuple(parts) => parts.clone(),
+        Pattern::Constructor { args, .. } => args.clone(),
+        _ => Vec::new(),
+    }
+}
+
+/// Specialize the matrix on `tag` with the given constructor arity.
+/// Keeps rows whose head matches the tag and any row whose head is a
+/// wildcard/var (expanded into `arity` wildcards).
+fn specialize_matrix(
+    matrix: &[Vec<Pattern>],
+    tag: &Tag,
+    arity: usize,
+) -> Vec<Vec<Pattern>> {
+    let mut out = Vec::with_capacity(matrix.len());
+    for row in matrix {
+        let head = &row[0];
+        if !pattern_matches_tag(head, tag) {
+            continue;
+        }
+        let mut new_row = sub_patterns_for(head, arity);
+        new_row.extend(row[1..].iter().cloned());
+        out.push(new_row);
+    }
+    out
+}
+
+/// Default matrix: rows whose head pattern is a wildcard/var, with the
+/// head column dropped. Concrete-headed rows are discarded.
+fn default_matrix(matrix: &[Vec<Pattern>]) -> Vec<Vec<Pattern>> {
+    let mut out = Vec::new();
+    for row in matrix {
+        if matches!(&row[0], Pattern::Wildcard | Pattern::Var(_)) {
+            out.push(row[1..].to_vec());
+        }
+    }
+    out
+}
+
+/// Recovered nominal/structural type of column 0.
+#[derive(Clone, Debug)]
+enum ColTy {
+    Bool,
+    Unit,
+    Pair,
+    Tuple(usize),
+    /// Any constructor name — we look up its parent in the registry to
+    /// enumerate the data type's full constructor list.
+    Data(SmolStr),
+    Other,
+}
+
+fn column_type(matrix: &[Vec<Pattern>]) -> ColTy {
+    for row in matrix {
+        match &row[0] {
+            Pattern::Wildcard | Pattern::Var(_) => continue,
+            Pattern::Unit => return ColTy::Unit,
+            Pattern::Literal(Literal::Unit) => return ColTy::Unit,
+            Pattern::Literal(Literal::Bool(_)) => return ColTy::Bool,
+            Pattern::Pair(_, _) => return ColTy::Pair,
+            Pattern::Tuple(parts) => return ColTy::Tuple(parts.len()),
+            Pattern::Constructor { ctor, .. } => return ColTy::Data(ctor.clone()),
+            Pattern::Literal(_) => return ColTy::Other,
+        }
+    }
+    ColTy::Other
+}
+
+/// If `col` has a finite signature, return `(Tag, arity)` for each
+/// constructor in declaration order. Returns `None` for infinite
+/// domains (integers, floats, opaque types).
+fn complete_signature(
+    col: &ColTy,
+    registry: &DataCtorRegistry,
+) -> Option<Vec<(Tag, usize)>> {
+    match col {
+        ColTy::Bool => Some(vec![(Tag::Bool(false), 0), (Tag::Bool(true), 0)]),
+        ColTy::Unit => Some(vec![(Tag::Unit, 0)]),
+        ColTy::Pair => Some(vec![(Tag::Pair, 2)]),
+        ColTy::Tuple(n) => Some(vec![(Tag::Tuple(*n), *n)]),
+        ColTy::Data(any_ctor) => {
+            let ci = registry.get_ctor(any_ctor.as_str())?;
+            let di = registry.get_type(ci.parent.as_str())?;
+            let mut sigs = Vec::with_capacity(di.ctor_names.len());
+            for cname in &di.ctor_names {
+                let arity = registry.get_ctor(cname.as_str())?.fields.len();
+                sigs.push((Tag::Data(cname.clone()), arity));
+            }
+            Some(sigs)
+        }
+        ColTy::Other => None,
+    }
+}
+
+/// Compute whether the row `[_; num_cols]` is useful with respect to
+/// `matrix`. Returns a witness pattern (as a Vec of `num_cols`
+/// `Witness` values) when useful, `None` when the matrix already
+/// covers every value.
+fn is_useful(
+    matrix: &[Vec<Pattern>],
+    num_cols: usize,
+    registry: &DataCtorRegistry,
+) -> Option<Vec<Witness>> {
+    if num_cols == 0 {
+        return if matrix.is_empty() {
+            Some(Vec::new())
+        } else {
+            None
+        };
+    }
+
+    let col = column_type(matrix);
+    let mut used_tags: HashSet<Tag> = HashSet::new();
+    for row in matrix {
+        if let Some(tag) = tag_of_pattern(&row[0]) {
+            used_tags.insert(tag);
+        }
+    }
+
+    if let Some(sig) = complete_signature(&col, registry) {
+        let all_present = sig.iter().all(|(t, _)| used_tags.contains(t));
+        if all_present {
+            for (tag, arity) in &sig {
+                let sub_matrix = specialize_matrix(matrix, tag, *arity);
+                let sub_cols = arity + (num_cols - 1);
+                if let Some(witness) = is_useful(&sub_matrix, sub_cols, registry) {
+                    let head_args = witness[..*arity].to_vec();
+                    let tail = witness[*arity..].to_vec();
+                    let mut out = Vec::with_capacity(num_cols);
+                    out.push(reconstruct_witness(tag, head_args));
+                    out.extend(tail);
+                    return Some(out);
+                }
+            }
+            None
+        } else {
+            let (missing_tag, missing_arity) = sig
+                .iter()
+                .find(|(t, _)| !used_tags.contains(t))
+                .expect("not all_present implies a missing tag");
+            let default = default_matrix(matrix);
+            if let Some(tail_witness) = is_useful(&default, num_cols - 1, registry) {
+                let head = reconstruct_witness(
+                    missing_tag,
+                    vec![Witness::Wildcard; *missing_arity],
+                );
+                let mut out = Vec::with_capacity(num_cols);
+                out.push(head);
+                out.extend(tail_witness);
+                return Some(out);
+            }
+            None
+        }
+    } else {
+        let default = default_matrix(matrix);
+        if let Some(tail_witness) = is_useful(&default, num_cols - 1, registry) {
+            let mut out = Vec::with_capacity(num_cols);
+            out.push(Witness::Wildcard);
+            out.extend(tail_witness);
+            return Some(out);
+        }
+        None
+    }
+}
+
 /// Type checker state
 pub struct TypeChecker {
     ctx: Context,
@@ -1342,79 +1632,39 @@ impl TypeChecker {
         }
     }
 
-    /// Check exhaustiveness of a match's arm patterns.
+    /// Check exhaustiveness of a match's arm patterns using a
+    /// Maranget-style specialize/default usefulness algorithm.
     ///
-    /// Coverage rules (simplified — full Maranget usefulness is future
-    /// work tracked separately):
-    /// - Any arm whose pattern is `Wildcard` or `Var` is a catch-all
-    ///   and makes the match exhaustive.
-    /// - For arms with constructor patterns, every constructor of the
-    ///   parent data type must appear among the patterns.
-    /// - Literal-only matches without a catch-all are non-exhaustive
-    ///   (literal sets are generally unbounded).
-    /// - Pair/Tuple/Unit patterns destructure a single inhabitant and
-    ///   are exhaustive on their own.
+    /// Builds a single-column pattern matrix from the arms and asks
+    /// whether the wildcard row `[_]` is useful with respect to that
+    /// matrix. A useful witness is a pretty-printed missing case;
+    /// "not useful" means every value is covered.
+    ///
+    /// Handles bool full coverage without a wildcard, nested
+    /// constructor patterns (recursive column specialization), and
+    /// mixed literal-plus-constructor columns. Infinite domains (Int,
+    /// Float, opaque types) require a wildcard / `Var` arm to be
+    /// exhaustive.
     fn check_exhaustiveness(
         &self,
         s: Span,
         arms: &[MatchArm],
         _scrutinee_ty: &Ty,
     ) -> Result<(), SpannedTypeError> {
-        for arm in arms {
-            if matches!(
-                arm.pattern,
-                Pattern::Wildcard
-                    | Pattern::Var(_)
-                    | Pattern::Unit
-                    | Pattern::Pair(_, _)
-                    | Pattern::Tuple(_)
-            ) {
-                return Ok(());
-            }
+        let matrix: Vec<Vec<Pattern>> = arms
+            .iter()
+            .map(|a| vec![a.pattern.clone()])
+            .collect();
+        if let Some(witness) = is_useful(&matrix, 1, &self.data_registry) {
+            let pretty = pretty_witness(&witness[0]);
+            return Err(self.at(
+                s,
+                TypeError::NonExhaustiveMatch {
+                    missing: SmolStr::new(&pretty),
+                },
+            ));
         }
-
-        let mut parent_name: Option<SmolStr> = None;
-        let mut seen: HashSet<SmolStr> = HashSet::new();
-        let mut all_constructor_arms = true;
-
-        for arm in arms {
-            match &arm.pattern {
-                Pattern::Constructor { ctor, .. } => {
-                    seen.insert(ctor.clone());
-                    if parent_name.is_none() {
-                        if let Some(info) = self.data_registry.get_ctor(ctor.as_str()) {
-                            parent_name = Some(info.parent.clone());
-                        }
-                    }
-                }
-                _ => all_constructor_arms = false,
-            }
-        }
-
-        if all_constructor_arms {
-            if let Some(name) = parent_name {
-                if let Some(data_info) = self.data_registry.get_type(name.as_str()) {
-                    for ctor in &data_info.ctor_names {
-                        if !seen.contains(ctor) {
-                            return Err(self.at(
-                                s,
-                                TypeError::NonExhaustiveMatch {
-                                    missing: ctor.clone(),
-                                },
-                            ));
-                        }
-                    }
-                    return Ok(());
-                }
-            }
-        }
-
-        Err(self.at(
-            s,
-            TypeError::NonExhaustiveMatch {
-                missing: SmolStr::new("_"),
-            },
-        ))
+        Ok(())
     }
 
     fn check_deref(&mut self, s: Span, inner: &Expr) -> Result<Ty, SpannedTypeError> {
@@ -3762,5 +4012,323 @@ mod tests {
             ],
         };
         type_check_module(&module).expect("Result(I32, Bool) match should type-check");
+    }
+
+    // ----- Maranget usefulness: nested patterns, bool, mixed columns -----
+
+    /// `match b: Bool { true => ... | false => ... }` is exhaustive
+    /// without a wildcard — Maranget should see both Bool constructors.
+    #[test]
+    fn test_match_bool_full_coverage_no_wildcard() {
+        let scrut = dummy_expr(ExprKind::Lit(Literal::Bool(true)));
+        let arms = vec![
+            MatchArm {
+                pattern: P::Literal(Literal::Bool(true)),
+                guard: None,
+                body: lit_i32(1),
+            },
+            MatchArm {
+                pattern: P::Literal(Literal::Bool(false)),
+                guard: None,
+                body: lit_i32(0),
+            },
+        ];
+        let body = dummy_expr(ExprKind::Match {
+            scrutinee: Box::new(scrut),
+            arms,
+        });
+        let module = Module {
+            name: "t".into(),
+            imports: vec![],
+            decls: vec![fn_decl("f", vec![], Ty::Base(BaseTy::I32), body)],
+        };
+        type_check_module(&module)
+            .expect("bool true/false should be exhaustive without a wildcard");
+    }
+
+    /// `match b: Bool { true => ... }` is non-exhaustive; witness is
+    /// `false`.
+    #[test]
+    fn test_match_bool_missing_false() {
+        let scrut = dummy_expr(ExprKind::Lit(Literal::Bool(true)));
+        let arms = vec![MatchArm {
+            pattern: P::Literal(Literal::Bool(true)),
+            guard: None,
+            body: lit_i32(1),
+        }];
+        let body = dummy_expr(ExprKind::Match {
+            scrutinee: Box::new(scrut),
+            arms,
+        });
+        let module = Module {
+            name: "t".into(),
+            imports: vec![],
+            decls: vec![fn_decl("f", vec![], Ty::Base(BaseTy::I32), body)],
+        };
+        let err = type_check_module(&module).unwrap_err();
+        match err.error {
+            TypeError::NonExhaustiveMatch { missing } => {
+                assert_eq!(missing, SmolStr::from("false"), "got missing={missing}")
+            }
+            other => panic!("expected NonExhaustiveMatch, got {other:?}"),
+        }
+    }
+
+    /// `Option(Option(I32))` covered by `None`, `Some(None)`,
+    /// `Some(Some(_))` — exhaustive via specialization.
+    #[test]
+    fn test_match_nested_option_exhaustive() {
+        let inner = dummy_expr(ExprKind::Inr {
+            ty: Ty::Base(BaseTy::Unit),
+            value: Box::new(lit_i32(42)),
+        });
+        let outer = dummy_expr(ExprKind::Inr {
+            ty: Ty::Base(BaseTy::Unit),
+            value: Box::new(inner),
+        });
+        let arms = vec![
+            MatchArm {
+                pattern: P::Constructor {
+                    ctor: "None".into(),
+                    args: vec![],
+                },
+                guard: None,
+                body: lit_i32(0),
+            },
+            MatchArm {
+                pattern: P::Constructor {
+                    ctor: "Some".into(),
+                    args: vec![P::Constructor {
+                        ctor: "None".into(),
+                        args: vec![],
+                    }],
+                },
+                guard: None,
+                body: lit_i32(1),
+            },
+            MatchArm {
+                pattern: P::Constructor {
+                    ctor: "Some".into(),
+                    args: vec![P::Constructor {
+                        ctor: "Some".into(),
+                        args: vec![P::Var("v".into())],
+                    }],
+                },
+                guard: None,
+                body: dummy_expr(ExprKind::Var("v".into())),
+            },
+        ];
+        let body = dummy_expr(ExprKind::Match {
+            scrutinee: Box::new(outer),
+            arms,
+        });
+        let module = Module {
+            name: "t".into(),
+            imports: vec![],
+            decls: vec![
+                option_data_decl(),
+                fn_decl("f", vec![], Ty::Base(BaseTy::I32), body),
+            ],
+        };
+        type_check_module(&module)
+            .expect("nested Option(Option(_)) should be exhaustive");
+    }
+
+    /// `Option(Option(I32))` with `None` + `Some(Some(_))` only —
+    /// missing `Some(None)`. Witness must surface that case.
+    #[test]
+    fn test_match_nested_option_non_exhaustive_witness() {
+        let inner = dummy_expr(ExprKind::Inr {
+            ty: Ty::Base(BaseTy::Unit),
+            value: Box::new(lit_i32(42)),
+        });
+        let outer = dummy_expr(ExprKind::Inr {
+            ty: Ty::Base(BaseTy::Unit),
+            value: Box::new(inner),
+        });
+        let arms = vec![
+            MatchArm {
+                pattern: P::Constructor {
+                    ctor: "None".into(),
+                    args: vec![],
+                },
+                guard: None,
+                body: lit_i32(0),
+            },
+            MatchArm {
+                pattern: P::Constructor {
+                    ctor: "Some".into(),
+                    args: vec![P::Constructor {
+                        ctor: "Some".into(),
+                        args: vec![P::Var("v".into())],
+                    }],
+                },
+                guard: None,
+                body: dummy_expr(ExprKind::Var("v".into())),
+            },
+        ];
+        let body = dummy_expr(ExprKind::Match {
+            scrutinee: Box::new(outer),
+            arms,
+        });
+        let module = Module {
+            name: "t".into(),
+            imports: vec![],
+            decls: vec![
+                option_data_decl(),
+                fn_decl("f", vec![], Ty::Base(BaseTy::I32), body),
+            ],
+        };
+        let err = type_check_module(&module).unwrap_err();
+        match err.error {
+            TypeError::NonExhaustiveMatch { missing } => {
+                assert_eq!(
+                    missing,
+                    SmolStr::from("Some(None)"),
+                    "expected Some(None) witness, got {missing}"
+                );
+            }
+            other => panic!("expected NonExhaustiveMatch, got {other:?}"),
+        }
+    }
+
+    /// Tuple of `(Option(I32), Bool)` covered by the cross product
+    /// `{None,Some(_)} × {true,false}` — exhaustive.
+    #[test]
+    fn test_match_tuple_option_bool_exhaustive() {
+        // scrutinee: `(None, true)` — Pair { Sum{Unit, I32}, Bool }
+        let none_val = dummy_expr(ExprKind::Inl {
+            ty: Ty::Base(BaseTy::I32),
+            value: Box::new(dummy_expr(ExprKind::Lit(Literal::Unit))),
+        });
+        let bool_val = dummy_expr(ExprKind::Lit(Literal::Bool(true)));
+        let scrut = dummy_expr(ExprKind::Pair {
+            left: Box::new(none_val),
+            right: Box::new(bool_val),
+        });
+        let arms = vec![
+            MatchArm {
+                pattern: P::Pair(
+                    Box::new(P::Constructor {
+                        ctor: "None".into(),
+                        args: vec![],
+                    }),
+                    Box::new(P::Literal(Literal::Bool(true))),
+                ),
+                guard: None,
+                body: lit_i32(1),
+            },
+            MatchArm {
+                pattern: P::Pair(
+                    Box::new(P::Constructor {
+                        ctor: "None".into(),
+                        args: vec![],
+                    }),
+                    Box::new(P::Literal(Literal::Bool(false))),
+                ),
+                guard: None,
+                body: lit_i32(2),
+            },
+            MatchArm {
+                pattern: P::Pair(
+                    Box::new(P::Constructor {
+                        ctor: "Some".into(),
+                        args: vec![P::Var("v".into())],
+                    }),
+                    Box::new(P::Literal(Literal::Bool(true))),
+                ),
+                guard: None,
+                body: dummy_expr(ExprKind::Var("v".into())),
+            },
+            MatchArm {
+                pattern: P::Pair(
+                    Box::new(P::Constructor {
+                        ctor: "Some".into(),
+                        args: vec![P::Var("v".into())],
+                    }),
+                    Box::new(P::Literal(Literal::Bool(false))),
+                ),
+                guard: None,
+                body: dummy_expr(ExprKind::Var("v".into())),
+            },
+        ];
+        let body = dummy_expr(ExprKind::Match {
+            scrutinee: Box::new(scrut),
+            arms,
+        });
+        let module = Module {
+            name: "t".into(),
+            imports: vec![],
+            decls: vec![
+                option_data_decl(),
+                fn_decl("f", vec![], Ty::Base(BaseTy::I32), body),
+            ],
+        };
+        type_check_module(&module).expect(
+            "cross product (Option, Bool) of all combinations should be exhaustive",
+        );
+    }
+
+    /// Tuple of `(Option(I32), Bool)` missing `(Some(_), false)` —
+    /// witness should reflect that combination.
+    #[test]
+    fn test_match_tuple_option_bool_missing_one() {
+        let none_val = dummy_expr(ExprKind::Inl {
+            ty: Ty::Base(BaseTy::I32),
+            value: Box::new(dummy_expr(ExprKind::Lit(Literal::Unit))),
+        });
+        let bool_val = dummy_expr(ExprKind::Lit(Literal::Bool(true)));
+        let scrut = dummy_expr(ExprKind::Pair {
+            left: Box::new(none_val),
+            right: Box::new(bool_val),
+        });
+        let arms = vec![
+            MatchArm {
+                pattern: P::Pair(
+                    Box::new(P::Constructor {
+                        ctor: "None".into(),
+                        args: vec![],
+                    }),
+                    Box::new(P::Wildcard),
+                ),
+                guard: None,
+                body: lit_i32(0),
+            },
+            MatchArm {
+                pattern: P::Pair(
+                    Box::new(P::Constructor {
+                        ctor: "Some".into(),
+                        args: vec![P::Var("v".into())],
+                    }),
+                    Box::new(P::Literal(Literal::Bool(true))),
+                ),
+                guard: None,
+                body: dummy_expr(ExprKind::Var("v".into())),
+            },
+        ];
+        let body = dummy_expr(ExprKind::Match {
+            scrutinee: Box::new(scrut),
+            arms,
+        });
+        let module = Module {
+            name: "t".into(),
+            imports: vec![],
+            decls: vec![
+                option_data_decl(),
+                fn_decl("f", vec![], Ty::Base(BaseTy::I32), body),
+            ],
+        };
+        let err = type_check_module(&module).unwrap_err();
+        match err.error {
+            TypeError::NonExhaustiveMatch { missing } => {
+                // Pair witness should include "Some(_)" and "false"
+                let s = missing.as_str();
+                assert!(
+                    s.contains("Some") && s.contains("false"),
+                    "expected witness mentioning Some(_) and false, got {s}"
+                );
+            }
+            other => panic!("expected NonExhaustiveMatch, got {other:?}"),
+        }
     }
 }

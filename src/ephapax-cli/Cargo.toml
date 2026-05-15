@@ -26,6 +26,7 @@ ephapax-wasm.workspace = true
 ephapax-interp.workspace = true
 ephapax-repl.workspace = true
 ephapax-package.workspace = true
+typed-wasm-verify.workspace = true
 smol_str.workspace = true
 clap.workspace = true
 colored.workspace = true
@@ -35,3 +36,4 @@ serde_json.workspace = true
 [dev-dependencies]
 wasmtime.workspace = true
 proptest = { workspace = true }
+tempfile = "3"

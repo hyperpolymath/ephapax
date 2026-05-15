@@ -93,6 +93,13 @@ enum Commands {
         /// Compilation mode (linear or affine)
         #[arg(short, long, default_value = "linear")]
         mode: String,
+
+        /// Run the typed-wasm L7+L10 verifier on the emitted module.
+        /// Reads the `affinescript.ownership` custom section and
+        /// reports any aliasing / linearity violations. Non-zero exit
+        /// if any are found.
+        #[arg(long)]
+        verify_ownership: bool,
     },
 
     /// Compile an S-expression IR module to WebAssembly
@@ -175,7 +182,16 @@ fn main() -> ExitCode {
             opt_level,
             debug,
             mode,
-        }) => compile_file(&file, output, opt_level, debug, &mode, cli.verbose),
+            verify_ownership,
+        }) => compile_file(
+            &file,
+            output,
+            opt_level,
+            debug,
+            &mode,
+            verify_ownership,
+            cli.verbose,
+        ),
         Some(Commands::CompileSexpr { file, output }) => {
             compile_sexpr_file(&file, output, cli.verbose)
         }
@@ -382,6 +398,7 @@ fn compile_file(
     opt_level: u8,
     debug: bool,
     _mode_str: &str,
+    verify_ownership: bool,
     verbose: bool,
 ) -> Result<(), String> {
     let content =
@@ -450,6 +467,13 @@ fn compile_file(
         wasm_bytes
     };
 
+    // Run the typed-wasm L7+L10 verifier on the emitted module if
+    // requested. Fails the build with a non-zero exit if any
+    // ownership violation is found.
+    if verify_ownership {
+        report_ownership_verification(&wasm_bytes, verbose)?;
+    }
+
     // Write output
     let output_path = output.unwrap_or_else(|| path.with_extension("wasm"));
     fs::write(&output_path, &wasm_bytes)
@@ -482,6 +506,56 @@ fn compile_file(
     );
 
     Ok(())
+}
+
+/// Run the typed-wasm L7+L10 verifier on a compiled module and report
+/// any violations. Returns `Ok(())` if the module is clean (or if it
+/// has no ownership section, which both verifiers treat as fully
+/// unconstrained). Returns `Err` with a user-facing message if any
+/// violation is found — the caller surfaces this as a non-zero exit.
+fn report_ownership_verification(wasm_bytes: &[u8], verbose: bool) -> Result<(), String> {
+    use typed_wasm_verify::{verify_from_module, VerifyError};
+
+    match verify_from_module(wasm_bytes) {
+        Ok(()) => {
+            if verbose {
+                println!(
+                    "{} typed-wasm L7+L10 verification: clean",
+                    "✓".green()
+                );
+            }
+            Ok(())
+        }
+        Err(VerifyError::Parse(e)) => {
+            Err(format!("verifier could not parse emitted wasm: {}", e))
+        }
+        Err(VerifyError::Ownership(errs)) => {
+            eprintln!(
+                "{} typed-wasm verification failed: {} violation(s)",
+                "✗".red().bold(),
+                errs.len()
+            );
+            for err in &errs {
+                eprintln!("  {}", err);
+            }
+            Err(format!("{} ownership violation(s)", errs.len()))
+        }
+        Err(VerifyError::Cross(errs)) => {
+            // Single-module compile shouldn't ever produce Cross
+            // errors (those come from cross-module verification, which
+            // takes a separate callee_iface argument). Surface it
+            // generically rather than silently passing.
+            eprintln!(
+                "{} typed-wasm cross-module verification reported {} violation(s)",
+                "✗".red().bold(),
+                errs.len()
+            );
+            for err in &errs {
+                eprintln!("  {}", err);
+            }
+            Err(format!("{} cross-module violation(s)", errs.len()))
+        }
+    }
 }
 
 fn compile_sexpr_file(

@@ -592,6 +592,35 @@ pub enum Decl {
         abi: String,
         items: Vec<ExternItem>,
     },
+
+    /// Algebraic data type declaration: `data Name(a, b) = C1 | C2(T) | ...`.
+    ///
+    /// Preserves the structured shape (variant names + payloads) for the
+    /// surface IR / LSP / tooling layers. The runtime path
+    /// (surface → desugar → core) does not use this variant — data
+    /// semantics flow through the registry-based encoding in
+    /// `ephapax-desugar`. The core parser produces `Decl::Data` directly
+    /// (instead of folding into `Decl::Type` with a binary-sum encoding
+    /// that discarded constructor names).
+    Data {
+        name: Var,
+        #[serde(skip_serializing_if = "Vec::is_empty")]
+        type_params: Vec<SmolStr>,
+        constructors: Vec<ConstructorDef>,
+    },
+}
+
+/// A single constructor inside a `data` declaration.
+///
+/// Mirror of `ephapax_surface::ConstructorDef` but with core `Ty`
+/// field types instead of `SurfaceTy`.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct ConstructorDef {
+    /// Constructor name (e.g. `"Some"`, `"None"`).
+    pub name: Var,
+    /// Payload types (empty for nullary constructors).
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub fields: Vec<Ty>,
 }
 
 /// A single declaration inside an `extern "abi" { ... }` block.

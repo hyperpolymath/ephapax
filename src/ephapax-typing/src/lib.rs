@@ -1396,6 +1396,10 @@ impl ModuleRegistry {
                         }
                     }
                 }
+                // Data decls live in the type namespace, not the value
+                // namespace, so they contribute no module-registry entry.
+                // Runtime semantics flow through the desugar registry.
+                Decl::Data { .. } => {}
             }
         }
         self.modules.insert(module.name.clone(), entries);
@@ -1583,6 +1587,10 @@ fn type_check_module_inner(
             // declaration parses but does not affect the type
             // environment.
             Decl::Extern { .. } => {}
+            // Data semantics flow through the desugar registry —
+            // structured Decl::Data is preserved for tooling but the
+            // typechecker has nothing to do with it directly.
+            Decl::Data { .. } => {}
         }
     }
 

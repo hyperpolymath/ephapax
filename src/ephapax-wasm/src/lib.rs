@@ -707,6 +707,11 @@ impl Codegen {
                 // and stored in the AST but codegen does not yet emit
                 // wasm imports for it.
                 Decl::Extern { .. } => {}
+                // Data types are erased at runtime — the desugar pass
+                // lowers them to the binary-sum encoding before codegen
+                // sees them. The structured Decl::Data is kept in the
+                // AST for tooling only.
+                Decl::Data { .. } => {}
             }
         }
         Ok(())
@@ -1045,6 +1050,10 @@ impl Codegen {
                 // import section, not via the code section). Until that
                 // wiring lands, phase 2A just skips them here.
                 Decl::Extern { .. } => {}
+                // Data types have no code-section body; runtime
+                // representation comes from the desugar binary-sum
+                // encoding.
+                Decl::Data { .. } => {}
             }
         }
         Ok(())

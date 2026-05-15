@@ -543,6 +543,11 @@ fn extract_declarations(module: &Module, _source: &str) -> Vec<DeclInfo> {
             // and lives in the AST but isn't visible to hover /
             // go-to-definition yet.
             Decl::Extern { .. } => None,
+            // TODO(ephapax#60 follow-up): expose data decls + their
+            // constructors as LSP symbols (currently the surface
+            // pipeline materialises them only via the desugar
+            // registry; this arm covers the core-parser path).
+            Decl::Data { .. } => None,
         })
         .collect()
 }

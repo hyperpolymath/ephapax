@@ -945,6 +945,7 @@ dependencies = [
  "object 0.36.7",
  "serde",
  "serde_json",
+ "typed-wasm-verify",
  "wasm-encoder 0.221.3",
  "wasmparser 0.221.3",
 ]
@@ -3179,6 +3180,15 @@ checksum = "97fee6b57c6a41524a810daee9286c02d7752c4253064d0b05472833a438f675"
 dependencies = [
  "cfg-if",
  "static_assertions",
+]
+
+[[package]]
+name = "typed-wasm-verify"
+version = "0.1.0"
+source = "git+https://github.com/hyperpolymath/typed-wasm?rev=e11bb985ff478a41e7edc4c98a58038d420b5c06#e11bb985ff478a41e7edc4c98a58038d420b5c06"
+dependencies = [
+ "thiserror 2.0.18",
+ "wasmparser 0.221.3",
 ]
 
 [[package]]

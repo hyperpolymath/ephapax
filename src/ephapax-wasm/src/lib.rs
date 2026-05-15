@@ -173,8 +173,9 @@ struct UserFnInfo {
     /// Parameter names (in order) for local binding
     #[allow(dead_code)]
     param_names: Vec<String>,
-    /// Whether each parameter is linear (must-use-once)
-    #[allow(dead_code)]
+    /// Whether each parameter is linear (must-use-once). Drives the
+    /// `affinescript.ownership` custom section emitted by
+    /// [`Codegen::emit_ownership_section`].
     param_linear: Vec<bool>,
 }
 
@@ -625,6 +626,7 @@ impl Codegen {
         self.emit_elements();
         self.module.section(&code_sec);
         self.emit_data_section();
+        self.emit_ownership_section();
         self.emit_debug_sections();
         self.module.clone().finish()
     }
@@ -676,6 +678,7 @@ impl Codegen {
         self.emit_elements();
         self.module.section(&code_sec);
         self.emit_data_section();
+        self.emit_ownership_section();
 
         Ok(self.module.clone().finish())
     }
@@ -1266,6 +1269,51 @@ impl Codegen {
             );
         }
         self.module.section(&data);
+    }
+
+    /// Emit the `affinescript.ownership` custom section if any user
+    /// function takes a Linear parameter. The section is consumed by
+    /// `typed-wasm-verify` (and by affinescript's OCaml verifier) to
+    /// enforce L7 + L10 across emitted wasm modules. Functions with no
+    /// Linear params are omitted from the section — both verifiers treat
+    /// missing entries as fully Unrestricted, so the smaller payload
+    /// has identical semantics.
+    fn emit_ownership_section(&mut self) {
+        let mut entries: Vec<typed_wasm_verify::OwnershipEntry> = self
+            .user_fns
+            .values()
+            .filter(|info| info.param_linear.iter().any(|&l| l))
+            .map(|info| {
+                let param_kinds = info
+                    .param_linear
+                    .iter()
+                    .map(|&is_linear| {
+                        if is_linear {
+                            typed_wasm_verify::OwnershipKind::Linear
+                        } else {
+                            typed_wasm_verify::OwnershipKind::Unrestricted
+                        }
+                    })
+                    .collect();
+                typed_wasm_verify::OwnershipEntry {
+                    func_idx: info.wasm_fn_idx,
+                    param_kinds,
+                    ret_kind: typed_wasm_verify::OwnershipKind::Unrestricted,
+                }
+            })
+            .collect();
+        if entries.is_empty() {
+            return;
+        }
+        // `user_fns` is a HashMap; sort by func_idx for deterministic output.
+        entries.sort_by_key(|e| e.func_idx);
+
+        let payload = typed_wasm_verify::build_ownership_section_payload(&entries);
+        let custom = wasm_encoder::CustomSection {
+            name: typed_wasm_verify::OWNERSHIP_SECTION_NAME.into(),
+            data: payload.as_slice().into(),
+        };
+        self.module.section(&custom);
     }
 
     /// Emit debug information as custom WASM sections
@@ -4461,5 +4509,165 @@ mod tests {
         let wasm = compile_module(&module).expect("Pr match should compile");
         assert_wasm_header(&wasm);
         validate_wasm(&wasm);
+    }
+
+    // -----------------------------------------------------------------------
+    // affinescript.ownership custom section (C6)
+    // -----------------------------------------------------------------------
+
+    /// Locate the `affinescript.ownership` custom section in a wasm
+    /// module's bytes and return its payload, or None if the section
+    /// isn't present.
+    fn ownership_payload(wasm: &[u8]) -> Option<Vec<u8>> {
+        use wasmparser::{Parser as WP, Payload};
+        for payload in WP::new(0).parse_all(wasm) {
+            if let Payload::CustomSection(reader) = payload.expect("wasm parse")
+            {
+                if reader.name() == typed_wasm_verify::OWNERSHIP_SECTION_NAME {
+                    return Some(reader.data().to_vec());
+                }
+            }
+        }
+        None
+    }
+
+    #[test]
+    fn ownership_section_emitted_for_linear_param() {
+        // fn consume(s: String) -> I32 = 0
+        // String is Linear, so the section should carry one entry
+        // with param_kinds = [Linear].
+        let module = AstModule {
+            name: "test".into(),
+            imports: vec![],
+            decls: vec![Decl::Fn {
+                name: "consume".into(),
+                visibility: Visibility::Private,
+                type_params: vec![],
+                params: vec![("s".into(), Ty::String("r".into()))],
+                ret_ty: Ty::Base(BaseTy::I32),
+                body: e(ExprKind::Lit(Literal::I32(0))),
+            }],
+        };
+        let wasm = compile_module(&module).expect("compilation failed");
+        assert_wasm_header(&wasm);
+
+        let payload = ownership_payload(&wasm).expect("ownership section missing");
+        let entries = typed_wasm_verify::parse_ownership_section_payload(&payload);
+        assert_eq!(entries.len(), 1, "expected one ownership entry");
+        assert_eq!(
+            entries[0].param_kinds,
+            vec![typed_wasm_verify::OwnershipKind::Linear]
+        );
+        assert_eq!(
+            entries[0].ret_kind,
+            typed_wasm_verify::OwnershipKind::Unrestricted
+        );
+    }
+
+    #[test]
+    fn ownership_section_omitted_when_no_linear_params() {
+        // fn add(a: I32, b: I32) -> I32 = a + b
+        // No Linear params, no section — both verifiers treat absent
+        // entries as fully Unrestricted, so emitting nothing is the
+        // semantically-equivalent minimum.
+        let module = AstModule {
+            name: "test".into(),
+            imports: vec![],
+            decls: vec![Decl::Fn {
+                name: "add".into(),
+                visibility: Visibility::Private,
+                type_params: vec![],
+                params: vec![
+                    ("a".into(), Ty::Base(BaseTy::I32)),
+                    ("b".into(), Ty::Base(BaseTy::I32)),
+                ],
+                ret_ty: Ty::Base(BaseTy::I32),
+                body: e(ExprKind::BinOp {
+                    op: BinOp::Add,
+                    left: Box::new(e(ExprKind::Var("a".into()))),
+                    right: Box::new(e(ExprKind::Var("b".into()))),
+                }),
+            }],
+        };
+        let wasm = compile_module(&module).expect("compilation failed");
+        assert!(
+            ownership_payload(&wasm).is_none(),
+            "section should be omitted when no Linear params exist"
+        );
+    }
+
+    #[test]
+    fn ownership_section_entries_are_sorted_by_func_idx() {
+        // Build a module where two functions have Linear params. The
+        // HashMap-backed user_fns iterates nondeterministically, but
+        // emit_ownership_section sorts by func_idx for deterministic
+        // output.
+        let module = AstModule {
+            name: "test".into(),
+            imports: vec![],
+            decls: vec![
+                Decl::Fn {
+                    name: "first_consume".into(),
+                    visibility: Visibility::Private,
+                    type_params: vec![],
+                    params: vec![("s".into(), Ty::String("r".into()))],
+                    ret_ty: Ty::Base(BaseTy::I32),
+                    body: e(ExprKind::Lit(Literal::I32(0))),
+                },
+                Decl::Fn {
+                    name: "second_consume".into(),
+                    visibility: Visibility::Private,
+                    type_params: vec![],
+                    params: vec![("s".into(), Ty::String("r".into()))],
+                    ret_ty: Ty::Base(BaseTy::I32),
+                    body: e(ExprKind::Lit(Literal::I32(0))),
+                },
+            ],
+        };
+        let wasm = compile_module(&module).expect("compilation failed");
+        let payload = ownership_payload(&wasm).expect("ownership section missing");
+        let entries = typed_wasm_verify::parse_ownership_section_payload(&payload);
+        assert_eq!(entries.len(), 2);
+        assert!(
+            entries[0].func_idx < entries[1].func_idx,
+            "entries must be sorted by func_idx"
+        );
+    }
+
+    #[test]
+    fn ownership_section_skips_non_linear_fns_in_mixed_module() {
+        // fn id(x: I32) -> I32 = x          // not Linear
+        // fn consume(s: String) -> I32 = 0  // Linear
+        // Only `consume` should appear in the section.
+        let module = AstModule {
+            name: "test".into(),
+            imports: vec![],
+            decls: vec![
+                Decl::Fn {
+                    name: "id".into(),
+                    visibility: Visibility::Private,
+                    type_params: vec![],
+                    params: vec![("x".into(), Ty::Base(BaseTy::I32))],
+                    ret_ty: Ty::Base(BaseTy::I32),
+                    body: e(ExprKind::Var("x".into())),
+                },
+                Decl::Fn {
+                    name: "consume".into(),
+                    visibility: Visibility::Private,
+                    type_params: vec![],
+                    params: vec![("s".into(), Ty::String("r".into()))],
+                    ret_ty: Ty::Base(BaseTy::I32),
+                    body: e(ExprKind::Lit(Literal::I32(0))),
+                },
+            ],
+        };
+        let wasm = compile_module(&module).expect("compilation failed");
+        let payload = ownership_payload(&wasm).expect("ownership section missing");
+        let entries = typed_wasm_verify::parse_ownership_section_payload(&payload);
+        assert_eq!(entries.len(), 1, "only the Linear fn should be listed");
+        assert_eq!(
+            entries[0].param_kinds,
+            vec![typed_wasm_verify::OwnershipKind::Linear]
+        );
     }
 }

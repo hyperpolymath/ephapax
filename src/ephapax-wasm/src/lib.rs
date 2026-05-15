@@ -2408,6 +2408,16 @@ impl Codegen {
             // produces an i32 on the stack; we br $done (depth 1) to
             // carry it past the remaining arms.
             self.compile_top_pattern(func, &arm.pattern, scrut_local, payload_local);
+
+            // Match guard (if any): evaluate under the arm's pattern
+            // bindings; `br_if $arm_i_fail` (depth 0) when the guard
+            // is false.
+            if let Some(guard) = &arm.guard {
+                self.compile_expr(func, guard);
+                func.instruction(&Instruction::I32Eqz);
+                func.instruction(&Instruction::BrIf(0));
+            }
+
             self.compile_expr(func, &arm.body);
             func.instruction(&Instruction::Br(1));
 
@@ -4919,6 +4929,126 @@ mod tests {
         };
         let wasm =
             compile_module(&module).expect("Box(Some(v)) | Box(None) should compile");
+        assert_wasm_header(&wasm);
+        validate_wasm(&wasm);
+    }
+
+    // ----- Match guards (#67) -----
+
+    /// Guarded arm with a pattern-bound var: `Some(v) if v > 0 -> v |
+    /// Some(_) -> 0 | None -> -1`. Codegen emits the guard expression
+    /// inside `$arm_0_fail`; `i32.eqz + br_if 0` falls through to
+    /// arm 1 when the guard is false.
+    #[test]
+    fn compile_module_match_guard_simple() {
+        let scrut = e(ExprKind::Inr {
+            ty: Ty::Base(BaseTy::Unit),
+            value: Box::new(e(ExprKind::Lit(Literal::I32(5)))),
+        });
+        let guard = e(ExprKind::BinOp {
+            op: BinOp::Gt,
+            left: Box::new(e(ExprKind::Var("v".into()))),
+            right: Box::new(e(ExprKind::Lit(Literal::I32(0)))),
+        });
+        let body = e(ExprKind::Match {
+            scrutinee: Box::new(scrut),
+            arms: vec![
+                MatchArm {
+                    pattern: P::Constructor {
+                        ctor: "Some".into(),
+                        args: vec![P::Var("v".into())],
+                    },
+                    guard: Some(Box::new(guard)),
+                    body: e(ExprKind::Var("v".into())),
+                },
+                MatchArm {
+                    pattern: P::Constructor {
+                        ctor: "Some".into(),
+                        args: vec![P::Wildcard],
+                    },
+                    guard: None,
+                    body: e(ExprKind::Lit(Literal::I32(0))),
+                },
+                MatchArm {
+                    pattern: P::Constructor {
+                        ctor: "None".into(),
+                        args: vec![],
+                    },
+                    guard: None,
+                    body: e(ExprKind::Lit(Literal::I32(-1))),
+                },
+            ],
+        });
+        let module = AstModule {
+            name: "t".into(),
+            imports: vec![],
+            decls: vec![
+                option_data_decl(),
+                Decl::Fn {
+                    name: "f".into(),
+                    visibility: Visibility::Private,
+                    type_params: vec![],
+                    params: vec![],
+                    ret_ty: Ty::Base(BaseTy::I32),
+                    body,
+                },
+            ],
+        };
+        let wasm =
+            compile_module(&module).expect("guarded match should compile");
+        assert_wasm_header(&wasm);
+        validate_wasm(&wasm);
+    }
+
+    /// Guard on a wildcard catch-all: `Some(v) -> v | _ if false -> 0
+    /// | _ -> 1`. Confirms the guard machinery works for non-ctor
+    /// top-level patterns too.
+    #[test]
+    fn compile_module_match_guard_on_wildcard() {
+        let scrut = e(ExprKind::Inl {
+            ty: Ty::Base(BaseTy::I32),
+            value: Box::new(e(ExprKind::Lit(Literal::Unit))),
+        });
+        let body = e(ExprKind::Match {
+            scrutinee: Box::new(scrut),
+            arms: vec![
+                MatchArm {
+                    pattern: P::Constructor {
+                        ctor: "Some".into(),
+                        args: vec![P::Var("v".into())],
+                    },
+                    guard: None,
+                    body: e(ExprKind::Var("v".into())),
+                },
+                MatchArm {
+                    pattern: P::Wildcard,
+                    guard: Some(Box::new(e(ExprKind::Lit(Literal::Bool(false))))),
+                    body: e(ExprKind::Lit(Literal::I32(0))),
+                },
+                MatchArm {
+                    pattern: P::Wildcard,
+                    guard: None,
+                    body: e(ExprKind::Lit(Literal::I32(1))),
+                },
+            ],
+        });
+        let module = AstModule {
+            name: "t".into(),
+            imports: vec![],
+            decls: vec![
+                option_data_decl(),
+                Decl::Fn {
+                    name: "f".into(),
+                    visibility: Visibility::Private,
+                    type_params: vec![],
+                    params: vec![],
+                    ret_ty: Ty::Base(BaseTy::I32),
+                    body,
+                },
+            ],
+        };
+        let wasm =
+            compile_module(&module).expect("guard on wildcard should compile");
         assert_wasm_header(&wasm);
         validate_wasm(&wasm);
     }

@@ -316,6 +316,34 @@ fn decl_to_sexpr(decl: &Decl) -> SExpr {
                     .collect(),
             ),
         ]),
+        // Render `data Name(a, b) = C1 | C2(T) | ...` as a tagged s-expr
+        // preserving the constructor shape:
+        //   (data Name (type-params) ((Ctor1 (T1 T2)) (Ctor2 ())))
+        Decl::Data {
+            name,
+            type_params,
+            constructors,
+        } => SExpr::List(vec![
+            SExpr::Atom("data".into()),
+            SExpr::Atom(escape_atom(name)),
+            SExpr::List(
+                type_params
+                    .iter()
+                    .map(|tp| SExpr::Atom(escape_atom(tp)))
+                    .collect(),
+            ),
+            SExpr::List(
+                constructors
+                    .iter()
+                    .map(|ctor| {
+                        SExpr::List(vec![
+                            SExpr::Atom(escape_atom(&ctor.name)),
+                            SExpr::List(ctor.fields.iter().map(ty_to_sexpr).collect()),
+                        ])
+                    })
+                    .collect(),
+            ),
+        ]),
     }
 }
 

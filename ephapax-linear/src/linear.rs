@@ -93,6 +93,9 @@ impl LinearChecker {
             // Extern declarations have no body — no linear discipline
             // applies. The signatures only exist to inform codegen.
             Decl::Extern { .. } => {}
+            // Data decls carry no body — linearity is checked on the
+            // desugared core form, not on Decl::Data itself.
+            Decl::Data { .. } => {}
         }
     }
 

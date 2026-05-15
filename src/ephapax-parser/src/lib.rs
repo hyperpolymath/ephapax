@@ -16,8 +16,8 @@
 //! ```
 
 use ephapax_syntax::{
-    BaseTy, BinOp, Decl, Expr, ExprKind, ExternItem, Import, Literal, Module, Span, Ty, UnaryOp,
-    Visibility,
+    BaseTy, BinOp, ConstructorDef, Decl, Expr, ExprKind, ExternItem, Import, Literal, Module, Span,
+    Ty, UnaryOp, Visibility,
 };
 use pest::Parser;
 use pest_derive::Parser;
@@ -144,7 +144,7 @@ fn parse_declaration(pair: pest::iterators::Pair<Rule>) -> Result<Decl, ParseErr
     match inner.as_rule() {
         Rule::fn_decl => parse_fn_decl(inner),
         Rule::type_decl => parse_type_decl(inner),
-        Rule::data_decl => parse_type_decl(inner), // data decls are a form of type decl
+        Rule::data_decl => parse_data_decl(inner),
         Rule::const_decl => parse_const_decl(inner),
         Rule::extern_block => parse_extern_block(inner),
         _ => Err(ParseError::Syntax {
@@ -152,6 +152,68 @@ fn parse_declaration(pair: pest::iterators::Pair<Rule>) -> Result<Decl, ParseErr
             span: span_from_pair(&inner),
         }),
     }
+}
+
+/// Parse a `data Name(a, b) = C1 | C2(T) | ...` declaration into a
+/// `Decl::Data` with constructor names + payloads preserved.
+///
+/// Prior to ephapax#60 this routed through `parse_type_decl`, which
+/// folded the variants into a `Decl::Type` with a binary-sum encoding
+/// and discarded the variant names. The structured form is now kept
+/// in the AST for the surface IR / LSP / tooling layers; the runtime
+/// semantics still flow through the `ephapax-desugar` registry path.
+fn parse_data_decl(pair: pest::iterators::Pair<Rule>) -> Result<Decl, ParseError> {
+    let mut inner = pair.into_inner();
+
+    let name_pair = inner
+        .next()
+        .ok_or_else(|| ParseError::missing("data type name"))?;
+    let name = parse_identifier(name_pair);
+
+    let mut type_params: Vec<SmolStr> = Vec::new();
+    let mut constructors: Vec<ConstructorDef> = Vec::new();
+
+    for sub in inner {
+        match sub.as_rule() {
+            Rule::type_params => {
+                for ident in sub.into_inner() {
+                    if ident.as_rule() == Rule::identifier {
+                        type_params.push(parse_identifier(ident));
+                    }
+                }
+            }
+            Rule::data_variant => {
+                let mut bits = sub.into_inner();
+                let ctor_name_pair = bits
+                    .next()
+                    .ok_or_else(|| ParseError::missing("constructor name"))?;
+                let ctor_name = parse_identifier(ctor_name_pair);
+
+                let mut fields: Vec<Ty> = Vec::new();
+                if let Some(ty_list) = bits.next() {
+                    if ty_list.as_rule() == Rule::ty_list {
+                        for ty_pair in ty_list.into_inner() {
+                            if ty_pair.as_rule() == Rule::ty {
+                                fields.push(parse_type(ty_pair)?);
+                            }
+                        }
+                    }
+                }
+
+                constructors.push(ConstructorDef {
+                    name: ctor_name,
+                    fields,
+                });
+            }
+            _ => {}
+        }
+    }
+
+    Ok(Decl::Data {
+        name,
+        type_params,
+        constructors,
+    })
 }
 
 /// Parse an `extern "abi" { ... }` block into a `Decl::Extern`.
@@ -2003,6 +2065,86 @@ mod tests {
                 }
             }
             other => panic!("expected Decl::Extern, got {other:?}"),
+        }
+    }
+
+    /// `data Color = Red | Green | Blue` — three nullary variants.
+    /// Verifies that the core parser emits `Decl::Data` (not the
+    /// pre-#60 `Decl::Type` binary-sum encoding) and preserves
+    /// constructor names.
+    #[test]
+    fn test_parse_data_decl_nullary() {
+        let source = "data Color = Red | Green | Blue";
+        let module = parse_module(source, "<input>").expect("should parse");
+        assert_eq!(module.decls.len(), 1);
+        match &module.decls[0] {
+            Decl::Data {
+                name,
+                type_params,
+                constructors,
+            } => {
+                assert_eq!(name.as_str(), "Color");
+                assert!(type_params.is_empty());
+                assert_eq!(constructors.len(), 3);
+                assert_eq!(constructors[0].name.as_str(), "Red");
+                assert!(constructors[0].fields.is_empty());
+                assert_eq!(constructors[1].name.as_str(), "Green");
+                assert_eq!(constructors[2].name.as_str(), "Blue");
+            }
+            other => panic!("expected Decl::Data, got {other:?}"),
+        }
+    }
+
+    /// `data Option(a) = None | Some(a)` — parametric, mixed nullary
+    /// and unary constructors with type variable payloads.
+    #[test]
+    fn test_parse_data_decl_parametric() {
+        let source = "data Option(a) = None | Some(a)";
+        let module = parse_module(source, "<input>").expect("should parse");
+        match &module.decls[0] {
+            Decl::Data {
+                name,
+                type_params,
+                constructors,
+            } => {
+                assert_eq!(name.as_str(), "Option");
+                assert_eq!(type_params.len(), 1);
+                assert_eq!(type_params[0].as_str(), "a");
+                assert_eq!(constructors.len(), 2);
+                assert_eq!(constructors[0].name.as_str(), "None");
+                assert!(constructors[0].fields.is_empty());
+                assert_eq!(constructors[1].name.as_str(), "Some");
+                assert_eq!(constructors[1].fields.len(), 1);
+                assert!(matches!(&constructors[1].fields[0], Ty::Var(v) if v == "a"));
+            }
+            other => panic!("expected Decl::Data, got {other:?}"),
+        }
+    }
+
+    /// `data Result(a, e) = Ok(a) | Err(e)` — two type params, two
+    /// unary constructors each carrying a distinct type variable.
+    #[test]
+    fn test_parse_data_decl_multi_param() {
+        let source = "data Result(a, e) = Ok(a) | Err(e)";
+        let module = parse_module(source, "<input>").expect("should parse");
+        match &module.decls[0] {
+            Decl::Data {
+                name,
+                type_params,
+                constructors,
+            } => {
+                assert_eq!(name.as_str(), "Result");
+                assert_eq!(
+                    type_params,
+                    &vec![SmolStr::new("a"), SmolStr::new("e")]
+                );
+                assert_eq!(constructors.len(), 2);
+                assert_eq!(constructors[0].name.as_str(), "Ok");
+                assert!(matches!(&constructors[0].fields[0], Ty::Var(v) if v == "a"));
+                assert_eq!(constructors[1].name.as_str(), "Err");
+                assert!(matches!(&constructors[1].fields[0], Ty::Var(v) if v == "e"));
+            }
+            other => panic!("expected Decl::Data, got {other:?}"),
         }
     }
 

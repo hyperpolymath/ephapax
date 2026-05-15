@@ -74,11 +74,18 @@ impl EphapaxDebugger {
                 }))
             }
             "launch" => {
-                // TODO: Launch the Ephapax interpreter with the target .eph file
+                // Intentional stub: this DAP shim acknowledges
+                // launch requests without actually spinning up the
+                // interpreter. Wiring is reserved for the compiler-
+                // integrated debugger; this lightweight shim exists
+                // for IDE handshake testing via the BoJ dap-mcp
+                // cartridge.
                 (true, serde_json::json!({}))
             }
             "setBreakpoints" => {
-                // TODO: Set breakpoints in the interpreter
+                // Intentional stub: breakpoints are echoed back as
+                // verified but the interpreter is not actually paused.
+                // See the `launch` arm above for the rationale.
                 let breakpoints = msg.content.get("arguments")
                     .and_then(|a| a.get("breakpoints"))
                     .and_then(|b| b.as_array())
@@ -103,7 +110,8 @@ impl EphapaxDebugger {
                 }))
             }
             "stackTrace" => {
-                // TODO: Return actual stack frames from interpreter
+                // Intentional stub — empty stack until the
+                // compiler-integrated debugger lands. See `launch`.
                 (true, serde_json::json!({
                     "stackFrames": [],
                     "totalFrames": 0,
@@ -142,8 +150,9 @@ impl EphapaxDebugger {
                 }))
             }
             "variables" => {
-                // TODO: Return variables from interpreter state
-                // Variables should show: name, value, type, qualifier (●/○), region
+                // Intentional stub — see `launch`. The compiler-
+                // integrated debugger will surface name / value / type /
+                // qualifier (●/○) / region per binding.
                 (true, serde_json::json!({ "variables": [] }))
             }
             "continue" => {

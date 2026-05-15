@@ -2336,15 +2336,13 @@ fn type_check_module_inner(
             }
             Decl::Type { .. } => {}
             Decl::Const { .. } => {} // Constants are handled in module registration
-            // TODO(ephapax#43 phase 2B): typecheck extern items —
-            // register extern types as opaque nominal types and extern
-            // fns with their declared signatures. For phase 2A the
-            // declaration parses but does not affect the type
-            // environment.
+            // Extern fn signatures are registered earlier in the
+            // signature-collection pass; the body-checking pass has
+            // nothing more to do. Extern types are opaque.
             Decl::Extern { .. } => {}
-            // Data semantics flow through the desugar registry —
-            // structured Decl::Data is preserved for tooling but the
-            // typechecker has nothing to do with it directly.
+            // Data ctor signatures flow through `DataCtorRegistry`
+            // (populated pre-pass); pattern-checking dispatches via the
+            // registry, so there is no per-decl body to walk here.
             Decl::Data { .. } => {}
         }
     }

@@ -126,7 +126,10 @@ impl LintContext {
 
 /// Lint a source file (text-based, pre-AST).
 ///
-/// TODO: Replace with AST-based linting once ephapax-syntax crate is integrated.
+/// Intentional text-based linter for the standalone tooling in
+/// `tools/` and the BoJ lsp-mcp cartridge. The compiler-integrated
+/// path runs the parser + typechecker directly and gets richer
+/// diagnostics; this shim avoids linking the full compiler.
 pub fn lint_source(file: &str, source: &str) -> Vec<Diagnostic> {
     let mut ctx = LintContext::new(file);
 

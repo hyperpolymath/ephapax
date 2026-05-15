@@ -1473,8 +1473,9 @@ impl TypeChecker {
 
             let bound = self.check_pattern(s, &arm.pattern, &scrutinee_ty)?;
 
-            if arm.guard.is_some() {
-                return Err(self.at(s, TypeError::NotYetSupportedInCore("match guards")));
+            if let Some(guard) = &arm.guard {
+                let guard_ty = self.check(guard)?;
+                self.unify(guard.span, &Ty::Base(BaseTy::Bool), &guard_ty)?;
             }
 
             let body_ty = self.check(&arm.body)?;
@@ -1651,8 +1652,12 @@ impl TypeChecker {
         arms: &[MatchArm],
         _scrutinee_ty: &Ty,
     ) -> Result<(), SpannedTypeError> {
+        // Guarded arms can refute at runtime — they don't contribute
+        // to coverage. Standard treatment: build the exhaustiveness
+        // matrix from arms whose `guard.is_none()`.
         let matrix: Vec<Vec<Pattern>> = arms
             .iter()
+            .filter(|a| a.guard.is_none())
             .map(|a| vec![a.pattern.clone()])
             .collect();
         if let Some(witness) = is_useful(&matrix, 1, &self.data_registry) {
@@ -4326,6 +4331,160 @@ mod tests {
                 assert!(
                     s.contains("Some") && s.contains("false"),
                     "expected witness mentioning Some(_) and false, got {s}"
+                );
+            }
+            other => panic!("expected NonExhaustiveMatch, got {other:?}"),
+        }
+    }
+
+    // ----- Match guards (#67) -----
+
+    /// `match x { Some(v) if v > 0 => 1 | Some(v) => 2 | None => 0 }`
+    /// — guard uses bound pattern var; non-guarded `Some(v)` covers
+    /// the remaining case, so exhaustiveness holds.
+    #[test]
+    fn test_match_guard_typechecks_with_pattern_binding() {
+        let scrut = dummy_expr(ExprKind::Inr {
+            ty: Ty::Base(BaseTy::Unit),
+            value: Box::new(lit_i32(5)),
+        });
+        let arms = vec![
+            MatchArm {
+                pattern: P::Constructor {
+                    ctor: "Some".into(),
+                    args: vec![P::Var("v".into())],
+                },
+                guard: Some(Box::new(dummy_expr(ExprKind::BinOp {
+                    op: BinOp::Gt,
+                    left: Box::new(dummy_expr(ExprKind::Var("v".into()))),
+                    right: Box::new(lit_i32(0)),
+                }))),
+                body: lit_i32(1),
+            },
+            MatchArm {
+                pattern: P::Constructor {
+                    ctor: "Some".into(),
+                    args: vec![P::Var("v".into())],
+                },
+                guard: None,
+                body: dummy_expr(ExprKind::Var("v".into())),
+            },
+            MatchArm {
+                pattern: P::Constructor {
+                    ctor: "None".into(),
+                    args: vec![],
+                },
+                guard: None,
+                body: lit_i32(0),
+            },
+        ];
+        let body = dummy_expr(ExprKind::Match {
+            scrutinee: Box::new(scrut),
+            arms,
+        });
+        let module = Module {
+            name: "t".into(),
+            imports: vec![],
+            decls: vec![
+                option_data_decl(),
+                fn_decl("f", vec![], Ty::Base(BaseTy::I32), body),
+            ],
+        };
+        type_check_module(&module).expect("guard binding to v: I32 should typecheck");
+    }
+
+    /// A guard whose expression is not `Bool` is rejected with a
+    /// type mismatch.
+    #[test]
+    fn test_match_guard_non_bool_rejected() {
+        let scrut = dummy_expr(ExprKind::Inr {
+            ty: Ty::Base(BaseTy::Unit),
+            value: Box::new(lit_i32(5)),
+        });
+        let arms = vec![
+            MatchArm {
+                pattern: P::Constructor {
+                    ctor: "Some".into(),
+                    args: vec![P::Var("v".into())],
+                },
+                guard: Some(Box::new(lit_i32(42))), // I32, not Bool
+                body: lit_i32(1),
+            },
+            MatchArm {
+                pattern: P::Wildcard,
+                guard: None,
+                body: lit_i32(0),
+            },
+        ];
+        let body = dummy_expr(ExprKind::Match {
+            scrutinee: Box::new(scrut),
+            arms,
+        });
+        let module = Module {
+            name: "t".into(),
+            imports: vec![],
+            decls: vec![
+                option_data_decl(),
+                fn_decl("f", vec![], Ty::Base(BaseTy::I32), body),
+            ],
+        };
+        let err = type_check_module(&module).unwrap_err();
+        assert!(
+            matches!(err.error, TypeError::TypeMismatch { .. }),
+            "expected TypeMismatch for non-Bool guard, got {:?}",
+            err.error
+        );
+    }
+
+    /// A guarded arm cannot make the match exhaustive on its own —
+    /// its guard could refute at runtime. `Some(v) if v > 0` followed
+    /// by `None` is missing the `Some` non-positive case.
+    #[test]
+    fn test_match_guarded_arm_not_counted_for_exhaustiveness() {
+        let scrut = dummy_expr(ExprKind::Inr {
+            ty: Ty::Base(BaseTy::Unit),
+            value: Box::new(lit_i32(5)),
+        });
+        let arms = vec![
+            MatchArm {
+                pattern: P::Constructor {
+                    ctor: "Some".into(),
+                    args: vec![P::Var("v".into())],
+                },
+                guard: Some(Box::new(dummy_expr(ExprKind::BinOp {
+                    op: BinOp::Gt,
+                    left: Box::new(dummy_expr(ExprKind::Var("v".into()))),
+                    right: Box::new(lit_i32(0)),
+                }))),
+                body: lit_i32(1),
+            },
+            MatchArm {
+                pattern: P::Constructor {
+                    ctor: "None".into(),
+                    args: vec![],
+                },
+                guard: None,
+                body: lit_i32(0),
+            },
+        ];
+        let body = dummy_expr(ExprKind::Match {
+            scrutinee: Box::new(scrut),
+            arms,
+        });
+        let module = Module {
+            name: "t".into(),
+            imports: vec![],
+            decls: vec![
+                option_data_decl(),
+                fn_decl("f", vec![], Ty::Base(BaseTy::I32), body),
+            ],
+        };
+        let err = type_check_module(&module).unwrap_err();
+        match err.error {
+            TypeError::NonExhaustiveMatch { missing } => {
+                assert!(
+                    missing.as_str().contains("Some"),
+                    "expected witness mentioning Some, got {missing}"
                 );
             }
             other => panic!("expected NonExhaustiveMatch, got {other:?}"),

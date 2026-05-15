@@ -902,11 +902,6 @@ impl Interpreter {
     ) -> Result<Value, RuntimeError> {
         let scrut_val = self.eval(scrutinee)?;
         for arm in arms {
-            if arm.guard.is_some() {
-                return Err(RuntimeError::Unimplemented(
-                    "match guards not yet implemented in interpreter".into(),
-                ));
-            }
             let mut new_bindings: Vec<(Var, Value)> = Vec::new();
             if self.try_match_pattern(&scrut_val, &arm.pattern, &mut new_bindings)? {
                 let saved: Vec<(Var, Option<Value>, Option<bool>)> = new_bindings
@@ -922,6 +917,40 @@ impl Interpreter {
                 for (name, value) in new_bindings {
                     self.env.extend(name, value);
                 }
+
+                // Evaluate guard (if any) under the arm's pattern
+                // bindings. If it returns `false`, restore prior
+                // bindings and try the next arm.
+                let guard_ok = match &arm.guard {
+                    None => true,
+                    Some(g) => match self.eval(g)? {
+                        Value::Bool(b) => b,
+                        other => {
+                            return Err(RuntimeError::TypeError {
+                                expected: "Bool".into(),
+                                found: other.type_name().into(),
+                            });
+                        }
+                    },
+                };
+
+                if !guard_ok {
+                    for (name, prev_val, prev_consumed) in saved.iter().rev() {
+                        match prev_val {
+                            Some(v) => {
+                                self.env.bindings.insert(name.clone(), v.clone());
+                                if let Some(c) = prev_consumed {
+                                    self.env.consumed.insert(name.clone(), *c);
+                                }
+                            }
+                            None => {
+                                self.env.remove(name);
+                            }
+                        }
+                    }
+                    continue;
+                }
+
                 let result = self.eval(&arm.body)?;
                 for (name, prev_val, prev_consumed) in saved.iter().rev() {
                     match prev_val {
@@ -1700,5 +1729,123 @@ mod tests {
         // suppress unused-import warning for Visibility (held for symmetry
         // with the typing test module pattern).
         let _ = Visibility::Private;
+    }
+
+    // ----- Match guards (#67) -----
+
+    /// Guard reads pattern-bound var and evaluates to `true` → arm body
+    /// runs. `match Some(7) { Some(v) if v > 0 => v | _ => 0 }` = 7.
+    #[test]
+    fn test_eval_match_guard_pass() {
+        let mut interp = Interpreter::new();
+        interp.load_module(&option_module());
+        let scrut = dummy_expr(ExprKind::Inr {
+            ty: Ty::Base(BaseTy::Unit),
+            value: Box::new(lit_i32_expr(7)),
+        });
+        let guard = dummy_expr(ExprKind::BinOp {
+            op: BinOp::Gt,
+            left: Box::new(dummy_expr(ExprKind::Var("v".into()))),
+            right: Box::new(lit_i32_expr(0)),
+        });
+        let expr = dummy_expr(ExprKind::Match {
+            scrutinee: Box::new(scrut),
+            arms: vec![
+                MatchArm {
+                    pattern: P::Constructor {
+                        ctor: "Some".into(),
+                        args: vec![P::Var("v".into())],
+                    },
+                    guard: Some(Box::new(guard)),
+                    body: dummy_expr(ExprKind::Var("v".into())),
+                },
+                MatchArm {
+                    pattern: P::Wildcard,
+                    guard: None,
+                    body: lit_i32_expr(0),
+                },
+            ],
+        });
+        let result = interp.eval(&expr).expect("guarded match should evaluate");
+        assert!(matches!(result, Value::I32(7)), "got {:?}", result);
+    }
+
+    /// Guard evaluates to `false` → arm is skipped, next arm runs.
+    /// `match Some(-3) { Some(v) if v > 0 => v | _ => 0 }` = 0.
+    #[test]
+    fn test_eval_match_guard_fail_falls_through() {
+        let mut interp = Interpreter::new();
+        interp.load_module(&option_module());
+        let scrut = dummy_expr(ExprKind::Inr {
+            ty: Ty::Base(BaseTy::Unit),
+            value: Box::new(lit_i32_expr(-3)),
+        });
+        let guard = dummy_expr(ExprKind::BinOp {
+            op: BinOp::Gt,
+            left: Box::new(dummy_expr(ExprKind::Var("v".into()))),
+            right: Box::new(lit_i32_expr(0)),
+        });
+        let expr = dummy_expr(ExprKind::Match {
+            scrutinee: Box::new(scrut),
+            arms: vec![
+                MatchArm {
+                    pattern: P::Constructor {
+                        ctor: "Some".into(),
+                        args: vec![P::Var("v".into())],
+                    },
+                    guard: Some(Box::new(guard)),
+                    body: dummy_expr(ExprKind::Var("v".into())),
+                },
+                MatchArm {
+                    pattern: P::Wildcard,
+                    guard: None,
+                    body: lit_i32_expr(0),
+                },
+            ],
+        });
+        let result = interp.eval(&expr).expect("guard fall-through should evaluate");
+        assert!(matches!(result, Value::I32(0)), "got {:?}", result);
+    }
+
+    /// Failed guard must not leak its bindings into subsequent arms.
+    /// `v` is pre-bound in the enclosing scope; the first arm tries to
+    /// rebind `v` and its guard fails — the second arm must see the
+    /// original `v`.
+    #[test]
+    fn test_eval_match_failed_guard_does_not_leak_bindings() {
+        let mut interp = Interpreter::new();
+        interp.load_module(&option_module());
+        interp.env.extend("v".into(), Value::I32(999));
+
+        let scrut = dummy_expr(ExprKind::Inr {
+            ty: Ty::Base(BaseTy::Unit),
+            value: Box::new(lit_i32_expr(-1)),
+        });
+        let guard = dummy_expr(ExprKind::BinOp {
+            op: BinOp::Gt,
+            left: Box::new(dummy_expr(ExprKind::Var("v".into()))),
+            right: Box::new(lit_i32_expr(0)),
+        });
+        let expr = dummy_expr(ExprKind::Match {
+            scrutinee: Box::new(scrut),
+            arms: vec![
+                MatchArm {
+                    pattern: P::Constructor {
+                        ctor: "Some".into(),
+                        args: vec![P::Var("v".into())],
+                    },
+                    guard: Some(Box::new(guard)),
+                    body: dummy_expr(ExprKind::Var("v".into())),
+                },
+                MatchArm {
+                    pattern: P::Wildcard,
+                    guard: None,
+                    // Second arm reads the OUTER `v` (still 999).
+                    body: dummy_expr(ExprKind::Var("v".into())),
+                },
+            ],
+        });
+        let result = interp.eval(&expr).expect("fall-through should evaluate");
+        assert!(matches!(result, Value::I32(999)), "got {:?}", result);
     }
 }

@@ -90,6 +90,9 @@ impl LinearChecker {
                 }
             }
             Decl::Type { .. } | Decl::Const { .. } => { /* no discipline check needed */ }
+            // Extern declarations have no body — no linear discipline
+            // applies. The signatures only exist to inform codegen.
+            Decl::Extern { .. } => {}
         }
     }
 

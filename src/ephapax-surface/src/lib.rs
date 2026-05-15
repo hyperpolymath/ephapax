@@ -403,6 +403,35 @@ pub enum SurfaceDecl {
 
     /// Data type declaration (surface-only)
     Data(DataDecl),
+
+    /// Foreign function and type declarations: `extern "abi" { ... }`.
+    ///
+    /// Surface mirror of the core `Decl::Extern`. The desugar pass
+    /// lowers this to the core form by mapping each item's `SurfaceTy`
+    /// fields through `desugar_ty`.
+    Extern {
+        abi: String,
+        items: Vec<SurfaceExternItem>,
+        span: Span,
+    },
+}
+
+/// A single declaration inside a surface `extern "abi" { ... }` block.
+///
+/// Mirror of the core `ExternItem`. Differs only in that types are
+/// `SurfaceTy` rather than `Ty`.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum SurfaceExternItem {
+    /// `type Foo` — declares an opaque foreign type.
+    Type { name: SmolStr },
+    /// `fn name(p1: T1, p2: T2): R` — declares a foreign function
+    /// signature using surface types.
+    Fn {
+        name: SmolStr,
+        params: Vec<(SmolStr, SurfaceTy)>,
+        ret_ty: SurfaceTy,
+    },
 }
 
 /// A complete surface-level module.

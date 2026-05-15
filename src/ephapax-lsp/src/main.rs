@@ -483,7 +483,7 @@ fn extract_declarations(module: &Module, _source: &str) -> Vec<DeclInfo> {
     module
         .decls
         .iter()
-        .map(|decl| match decl {
+        .filter_map(|decl| match decl {
             Decl::Fn {
                 name,
                 params,
@@ -508,24 +508,24 @@ fn extract_declarations(module: &Module, _source: &str) -> Vec<DeclInfo> {
                     format_ty(ret_ty)
                 );
 
-                DeclInfo {
+                Some(DeclInfo {
                     name: name.to_string(),
                     kind: DeclKind::Function,
                     span: body.span,
                     signature: sig,
                     params: param_strs,
                     return_type: Some(format_ty(ret_ty)),
-                }
+                })
             }
-            Decl::Type { name, visibility: _, ty } => DeclInfo {
+            Decl::Type { name, visibility: _, ty } => Some(DeclInfo {
                 name: name.to_string(),
                 kind: DeclKind::TypeAlias,
                 span: Span::dummy(),
                 signature: format!("type {} = {}", name, format_ty(ty)),
                 params: Vec::new(),
                 return_type: None,
-            },
-            Decl::Const { name, ty, value } => DeclInfo {
+            }),
+            Decl::Const { name, ty, value } => Some(DeclInfo {
                 name: name.to_string(),
                 kind: DeclKind::TypeAlias, // closest existing variant
                 span: value.span,
@@ -536,7 +536,13 @@ fn extract_declarations(module: &Module, _source: &str) -> Vec<DeclInfo> {
                 ),
                 params: Vec::new(),
                 return_type: ty.as_ref().map(|t| format_ty(t)),
-            },
+            }),
+            // TODO(ephapax#43 phase 2B): expose extern items as
+            // navigable LSP symbols. For phase 2A the LSP simply
+            // doesn't index extern declarations; the block parses
+            // and lives in the AST but isn't visible to hover /
+            // go-to-definition yet.
+            Decl::Extern { .. } => None,
         })
         .collect()
 }

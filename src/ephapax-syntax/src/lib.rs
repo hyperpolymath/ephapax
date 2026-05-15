@@ -579,6 +579,38 @@ pub enum Decl {
         ty: Option<Ty>,
         value: Expr,
     },
+
+    /// Foreign function and type declarations: `extern "abi" { ... }`.
+    ///
+    /// Items inside the block have no body — they declare signatures
+    /// that resolve to host imports at codegen time. The `abi` string
+    /// names the linkage target (e.g. `"gossamer"`, `"c"`, `"wasm"`).
+    /// Extern types are opaque to the type checker (no constructors,
+    /// no destructors known); extern fns get an ambient binding with
+    /// the declared type.
+    Extern {
+        abi: String,
+        items: Vec<ExternItem>,
+    },
+}
+
+/// A single declaration inside an `extern "abi" { ... }` block.
+///
+/// Extern items declare signatures only — no bodies. The checker
+/// registers them as ambient bindings; codegen lowers fn items to
+/// wasm `import` directives and treats type items as opaque externs.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum ExternItem {
+    /// `type Foo` — declares an opaque foreign type.
+    Type { name: Var },
+    /// `fn name(p1: T1, p2: T2): R` — declares a foreign function
+    /// signature.
+    Fn {
+        name: Var,
+        params: Vec<(Var, Ty)>,
+        ret_ty: Ty,
+    },
 }
 
 /// Helper for serde skip_serializing_if.

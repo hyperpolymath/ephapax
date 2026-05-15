@@ -12,7 +12,7 @@
 //! - Keyword and declaration completions
 
 use ephapax_parser::parse_module;
-use ephapax_syntax::{Decl, Expr, ExprKind, Module, Span, Ty};
+use ephapax_syntax::{Decl, Expr, ExprKind, ExternItem, Module, Span, Ty};
 use ephapax_typing::type_check_module;
 use std::collections::HashMap;
 use std::sync::Mutex;
@@ -53,6 +53,13 @@ struct DeclInfo {
 enum DeclKind {
     Function,
     TypeAlias,
+    /// `extern "abi" { ... }` item — `Fn` or `Type` extern.
+    ExternFn,
+    ExternType,
+    /// `data` declaration (the parent type).
+    Data,
+    /// A constructor inside a `data` declaration.
+    Constructor,
 }
 
 // ============================================================================
@@ -209,7 +216,7 @@ impl Backend {
                 info.push_str(&format!("`{}`\n\n", decl.signature));
 
                 match decl.kind {
-                    DeclKind::Function => {
+                    DeclKind::Function | DeclKind::ExternFn => {
                         if !decl.params.is_empty() {
                             info.push_str("**Parameters:**\n");
                             for (name, ty) in &decl.params {
@@ -219,9 +226,21 @@ impl Backend {
                         if let Some(ret) = &decl.return_type {
                             info.push_str(&format!("\n**Returns:** `{}`\n", ret));
                         }
+                        if matches!(decl.kind, DeclKind::ExternFn) {
+                            info.push_str("\n*Foreign function (extern)*\n");
+                        }
                     }
                     DeclKind::TypeAlias => {
                         info.push_str("*Type alias*\n");
+                    }
+                    DeclKind::ExternType => {
+                        info.push_str("*Foreign opaque type (extern)*\n");
+                    }
+                    DeclKind::Data => {
+                        info.push_str("*Data type*\n");
+                    }
+                    DeclKind::Constructor => {
+                        info.push_str("*Constructor*\n");
                     }
                 }
 
@@ -264,8 +283,10 @@ impl Backend {
             .map(|decl| {
                 let range = span_to_range(&state.text, decl.span);
                 let kind = match decl.kind {
-                    DeclKind::Function => SymbolKind::FUNCTION,
-                    DeclKind::TypeAlias => SymbolKind::TYPE_PARAMETER,
+                    DeclKind::Function | DeclKind::ExternFn => SymbolKind::FUNCTION,
+                    DeclKind::TypeAlias | DeclKind::ExternType => SymbolKind::TYPE_PARAMETER,
+                    DeclKind::Data => SymbolKind::ENUM,
+                    DeclKind::Constructor => SymbolKind::ENUM_MEMBER,
                 };
 
                 #[allow(deprecated)] // DocumentSymbol::deprecated is itself deprecated
@@ -457,8 +478,13 @@ impl LanguageServer for Backend {
             if let Some(state) = docs.get(uri) {
                 for decl in &state.declarations {
                     let kind = match decl.kind {
-                        DeclKind::Function => CompletionItemKind::FUNCTION,
-                        DeclKind::TypeAlias => CompletionItemKind::TYPE_PARAMETER,
+                        DeclKind::Function | DeclKind::ExternFn => {
+                            CompletionItemKind::FUNCTION
+                        }
+                        DeclKind::TypeAlias | DeclKind::ExternType | DeclKind::Data => {
+                            CompletionItemKind::TYPE_PARAMETER
+                        }
+                        DeclKind::Constructor => CompletionItemKind::ENUM_MEMBER,
                     };
                     completions.push(CompletionItem {
                         label: decl.name.clone(),
@@ -478,12 +504,14 @@ impl LanguageServer for Backend {
 // Helper functions
 // ============================================================================
 
-/// Extract declaration info from a parsed module.
+/// Extract declaration info from a parsed module. Each top-level
+/// `Decl` may yield one or more `DeclInfo` entries: extern blocks
+/// expand into one entry per item; data decls expand into one entry
+/// for the parent type plus one per constructor.
 fn extract_declarations(module: &Module, _source: &str) -> Vec<DeclInfo> {
-    module
-        .decls
-        .iter()
-        .filter_map(|decl| match decl {
+    let mut out: Vec<DeclInfo> = Vec::new();
+    for decl in &module.decls {
+        match decl {
             Decl::Fn {
                 name,
                 params,
@@ -508,16 +536,16 @@ fn extract_declarations(module: &Module, _source: &str) -> Vec<DeclInfo> {
                     format_ty(ret_ty)
                 );
 
-                Some(DeclInfo {
+                out.push(DeclInfo {
                     name: name.to_string(),
                     kind: DeclKind::Function,
                     span: body.span,
                     signature: sig,
                     params: param_strs,
                     return_type: Some(format_ty(ret_ty)),
-                })
+                });
             }
-            Decl::Type { name, visibility: _, ty } => Some(DeclInfo {
+            Decl::Type { name, visibility: _, ty } => out.push(DeclInfo {
                 name: name.to_string(),
                 kind: DeclKind::TypeAlias,
                 span: Span::dummy(),
@@ -525,7 +553,7 @@ fn extract_declarations(module: &Module, _source: &str) -> Vec<DeclInfo> {
                 params: Vec::new(),
                 return_type: None,
             }),
-            Decl::Const { name, ty, value } => Some(DeclInfo {
+            Decl::Const { name, ty, value } => out.push(DeclInfo {
                 name: name.to_string(),
                 kind: DeclKind::TypeAlias, // closest existing variant
                 span: value.span,
@@ -537,19 +565,122 @@ fn extract_declarations(module: &Module, _source: &str) -> Vec<DeclInfo> {
                 params: Vec::new(),
                 return_type: ty.as_ref().map(|t| format_ty(t)),
             }),
-            // TODO(ephapax#43 phase 2B): expose extern items as
-            // navigable LSP symbols. For phase 2A the LSP simply
-            // doesn't index extern declarations; the block parses
-            // and lives in the AST but isn't visible to hover /
-            // go-to-definition yet.
-            Decl::Extern { .. } => None,
-            // TODO(ephapax#60 follow-up): expose data decls + their
-            // constructors as LSP symbols (currently the surface
-            // pipeline materialises them only via the desugar
-            // registry; this arm covers the core-parser path).
-            Decl::Data { .. } => None,
-        })
-        .collect()
+            Decl::Extern { abi, items } => {
+                for item in items {
+                    match item {
+                        ExternItem::Fn {
+                            name,
+                            params,
+                            ret_ty,
+                        } => {
+                            let param_strs: Vec<(String, String)> = params
+                                .iter()
+                                .map(|(n, t)| (n.to_string(), format_ty(t)))
+                                .collect();
+                            let sig = format!(
+                                "extern \"{}\" fn {}({}) -> {}",
+                                abi,
+                                name,
+                                param_strs
+                                    .iter()
+                                    .map(|(n, t)| format!("{}: {}", n, t))
+                                    .collect::<Vec<_>>()
+                                    .join(", "),
+                                format_ty(ret_ty)
+                            );
+                            out.push(DeclInfo {
+                                name: name.to_string(),
+                                kind: DeclKind::ExternFn,
+                                span: Span::dummy(),
+                                signature: sig,
+                                params: param_strs,
+                                return_type: Some(format_ty(ret_ty)),
+                            });
+                        }
+                        ExternItem::Type { name } => {
+                            out.push(DeclInfo {
+                                name: name.to_string(),
+                                kind: DeclKind::ExternType,
+                                span: Span::dummy(),
+                                signature: format!("extern \"{}\" type {}", abi, name),
+                                params: Vec::new(),
+                                return_type: None,
+                            });
+                        }
+                    }
+                }
+            }
+            Decl::Data {
+                name,
+                type_params,
+                constructors,
+            } => {
+                let header = if type_params.is_empty() {
+                    format!("data {}", name)
+                } else {
+                    let tps = type_params
+                        .iter()
+                        .map(|tp| tp.to_string())
+                        .collect::<Vec<_>>()
+                        .join(", ");
+                    format!("data {}({})", name, tps)
+                };
+                let ctor_summary = constructors
+                    .iter()
+                    .map(|c| {
+                        if c.fields.is_empty() {
+                            c.name.to_string()
+                        } else {
+                            let fs = c
+                                .fields
+                                .iter()
+                                .map(format_ty)
+                                .collect::<Vec<_>>()
+                                .join(", ");
+                            format!("{}({})", c.name, fs)
+                        }
+                    })
+                    .collect::<Vec<_>>()
+                    .join(" | ");
+                out.push(DeclInfo {
+                    name: name.to_string(),
+                    kind: DeclKind::Data,
+                    span: Span::dummy(),
+                    signature: format!("{} = {}", header, ctor_summary),
+                    params: Vec::new(),
+                    return_type: None,
+                });
+
+                for ctor in constructors {
+                    let sig = if ctor.fields.is_empty() {
+                        format!("{}: {}", ctor.name, name)
+                    } else {
+                        let fs = ctor
+                            .fields
+                            .iter()
+                            .map(format_ty)
+                            .collect::<Vec<_>>()
+                            .join(", ");
+                        format!("{}({}): {}", ctor.name, fs, name)
+                    };
+                    out.push(DeclInfo {
+                        name: ctor.name.to_string(),
+                        kind: DeclKind::Constructor,
+                        span: Span::dummy(),
+                        signature: sig,
+                        params: ctor
+                            .fields
+                            .iter()
+                            .enumerate()
+                            .map(|(i, t)| (format!("f{}", i), format_ty(t)))
+                            .collect(),
+                        return_type: Some(name.to_string()),
+                    });
+                }
+            }
+        }
+    }
+    out
 }
 
 /// Format a type for display.

@@ -770,12 +770,9 @@ impl Codegen {
                 }
                 Decl::Type { .. } => { /* type aliases are erased at runtime */ }
                 Decl::Const { .. } => { /* constants inlined at compile time */ }
-                // TODO(ephapax#43 phase 2B): emit `(import "<abi>" "<name>"
-                // (func ...))` directives for `Decl::Extern { abi, items }`
-                // fn items and treat type items as opaque (i32) externs.
-                // For phase 2A the declaration is accepted by the parser
-                // and stored in the AST but codegen does not yet emit
-                // wasm imports for it.
+                // Extern fn imports are emitted via `collect_extern_imports`
+                // earlier in `compile_ast_module`; extern types are opaque
+                // (lowered as i32). Nothing to do here in user-fn collection.
                 Decl::Extern { .. } => {}
                 // Data types are erased at runtime — the desugar pass
                 // lowers them to the binary-sum encoding before codegen
@@ -1115,10 +1112,10 @@ impl Codegen {
                 }
                 Decl::Type { .. } => {}
                 Decl::Const { .. } => {} // constants inlined
-                // TODO(ephapax#43 phase 2B): emit no body for extern fns
-                // (they're resolved as `(import …)` directives in the
-                // import section, not via the code section). Until that
-                // wiring lands, phase 2A just skips them here.
+                // Extern fns have no code-section body — they're
+                // imported via `(import ...)` directives emitted from
+                // `collect_extern_imports`, so the code-section pass
+                // has nothing to do here.
                 Decl::Extern { .. } => {}
                 // Data types have no code-section body; runtime
                 // representation comes from the desugar binary-sum

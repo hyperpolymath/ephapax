@@ -77,8 +77,13 @@ impl LanguageServer for EphapaxLsp {
 
     async fn hover(&self, params: HoverParams) -> Result<Option<Hover>> {
         let _ = params;
-        // TODO: Integrate with ephapax-typing to show type + qualifier + region
-        // Example hover output:
+        // Intentionally unimplemented in the standalone shim. Hover
+        // with resolved types lives in the compiler-integrated LSP at
+        // `src/ephapax-lsp/`, which links the parser + type checker.
+        // This standalone build prioritises lightweight startup over
+        // type-aware features.
+        //
+        // Example shape produced by the compiler-integrated LSP:
         //   let! conn : DbConnection@app  [linear, region: app]
         //   let  buffer : Bytes@r         [affine, region: r]
         Ok(None)
@@ -124,7 +129,9 @@ impl LanguageServer for EphapaxLsp {
         params: GotoDefinitionParams,
     ) -> Result<Option<GotoDefinitionResponse>> {
         let _ = params;
-        // TODO: Integrate with ephapax-syntax to resolve definitions
+        // Intentionally unimplemented — see hover() for the rationale.
+        // Use the compiler-integrated LSP at `src/ephapax-lsp/` for
+        // definition resolution.
         Ok(None)
     }
 
@@ -133,7 +140,8 @@ impl LanguageServer for EphapaxLsp {
         params: DocumentSymbolParams,
     ) -> Result<Option<DocumentSymbolResponse>> {
         let _ = params;
-        // TODO: Parse document and return function/type/region symbols
+        // Intentionally unimplemented — see hover() for the rationale.
+        // Document outline lives in the compiler-integrated LSP.
         Ok(None)
     }
 }

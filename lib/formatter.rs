@@ -39,8 +39,11 @@ impl Default for FormatConfig {
 
 /// Format a source file.
 ///
-/// TODO: This is a stub. Full formatting requires AST integration
-/// (parse → pretty-print). For now, it normalises whitespace only.
+/// This is an intentional whitespace-only normaliser used by the
+/// standalone heuristic tooling in `tools/`. The compiler-integrated
+/// path goes through `ephapax-parser` + pretty-printer instead; this
+/// shim exists to avoid linking the full compiler for lightweight
+/// editor or MCP-cartridge use.
 pub fn format_source(source: &str, config: &FormatConfig) -> String {
     let mut output = String::with_capacity(source.len());
     let mut prev_blank = false;

@@ -323,7 +323,11 @@ pub enum UnaryOp {
     Neg,
 }
 
-/// Pattern for destructuring
+/// Pattern for destructuring.
+///
+/// Used in core `ExprKind::Match` arms. Mirror of
+/// `ephapax_surface::Pattern` so the core parser's direct path can
+/// build structured patterns without round-tripping through surface.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(tag = "kind", content = "value", rename_all = "snake_case")]
 pub enum Pattern {
@@ -331,12 +335,41 @@ pub enum Pattern {
     Wildcard,
     /// Variable binding
     Var(Var),
+    /// Literal value — matches an exact constant (added ephapax#61).
+    Literal(Literal),
     /// Pair destructuring (p1, p2)
     Pair(Box<Pattern>, Box<Pattern>),
     /// Unit ()
     Unit,
     /// Tuple pattern (p1, p2, p3, ...)
     Tuple(Vec<Pattern>),
+    /// Constructor pattern: `Some(x)`, `None`, `Ok((a, b))` (added
+    /// ephapax#61 for core `match` parsing).
+    Constructor {
+        ctor: SmolStr,
+        args: Vec<Pattern>,
+    },
+}
+
+impl Pattern {
+    /// Collect every variable bound by this pattern (recursively).
+    /// Wildcards, literals, and unit bind nothing; `Var` binds itself;
+    /// constructor/tuple/pair patterns aggregate from sub-patterns.
+    pub fn bound_vars(&self) -> Vec<Var> {
+        match self {
+            Pattern::Wildcard | Pattern::Literal(_) | Pattern::Unit => Vec::new(),
+            Pattern::Var(v) => vec![v.clone()],
+            Pattern::Constructor { args, .. } => {
+                args.iter().flat_map(Pattern::bound_vars).collect()
+            }
+            Pattern::Pair(l, r) => {
+                let mut out = l.bound_vars();
+                out.extend(r.bound_vars());
+                out
+            }
+            Pattern::Tuple(ps) => ps.iter().flat_map(Pattern::bound_vars).collect(),
+        }
+    }
 }
 
 /// Resume mode for effect handler continuations.
@@ -447,6 +480,18 @@ pub enum ExprKind {
         right_body: Box<Expr>,
     },
 
+    /// Multi-arm pattern match: `match e of | P1 => e1 | P2 => e2 ... end`.
+    ///
+    /// Mirror of `SurfaceExprKind::Match`, kept in the core AST so the
+    /// core parser's direct path can preserve structured pattern matching
+    /// without having to round-trip through the surface→desugar→case
+    /// lowering. The surface path still produces `Case` via desugar;
+    /// this variant exists for the core-parser-direct path and tooling.
+    Match {
+        scrutinee: Box<Expr>,
+        arms: Vec<MatchArm>,
+    },
+
     // ===== Control flow =====
     /// Conditional: if e1 then e2 else e3
     If {
@@ -544,6 +589,15 @@ impl Expr {
             span: Span::dummy(),
         }
     }
+}
+
+/// A single arm in an `ExprKind::Match` expression (added ephapax#61).
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct MatchArm {
+    pub pattern: Pattern,
+    /// Optional guard `if e`.
+    pub guard: Option<Box<Expr>>,
+    pub body: Expr,
 }
 
 /// Top-level declarations

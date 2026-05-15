@@ -737,6 +737,16 @@ fn find_let_binding_span(expr: &Expr, target: &str) -> Option<Span> {
                 .iter()
                 .find_map(|c| find_let_binding_span(&c.body, target))
         }),
+        ExprKind::Match { scrutinee, arms } => {
+            find_let_binding_span(scrutinee, target).or_else(|| {
+                arms.iter().find_map(|arm| {
+                    arm.guard
+                        .as_deref()
+                        .and_then(|g| find_let_binding_span(g, target))
+                        .or_else(|| find_let_binding_span(&arm.body, target))
+                })
+            })
+        }
         ExprKind::Var(_) | ExprKind::Lit(_) | ExprKind::StringNew { .. } => None,
     }
 }

@@ -769,6 +769,8 @@ dependencies = [
  "proptest",
  "serde_json",
  "smol_str",
+ "tempfile",
+ "typed-wasm-verify",
  "wasmtime",
 ]
 
@@ -3185,7 +3187,7 @@ dependencies = [
 [[package]]
 name = "typed-wasm-verify"
 version = "0.1.0"
-source = "git+https://github.com/hyperpolymath/typed-wasm?rev=e11bb985ff478a41e7edc4c98a58038d420b5c06#e11bb985ff478a41e7edc4c98a58038d420b5c06"
+source = "git+https://github.com/hyperpolymath/typed-wasm?rev=67006edddef34e86be2afd97f23d0dfb1191b228#67006edddef34e86be2afd97f23d0dfb1191b228"
 dependencies = [
  "thiserror 2.0.18",
  "wasmparser 0.221.3",

@@ -6,6 +6,10 @@ All notable changes to Ephapax are documented here.
 ## [Unreleased]
 
 ### Added
+- **typed-wasm L7+L10 integration** (closes the typed-wasm-verify loop for ephapax):
+  - **C6 (#70)** — `ephapax-wasm` emits an `affinescript.ownership` custom section on every compile when any user fn has a Linear parameter. Section format and encoder come from the new `typed-wasm-verify` Rust crate (`hyperpolymath/typed-wasm:crates/typed-wasm-verify/`, rev `e11bb985` at C6, bumped to `67006edd` at C7). Driven by `Ty::is_linear()`; entries sorted by `func_idx` for deterministic output. 4 new unit tests; `cargo test --workspace` clean.
+  - **C7 (#72)** — New `--verify-ownership` flag on `ephapax compile`. After codegen and before output write, runs `typed_wasm_verify::verify_from_module` on the emitted module and surfaces any aliasing / linearity violation as a non-zero exit. Output: `✓ typed-wasm L7+L10 verification: clean` on success; per-violation diagnostics on failure. 3 new integration tests spawn the built binary.
+  - Net effect: ephapax-emitted wasm now has end-to-end L7+L10 guarantees — producer side (custom section emission) + opt-in consumer side (verifier flag), both backed by the canonical Rust verifier shared with `hyperpolymath/typed-wasm`.
 - `module Qualified.Name` declarations (dotted module paths)
 - `--` Haskell-style line comments (alongside existing `//` and `/* */`)
 - Qualified names in imports: `import Foo.Bar.Baz`

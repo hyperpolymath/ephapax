@@ -122,6 +122,15 @@ pub struct DataRegistry {
     constructors: HashMap<SmolStr, ConstructorInfo>,
     /// Data type name → (params, constructors)
     types: HashMap<SmolStr, (Vec<SmolStr>, Vec<ConstructorDef>)>,
+    /// Names declared via `extern "abi" { type Foo }` blocks.
+    ///
+    /// Extern types are nominal and opaque: the desugar pass resolves
+    /// `SurfaceTy::Named { name: "Foo", args: [] }` to `Ty::Var("Foo")`
+    /// rather than emitting an `UnknownType` error. The type checker
+    /// then treats them as rigid type variables that only unify with
+    /// themselves (so values of type `Window` cannot be confused with
+    /// `IpcChannel`, etc.).
+    extern_types: std::collections::HashSet<SmolStr>,
 }
 
 impl DataRegistry {
@@ -151,6 +160,12 @@ impl DataRegistry {
         );
     }
 
+    /// Register an opaque extern type name (from
+    /// `extern "abi" { type Foo }`).
+    pub fn register_extern_type(&mut self, name: &SmolStr) {
+        self.extern_types.insert(name.clone());
+    }
+
     /// Look up a constructor by name.
     fn get_ctor(&self, name: &str) -> Option<&ConstructorInfo> {
         self.constructors.get(name)
@@ -159,6 +174,11 @@ impl DataRegistry {
     /// Get the constructors for a data type (in order).
     fn get_type_ctors(&self, name: &str) -> Option<&(Vec<SmolStr>, Vec<ConstructorDef>)> {
         self.types.get(name)
+    }
+
+    /// Is this name a registered extern (opaque) type?
+    fn is_extern_type(&self, name: &str) -> bool {
+        self.extern_types.contains(name)
     }
 }
 
@@ -193,10 +213,20 @@ impl Desugarer {
     /// First pass: collect all data declarations into the registry.
     /// Second pass: desugar all declarations.
     pub fn desugar_module(&mut self, module: &SurfaceModule) -> Result<Module, DesugarError> {
-        // First pass: register all data types
+        // First pass: register all data types and extern types
         for decl in &module.decls {
-            if let SurfaceDecl::Data(data) = decl {
-                self.registry.register(data);
+            match decl {
+                SurfaceDecl::Data(data) => {
+                    self.registry.register(data);
+                }
+                SurfaceDecl::Extern { items, .. } => {
+                    for item in items {
+                        if let SurfaceExternItem::Type { name } = item {
+                            self.registry.register_extern_type(name);
+                        }
+                    }
+                }
+                _ => {}
             }
         }
 
@@ -502,7 +532,18 @@ impl Desugarer {
     ///
     /// `Option(I32)` → `() + I32`
     /// `Result(I32, Bool)` → `I32 + Bool`
+    ///
+    /// **Extern types** (registered via `extern "abi" { type Foo }`) are
+    /// nominal and opaque — they resolve to `Ty::Var(name)` regardless
+    /// of any args. Type arguments on extern names are accepted but
+    /// ignored: extern types currently have no parameter abstraction
+    /// (parameterised externs are a phase-2C concern, post wasm
+    /// codegen). Two distinct extern types `Window` and `IpcChannel`
+    /// produce two distinct `Ty::Var` rigids that never unify.
     fn desugar_named_type(&self, name: &SmolStr, args: &[SurfaceTy]) -> Result<Ty, DesugarError> {
+        if self.registry.is_extern_type(name.as_str()) {
+            return Ok(Ty::Var(name.clone()));
+        }
         let (params, ctors) = self.registry.get_type_ctors(name.as_str()).ok_or_else(|| {
             DesugarError::UnknownType {
                 name: name.to_string(),
@@ -1612,6 +1653,63 @@ mod tests {
                 panic!("expected Case, got: {:?}", body.kind);
             }
         }
+    }
+
+    /// An extern type declared inside `extern "abi" { type Foo }`
+    /// becomes a nominal opaque `Ty::Var("Foo")` when referenced from
+    /// an extern fn's signature. Two distinct extern types produce
+    /// two distinct `Ty::Var` names so the type checker keeps them
+    /// apart.
+    #[test]
+    fn desugar_extern_types_resolve_to_ty_var() {
+        let module = SurfaceModule {
+            name: "test".into(),
+            decls: vec![SurfaceDecl::Extern {
+                abi: "gossamer".to_string(),
+                items: vec![
+                    SurfaceExternItem::Type {
+                        name: "Window".into(),
+                    },
+                    SurfaceExternItem::Type {
+                        name: "IpcChannel".into(),
+                    },
+                    SurfaceExternItem::Fn {
+                        name: "open_window".into(),
+                        params: vec![],
+                        ret_ty: SurfaceTy::Named {
+                            name: "Window".into(),
+                            args: vec![],
+                        },
+                    },
+                    SurfaceExternItem::Fn {
+                        name: "open_ipc".into(),
+                        params: vec![],
+                        ret_ty: SurfaceTy::Named {
+                            name: "IpcChannel".into(),
+                            args: vec![],
+                        },
+                    },
+                ],
+                span: Span::dummy(),
+            }],
+        };
+
+        let core = desugar(&module).unwrap();
+        assert_eq!(core.decls.len(), 1);
+        let Decl::Extern { items, .. } = &core.decls[0] else {
+            panic!("expected Decl::Extern");
+        };
+        // The two fn items end up at indexes 2 and 3 (after the two
+        // type items at 0 and 1).
+        let ExternItem::Fn { ret_ty: window_ret, .. } = &items[2] else {
+            panic!("expected ExternItem::Fn at index 2");
+        };
+        let ExternItem::Fn { ret_ty: ipc_ret, .. } = &items[3] else {
+            panic!("expected ExternItem::Fn at index 3");
+        };
+        assert_eq!(*window_ret, Ty::Var("Window".into()));
+        assert_eq!(*ipc_ret, Ty::Var("IpcChannel".into()));
+        assert_ne!(window_ret, ipc_ret, "distinct nominal types must not be equal");
     }
 
     /// `SurfaceDecl::Extern` lowers to `Decl::Extern` with item types

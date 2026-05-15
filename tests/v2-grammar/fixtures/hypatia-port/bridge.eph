@@ -1,0 +1,151 @@
+// SPDX-License-Identifier: PMPL-1.0-or-later
+// Hypatia Bridge — wires the TEA loop in hypatia_gui.eph into the
+// Gossamer host runtime, with direct IPC to the Elixir OTP backend
+// on :9090.
+//
+// Wire format: JSON. See `decode_msg` below.
+//
+// Burble session integration: deferred. See BURBLE-DEFERRAL.md for the
+// decision and the three triggers that promote it to a required
+// integration. Until then, all UI<->backend traffic uses the direct
+// IPC channel opened in `main` at `ipc_open("http://localhost:9090/ws")`.
+//
+// The `extern "gossamer"` block below holds placeholder Gossamer host
+// API signatures. They will be replaced with imports from the real
+// gossamer module once `hyperpolymath/gossamer:src/core/Bridge.eph`
+// (the canonical pattern) is reachable from the import graph.
+
+module hypatia/ui/bridge
+
+import hypatia/ui/gui  // exposes Model, Msg, hypatia_init, update, view, subs
+
+// ── Host imports (Gossamer) ───────────────────────────────────────────────
+//
+// These are the Gossamer host API calls we need. When the real signatures
+// are in, each `extern "gossamer"` block gets replaced by an `import` from
+// the gossamer module and the bodies move into the runtime.
+
+extern "gossamer" {
+  // Linear window handle. Obtained once, must be closed exactly once.
+  type Window
+
+  // Open a top-level window with title + initial body string (from view).
+  fn window_open(title: String, initial_body: String): Window
+
+  // Update the body of an open window. Consumes the window handle for
+  // the duration of the call; returns it reborrowed on success.
+  fn window_set_body(w: Window, body: String): Window
+
+  // Close the window. Linear — consumes w, nothing returned.
+  fn window_close(w: Window): Unit
+
+  // Linear IPC channel handle. Obtained once per session, must be
+  // closed exactly once (send a close control frame; the backend
+  // tears down its OTP GenServer on receipt).
+  type IpcChannel
+
+  // Open an IPC channel to the named host endpoint. For Hypatia the
+  // endpoint is the Phoenix/Bandit listener on :9090 (see stapeln.toml
+  // layers.elixir-toolchain for the port binding).
+  fn ipc_open(endpoint: String): IpcChannel
+
+  // Receive the next message from the channel. Consumes + reborrows.
+  // Returns (channel, msg-bytes). Caller decodes to Msg.
+  fn ipc_recv(ch: IpcChannel): (IpcChannel, Bytes)
+
+  // Send a message (e.g. outcome record from a UI action). Consumes +
+  // reborrows.
+  fn ipc_send(ch: IpcChannel, body: Bytes): IpcChannel
+
+  // Close the channel. Linear — consumes ch.
+  fn ipc_close(ch: IpcChannel): Unit
+
+  // ── JSON decode helpers ──────────────────────────────────────────────────
+  //
+  // The wire format is JSON: {"tag": 0, "value": <i32>} for Navigate,
+  // {"tag": 1} for PopState (matches loader.js Msg constructors at
+  // src/ui/gossamer/loader.js:76-79). When Ephapax stdlib publishes a
+  // JSON module these three externs collapse into a single
+  // `json::decode::<Msg>` call.
+
+  fn bytes_to_string(b: Bytes): String
+  fn json_parse_tag(s: String): I32
+  fn json_parse_int_field(s: String, field: String): I32
+}
+
+// ── Burble session integration (TODO) ────────────────────────────────────
+//
+// Burble provides the P2P session layer that PanLL listens on. When the
+// Hypatia panel is minted (panel-minter, per the user's earlier note),
+// Burble hands us a session handle. Shape is:
+//
+//   extern "burble" {
+//     type Session
+//     fn session_attach(panel_id: String): Session
+//     fn session_detach(s: Session): Unit
+//     fn session_publish(s: Session, topic: String, payload: Bytes): Session
+//   }
+//
+// Left unwritten here until the burble module is in the import graph.
+
+// ── Main entry: drive the TEA loop from host events ──────────────────────
+//
+// The canonical Ephapax TEA driver is a tail-recursive loop that
+// consumes and re-produces (window, channel, model) on every iteration.
+// Each iteration:
+//   1. Block on `ipc_recv` for the next Msg
+//   2. Feed it to hypatia_update(msg, model) — see hypatia_gui.eph
+//   3. Compute new view with hypatia_view(model)
+//   4. Push it to the window with window_set_body
+//   5. Recur
+//
+// `let!` on channel + window guarantees the handles are consumed once
+// per iteration and reborrowed (so a dropped iteration = a leaked handle
+// = a type error at compile time, which is the entire point of picking
+// Ephapax).
+
+@tail_recursive
+fn run(win: Window, ch: IpcChannel, model: Model): Unit =
+  let! (ch2, msg_bytes) = ipc_recv(ch)
+  let msg: Msg = decode_msg(msg_bytes)
+  let new_model = hypatia_update(msg, model)
+  let new_body = hypatia_view(new_model)
+  let! win2 = window_set_body(win, new_body)
+  run(win2, ch2, new_model)
+
+// Maps the i32 tag at JSON field "value" to a Department variant.
+// Order matches loader.js Department = { Learning: 0, Symbolic: 1,
+// Verification: 2, Triangle: 3 }.
+fn int_to_department(n: I32): Department =
+  match n of
+    | 0 => Learning
+    | 1 => Symbolic
+    | 2 => Verification
+    | _ => Triangle
+  end
+
+// Decode a single IPC frame into a Msg. Wire format is JSON; see the
+// `extern "gossamer"` JSON helpers block above. Unknown tags fall
+// through to PopState so a forward-compatible backend that emits a
+// new variant does not crash the UI.
+// Local adaptation: the upstream form reuses the parsed `s` (a linear
+// String) in two host calls, which the v2 linear discipline rejects.
+// Reparse the bytes per use so each String is consumed exactly once.
+// Bytes is an alias for I32 today (host handle), so reusing `bytes`
+// is safe — the linear discipline applies to the conversion result.
+fn decode_msg(bytes: Bytes): Msg =
+  let tag = json_parse_tag(bytes_to_string(bytes))
+  match tag of
+    | 0 => Navigate(int_to_department(json_parse_int_field(bytes_to_string(bytes), "value")))
+    | 1 => PopState
+    | _ => PopState
+  end
+
+// ── Entry point for the Gossamer runtime ─────────────────────────────────
+
+fn main(): Unit =
+  let initial_model = hypatia_init()
+  let initial_body = hypatia_view(initial_model)
+  let! win = window_open("Hypatia", initial_body)
+  let! ch = ipc_open("http://localhost:9090/ws")
+  run(win, ch, initial_model)

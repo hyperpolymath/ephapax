@@ -73,11 +73,20 @@ pub fn load_program(
     let mut visiting: HashSet<String> = HashSet::new();
     let mut stack: Vec<String> = Vec::new();
 
+    // Build a `declared module name → file path` index by scanning the
+    // base directory for .eph files. Imports try the literal path first
+    // (`a/b/c.eph` under base_dir); if that misses, they fall back to
+    // this map. This lets files live anywhere in the tree as long as
+    // they declare their module name in a `module a/b/c` header — which
+    // matches existing corpora like hypatia/src/ui/gossamer/.
+    let mod_index = scan_module_index(base_dir);
+
     let root_module_path = root_module_path_from_source(root_path)?;
     visit(
         &root_module_path,
         Some(root_path),
         base_dir,
+        &mod_index,
         &mut loaded,
         &mut order,
         &mut visiting,
@@ -93,10 +102,62 @@ pub fn load_program(
     Ok(result)
 }
 
+/// Walk `base_dir` recursively, reading the first `module a/b/c` line of
+/// every `.eph` file we find, and return a map from declared module name
+/// to file path. Files without a `module` header are skipped.
+fn scan_module_index(base_dir: &Path) -> HashMap<String, PathBuf> {
+    let mut idx = HashMap::new();
+    let mut stack = vec![base_dir.to_path_buf()];
+    while let Some(dir) = stack.pop() {
+        let entries = match std::fs::read_dir(&dir) {
+            Ok(e) => e,
+            Err(_) => continue,
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                stack.push(path);
+                continue;
+            }
+            if path.extension().and_then(|s| s.to_str()) != Some("eph") {
+                continue;
+            }
+            let Ok(source) = std::fs::read_to_string(&path) else {
+                continue;
+            };
+            if let Some(name) = first_module_declaration(&source) {
+                idx.entry(name).or_insert(path);
+            }
+        }
+    }
+    idx
+}
+
+fn first_module_declaration(source: &str) -> Option<String> {
+    for line in source.lines() {
+        let line = line.trim_start();
+        if let Some(rest) = line.strip_prefix("module") {
+            let rest = rest.trim();
+            // Take everything up to a whitespace, comma, or comment marker.
+            let end = rest
+                .find(|c: char| {
+                    !(c.is_ascii_alphanumeric() || c == '_' || c == '.' || c == '/')
+                })
+                .unwrap_or(rest.len());
+            let name = &rest[..end];
+            if !name.is_empty() {
+                return Some(normalise_path(name));
+            }
+        }
+    }
+    None
+}
+
 fn visit(
     logical: &str,
     explicit_file: Option<&Path>,
     base_dir: &Path,
+    mod_index: &HashMap<String, PathBuf>,
     loaded: &mut HashMap<String, LoadedModule>,
     order: &mut Vec<String>,
     visiting: &mut HashSet<String>,
@@ -115,7 +176,20 @@ fn visit(
 
     let file_path = match explicit_file {
         Some(p) => p.to_path_buf(),
-        None => logical_to_file_path(logical, base_dir),
+        None => {
+            // 1) Literal path under base_dir (`a/b/c` → `<base>/a/b/c.eph`).
+            let direct = logical_to_file_path(logical, base_dir);
+            if direct.exists() {
+                direct
+            } else if let Some(p) = mod_index.get(logical) {
+                // 2) Module-declaration index built by walking base_dir.
+                p.clone()
+            } else {
+                // Fall back to the literal path so the IO error names a
+                // useful location.
+                direct
+            }
+        }
     };
 
     let source = std::fs::read_to_string(&file_path).map_err(|e| ResolveError::Io {
@@ -141,7 +215,7 @@ fn visit(
         .map(|i| normalise_path(i.module.as_str()))
         .collect();
     for dep in &deps {
-        visit(dep, None, base_dir, loaded, order, visiting, stack)?;
+        visit(dep, None, base_dir, mod_index, loaded, order, visiting, stack)?;
     }
 
     loaded.insert(

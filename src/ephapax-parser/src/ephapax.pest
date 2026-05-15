@@ -93,8 +93,9 @@ named_record_type_def = { constructor_name ~ "{" ~ record_field ~ ("," ~ record_
 linearity = { "linear" | "affine" }
 
 // Data type declaration: data Option(a) = None | Some(a)
+// Optional `pub` prefix makes the type + its constructors importable.
 data_decl = {
-    "data" ~ constructor_name ~ type_params? ~ "=" ~ "|"? ~ data_variant ~ ("|" ~ data_variant)*
+    visibility? ~ "data" ~ constructor_name ~ type_params? ~ "=" ~ "|"? ~ data_variant ~ ("|" ~ data_variant)*
 }
 
 type_params = { "(" ~ identifier ~ ("," ~ identifier)* ~ ")" }
@@ -389,7 +390,21 @@ ffi_expr = {
 }
 
 record_literal = { "{" ~ record_field_assign ~ ("," ~ record_field_assign)* ~ ","? ~ "}" }
-record_field_assign = { identifier ~ (":" ~ ty)? ~ "=" ~ expression }
+// Two surface forms, both producing the same AST node:
+//   1. `field: ty = value`  (typed, explicit assignment)
+//   2. `field = value`      (untyped, explicit assignment)
+//   3. `field: value`       (ML/Haskell-style shorthand — the value
+//                            expression appears directly after `:`;
+//                            no `=` keyword, no type annotation)
+//
+// PEG ordering: the typed-or-untyped form with `=` is tried first.
+// The shorthand fires only when the parser otherwise gives up
+// (e.g. `current_dept: Triangle,` — no `=` follows the named-ty).
+record_field_assign = {
+      identifier ~ ":" ~ ty ~ "=" ~ expression
+    | identifier ~ "=" ~ expression
+    | identifier ~ ":" ~ expression
+}
 
 string_method = {
     "String" ~ "." ~ identifier ~ ("@" ~ identifier)? ~ "(" ~ expr_list? ~ ")"

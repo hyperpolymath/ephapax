@@ -135,6 +135,12 @@ pub struct DataRegistry {
     /// or pointers). Listed separately from `types` because they don't
     /// participate in `Construct`/`Match` desugaring.
     extern_types: HashMap<SmolStr, ()>,
+    /// `type Foo = T` aliases — captured in their pre-desugar surface form
+    /// so `desugar_named_type` can recursively expand them on demand. The
+    /// stored value is whatever the parser produced for the alias body
+    /// (record decls already pre-lowered to `Prod`/`Tuple` by
+    /// `parse_type_decl`).
+    type_aliases: HashMap<SmolStr, SurfaceTy>,
 }
 
 impl DataRegistry {
@@ -169,6 +175,16 @@ impl DataRegistry {
     /// to `Ty::Base(BaseTy::I32)` (host handle representation).
     pub fn register_extern_type(&mut self, name: SmolStr) {
         self.extern_types.insert(name, ());
+    }
+
+    /// Register a `type Foo = T` alias in surface form. Lookups in
+    /// `desugar_named_type` find the entry and recursively desugar it.
+    pub fn register_type_alias(&mut self, name: SmolStr, ty: SurfaceTy) {
+        self.type_aliases.insert(name, ty);
+    }
+
+    fn lookup_type_alias(&self, name: &str) -> Option<&SurfaceTy> {
+        self.type_aliases.get(name)
     }
 
     /// Look up a constructor by name.
@@ -231,9 +247,10 @@ impl Desugarer {
     /// First pass: collect all data declarations into the registry.
     /// Second pass: desugar all declarations.
     pub fn desugar_module(&mut self, module: &SurfaceModule) -> Result<Module, DesugarError> {
-        // First pass: register all data types AND extern opaque types so
-        // subsequent `desugar_ty` calls (against fn signatures, etc.) can
-        // resolve `Window` / `IpcChannel` / etc. as `I32` handles.
+        // First pass: register all data types, extern opaque types, AND
+        // `type Foo = T` aliases so subsequent `desugar_ty` calls (against
+        // fn signatures, etc.) can resolve cross-references regardless of
+        // declaration order within the module.
         for decl in &module.decls {
             match decl {
                 SurfaceDecl::Data(data) => self.registry.register(data),
@@ -243,6 +260,10 @@ impl Desugarer {
                             self.registry.register_extern_type(name.clone());
                         }
                     }
+                }
+                SurfaceDecl::Type { name, ty, .. } => {
+                    self.registry
+                        .register_type_alias(name.clone(), ty.clone());
                 }
                 _ => {}
             }
@@ -342,7 +363,18 @@ impl Desugarer {
         let span = expr.span;
         let kind = match &expr.kind {
             // === Pass-through nodes (structural recursion) ===
-            SurfaceExprKind::Lit(lit) => ExprKind::Lit(lit.clone()),
+            SurfaceExprKind::Lit(lit) => match lit {
+                // Bare string literals (`"hello"` written inline) lower to
+                // a `StringNew` allocating in the synthetic `_` region —
+                // the wildcard region the typechecker uses for inferred
+                // String types. The check itself is also relaxed for `_`
+                // in `ephapax-typing::check_string_new`.
+                Literal::String(s) => ExprKind::StringNew {
+                    region: SmolStr::new("_"),
+                    value: s.clone(),
+                },
+                _ => ExprKind::Lit(lit.clone()),
+            },
             SurfaceExprKind::Var(v) => ExprKind::Var(v.clone()),
 
             SurfaceExprKind::StringNew { region, value } => ExprKind::StringNew {
@@ -602,6 +634,21 @@ impl Desugarer {
             return Ok(Ty::Base(BaseTy::I32));
         }
 
+        // `type Foo = T` aliases — recursively desugar the stored surface
+        // form. Arity-checking on aliases is deferred to the next
+        // expansion (an alias to a parameterised type can still take
+        // type arguments via the body).
+        if let Some(aliased) = self.registry.lookup_type_alias(name.as_str()).cloned() {
+            if !args.is_empty() {
+                return Err(DesugarError::TypeArityMismatch {
+                    name: name.to_string(),
+                    expected: 0,
+                    got: args.len(),
+                });
+            }
+            return self.desugar_ty(&aliased);
+        }
+
         let (params, ctors) = self.registry.get_type_ctors(name.as_str()).ok_or_else(|| {
             DesugarError::UnknownType {
                 name: name.to_string(),
@@ -852,6 +899,51 @@ impl Desugarer {
         {
             let body = self.desugar_expr(&arms[0].body)?;
             return self.bind_single_pattern(&core_scrutinee, &arms[0].pattern, body, span);
+        }
+
+        // Match on a literal-typed scrutinee (`match n of | 0 => a | 1 => b
+        // | _ => c end`). All arms are Literal or Wildcard, no
+        // constructor — desugar to nested `if scrutinee == lit then arm
+        // else next` ending in the wildcard branch.
+        let all_literal_or_wildcard = arms.iter().all(|a| {
+            matches!(
+                a.pattern,
+                Pattern::Literal(_) | Pattern::Wildcard | Pattern::Var(_)
+            ) && a.guard.is_none()
+        });
+        if all_literal_or_wildcard {
+            // Pick a default: the last Wildcard/Var arm, or unit if none.
+            let mut default = Expr::new(ExprKind::Lit(Literal::Unit), span);
+            for arm in arms.iter().rev() {
+                if matches!(arm.pattern, Pattern::Wildcard | Pattern::Var(_)) {
+                    default = self.desugar_expr(&arm.body)?;
+                    break;
+                }
+            }
+            // Walk literal arms in reverse, wrapping each in an if.
+            let mut acc = default;
+            for arm in arms.iter().rev() {
+                if let Pattern::Literal(lit) = &arm.pattern {
+                    let arm_body = self.desugar_expr(&arm.body)?;
+                    let cond = Expr::new(
+                        ExprKind::BinOp {
+                            op: ephapax_syntax::BinOp::Eq,
+                            left: Box::new(core_scrutinee.clone()),
+                            right: Box::new(Expr::new(ExprKind::Lit(lit.clone()), span)),
+                        },
+                        span,
+                    );
+                    acc = Expr::new(
+                        ExprKind::If {
+                            cond: Box::new(cond),
+                            then_branch: Box::new(arm_body),
+                            else_branch: Box::new(acc),
+                        },
+                        span,
+                    );
+                }
+            }
+            return Ok(acc);
         }
 
         // Find the data type from constructor patterns

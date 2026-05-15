@@ -462,7 +462,11 @@ impl TypeChecker {
     }
 
     fn check_string_new(&self, s: Span, region: &RegionName) -> Result<Ty, SpannedTypeError> {
-        if !self.ctx.region_active(region) {
+        // The wildcard region name `_` is implicitly active everywhere —
+        // it stands for the global / data-section pool that holds bare
+        // string literals lowered by desugar. Other named regions still
+        // require a surrounding `region r { ... }` block.
+        if region.as_str() != "_" && !self.ctx.region_active(region) {
             return Err(self.at(s, TypeError::InactiveRegion(region.clone())));
         }
         Ok(Ty::String(region.clone()))
@@ -1345,13 +1349,23 @@ impl ModuleRegistry {
                     ret_ty,
                     ..
                 } => {
-                    let fn_ty = params
-                        .iter()
-                        .rev()
-                        .fold(ret_ty.clone(), |acc, (_, param_ty)| Ty::Fun {
-                            param: Box::new(param_ty.clone()),
-                            ret: Box::new(acc),
-                        });
+                    // Nullary fn `fn foo(): T = ...` has type `() -> T`,
+                    // not `T`. Without this wrap, `foo()` at a call site
+                    // fails to unify `T applied to ()`.
+                    let fn_ty = if params.is_empty() {
+                        Ty::Fun {
+                            param: Box::new(Ty::Base(BaseTy::Unit)),
+                            ret: Box::new(ret_ty.clone()),
+                        }
+                    } else {
+                        params
+                            .iter()
+                            .rev()
+                            .fold(ret_ty.clone(), |acc, (_, param_ty)| Ty::Fun {
+                                param: Box::new(param_ty.clone()),
+                                ret: Box::new(acc),
+                            })
+                    };
                     let poly_ty =
                         type_params.iter().rev().fold(fn_ty, |acc, tv| Ty::ForAll {
                             var: tv.clone(),
@@ -1378,14 +1392,20 @@ impl ModuleRegistry {
                     // Extern items are publicly available to importers — the
                     // host runtime / wasm imports resolve them; we don't gate
                     // visibility at the language level here.
-                    let fn_ty =
+                    let fn_ty = if params.is_empty() {
+                        Ty::Fun {
+                            param: Box::new(Ty::Base(BaseTy::Unit)),
+                            ret: Box::new(ret_ty.clone()),
+                        }
+                    } else {
                         params
                             .iter()
                             .rev()
                             .fold(ret_ty.clone(), |acc, (_, param_ty)| Ty::Fun {
                                 param: Box::new(param_ty.clone()),
                                 ret: Box::new(acc),
-                            });
+                            })
+                    };
                     entries.push((name.clone(), fn_ty, Visibility::Public));
                 }
             }
@@ -1480,13 +1500,20 @@ fn type_check_module_inner(
                 type_params,
                 ..
             } => {
-                let fn_ty = params
-                    .iter()
-                    .rev()
-                    .fold(ret_ty.clone(), |acc, (_, param_ty)| Ty::Fun {
-                        param: Box::new(param_ty.clone()),
-                        ret: Box::new(acc),
-                    });
+                let fn_ty = if params.is_empty() {
+                    Ty::Fun {
+                        param: Box::new(Ty::Base(BaseTy::Unit)),
+                        ret: Box::new(ret_ty.clone()),
+                    }
+                } else {
+                    params
+                        .iter()
+                        .rev()
+                        .fold(ret_ty.clone(), |acc, (_, param_ty)| Ty::Fun {
+                            param: Box::new(param_ty.clone()),
+                            ret: Box::new(acc),
+                        })
+                };
                 let poly_ty = type_params.iter().rev().fold(fn_ty, |acc, tv| Ty::ForAll {
                     var: tv.clone(),
                     body: Box::new(acc),
@@ -1499,14 +1526,20 @@ fn type_check_module_inner(
                 params,
                 ret_ty,
             } => {
-                let fn_ty =
+                let fn_ty = if params.is_empty() {
+                    Ty::Fun {
+                        param: Box::new(Ty::Base(BaseTy::Unit)),
+                        ret: Box::new(ret_ty.clone()),
+                    }
+                } else {
                     params
                         .iter()
                         .rev()
                         .fold(ret_ty.clone(), |acc, (_, param_ty)| Ty::Fun {
                             param: Box::new(param_ty.clone()),
                             ret: Box::new(acc),
-                        });
+                        })
+                };
                 tc.ctx.extend(name.clone(), fn_ty, BindingForm::Let);
             }
             Decl::Type { .. } | Decl::Const { .. } => {}

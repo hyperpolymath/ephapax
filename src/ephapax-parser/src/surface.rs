@@ -241,18 +241,24 @@ fn parse_extern_item(pair: pest::iterators::Pair<Rule>) -> Result<ExternItem, Pa
 
 fn parse_data_decl(pair: pest::iterators::Pair<Rule>) -> Result<SurfaceDecl, ParseError> {
     let span = span_from_pair(&pair);
-    let mut inner = pair.into_inner();
+    let inner = pair.into_inner();
 
-    let name = parse_constructor_name(
-        inner
-            .next()
-            .ok_or_else(|| ParseError::missing("data type name"))?,
-    );
-
+    // `visibility?` may precede the constructor name (e.g. `pub data
+    // Department = ...`). Surface AST doesn't track data-decl visibility
+    // explicitly today — but we still need to skip past the pair to find
+    // the actual name. Data exports remain implicitly public for now.
+    let mut name: Option<smol_str::SmolStr> = None;
     let mut params = Vec::new();
     let mut constructors = Vec::new();
 
     for item in inner {
+        if name.is_none() && item.as_rule() == Rule::visibility {
+            continue;
+        }
+        if name.is_none() && item.as_rule() == Rule::constructor_name {
+            name = Some(parse_constructor_name(item));
+            continue;
+        }
         match item.as_rule() {
             Rule::type_params => {
                 for p in item.into_inner() {
@@ -269,7 +275,7 @@ fn parse_data_decl(pair: pest::iterators::Pair<Rule>) -> Result<SurfaceDecl, Par
     }
 
     Ok(SurfaceDecl::Data(DataDecl {
-        name,
+        name: name.ok_or_else(|| ParseError::missing("data type name"))?,
         params,
         constructors,
         span,
@@ -373,6 +379,41 @@ fn parse_type_decl(pair: pest::iterators::Pair<Rule>) -> Result<SurfaceDecl, Par
             Rule::visibility => visibility = SurfaceVisibility::Public,
             Rule::identifier if name.is_none() => name = Some(parse_identifier(item)),
             Rule::ty if ty.is_none() => ty = Some(parse_type(item)?),
+            // `type Foo = { f1: T1, f2: T2 }` — record type alias. Lower
+            // to a right-nested binary product of field types (field
+            // names are not preserved in the surface AST today; record
+            // access happens via tuple `.0`/`.1` projections after
+            // desugar). Bridge.eph relies on this for `type Model = {..}`.
+            Rule::record_type_def if ty.is_none() => {
+                let mut field_tys: Vec<SurfaceTy> = Vec::new();
+                for fld in item.into_inner() {
+                    if fld.as_rule() == Rule::record_field {
+                        // record_field = identifier ~ ":" ~ ty
+                        let mut parts = fld.into_inner();
+                        let _name = parts.next();
+                        if let Some(t) = parts.next() {
+                            field_tys.push(parse_type(t)?);
+                        }
+                    }
+                }
+                ty = Some(field_tys_to_product(field_tys));
+            }
+            // `type Foo = | A | B(I32)` — sum type alias. Same approach,
+            // lower to a binary sum of variant payloads.
+            Rule::sum_type_def if ty.is_none() => {
+                let mut variant_tys: Vec<SurfaceTy> = Vec::new();
+                for v in item.into_inner() {
+                    if v.as_rule() == Rule::sum_variant {
+                        let mut parts = v.into_inner();
+                        let _name = parts.next();
+                        match parts.next() {
+                            Some(t) => variant_tys.push(parse_type(t)?),
+                            None => variant_tys.push(SurfaceTy::Base(BaseTy::Unit)),
+                        }
+                    }
+                }
+                ty = Some(field_tys_to_sum(variant_tys));
+            }
             _ => {}
         }
     }
@@ -382,6 +423,36 @@ fn parse_type_decl(pair: pest::iterators::Pair<Rule>) -> Result<SurfaceDecl, Par
         visibility,
         ty: ty.ok_or_else(|| ParseError::missing("type definition"))?,
     })
+}
+
+fn field_tys_to_product(tys: Vec<SurfaceTy>) -> SurfaceTy {
+    match tys.len() {
+        0 => SurfaceTy::Base(BaseTy::Unit),
+        1 => tys.into_iter().next().expect("len == 1"),
+        2 => {
+            let mut iter = tys.into_iter();
+            SurfaceTy::Prod {
+                left: Box::new(iter.next().expect("len == 2")),
+                right: Box::new(iter.next().expect("len == 2")),
+            }
+        }
+        _ => SurfaceTy::Tuple(tys),
+    }
+}
+
+fn field_tys_to_sum(tys: Vec<SurfaceTy>) -> SurfaceTy {
+    let mut iter = tys.into_iter().rev();
+    let mut acc = match iter.next() {
+        Some(t) => t,
+        None => return SurfaceTy::Base(BaseTy::Unit),
+    };
+    for t in iter {
+        acc = SurfaceTy::Sum {
+            left: Box::new(t),
+            right: Box::new(acc),
+        };
+    }
+    acc
 }
 
 // =========================================================================
@@ -1480,6 +1551,46 @@ fn parse_atom_expr(pair: pest::iterators::Pair<Rule>) -> Result<SurfaceExpr, Par
                 }
             }
             Ok(SurfaceExpr::new(SurfaceExprKind::ListLit(elements), span))
+        }
+
+        // Record literal `{ f1 = v1, f2 = v2 }` (or `f: v` / `f: ty = v`
+        // shorthands). Field names aren't preserved in the surface AST
+        // today — lower to a positional product (`Pair`/`TupleLit`)
+        // matching the lowering used by `type Foo = { f1: T1, f2: T2 }`
+        // in `parse_type_decl`. Bridge.eph + hypatia_gui.eph rely on this.
+        Rule::record_literal => {
+            let mut values = Vec::new();
+            for fld in inner.into_inner() {
+                if fld.as_rule() == Rule::record_field_assign {
+                    let mut value: Option<SurfaceExpr> = None;
+                    for part in fld.into_inner() {
+                        match part.as_rule() {
+                            Rule::expression => value = Some(parse_expression(part)?),
+                            _ => {}
+                        }
+                    }
+                    if let Some(v) = value {
+                        values.push(v);
+                    }
+                }
+            }
+            Ok(match values.len() {
+                0 => SurfaceExpr::new(SurfaceExprKind::Lit(Literal::Unit), span),
+                1 => values.into_iter().next().expect("len == 1"),
+                2 => {
+                    let mut iter = values.into_iter();
+                    let left = iter.next().expect("len == 2");
+                    let right = iter.next().expect("len == 2");
+                    SurfaceExpr::new(
+                        SurfaceExprKind::Pair {
+                            left: Box::new(left),
+                            right: Box::new(right),
+                        },
+                        span,
+                    )
+                }
+                _ => SurfaceExpr::new(SurfaceExprKind::TupleLit(values), span),
+            })
         }
 
         Rule::paren_or_pair => {

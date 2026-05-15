@@ -304,7 +304,7 @@ impl Desugarer {
 
         Ok(Module {
             name: module.name.clone(),
-            imports: vec![],
+            imports: module.imports.clone(),
             decls: core_decls,
         })
     }
@@ -1442,6 +1442,7 @@ mod tests {
     fn desugar_module_with_data() {
         let module = SurfaceModule {
             name: "test".into(),
+            imports: vec![],
             decls: vec![
                 SurfaceDecl::Data(option_decl()),
                 SurfaceDecl::Fn {
@@ -1510,6 +1511,7 @@ mod tests {
         // Build surface AST directly, skip parser
         let module = SurfaceModule {
             name: "test".into(),
+            imports: vec![],
             decls: vec![
                 SurfaceDecl::Data(DataDecl {
                     name: "Option".into(),
@@ -1573,6 +1575,7 @@ mod tests {
         // Debug: check what the desugarer produces for a match
         let module = SurfaceModule {
             name: "test".into(),
+            imports: vec![],
             decls: vec![
                 SurfaceDecl::Data(DataDecl {
                     name: "Option".into(),
@@ -1664,6 +1667,7 @@ mod tests {
     fn desugar_extern_types_resolve_to_ty_var() {
         let module = SurfaceModule {
             name: "test".into(),
+            imports: vec![],
             decls: vec![SurfaceDecl::Extern {
                 abi: "gossamer".to_string(),
                 items: vec![
@@ -1721,6 +1725,7 @@ mod tests {
     fn desugar_extern_block() {
         let module = SurfaceModule {
             name: "test".into(),
+            imports: vec![],
             decls: vec![SurfaceDecl::Extern {
                 abi: "gossamer".to_string(),
                 items: vec![

@@ -16,6 +16,7 @@ categories.workspace = true
 [dependencies]
 ephapax-syntax = { workspace = true }
 ephapax-ir = { workspace = true }
+typed-wasm-verify = { workspace = true }
 wasm-encoder = { workspace = true }
 gimli = { version = "0.31", features = ["write"] }
 object = "0.36"

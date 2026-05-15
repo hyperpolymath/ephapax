@@ -852,6 +852,184 @@ fn aspect_violations_non_empty_on_failure() {
     }
 }
 
+// =========================================================================
+// Match expression: N-arm branch agreement
+// =========================================================================
+
+use ephapax_syntax::{MatchArm, Pattern as P};
+
+/// `match scrutinee of | _ => x | _ => () end` — first arm consumes
+/// linear `x`, second doesn't. Linear discipline must reject.
+#[test]
+fn linear_rejects_match_arm_disagreement() {
+    let expr = e(ExprKind::Region {
+        name: "r".into(),
+        body: Box::new(e(ExprKind::LetLin {
+            name: "x".into(),
+            ty: Some(Ty::String("r".into())),
+            value: Box::new(e(ExprKind::StringNew {
+                region: "r".into(),
+                value: "hello".to_string(),
+            })),
+            body: Box::new(e(ExprKind::Match {
+                scrutinee: Box::new(e(ExprKind::Lit(Literal::I32(0)))),
+                arms: vec![
+                    MatchArm {
+                        pattern: P::Literal(Literal::I32(0)),
+                        guard: None,
+                        body: Box::new(var("x")).as_ref().clone(),
+                    },
+                    MatchArm {
+                        pattern: P::Wildcard,
+                        guard: None,
+                        body: unit(),
+                    },
+                ],
+            })),
+        })),
+    });
+
+    let mut checker = LinearChecker::new();
+    let result = checker.check(&expr);
+    assert!(result.is_err(), "linear must reject N-arm disagreement");
+    let violations = result.unwrap_err();
+    assert!(
+        violations
+            .iter()
+            .any(|v| matches!(v, DisciplineViolation::BranchDisagreement { name } if name == "x")),
+        "expected BranchDisagreement on x, got {:?}",
+        violations
+    );
+}
+
+/// Three-arm match where one arm fails to consume a linear var.
+#[test]
+fn linear_rejects_three_arm_disagreement() {
+    let expr = e(ExprKind::Region {
+        name: "r".into(),
+        body: Box::new(e(ExprKind::LetLin {
+            name: "x".into(),
+            ty: Some(Ty::String("r".into())),
+            value: Box::new(e(ExprKind::StringNew {
+                region: "r".into(),
+                value: "hello".to_string(),
+            })),
+            body: Box::new(e(ExprKind::Match {
+                scrutinee: Box::new(e(ExprKind::Lit(Literal::I32(0)))),
+                arms: vec![
+                    MatchArm {
+                        pattern: P::Literal(Literal::I32(0)),
+                        guard: None,
+                        body: var("x"),
+                    },
+                    MatchArm {
+                        pattern: P::Literal(Literal::I32(1)),
+                        guard: None,
+                        body: var("x"),
+                    },
+                    MatchArm {
+                        // Third arm fails to consume x.
+                        pattern: P::Wildcard,
+                        guard: None,
+                        body: unit(),
+                    },
+                ],
+            })),
+        })),
+    });
+
+    let mut checker = LinearChecker::new();
+    let result = checker.check(&expr);
+    assert!(result.is_err(), "linear must reject N-arm disagreement");
+    let violations = result.unwrap_err();
+    assert!(
+        violations
+            .iter()
+            .any(|v| matches!(v, DisciplineViolation::BranchDisagreement { name } if name == "x")),
+        "expected BranchDisagreement on x in 3-arm match, got {:?}",
+        violations
+    );
+}
+
+/// All three arms consume the linear variable → linear accepts.
+#[test]
+fn linear_accepts_all_arms_consume() {
+    let expr = e(ExprKind::Region {
+        name: "r".into(),
+        body: Box::new(e(ExprKind::LetLin {
+            name: "x".into(),
+            ty: Some(Ty::String("r".into())),
+            value: Box::new(e(ExprKind::StringNew {
+                region: "r".into(),
+                value: "hello".to_string(),
+            })),
+            body: Box::new(e(ExprKind::Match {
+                scrutinee: Box::new(e(ExprKind::Lit(Literal::I32(0)))),
+                arms: vec![
+                    MatchArm {
+                        pattern: P::Literal(Literal::I32(0)),
+                        guard: None,
+                        body: var("x"),
+                    },
+                    MatchArm {
+                        pattern: P::Literal(Literal::I32(1)),
+                        guard: None,
+                        body: var("x"),
+                    },
+                    MatchArm {
+                        pattern: P::Wildcard,
+                        guard: None,
+                        body: var("x"),
+                    },
+                ],
+            })),
+        })),
+    });
+
+    let mut checker = LinearChecker::new();
+    let result = checker.check(&expr);
+    assert!(
+        result.is_ok(),
+        "linear must accept all-arms-consume match — got {:?}",
+        result
+    );
+}
+
+/// Affine allows arm disagreement: some arms consume the affine
+/// binding, others implicitly drop. Must NOT produce a
+/// BranchDisagreement violation.
+#[test]
+fn affine_allows_match_arm_disagreement() {
+    let expr = e(ExprKind::Let {
+        name: "x".into(),
+        ty: Some(Ty::Base(BaseTy::I32)),
+        value: Box::new(i32_lit(42)),
+        body: Box::new(e(ExprKind::Match {
+            scrutinee: Box::new(e(ExprKind::Lit(Literal::I32(0)))),
+            arms: vec![
+                MatchArm {
+                    pattern: P::Literal(Literal::I32(0)),
+                    guard: None,
+                    body: var("x"),
+                },
+                MatchArm {
+                    pattern: P::Wildcard,
+                    guard: None,
+                    body: unit(),
+                },
+            ],
+        })),
+    });
+
+    let mut checker = AffineChecker::new();
+    let result = checker.check(&expr);
+    assert!(
+        result.is_ok(),
+        "affine must allow N-arm disagreement — got {:?}",
+        result
+    );
+}
+
 /// Aspect: is_error() and is_warning() are mutually exclusive for all violation kinds.
 #[test]
 fn aspect_violation_error_warning_mutually_exclusive() {

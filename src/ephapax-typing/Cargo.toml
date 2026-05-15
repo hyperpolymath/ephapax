@@ -15,4 +15,5 @@ categories.workspace = true
 
 [dependencies]
 ephapax-syntax = { workspace = true }
+smol_str = { workspace = true }
 thiserror = { workspace = true }

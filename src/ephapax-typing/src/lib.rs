@@ -19,10 +19,11 @@
 pub mod discipline;
 
 use ephapax_syntax::{
-    BaseTy, BinOp, Decl, Expr, ExprKind, ExternItem, Literal, Module, RegionName, Span, Ty,
-    UnaryOp, Var, Visibility,
+    BaseTy, BinOp, Decl, Expr, ExprKind, ExternItem, Literal, MatchArm, Module, Pattern,
+    RegionName, Span, Ty, UnaryOp, Var, Visibility,
 };
-use std::collections::HashMap;
+use smol_str::SmolStr;
+use std::collections::{HashMap, HashSet};
 use std::fmt;
 use thiserror::Error;
 
@@ -74,6 +75,25 @@ pub enum TypeError {
 
     #[error("Not yet supported in the core type checker: {0}. Use the surface (parse_surface_module → desugar) path instead.")]
     NotYetSupportedInCore(&'static str),
+
+    #[error("Unknown constructor `{0}`")]
+    UnknownConstructor(Var),
+
+    #[error("Constructor `{ctor}` expects {expected} field(s), pattern has {got}")]
+    ConstructorArityMismatch {
+        ctor: Var,
+        expected: usize,
+        got: usize,
+    },
+
+    #[error("Duplicate constructor `{0}` in module")]
+    DuplicateConstructor(Var),
+
+    #[error("Non-exhaustive match: missing pattern for `{missing}`")]
+    NonExhaustiveMatch { missing: SmolStr },
+
+    #[error("Match expression must have at least one arm")]
+    EmptyMatch,
 }
 
 /// A type error with source location.
@@ -258,6 +278,197 @@ impl Context {
     }
 }
 
+/// Information about a single constructor in a `data` declaration.
+///
+/// Constructed by [`DataCtorRegistry::populate_from_module`] from each
+/// `Decl::Data`. Used by [`TypeChecker::check_pattern`] to resolve
+/// `Pattern::Constructor` and build the binary-sum encoding that mirrors
+/// `ephapax_desugar::build_sum_type`.
+#[derive(Debug, Clone)]
+pub struct CtorInfo {
+    /// Name of the parent data type (e.g. `"Option"` for `Some`/`None`).
+    pub parent: SmolStr,
+    /// Type parameters of the parent data type (in declaration order).
+    pub type_params: Vec<SmolStr>,
+    /// 0-based position of this constructor in the parent's declaration.
+    /// Defines the inl/inr nesting depth used by the binary-sum encoding.
+    pub position: usize,
+    /// Total number of constructors in the parent data type.
+    pub total: usize,
+    /// Field types in declaration order. Type parameters appear as
+    /// `Ty::Var(name)` and are substituted with fresh unifs per use site.
+    pub fields: Vec<Ty>,
+}
+
+/// Information about a `data` declaration.
+#[derive(Debug, Clone)]
+pub struct DataInfo {
+    /// Name of the data type.
+    pub name: SmolStr,
+    /// Type parameters (e.g. `[a]` for `Option(a)`).
+    pub type_params: Vec<SmolStr>,
+    /// Constructor names in declaration order. Defines positions and
+    /// the exhaustiveness coverage set.
+    pub ctor_names: Vec<SmolStr>,
+}
+
+/// Registry mapping constructor → parent and data type → constructors.
+///
+/// Populated from `Decl::Data` declarations in the module pre-pass
+/// before any function body is checked. Used by `check_match` to resolve
+/// `Pattern::Constructor` to the right-nested binary-sum encoding that
+/// `ephapax-desugar` would produce for surface code.
+#[derive(Debug, Clone, Default)]
+pub struct DataCtorRegistry {
+    ctors: HashMap<SmolStr, CtorInfo>,
+    types: HashMap<SmolStr, DataInfo>,
+}
+
+impl DataCtorRegistry {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn get_ctor(&self, name: &str) -> Option<&CtorInfo> {
+        self.ctors.get(name)
+    }
+
+    pub fn get_type(&self, name: &str) -> Option<&DataInfo> {
+        self.types.get(name)
+    }
+
+    /// Register every `Decl::Data` in `module`. Duplicate constructor
+    /// names across the module are rejected.
+    pub fn populate_from_module(&mut self, module: &Module) -> Result<(), TypeError> {
+        for decl in &module.decls {
+            if let Decl::Data {
+                name,
+                type_params,
+                constructors,
+            } = decl
+            {
+                let parent: SmolStr = name.as_str().into();
+                let total = constructors.len();
+                let mut ctor_names = Vec::with_capacity(total);
+                for (position, ctor) in constructors.iter().enumerate() {
+                    let ctor_name: SmolStr = ctor.name.as_str().into();
+                    if self.ctors.contains_key(&ctor_name) {
+                        return Err(TypeError::DuplicateConstructor(ctor_name));
+                    }
+                    self.ctors.insert(
+                        ctor_name.clone(),
+                        CtorInfo {
+                            parent: parent.clone(),
+                            type_params: type_params.clone(),
+                            position,
+                            total,
+                            fields: ctor.fields.clone(),
+                        },
+                    );
+                    ctor_names.push(ctor_name);
+                }
+                self.types.insert(
+                    parent.clone(),
+                    DataInfo {
+                        name: parent,
+                        type_params: type_params.clone(),
+                        ctor_names,
+                    },
+                );
+            }
+        }
+        Ok(())
+    }
+}
+
+/// Substitute multiple type variables at once. Equivalent to chaining
+/// `Ty::subst_var` over the substitution map but avoids the O(N·|ty|)
+/// repeated traversal — useful when payload types reference several
+/// type parameters of the parent data type at once.
+fn subst_tys(ty: &Ty, subst: &HashMap<SmolStr, Ty>) -> Ty {
+    match ty {
+        Ty::Var(v) => subst.get(v).cloned().unwrap_or_else(|| ty.clone()),
+        Ty::Base(_) | Ty::Unif(_) => ty.clone(),
+        Ty::String(_) => ty.clone(),
+        Ty::Ref { linearity, inner } => Ty::Ref {
+            linearity: *linearity,
+            inner: Box::new(subst_tys(inner, subst)),
+        },
+        Ty::Fun { param, ret } => Ty::Fun {
+            param: Box::new(subst_tys(param, subst)),
+            ret: Box::new(subst_tys(ret, subst)),
+        },
+        Ty::Prod { left, right } => Ty::Prod {
+            left: Box::new(subst_tys(left, subst)),
+            right: Box::new(subst_tys(right, subst)),
+        },
+        Ty::Sum { left, right } => Ty::Sum {
+            left: Box::new(subst_tys(left, subst)),
+            right: Box::new(subst_tys(right, subst)),
+        },
+        Ty::Region { name, inner } => Ty::Region {
+            name: name.clone(),
+            inner: Box::new(subst_tys(inner, subst)),
+        },
+        Ty::Borrow(inner) => Ty::Borrow(Box::new(subst_tys(inner, subst))),
+        Ty::ForAll { var, body } => {
+            if subst.contains_key(var) {
+                ty.clone() // shadowed by binder
+            } else {
+                Ty::ForAll {
+                    var: var.clone(),
+                    body: Box::new(subst_tys(body, subst)),
+                }
+            }
+        }
+        Ty::Effectful {
+            param,
+            ret,
+            effects,
+        } => Ty::Effectful {
+            param: Box::new(subst_tys(param, subst)),
+            ret: Box::new(subst_tys(ret, subst)),
+            effects: effects.clone(),
+        },
+        Ty::List(inner) => Ty::List(Box::new(subst_tys(inner, subst))),
+        Ty::Tuple(elems) => Ty::Tuple(elems.iter().map(|t| subst_tys(t, subst)).collect()),
+    }
+}
+
+/// Build the payload type for a constructor's fields under a substitution.
+/// Mirrors `ephapax_desugar::build_payload_type`:
+/// - 0 fields → `Unit`
+/// - 1 field  → the field's substituted type
+/// - N fields → right-nested `Prod`
+fn build_payload_ty(fields: &[Ty], subst: &HashMap<SmolStr, Ty>) -> Ty {
+    match fields.len() {
+        0 => Ty::Base(BaseTy::Unit),
+        1 => subst_tys(&fields[0], subst),
+        _ => Ty::Prod {
+            left: Box::new(subst_tys(&fields[0], subst)),
+            right: Box::new(build_payload_ty(&fields[1..], subst)),
+        },
+    }
+}
+
+/// Build the right-nested binary sum of payloads. Mirrors
+/// `ephapax_desugar::build_sum_type`: a single-constructor data type
+/// has no `Sum` wrapper (its encoding is just the payload).
+fn right_nested_sum(payloads: &[Ty]) -> Ty {
+    debug_assert!(
+        !payloads.is_empty(),
+        "data type must have at least one constructor"
+    );
+    if payloads.len() == 1 {
+        payloads[0].clone()
+    } else {
+        Ty::Sum {
+            left: Box::new(payloads[0].clone()),
+            right: Box::new(right_nested_sum(&payloads[1..])),
+        }
+    }
+}
+
 /// Type checker state
 pub struct TypeChecker {
     ctx: Context,
@@ -265,6 +476,10 @@ pub struct TypeChecker {
     next_unif: u32,
     /// Solved unification variables: id -> type.
     unif_solutions: HashMap<u32, Ty>,
+    /// Data declarations visible to the current module.
+    /// Populated by `type_check_module_inner` from `Decl::Data` decls
+    /// before any function body is checked.
+    data_registry: DataCtorRegistry,
 }
 
 impl TypeChecker {
@@ -274,7 +489,15 @@ impl TypeChecker {
             ctx: Context::new(),
             next_unif: 0,
             unif_solutions: HashMap::new(),
+            data_registry: DataCtorRegistry::new(),
         }
+    }
+
+    /// Access the data-constructor registry — useful for tests and
+    /// downstream tooling that wants to inspect resolved constructor
+    /// positions without re-walking `Decl::Data`.
+    pub fn data_registry(&self) -> &DataCtorRegistry {
+        &self.data_registry
     }
 
     /// Construct a SpannedTypeError at the given span.
@@ -433,18 +656,7 @@ impl TypeChecker {
             ExprKind::FFI { args, .. } => self.check_ffi(s, args),
             ExprKind::Perform { op, args } => self.check_perform(s, op, args),
             ExprKind::Handle { body, clauses } => self.check_handle(s, body, clauses),
-            // Core `ExprKind::Match` is preserved structurally by the
-            // core parser direct path (ephapax#61) but the typechecker
-            // does not yet implement pattern type inference and arm
-            // unification. Surface match expressions are desugared to
-            // nested `ExprKind::Case` before reaching this point, so
-            // the standard pipeline is unaffected; only direct uses
-            // of `parse_module` on files containing `match` will land
-            // here.
-            ExprKind::Match { .. } => Err(self.at(
-                s,
-                TypeError::NotYetSupportedInCore("match expressions"),
-            )),
+            ExprKind::Match { scrutinee, arms } => self.check_match(s, scrutinee, arms),
         }
     }
 
@@ -939,6 +1151,270 @@ impl TypeChecker {
                 },
             )),
         }
+    }
+
+    /// Type check a core `ExprKind::Match`.
+    ///
+    /// Each arm is checked against a snapshot of the post-scrutinee
+    /// context. Arm body types are unified pairwise so the whole
+    /// expression has a single type. Pattern-bound variables are
+    /// removed from the post-arm snapshot before branch agreement so
+    /// arms that bind different names still agree on the rest of the
+    /// linear environment (matching `check_case`'s convention).
+    /// Exhaustiveness is checked after all arms pass.
+    fn check_match(
+        &mut self,
+        s: Span,
+        scrutinee: &Expr,
+        arms: &[MatchArm],
+    ) -> Result<Ty, SpannedTypeError> {
+        if arms.is_empty() {
+            return Err(self.at(s, TypeError::EmptyMatch));
+        }
+
+        let scrutinee_ty = self.check(scrutinee)?;
+        let ctx_after_scrutinee = self.ctx.snapshot();
+
+        let mut arm_result_ty: Option<Ty> = None;
+        let mut first_post_ctx: Option<Context> = None;
+
+        for arm in arms {
+            self.ctx = ctx_after_scrutinee.clone();
+
+            let bound = self.check_pattern(s, &arm.pattern, &scrutinee_ty)?;
+
+            if arm.guard.is_some() {
+                return Err(self.at(s, TypeError::NotYetSupportedInCore("match guards")));
+            }
+
+            let body_ty = self.check(&arm.body)?;
+
+            for name in &bound {
+                if let Some(entry) = self.ctx.vars.get(name) {
+                    if entry.demands_consumption() && !entry.used {
+                        return Err(self
+                            .at(s, TypeError::LinearVariableNotConsumed(name.clone())));
+                    }
+                }
+            }
+
+            let mut ctx_after_arm = self.ctx.snapshot();
+            for name in &bound {
+                ctx_after_arm.vars.remove(name);
+            }
+
+            if let Some(prev_ty) = &arm_result_ty {
+                self.unify(arm.body.span, prev_ty, &body_ty)?;
+            }
+            arm_result_ty = Some(body_ty);
+
+            match &first_post_ctx {
+                Some(first) => {
+                    first
+                        .check_branch_agreement(&ctx_after_arm)
+                        .map_err(|e| self.at(s, e))?;
+                }
+                None => first_post_ctx = Some(ctx_after_arm),
+            }
+        }
+
+        self.ctx = first_post_ctx.expect("at least one arm processed");
+
+        self.check_exhaustiveness(s, arms, &scrutinee_ty)?;
+
+        Ok(self.resolve(&arm_result_ty.expect("at least one arm produced a type")))
+    }
+
+    /// Type check a `Pattern` against an `expected_ty` and bind its
+    /// variables in the current context. Returns the names bound by
+    /// this pattern so `check_match` can scope them out for branch
+    /// agreement and verify linear consumption.
+    fn check_pattern(
+        &mut self,
+        s: Span,
+        pattern: &Pattern,
+        expected_ty: &Ty,
+    ) -> Result<Vec<Var>, SpannedTypeError> {
+        let expected = self.resolve(expected_ty);
+        match pattern {
+            Pattern::Wildcard => Ok(Vec::new()),
+            Pattern::Var(name) => {
+                self.ctx
+                    .extend(name.clone(), expected, BindingForm::Param);
+                Ok(vec![name.clone()])
+            }
+            Pattern::Literal(lit) => {
+                let lit_ty = match lit {
+                    Literal::Unit => Ty::Base(BaseTy::Unit),
+                    Literal::Bool(_) => Ty::Base(BaseTy::Bool),
+                    Literal::I32(_) => Ty::Base(BaseTy::I32),
+                    Literal::I64(_) => Ty::Base(BaseTy::I64),
+                    Literal::F32(_) => Ty::Base(BaseTy::F32),
+                    Literal::F64(_) => Ty::Base(BaseTy::F64),
+                    Literal::String(_) => {
+                        return Err(self.at(s, TypeError::UnallocatedStringLiteral));
+                    }
+                };
+                self.unify(s, &lit_ty, &expected)?;
+                Ok(Vec::new())
+            }
+            Pattern::Unit => {
+                self.unify(s, &Ty::Base(BaseTy::Unit), &expected)?;
+                Ok(Vec::new())
+            }
+            Pattern::Pair(left, right) => {
+                let lu = self.fresh_unif();
+                let ru = self.fresh_unif();
+                self.unify(
+                    s,
+                    &Ty::Prod {
+                        left: Box::new(lu.clone()),
+                        right: Box::new(ru.clone()),
+                    },
+                    &expected,
+                )?;
+                let mut bound = self.check_pattern(s, left, &lu)?;
+                bound.extend(self.check_pattern(s, right, &ru)?);
+                Ok(bound)
+            }
+            Pattern::Tuple(parts) => {
+                let unifs: Vec<Ty> = (0..parts.len()).map(|_| self.fresh_unif()).collect();
+                self.unify(s, &Ty::Tuple(unifs.clone()), &expected)?;
+                let mut bound = Vec::new();
+                for (p, u) in parts.iter().zip(unifs.iter()) {
+                    bound.extend(self.check_pattern(s, p, u)?);
+                }
+                Ok(bound)
+            }
+            Pattern::Constructor { ctor, args } => {
+                let ctor_info = self
+                    .data_registry
+                    .get_ctor(ctor.as_str())
+                    .ok_or_else(|| self.at(s, TypeError::UnknownConstructor(ctor.clone())))?
+                    .clone();
+
+                if args.len() != ctor_info.fields.len() {
+                    return Err(self.at(
+                        s,
+                        TypeError::ConstructorArityMismatch {
+                            ctor: ctor.clone(),
+                            expected: ctor_info.fields.len(),
+                            got: args.len(),
+                        },
+                    ));
+                }
+
+                let data_info = self
+                    .data_registry
+                    .get_type(&ctor_info.parent)
+                    .expect("ctor's parent must be registered")
+                    .clone();
+
+                let mut subst: HashMap<SmolStr, Ty> = HashMap::new();
+                for tp in &data_info.type_params {
+                    subst.insert(tp.clone(), self.fresh_unif());
+                }
+
+                let mut payloads: Vec<Ty> = Vec::with_capacity(data_info.ctor_names.len());
+                for cname in &data_info.ctor_names {
+                    let ci = self
+                        .data_registry
+                        .get_ctor(cname.as_str())
+                        .expect("parent's ctor must be registered");
+                    payloads.push(build_payload_ty(&ci.fields, &subst));
+                }
+                let parent_ty = right_nested_sum(&payloads);
+
+                self.unify(s, &parent_ty, &expected)?;
+
+                let field_tys: Vec<Ty> = ctor_info
+                    .fields
+                    .iter()
+                    .map(|f| subst_tys(f, &subst))
+                    .collect();
+
+                let mut bound = Vec::new();
+                for (arg, field_ty) in args.iter().zip(field_tys.iter()) {
+                    bound.extend(self.check_pattern(s, arg, field_ty)?);
+                }
+                Ok(bound)
+            }
+        }
+    }
+
+    /// Check exhaustiveness of a match's arm patterns.
+    ///
+    /// Coverage rules (simplified — full Maranget usefulness is future
+    /// work tracked separately):
+    /// - Any arm whose pattern is `Wildcard` or `Var` is a catch-all
+    ///   and makes the match exhaustive.
+    /// - For arms with constructor patterns, every constructor of the
+    ///   parent data type must appear among the patterns.
+    /// - Literal-only matches without a catch-all are non-exhaustive
+    ///   (literal sets are generally unbounded).
+    /// - Pair/Tuple/Unit patterns destructure a single inhabitant and
+    ///   are exhaustive on their own.
+    fn check_exhaustiveness(
+        &self,
+        s: Span,
+        arms: &[MatchArm],
+        _scrutinee_ty: &Ty,
+    ) -> Result<(), SpannedTypeError> {
+        for arm in arms {
+            if matches!(
+                arm.pattern,
+                Pattern::Wildcard
+                    | Pattern::Var(_)
+                    | Pattern::Unit
+                    | Pattern::Pair(_, _)
+                    | Pattern::Tuple(_)
+            ) {
+                return Ok(());
+            }
+        }
+
+        let mut parent_name: Option<SmolStr> = None;
+        let mut seen: HashSet<SmolStr> = HashSet::new();
+        let mut all_constructor_arms = true;
+
+        for arm in arms {
+            match &arm.pattern {
+                Pattern::Constructor { ctor, .. } => {
+                    seen.insert(ctor.clone());
+                    if parent_name.is_none() {
+                        if let Some(info) = self.data_registry.get_ctor(ctor.as_str()) {
+                            parent_name = Some(info.parent.clone());
+                        }
+                    }
+                }
+                _ => all_constructor_arms = false,
+            }
+        }
+
+        if all_constructor_arms {
+            if let Some(name) = parent_name {
+                if let Some(data_info) = self.data_registry.get_type(name.as_str()) {
+                    for ctor in &data_info.ctor_names {
+                        if !seen.contains(ctor) {
+                            return Err(self.at(
+                                s,
+                                TypeError::NonExhaustiveMatch {
+                                    missing: ctor.clone(),
+                                },
+                            ));
+                        }
+                    }
+                    return Ok(());
+                }
+            }
+        }
+
+        Err(self.at(
+            s,
+            TypeError::NonExhaustiveMatch {
+                missing: SmolStr::new("_"),
+            },
+        ))
     }
 
     fn check_deref(&mut self, s: Span, inner: &Expr) -> Result<Ty, SpannedTypeError> {
@@ -1497,6 +1973,15 @@ fn type_check_module_inner(
     tc: &mut TypeChecker,
     module: &Module,
 ) -> Result<(), SpannedTypeError> {
+    // Pre-pass: register all `Decl::Data` declarations so constructor
+    // patterns inside function bodies can resolve via the registry.
+    tc.data_registry
+        .populate_from_module(module)
+        .map_err(|e| SpannedTypeError {
+            error: e,
+            span: Span::dummy(),
+        })?;
+
     // First pass: collect all function signatures (regular + extern)
     for decl in &module.decls {
         match decl {
@@ -2835,5 +3320,447 @@ mod tests {
             type_check_module(&module).is_err(),
             "Ty::Var(\"IpcChannel\") must not unify with Ty::Var(\"Window\")"
         );
+    }
+
+    // =========================================================================
+    // ExprKind::Match — typing, exhaustiveness, error paths
+    // =========================================================================
+
+    use ephapax_syntax::{ConstructorDef, MatchArm, Pattern as P};
+
+    /// Build a `data Option(a) = None | Some(a)` declaration.
+    fn option_data_decl() -> Decl {
+        Decl::Data {
+            name: "Option".into(),
+            type_params: vec!["a".into()],
+            constructors: vec![
+                ConstructorDef {
+                    name: "None".into(),
+                    fields: vec![],
+                },
+                ConstructorDef {
+                    name: "Some".into(),
+                    fields: vec![Ty::Var("a".into())],
+                },
+            ],
+        }
+    }
+
+    /// Build `data Result(a, e) = Ok(a) | Err(e)`.
+    fn result_data_decl() -> Decl {
+        Decl::Data {
+            name: "Result".into(),
+            type_params: vec!["a".into(), "e".into()],
+            constructors: vec![
+                ConstructorDef {
+                    name: "Ok".into(),
+                    fields: vec![Ty::Var("a".into())],
+                },
+                ConstructorDef {
+                    name: "Err".into(),
+                    fields: vec![Ty::Var("e".into())],
+                },
+            ],
+        }
+    }
+
+    /// Wrap an expression as a private `fn test_fn(scrut: T): R = expr`.
+    fn fn_decl(name: &str, params: Vec<(Var, Ty)>, ret_ty: Ty, body: Expr) -> Decl {
+        Decl::Fn {
+            name: name.into(),
+            visibility: Visibility::Private,
+            type_params: vec![],
+            params,
+            ret_ty,
+            body,
+        }
+    }
+
+    fn lit_i32(n: i32) -> Expr {
+        dummy_expr(ExprKind::Lit(Literal::I32(n)))
+    }
+
+    #[test]
+    fn test_data_registry_populated_from_decl_data() {
+        let mut tc = TypeChecker::new();
+        let module = Module {
+            name: "t".into(),
+            imports: vec![],
+            decls: vec![option_data_decl()],
+        };
+        tc.data_registry.populate_from_module(&module).unwrap();
+
+        let none = tc.data_registry.get_ctor("None").unwrap();
+        assert_eq!(none.parent, SmolStr::from("Option"));
+        assert_eq!(none.position, 0);
+        assert_eq!(none.total, 2);
+        assert!(none.fields.is_empty());
+
+        let some = tc.data_registry.get_ctor("Some").unwrap();
+        assert_eq!(some.position, 1);
+        assert_eq!(some.fields, vec![Ty::Var("a".into())]);
+
+        let info = tc.data_registry.get_type("Option").unwrap();
+        assert_eq!(info.ctor_names, vec![SmolStr::from("None"), SmolStr::from("Some")]);
+    }
+
+    #[test]
+    fn test_data_registry_rejects_duplicate_ctor() {
+        let mut tc = TypeChecker::new();
+        let module = Module {
+            name: "t".into(),
+            imports: vec![],
+            decls: vec![
+                Decl::Data {
+                    name: "A".into(),
+                    type_params: vec![],
+                    constructors: vec![ConstructorDef {
+                        name: "X".into(),
+                        fields: vec![],
+                    }],
+                },
+                Decl::Data {
+                    name: "B".into(),
+                    type_params: vec![],
+                    constructors: vec![ConstructorDef {
+                        name: "X".into(),
+                        fields: vec![],
+                    }],
+                },
+            ],
+        };
+        let err = tc.data_registry.populate_from_module(&module);
+        assert!(matches!(err, Err(TypeError::DuplicateConstructor(_))));
+    }
+
+    /// `match Some(42) of | None => 0 | Some(v) => v end : I32` — full
+    /// pattern resolution: literal, constructor with var arg, binary-sum
+    /// encoding, arm-body unification, and exhaustiveness all in one.
+    #[test]
+    fn test_match_option_exhaustive_typecheck() {
+        let scrut = dummy_expr(ExprKind::Inr {
+            ty: Ty::Base(BaseTy::Unit),
+            value: Box::new(lit_i32(42)),
+        });
+        let arms = vec![
+            MatchArm {
+                pattern: P::Constructor {
+                    ctor: "None".into(),
+                    args: vec![],
+                },
+                guard: None,
+                body: lit_i32(0),
+            },
+            MatchArm {
+                pattern: P::Constructor {
+                    ctor: "Some".into(),
+                    args: vec![P::Var("v".into())],
+                },
+                guard: None,
+                body: dummy_expr(ExprKind::Var("v".into())),
+            },
+        ];
+        let body = dummy_expr(ExprKind::Match {
+            scrutinee: Box::new(scrut),
+            arms,
+        });
+        let module = Module {
+            name: "t".into(),
+            imports: vec![],
+            decls: vec![
+                option_data_decl(),
+                fn_decl("f", vec![], Ty::Base(BaseTy::I32), body),
+            ],
+        };
+        type_check_module(&module).expect("Option match should type-check");
+    }
+
+    /// Missing `None` arm → NonExhaustiveMatch with `missing: None`.
+    #[test]
+    fn test_match_non_exhaustive_missing_ctor() {
+        let scrut = dummy_expr(ExprKind::Inr {
+            ty: Ty::Base(BaseTy::Unit),
+            value: Box::new(lit_i32(42)),
+        });
+        let arms = vec![MatchArm {
+            pattern: P::Constructor {
+                ctor: "Some".into(),
+                args: vec![P::Var("v".into())],
+            },
+            guard: None,
+            body: dummy_expr(ExprKind::Var("v".into())),
+        }];
+        let body = dummy_expr(ExprKind::Match {
+            scrutinee: Box::new(scrut),
+            arms,
+        });
+        let module = Module {
+            name: "t".into(),
+            imports: vec![],
+            decls: vec![
+                option_data_decl(),
+                fn_decl("f", vec![], Ty::Base(BaseTy::I32), body),
+            ],
+        };
+        let err = type_check_module(&module).unwrap_err();
+        assert!(
+            matches!(
+                err.error,
+                TypeError::NonExhaustiveMatch { ref missing } if missing == &SmolStr::from("None")
+            ),
+            "expected NonExhaustiveMatch{{missing:\"None\"}}, got {:?}",
+            err.error
+        );
+    }
+
+    /// Wildcard arm covers everything else → exhaustive.
+    #[test]
+    fn test_match_wildcard_makes_exhaustive() {
+        let scrut = dummy_expr(ExprKind::Inr {
+            ty: Ty::Base(BaseTy::Unit),
+            value: Box::new(lit_i32(42)),
+        });
+        let arms = vec![
+            MatchArm {
+                pattern: P::Constructor {
+                    ctor: "Some".into(),
+                    args: vec![P::Var("v".into())],
+                },
+                guard: None,
+                body: dummy_expr(ExprKind::Var("v".into())),
+            },
+            MatchArm {
+                pattern: P::Wildcard,
+                guard: None,
+                body: lit_i32(0),
+            },
+        ];
+        let body = dummy_expr(ExprKind::Match {
+            scrutinee: Box::new(scrut),
+            arms,
+        });
+        let module = Module {
+            name: "t".into(),
+            imports: vec![],
+            decls: vec![
+                option_data_decl(),
+                fn_decl("f", vec![], Ty::Base(BaseTy::I32), body),
+            ],
+        };
+        type_check_module(&module).expect("wildcard should make match exhaustive");
+    }
+
+    /// Unknown constructor → UnknownConstructor.
+    #[test]
+    fn test_match_unknown_constructor() {
+        let scrut = dummy_expr(ExprKind::Inl {
+            ty: Ty::Base(BaseTy::I32),
+            value: Box::new(dummy_expr(ExprKind::Lit(Literal::Unit))),
+        });
+        let arms = vec![MatchArm {
+            pattern: P::Constructor {
+                ctor: "Ghost".into(),
+                args: vec![],
+            },
+            guard: None,
+            body: lit_i32(0),
+        }];
+        let body = dummy_expr(ExprKind::Match {
+            scrutinee: Box::new(scrut),
+            arms,
+        });
+        let module = Module {
+            name: "t".into(),
+            imports: vec![],
+            decls: vec![
+                option_data_decl(),
+                fn_decl("f", vec![], Ty::Base(BaseTy::I32), body),
+            ],
+        };
+        let err = type_check_module(&module).unwrap_err();
+        assert!(
+            matches!(err.error, TypeError::UnknownConstructor(ref c) if c == &Var::from("Ghost")),
+            "got {:?}",
+            err.error
+        );
+    }
+
+    /// `Some(a, b)` for `Some` of arity 1 → ConstructorArityMismatch.
+    #[test]
+    fn test_match_constructor_arity_mismatch() {
+        let scrut = dummy_expr(ExprKind::Inr {
+            ty: Ty::Base(BaseTy::Unit),
+            value: Box::new(lit_i32(42)),
+        });
+        let arms = vec![
+            MatchArm {
+                pattern: P::Constructor {
+                    ctor: "Some".into(),
+                    args: vec![P::Var("a".into()), P::Var("b".into())],
+                },
+                guard: None,
+                body: lit_i32(0),
+            },
+            MatchArm {
+                pattern: P::Wildcard,
+                guard: None,
+                body: lit_i32(0),
+            },
+        ];
+        let body = dummy_expr(ExprKind::Match {
+            scrutinee: Box::new(scrut),
+            arms,
+        });
+        let module = Module {
+            name: "t".into(),
+            imports: vec![],
+            decls: vec![
+                option_data_decl(),
+                fn_decl("f", vec![], Ty::Base(BaseTy::I32), body),
+            ],
+        };
+        let err = type_check_module(&module).unwrap_err();
+        assert!(
+            matches!(
+                err.error,
+                TypeError::ConstructorArityMismatch { expected: 1, got: 2, .. }
+            ),
+            "got {:?}",
+            err.error
+        );
+    }
+
+    /// Arms return different types → TypeMismatch from inter-arm unify.
+    #[test]
+    fn test_match_arm_type_mismatch() {
+        let scrut = dummy_expr(ExprKind::Inr {
+            ty: Ty::Base(BaseTy::Unit),
+            value: Box::new(lit_i32(42)),
+        });
+        let arms = vec![
+            MatchArm {
+                pattern: P::Constructor {
+                    ctor: "None".into(),
+                    args: vec![],
+                },
+                guard: None,
+                body: lit_i32(0),
+            },
+            MatchArm {
+                pattern: P::Constructor {
+                    ctor: "Some".into(),
+                    args: vec![P::Wildcard],
+                },
+                guard: None,
+                body: dummy_expr(ExprKind::Lit(Literal::Bool(true))),
+            },
+        ];
+        let body = dummy_expr(ExprKind::Match {
+            scrutinee: Box::new(scrut),
+            arms,
+        });
+        let module = Module {
+            name: "t".into(),
+            imports: vec![],
+            decls: vec![
+                option_data_decl(),
+                fn_decl("f", vec![], Ty::Base(BaseTy::I32), body),
+            ],
+        };
+        let err = type_check_module(&module).unwrap_err();
+        assert!(
+            matches!(err.error, TypeError::TypeMismatch { .. }),
+            "got {:?}",
+            err.error
+        );
+    }
+
+    /// Literal patterns over i32 without wildcard → NonExhaustiveMatch.
+    #[test]
+    fn test_match_literal_non_exhaustive() {
+        let arms = vec![
+            MatchArm {
+                pattern: P::Literal(Literal::I32(0)),
+                guard: None,
+                body: lit_i32(10),
+            },
+            MatchArm {
+                pattern: P::Literal(Literal::I32(1)),
+                guard: None,
+                body: lit_i32(20),
+            },
+        ];
+        let body = dummy_expr(ExprKind::Match {
+            scrutinee: Box::new(lit_i32(0)),
+            arms,
+        });
+        let module = Module {
+            name: "t".into(),
+            imports: vec![],
+            decls: vec![fn_decl("f", vec![], Ty::Base(BaseTy::I32), body)],
+        };
+        let err = type_check_module(&module).unwrap_err();
+        assert!(
+            matches!(err.error, TypeError::NonExhaustiveMatch { .. }),
+            "got {:?}",
+            err.error
+        );
+    }
+
+    /// Empty arms list → EmptyMatch.
+    #[test]
+    fn test_match_empty_arms() {
+        let body = dummy_expr(ExprKind::Match {
+            scrutinee: Box::new(lit_i32(0)),
+            arms: vec![],
+        });
+        let module = Module {
+            name: "t".into(),
+            imports: vec![],
+            decls: vec![fn_decl("f", vec![], Ty::Base(BaseTy::I32), body)],
+        };
+        let err = type_check_module(&module).unwrap_err();
+        assert!(matches!(err.error, TypeError::EmptyMatch), "got {:?}", err.error);
+    }
+
+    /// Multi-param data type with substitution: `Result(I32, Bool)`.
+    #[test]
+    fn test_match_result_multi_type_param() {
+        // scrutinee is `Inl(42)` of declared type `Sum { I32, Bool }`
+        let scrut = dummy_expr(ExprKind::Inl {
+            ty: Ty::Base(BaseTy::Bool),
+            value: Box::new(lit_i32(42)),
+        });
+        let arms = vec![
+            MatchArm {
+                pattern: P::Constructor {
+                    ctor: "Ok".into(),
+                    args: vec![P::Var("v".into())],
+                },
+                guard: None,
+                body: dummy_expr(ExprKind::Var("v".into())),
+            },
+            MatchArm {
+                pattern: P::Constructor {
+                    ctor: "Err".into(),
+                    args: vec![P::Wildcard],
+                },
+                guard: None,
+                body: lit_i32(0),
+            },
+        ];
+        let body = dummy_expr(ExprKind::Match {
+            scrutinee: Box::new(scrut),
+            arms,
+        });
+        let module = Module {
+            name: "t".into(),
+            imports: vec![],
+            decls: vec![
+                result_data_decl(),
+                fn_decl("f", vec![], Ty::Base(BaseTy::I32), body),
+            ],
+        };
+        type_check_module(&module).expect("Result(I32, Bool) match should type-check");
     }
 }

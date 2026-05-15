@@ -378,17 +378,21 @@ impl LinearChecker {
                 }
             }
 
-            // Core `match`: walk scrutinee + each arm body with the
-            // pattern's bound vars in scope. TODO(ephapax#61 follow-up):
-            // implement proper N-arm branch-agreement checking so a
-            // linear var consumed in only some arms is rejected. For
-            // now we simply walk subexpressions to keep the discipline
-            // checker sound on the structural fragment; programs that
-            // produce `ExprKind::Match` today come only from the core
-            // parser direct path and have no existing test coverage.
+            // Core `match`: all arms must agree on linear-variable
+            // consumption against the post-scrutinee snapshot. We treat
+            // each arm as an alternative branch (only one runs at
+            // runtime) — generalising the binary Case rule above to N
+            // arms by checking arm[0] against every arm[i].
             ExprKind::Match { scrutinee, arms } => {
                 self.walk_expr(scrutinee);
+
+                let pre_snapshot = self.ctx.snapshot_consumption();
+                let mut arm_snapshots: Vec<std::collections::HashMap<Var, bool>> =
+                    Vec::with_capacity(arms.len());
+
                 for arm in arms {
+                    self.ctx.restore_consumption(&pre_snapshot);
+
                     let bound = arm.pattern.bound_vars();
                     for v in &bound {
                         self.ctx.bind(v.clone(), BindingForm::Let, None);
@@ -400,6 +404,15 @@ impl LinearChecker {
                     for v in bound.iter().rev() {
                         self.ctx.unbind(v);
                     }
+
+                    arm_snapshots.push(self.ctx.snapshot_consumption());
+                }
+
+                if let Some(first) = arm_snapshots.first() {
+                    for other in arm_snapshots.iter().skip(1) {
+                        self.check_branch_agreement(first, other);
+                    }
+                    self.ctx.restore_consumption(first);
                 }
             }
         }

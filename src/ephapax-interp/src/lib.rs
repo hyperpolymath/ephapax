@@ -7,11 +7,62 @@
 //! Useful for testing before compiling to WASM.
 
 use ephapax_syntax::{
-    BaseTy, BinOp, Decl, Expr, ExprKind, Literal, Module, RegionName, Ty, UnaryOp, Var,
+    BaseTy, BinOp, Decl, Expr, ExprKind, Literal, MatchArm, Module, Pattern, RegionName, Ty,
+    UnaryOp, Var,
 };
 use smol_str::SmolStr;
 use std::collections::HashMap;
 use thiserror::Error;
+
+/// Runtime info for a single constructor: (position, total, arity).
+///
+/// - **position**: 0-based index in the parent data type's constructor list,
+///   defining the inl/inr depth in the runtime `Value::Left`/`Value::Right`
+///   chain.
+/// - **total**: total number of constructors in the parent data type.
+///   When `position == total - 1` ("last"), the value path skips the
+///   trailing `Left` (the rightmost summand is bare, not wrapped) —
+///   mirrors `ephapax_desugar::wrap_injection`.
+/// - **arity**: number of payload fields, used to destructure the payload
+///   into `Value::Pair` chains (0 → Unit, 1 → bare, N → right-nested).
+#[derive(Debug, Clone, Copy)]
+struct InterpCtor {
+    position: usize,
+    total: usize,
+    arity: usize,
+}
+
+/// Runtime constructor registry, populated from `Decl::Data` at load time.
+/// Used by `eval_match` to resolve `Pattern::Constructor` against the
+/// binary-sum value encoding without typing-level info.
+#[derive(Debug, Clone, Default)]
+struct InterpDataRegistry {
+    ctors: HashMap<SmolStr, InterpCtor>,
+}
+
+impl InterpDataRegistry {
+    fn populate_from_module(&mut self, module: &Module) {
+        for decl in &module.decls {
+            if let Decl::Data { constructors, .. } = decl {
+                let total = constructors.len();
+                for (position, ctor) in constructors.iter().enumerate() {
+                    self.ctors.insert(
+                        ctor.name.as_str().into(),
+                        InterpCtor {
+                            position,
+                            total,
+                            arity: ctor.fields.len(),
+                        },
+                    );
+                }
+            }
+        }
+    }
+
+    fn get(&self, name: &str) -> Option<InterpCtor> {
+        self.ctors.get(name).copied()
+    }
+}
 
 /// Runtime errors during interpretation
 #[derive(Error, Debug, Clone)]
@@ -259,9 +310,30 @@ pub struct Interpreter {
     regions: Vec<RegionName>,
     /// Function definitions
     functions: HashMap<Var, FnDef>,
+    /// Data declarations from loaded modules, used by `eval_match` to
+    /// resolve `Pattern::Constructor` against the runtime binary-sum
+    /// encoding.
+    data_registry: InterpDataRegistry,
     /// Loaded native libraries for FFI (dlopen handles).
     /// Libraries are kept alive for the lifetime of the interpreter.
     ffi_libraries: Vec<libloading::Library>,
+}
+
+/// Compare a runtime `Value` against a `Literal` for pattern matching.
+/// Type mismatches (e.g. comparing a `Value::String` against `Literal::I32`)
+/// fail silently — they're already rejected by the typechecker, and at
+/// match time we just want a boolean "is this the same constant value?".
+fn value_matches_literal(val: &Value, lit: &Literal) -> bool {
+    match (val, lit) {
+        (Value::Unit, Literal::Unit) => true,
+        (Value::Bool(a), Literal::Bool(b)) => a == b,
+        (Value::I32(a), Literal::I32(b)) => a == b,
+        (Value::I64(a), Literal::I64(b)) => a == b,
+        (Value::F32(a), Literal::F32(b)) => a == b,
+        (Value::F64(a), Literal::F64(b)) => a == b,
+        (Value::String { data, .. }, Literal::String(s)) => data == s,
+        _ => false,
+    }
 }
 
 impl Interpreter {
@@ -270,6 +342,7 @@ impl Interpreter {
             env: Environment::new(),
             regions: Vec::new(),
             functions: HashMap::new(),
+            data_registry: InterpDataRegistry::default(),
             ffi_libraries: Vec::new(),
         }
     }
@@ -306,7 +379,7 @@ impl Interpreter {
         None
     }
 
-    /// Load a module (register all function definitions)
+    /// Load a module (register all function definitions and data decls).
     pub fn load_module(&mut self, module: &Module) {
         for decl in &module.decls {
             if let Decl::Fn {
@@ -322,6 +395,7 @@ impl Interpreter {
                     .insert(name.clone(), (params.clone(), ret_ty.clone(), body.clone()));
             }
         }
+        self.data_registry.populate_from_module(module);
     }
 
     /// Evaluate an expression
@@ -477,9 +551,7 @@ impl Interpreter {
                     "effect handle not yet implemented in interpreter".into(),
                 ))
             }
-            ExprKind::Match { .. } => Err(RuntimeError::Unimplemented(
-                "core ExprKind::Match not yet implemented in interpreter — use the surface (parse_surface_module → desugar) path which lowers match to nested Case".into(),
-            )),
+            ExprKind::Match { scrutinee, arms } => self.eval_match(scrutinee, arms),
         }
     }
 
@@ -816,6 +888,162 @@ impl Interpreter {
         Ok(Value::Right(Box::new(val)))
     }
 
+    /// Evaluate a core `ExprKind::Match`.
+    ///
+    /// Tries each arm in order; on the first matching pattern, binds
+    /// captured names in the environment, evaluates the arm body,
+    /// and restores prior bindings. No arms matching is a runtime
+    /// error — the typechecker's exhaustiveness pass should prevent
+    /// this when the module is well-typed.
+    fn eval_match(
+        &mut self,
+        scrutinee: &Expr,
+        arms: &[MatchArm],
+    ) -> Result<Value, RuntimeError> {
+        let scrut_val = self.eval(scrutinee)?;
+        for arm in arms {
+            if arm.guard.is_some() {
+                return Err(RuntimeError::Unimplemented(
+                    "match guards not yet implemented in interpreter".into(),
+                ));
+            }
+            let mut new_bindings: Vec<(Var, Value)> = Vec::new();
+            if self.try_match_pattern(&scrut_val, &arm.pattern, &mut new_bindings)? {
+                let saved: Vec<(Var, Option<Value>, Option<bool>)> = new_bindings
+                    .iter()
+                    .map(|(name, _)| {
+                        (
+                            name.clone(),
+                            self.env.bindings.get(name).cloned(),
+                            self.env.consumed.get(name).copied(),
+                        )
+                    })
+                    .collect();
+                for (name, value) in new_bindings {
+                    self.env.extend(name, value);
+                }
+                let result = self.eval(&arm.body)?;
+                for (name, prev_val, prev_consumed) in saved.iter().rev() {
+                    match prev_val {
+                        Some(v) => {
+                            self.env.bindings.insert(name.clone(), v.clone());
+                            if let Some(c) = prev_consumed {
+                                self.env.consumed.insert(name.clone(), *c);
+                            }
+                        }
+                        None => {
+                            self.env.remove(name);
+                        }
+                    }
+                }
+                return Ok(result);
+            }
+        }
+        Err(RuntimeError::PatternMatchFailed)
+    }
+
+    /// Check whether `val` matches `pat`, collecting variable bindings
+    /// into `out`. Read-only on the interpreter state — the caller
+    /// applies (or discards) the bindings after deciding which arm to
+    /// run. A failed match returns `Ok(false)`; structural errors
+    /// (unknown constructor, ill-typed value) return `Err`.
+    fn try_match_pattern(
+        &self,
+        val: &Value,
+        pat: &Pattern,
+        out: &mut Vec<(Var, Value)>,
+    ) -> Result<bool, RuntimeError> {
+        match pat {
+            Pattern::Wildcard => Ok(true),
+            Pattern::Var(name) => {
+                out.push((name.clone(), val.clone()));
+                Ok(true)
+            }
+            Pattern::Literal(lit) => Ok(value_matches_literal(val, lit)),
+            Pattern::Unit => Ok(matches!(val, Value::Unit)),
+            Pattern::Pair(lpat, rpat) => match val {
+                Value::Pair(lv, rv) => {
+                    if !self.try_match_pattern(lv, lpat, out)? {
+                        return Ok(false);
+                    }
+                    self.try_match_pattern(rv, rpat, out)
+                }
+                _ => Ok(false),
+            },
+            Pattern::Tuple(parts) => match val {
+                Value::Tuple(vals) if vals.len() == parts.len() => {
+                    for (p, v) in parts.iter().zip(vals.iter()) {
+                        if !self.try_match_pattern(v, p, out)? {
+                            return Ok(false);
+                        }
+                    }
+                    Ok(true)
+                }
+                _ => Ok(false),
+            },
+            Pattern::Constructor { ctor, args } => {
+                let info = self.data_registry.get(ctor.as_str()).ok_or_else(|| {
+                    RuntimeError::Unimplemented(format!("unknown constructor `{}`", ctor))
+                })?;
+                if args.len() != info.arity {
+                    return Err(RuntimeError::TypeError {
+                        expected: format!("{} arg(s) for constructor `{}`", info.arity, ctor),
+                        found: format!("{} arg(s)", args.len()),
+                    });
+                }
+
+                // Walk `position` levels of Right-wrapping. The last
+                // constructor (position == total-1) is encoded bare
+                // (no trailing Left), all others wrap their payload
+                // in Left after the Right-chain.
+                let mut current = val;
+                for _ in 0..info.position {
+                    match current {
+                        Value::Right(inner) => current = inner,
+                        _ => return Ok(false),
+                    }
+                }
+                let payload: &Value = if info.position + 1 < info.total {
+                    match current {
+                        Value::Left(inner) => inner,
+                        _ => return Ok(false),
+                    }
+                } else {
+                    current
+                };
+
+                match info.arity {
+                    0 => Ok(matches!(payload, Value::Unit)),
+                    1 => self.try_match_pattern(payload, &args[0], out),
+                    _ => self.try_match_pair_chain(payload, args, out),
+                }
+            }
+        }
+    }
+
+    /// Destructure a right-nested `Value::Pair` chain against a flat
+    /// list of patterns. Mirrors `ephapax_desugar::build_payload_expr`:
+    /// `(a, b, c)` was constructed as `Pair(a, Pair(b, c))`.
+    fn try_match_pair_chain(
+        &self,
+        val: &Value,
+        args: &[Pattern],
+        out: &mut Vec<(Var, Value)>,
+    ) -> Result<bool, RuntimeError> {
+        if args.len() == 1 {
+            return self.try_match_pattern(val, &args[0], out);
+        }
+        match val {
+            Value::Pair(lv, rv) => {
+                if !self.try_match_pattern(lv, &args[0], out)? {
+                    return Ok(false);
+                }
+                self.try_match_pair_chain(rv, &args[1..], out)
+            }
+            _ => Ok(false),
+        }
+    }
+
     fn eval_case(
         &mut self,
         scrutinee: &Expr,
@@ -1138,5 +1366,339 @@ mod tests {
         });
         let result = interp.eval(&expr).expect("eval should succeed");
         assert!(matches!(result, Value::Unit));
+    }
+
+    // =========================================================================
+    // ExprKind::Match — runtime evaluation
+    // =========================================================================
+
+    use ephapax_syntax::{ConstructorDef, MatchArm, Pattern as P, Visibility};
+
+    fn option_module() -> Module {
+        Module {
+            name: "t".into(),
+            imports: vec![],
+            decls: vec![Decl::Data {
+                name: "Option".into(),
+                type_params: vec!["a".into()],
+                constructors: vec![
+                    ConstructorDef {
+                        name: "None".into(),
+                        fields: vec![],
+                    },
+                    ConstructorDef {
+                        name: "Some".into(),
+                        fields: vec![Ty::Var("a".into())],
+                    },
+                ],
+            }],
+        }
+    }
+
+    fn lit_i32_expr(n: i32) -> Expr {
+        dummy_expr(ExprKind::Lit(Literal::I32(n)))
+    }
+
+    /// `match Some(7) of | None => 0 | Some(v) => v end → 7`.
+    #[test]
+    fn test_eval_match_option_some() {
+        let mut interp = Interpreter::new();
+        interp.load_module(&option_module());
+
+        let scrut = dummy_expr(ExprKind::Inr {
+            ty: Ty::Base(BaseTy::Unit),
+            value: Box::new(lit_i32_expr(7)),
+        });
+        let expr = dummy_expr(ExprKind::Match {
+            scrutinee: Box::new(scrut),
+            arms: vec![
+                MatchArm {
+                    pattern: P::Constructor {
+                        ctor: "None".into(),
+                        args: vec![],
+                    },
+                    guard: None,
+                    body: lit_i32_expr(0),
+                },
+                MatchArm {
+                    pattern: P::Constructor {
+                        ctor: "Some".into(),
+                        args: vec![P::Var("v".into())],
+                    },
+                    guard: None,
+                    body: dummy_expr(ExprKind::Var("v".into())),
+                },
+            ],
+        });
+        let result = interp.eval(&expr).expect("match should evaluate");
+        assert!(matches!(result, Value::I32(7)), "got {:?}", result);
+    }
+
+    /// `match None of | None => 99 | Some(_) => 0 end → 99`. None is
+    /// position-0-of-2 so the value is `Left(Unit)`; the matcher must
+    /// pick the None arm.
+    #[test]
+    fn test_eval_match_option_none() {
+        let mut interp = Interpreter::new();
+        interp.load_module(&option_module());
+
+        let scrut = dummy_expr(ExprKind::Inl {
+            ty: Ty::Base(BaseTy::I32),
+            value: Box::new(dummy_expr(ExprKind::Lit(Literal::Unit))),
+        });
+        let expr = dummy_expr(ExprKind::Match {
+            scrutinee: Box::new(scrut),
+            arms: vec![
+                MatchArm {
+                    pattern: P::Constructor {
+                        ctor: "None".into(),
+                        args: vec![],
+                    },
+                    guard: None,
+                    body: lit_i32_expr(99),
+                },
+                MatchArm {
+                    pattern: P::Constructor {
+                        ctor: "Some".into(),
+                        args: vec![P::Wildcard],
+                    },
+                    guard: None,
+                    body: lit_i32_expr(0),
+                },
+            ],
+        });
+        let result = interp.eval(&expr).expect("match should evaluate");
+        assert!(matches!(result, Value::I32(99)));
+    }
+
+    /// Wildcard arm fires when no constructor arm matches.
+    #[test]
+    fn test_eval_match_wildcard_fallback() {
+        let mut interp = Interpreter::new();
+        interp.load_module(&option_module());
+
+        let scrut = dummy_expr(ExprKind::Inl {
+            ty: Ty::Base(BaseTy::I32),
+            value: Box::new(dummy_expr(ExprKind::Lit(Literal::Unit))),
+        });
+        let expr = dummy_expr(ExprKind::Match {
+            scrutinee: Box::new(scrut),
+            arms: vec![
+                MatchArm {
+                    pattern: P::Constructor {
+                        ctor: "Some".into(),
+                        args: vec![P::Wildcard],
+                    },
+                    guard: None,
+                    body: lit_i32_expr(1),
+                },
+                MatchArm {
+                    pattern: P::Wildcard,
+                    guard: None,
+                    body: lit_i32_expr(42),
+                },
+            ],
+        });
+        let result = interp.eval(&expr).expect("match should evaluate");
+        assert!(matches!(result, Value::I32(42)));
+    }
+
+    /// Literal patterns dispatch by equality.
+    #[test]
+    fn test_eval_match_literal_patterns() {
+        let mut interp = Interpreter::new();
+        let expr = dummy_expr(ExprKind::Match {
+            scrutinee: Box::new(lit_i32_expr(2)),
+            arms: vec![
+                MatchArm {
+                    pattern: P::Literal(Literal::I32(1)),
+                    guard: None,
+                    body: lit_i32_expr(10),
+                },
+                MatchArm {
+                    pattern: P::Literal(Literal::I32(2)),
+                    guard: None,
+                    body: lit_i32_expr(20),
+                },
+                MatchArm {
+                    pattern: P::Wildcard,
+                    guard: None,
+                    body: lit_i32_expr(99),
+                },
+            ],
+        });
+        let result = interp.eval(&expr).expect("match should evaluate");
+        assert!(matches!(result, Value::I32(20)));
+    }
+
+    /// `data Tri = A | B | C` with three constructors: the last
+    /// constructor `C` is encoded BARE (no trailing Left), so the
+    /// matcher must NOT expect a Left wrap at position 2 of 3.
+    #[test]
+    fn test_eval_match_three_ctor_last_position_bare() {
+        let module = Module {
+            name: "t".into(),
+            imports: vec![],
+            decls: vec![Decl::Data {
+                name: "Tri".into(),
+                type_params: vec![],
+                constructors: vec![
+                    ConstructorDef {
+                        name: "A".into(),
+                        fields: vec![],
+                    },
+                    ConstructorDef {
+                        name: "B".into(),
+                        fields: vec![],
+                    },
+                    ConstructorDef {
+                        name: "C".into(),
+                        fields: vec![],
+                    },
+                ],
+            }],
+        };
+        let mut interp = Interpreter::new();
+        interp.load_module(&module);
+
+        // Value for C: inr(inr(Unit)) — two Right wraps, no trailing Left.
+        let scrut = dummy_expr(ExprKind::Inr {
+            ty: Ty::Base(BaseTy::Unit),
+            value: Box::new(dummy_expr(ExprKind::Inr {
+                ty: Ty::Base(BaseTy::Unit),
+                value: Box::new(dummy_expr(ExprKind::Lit(Literal::Unit))),
+            })),
+        });
+        let expr = dummy_expr(ExprKind::Match {
+            scrutinee: Box::new(scrut),
+            arms: vec![
+                MatchArm {
+                    pattern: P::Constructor {
+                        ctor: "A".into(),
+                        args: vec![],
+                    },
+                    guard: None,
+                    body: lit_i32_expr(1),
+                },
+                MatchArm {
+                    pattern: P::Constructor {
+                        ctor: "B".into(),
+                        args: vec![],
+                    },
+                    guard: None,
+                    body: lit_i32_expr(2),
+                },
+                MatchArm {
+                    pattern: P::Constructor {
+                        ctor: "C".into(),
+                        args: vec![],
+                    },
+                    guard: None,
+                    body: lit_i32_expr(3),
+                },
+            ],
+        });
+        let result = interp.eval(&expr).expect("match should evaluate");
+        assert!(matches!(result, Value::I32(3)), "got {:?}", result);
+    }
+
+    /// Variable binding inside constructor pattern is restored after
+    /// the arm body runs — no leak into the enclosing scope.
+    #[test]
+    fn test_eval_match_binding_restored() {
+        let mut interp = Interpreter::new();
+        interp.load_module(&option_module());
+
+        // Pre-bind `v` to 100 in the enclosing scope.
+        interp.env.extend("v".into(), Value::I32(100));
+
+        let scrut = dummy_expr(ExprKind::Inr {
+            ty: Ty::Base(BaseTy::Unit),
+            value: Box::new(lit_i32_expr(7)),
+        });
+        let expr = dummy_expr(ExprKind::Match {
+            scrutinee: Box::new(scrut),
+            arms: vec![MatchArm {
+                pattern: P::Constructor {
+                    ctor: "Some".into(),
+                    args: vec![P::Var("v".into())],
+                },
+                guard: None,
+                body: dummy_expr(ExprKind::Var("v".into())),
+            }, MatchArm {
+                pattern: P::Wildcard,
+                guard: None,
+                body: lit_i32_expr(0),
+            }],
+        });
+        let result = interp.eval(&expr).expect("match should evaluate");
+        assert!(matches!(result, Value::I32(7)));
+
+        let outer = interp.env.get(&Var::from("v")).cloned().unwrap();
+        assert!(matches!(outer, Value::I32(100)), "outer v leaked: {:?}", outer);
+    }
+
+    /// Multi-field constructor: `Pair(a, b)` of arity 2 lives in a
+    /// `Value::Pair(va, vb)` payload — the matcher destructures via
+    /// the right-nested chain.
+    #[test]
+    fn test_eval_match_multi_field_constructor() {
+        let module = Module {
+            name: "t".into(),
+            imports: vec![],
+            decls: vec![Decl::Data {
+                name: "P".into(),
+                type_params: vec![],
+                constructors: vec![ConstructorDef {
+                    name: "Pr".into(),
+                    fields: vec![Ty::Base(BaseTy::I32), Ty::Base(BaseTy::I32)],
+                }],
+            }],
+        };
+        let mut interp = Interpreter::new();
+        interp.load_module(&module);
+
+        // Pr has total=1, so no Sum wrap — value is the payload directly:
+        // (a, b) = Pair(I32(3), I32(4)).
+        let scrut = dummy_expr(ExprKind::Pair {
+            left: Box::new(lit_i32_expr(3)),
+            right: Box::new(lit_i32_expr(4)),
+        });
+        let expr = dummy_expr(ExprKind::Match {
+            scrutinee: Box::new(scrut),
+            arms: vec![MatchArm {
+                pattern: P::Constructor {
+                    ctor: "Pr".into(),
+                    args: vec![P::Var("a".into()), P::Var("b".into())],
+                },
+                guard: None,
+                body: dummy_expr(ExprKind::BinOp {
+                    op: BinOp::Add,
+                    left: Box::new(dummy_expr(ExprKind::Var("a".into()))),
+                    right: Box::new(dummy_expr(ExprKind::Var("b".into()))),
+                }),
+            }],
+        });
+        let result = interp.eval(&expr).expect("match should evaluate");
+        assert!(matches!(result, Value::I32(7)), "got {:?}", result);
+    }
+
+    /// No arms match → PatternMatchFailed.
+    #[test]
+    fn test_eval_match_no_arm_matches() {
+        let mut interp = Interpreter::new();
+        let expr = dummy_expr(ExprKind::Match {
+            scrutinee: Box::new(lit_i32_expr(99)),
+            arms: vec![MatchArm {
+                pattern: P::Literal(Literal::I32(0)),
+                guard: None,
+                body: lit_i32_expr(1),
+            }],
+        });
+        let err = interp.eval(&expr).unwrap_err();
+        assert!(matches!(err, RuntimeError::PatternMatchFailed), "got {:?}", err);
+        // suppress unused-import warning for Visibility (held for symmetry
+        // with the typing test module pattern).
+        let _ = Visibility::Private;
     }
 }

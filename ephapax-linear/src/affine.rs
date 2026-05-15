@@ -316,14 +316,21 @@ impl AffineChecker {
             }
 
             // Core `match`: affine allows arms to disagree on
-            // consumption (the non-consuming arm implicitly drops),
-            // so a simple walk-with-pattern-binding mirrors the
-            // existing arm-disagreement freedom for `if` and `case`.
-            // TODO(ephapax#61 follow-up): N-arm `merge_affine_branches`
-            // for tighter cross-arm reasoning.
+            // consumption (the non-consuming arm implicitly drops).
+            // Each arm runs against the post-scrutinee state; after
+            // all arms, merge consumption conservatively — a var is
+            // marked consumed iff consumed in ANY arm. Generalises
+            // the binary `Case`/`If` merge to N arms.
             ExprKind::Match { scrutinee, arms } => {
                 self.walk_expr(scrutinee);
+
+                let pre_snapshot = self.ctx.snapshot_consumption();
+                let mut arm_snapshots: Vec<std::collections::HashMap<Var, bool>> =
+                    Vec::with_capacity(arms.len());
+
                 for arm in arms {
+                    self.ctx.restore_consumption(&pre_snapshot);
+
                     let bound = arm.pattern.bound_vars();
                     for v in &bound {
                         self.ctx.bind(v.clone(), BindingForm::Let, None);
@@ -335,6 +342,12 @@ impl AffineChecker {
                     for v in bound.iter().rev() {
                         self.ctx.unbind(v);
                     }
+
+                    arm_snapshots.push(self.ctx.snapshot_consumption());
+                }
+
+                if !arm_snapshots.is_empty() {
+                    self.merge_affine_branches_n(&arm_snapshots);
                 }
             }
         }
@@ -369,6 +382,19 @@ impl AffineChecker {
         for (name, &right_consumed) in right {
             let entry = merged.entry(name.clone()).or_insert(false);
             *entry = *entry || right_consumed;
+        }
+        self.ctx.restore_consumption(&merged);
+    }
+
+    /// N-arm affine merge: a var is consumed iff consumed in ANY arm.
+    /// Generalises [`merge_affine_branches`] to match's variadic shape.
+    fn merge_affine_branches_n(&mut self, arms: &[std::collections::HashMap<Var, bool>]) {
+        let mut merged: std::collections::HashMap<Var, bool> = std::collections::HashMap::new();
+        for arm in arms {
+            for (name, &consumed) in arm {
+                let entry = merged.entry(name.clone()).or_insert(false);
+                *entry = *entry || consumed;
+            }
         }
         self.ctx.restore_consumption(&merged);
     }

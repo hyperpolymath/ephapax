@@ -931,6 +931,7 @@ name = "ephapax-typing"
 version = "0.1.0"
 dependencies = [
  "ephapax-syntax",
+ "smol_str",
  "thiserror 2.0.18",
 ]
 

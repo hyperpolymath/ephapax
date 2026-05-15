@@ -71,6 +71,9 @@ pub enum TypeError {
 
     #[error("Type annotation mismatch: declared {declared:?}, but value has type {actual:?}")]
     AnnotationMismatch { declared: Ty, actual: Ty },
+
+    #[error("Not yet supported in the core type checker: {0}. Use the surface (parse_surface_module → desugar) path instead.")]
+    NotYetSupportedInCore(&'static str),
 }
 
 /// A type error with source location.
@@ -430,6 +433,18 @@ impl TypeChecker {
             ExprKind::FFI { args, .. } => self.check_ffi(s, args),
             ExprKind::Perform { op, args } => self.check_perform(s, op, args),
             ExprKind::Handle { body, clauses } => self.check_handle(s, body, clauses),
+            // Core `ExprKind::Match` is preserved structurally by the
+            // core parser direct path (ephapax#61) but the typechecker
+            // does not yet implement pattern type inference and arm
+            // unification. Surface match expressions are desugared to
+            // nested `ExprKind::Case` before reaching this point, so
+            // the standard pipeline is unaffected; only direct uses
+            // of `parse_module` on files containing `match` will land
+            // here.
+            ExprKind::Match { .. } => Err(self.at(
+                s,
+                TypeError::NotYetSupportedInCore("match expressions"),
+            )),
         }
     }
 

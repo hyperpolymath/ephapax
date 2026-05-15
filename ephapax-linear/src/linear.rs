@@ -377,6 +377,31 @@ impl LinearChecker {
                     }
                 }
             }
+
+            // Core `match`: walk scrutinee + each arm body with the
+            // pattern's bound vars in scope. TODO(ephapax#61 follow-up):
+            // implement proper N-arm branch-agreement checking so a
+            // linear var consumed in only some arms is rejected. For
+            // now we simply walk subexpressions to keep the discipline
+            // checker sound on the structural fragment; programs that
+            // produce `ExprKind::Match` today come only from the core
+            // parser direct path and have no existing test coverage.
+            ExprKind::Match { scrutinee, arms } => {
+                self.walk_expr(scrutinee);
+                for arm in arms {
+                    let bound = arm.pattern.bound_vars();
+                    for v in &bound {
+                        self.ctx.bind(v.clone(), BindingForm::Let, None);
+                    }
+                    if let Some(guard) = &arm.guard {
+                        self.walk_expr(guard);
+                    }
+                    self.walk_expr(&arm.body);
+                    for v in bound.iter().rev() {
+                        self.ctx.unbind(v);
+                    }
+                }
+            }
         }
     }
 

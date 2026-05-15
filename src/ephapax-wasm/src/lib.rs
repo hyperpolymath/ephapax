@@ -1679,6 +1679,16 @@ impl Codegen {
                 // instead of panicking the compiler at codegen time.
                 func.instruction(&wasm_encoder::Instruction::Unreachable);
             }
+            // Core `ExprKind::Match` is preserved in the AST by the
+            // core parser direct path (ephapax#61) but wasm codegen
+            // does not yet implement pattern compilation. Surface
+            // `match` is desugared to `ExprKind::Case` before reaching
+            // here, so the normal pipeline is unaffected. Emit
+            // unreachable for now — proper match→case lowering or
+            // br_table compilation is follow-up work.
+            ExprKind::Match { .. } => {
+                func.instruction(&wasm_encoder::Instruction::Unreachable);
+            }
         }
     }
 
@@ -1913,6 +1923,19 @@ impl Codegen {
                             inner.insert(param.to_string());
                         }
                         collect(&clause.body, &inner, free, seen);
+                    }
+                }
+                ExprKind::Match { scrutinee, arms } => {
+                    collect(scrutinee, bound, free, seen);
+                    for arm in arms {
+                        let mut inner = bound.clone();
+                        for v in arm.pattern.bound_vars() {
+                            inner.insert(v.to_string());
+                        }
+                        if let Some(guard) = &arm.guard {
+                            collect(guard, &inner, free, seen);
+                        }
+                        collect(&arm.body, &inner, free, seen);
                     }
                 }
                 ExprKind::Lit(_) | ExprKind::StringNew { .. } => {}

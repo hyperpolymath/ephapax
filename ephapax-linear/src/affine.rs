@@ -314,6 +314,29 @@ impl AffineChecker {
                     }
                 }
             }
+
+            // Core `match`: affine allows arms to disagree on
+            // consumption (the non-consuming arm implicitly drops),
+            // so a simple walk-with-pattern-binding mirrors the
+            // existing arm-disagreement freedom for `if` and `case`.
+            // TODO(ephapax#61 follow-up): N-arm `merge_affine_branches`
+            // for tighter cross-arm reasoning.
+            ExprKind::Match { scrutinee, arms } => {
+                self.walk_expr(scrutinee);
+                for arm in arms {
+                    let bound = arm.pattern.bound_vars();
+                    for v in &bound {
+                        self.ctx.bind(v.clone(), BindingForm::Let, None);
+                    }
+                    if let Some(guard) = &arm.guard {
+                        self.walk_expr(guard);
+                    }
+                    self.walk_expr(&arm.body);
+                    for v in bound.iter().rev() {
+                        self.ctx.unbind(v);
+                    }
+                }
+            }
         }
     }
 

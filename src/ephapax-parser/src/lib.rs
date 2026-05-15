@@ -16,8 +16,8 @@
 //! ```
 
 use ephapax_syntax::{
-    BaseTy, BinOp, ConstructorDef, Decl, Expr, ExprKind, ExternItem, Import, Literal, Module, Span,
-    Ty, UnaryOp, Visibility,
+    BaseTy, BinOp, ConstructorDef, Decl, Expr, ExprKind, ExternItem, Import, Literal, MatchArm,
+    Module, Pattern, Span, Ty, UnaryOp, Visibility,
 };
 use pest::Parser;
 use pest_derive::Parser;
@@ -712,6 +712,7 @@ fn parse_expression(pair: pest::iterators::Pair<Rule>) -> Result<Expr, ParseErro
         Rule::region_expr => parse_region_expr(inner),
         Rule::case_expr => parse_case_expr(inner),
         Rule::handle_expr => parse_handle_expr(inner),
+        Rule::match_expr => parse_match_expr_core(inner),
         Rule::or_expr => parse_or_expr(inner),
         _ => Err(ParseError::Syntax {
             message: format!("Unexpected expression: {:?}", inner.as_rule()),
@@ -777,11 +778,196 @@ fn parse_single_expr_core(pair: pest::iterators::Pair<Rule>) -> Result<Expr, Par
         Rule::region_expr => parse_region_expr(inner),
         Rule::case_expr => parse_case_expr(inner),
         Rule::handle_expr => parse_handle_expr(inner),
+        Rule::match_expr => parse_match_expr_core(inner),
         Rule::or_expr => parse_or_expr(inner),
         _ => Err(ParseError::Syntax {
             message: format!("Unexpected single_expr: {:?}", inner.as_rule()),
             span,
         }),
+    }
+}
+
+/// Parse a `match e of | P1 => e1 | P2 => e2 ... end` into
+/// `ExprKind::Match`. Mirror of `surface::parse_match_expr`, but builds
+/// core `Pattern` / `MatchArm` / `Expr` instead of the surface variants.
+///
+/// Added for ephapax#61 so the core parser's direct path doesn't fail
+/// with `"Unexpected single_expr: match_expr"` on files that use match.
+/// The surface→desugar→core path continues to lower its own Match to
+/// nested `ExprKind::Case`; this variant is for the core-parser-direct
+/// path and tooling consumers that prefer the structured shape.
+fn parse_match_expr_core(pair: pest::iterators::Pair<Rule>) -> Result<Expr, ParseError> {
+    let span = span_from_pair(&pair);
+    let mut inner = pair.into_inner();
+
+    let scrutinee = parse_expression(
+        inner
+            .next()
+            .ok_or_else(|| ParseError::missing("match scrutinee"))?,
+    )?;
+
+    let mut arms: Vec<MatchArm> = Vec::new();
+    for item in inner {
+        if item.as_rule() == Rule::match_arm {
+            arms.push(parse_match_arm_core(item)?);
+        }
+    }
+
+    Ok(Expr::new(
+        ExprKind::Match {
+            scrutinee: Box::new(scrutinee),
+            arms,
+        },
+        span,
+    ))
+}
+
+fn parse_match_arm_core(pair: pest::iterators::Pair<Rule>) -> Result<MatchArm, ParseError> {
+    let mut inner = pair.into_inner();
+
+    let pattern = parse_pattern_core(
+        inner
+            .next()
+            .ok_or_else(|| ParseError::missing("match pattern"))?,
+    )?;
+
+    // Remaining items: optional guard (expression before =>), then body
+    // (expression after =>). Same shape the surface parser uses.
+    let mut exprs: Vec<pest::iterators::Pair<Rule>> =
+        inner.filter(|p| p.as_rule() == Rule::expression).collect();
+
+    let (guard, body) = if exprs.len() >= 2 {
+        let body = parse_expression(exprs.pop().expect("len >= 2"))?;
+        let guard_expr = parse_expression(exprs.pop().expect("len >= 2"))?;
+        (Some(Box::new(guard_expr)), body)
+    } else if exprs.len() == 1 {
+        (None, parse_expression(exprs.pop().expect("len == 1"))?)
+    } else {
+        return Err(ParseError::missing("match arm body"));
+    };
+
+    Ok(MatchArm {
+        pattern,
+        guard,
+        body,
+    })
+}
+
+fn parse_pattern_core(pair: pest::iterators::Pair<Rule>) -> Result<Pattern, ParseError> {
+    let inner = pair
+        .into_inner()
+        .next()
+        .ok_or_else(|| ParseError::unexpected_end("pattern"))?;
+
+    match inner.as_rule() {
+        Rule::constructor_pattern => parse_constructor_pattern_core(inner),
+        Rule::pair_pattern => {
+            let mut parts = inner.into_inner();
+            let left = parse_pattern_core(
+                parts
+                    .next()
+                    .ok_or_else(|| ParseError::missing("left pattern"))?,
+            )?;
+            let right = parse_pattern_core(
+                parts
+                    .next()
+                    .ok_or_else(|| ParseError::missing("right pattern"))?,
+            )?;
+            Ok(Pattern::Pair(Box::new(left), Box::new(right)))
+        }
+        Rule::wildcard_pattern => Ok(Pattern::Wildcard),
+        Rule::literal_pattern => {
+            let lit_pair = inner
+                .into_inner()
+                .next()
+                .ok_or_else(|| ParseError::missing("literal"))?;
+            Ok(Pattern::Literal(parse_literal_value_core(lit_pair)))
+        }
+        Rule::var_pattern => {
+            let name = parse_identifier(
+                inner
+                    .into_inner()
+                    .next()
+                    .ok_or_else(|| ParseError::missing("var pattern"))?,
+            );
+            Ok(Pattern::Var(name))
+        }
+        _ => Err(ParseError::Syntax {
+            message: format!("Unexpected pattern rule: {:?}", inner.as_rule()),
+            span: span_from_pair(&inner),
+        }),
+    }
+}
+
+fn parse_constructor_pattern_core(
+    pair: pest::iterators::Pair<Rule>,
+) -> Result<Pattern, ParseError> {
+    let mut inner = pair.into_inner();
+
+    let ctor = SmolStr::new(
+        inner
+            .next()
+            .ok_or_else(|| ParseError::missing("constructor name"))?
+            .as_str(),
+    );
+
+    let mut args = Vec::new();
+    for item in inner {
+        match item.as_rule() {
+            Rule::pattern_list => {
+                for p in item.into_inner() {
+                    if p.as_rule() == Rule::pattern {
+                        args.push(parse_pattern_core(p)?);
+                    }
+                }
+            }
+            Rule::pattern => {
+                args.push(parse_pattern_core(item)?);
+            }
+            _ => {}
+        }
+    }
+
+    Ok(Pattern::Constructor { ctor, args })
+}
+
+/// Extract just the `Literal` value from a literal pair. The pest
+/// `literal` rule wraps one of `unit_literal | boolean | float |
+/// integer | string`; this function handles either the wrapped or
+/// unwrapped form by recursing one level when needed.
+fn parse_literal_value_core(pair: pest::iterators::Pair<Rule>) -> Literal {
+    match pair.as_rule() {
+        Rule::unit_literal => Literal::Unit,
+        Rule::boolean => Literal::Bool(pair.as_str() == "true"),
+        Rule::float => Literal::F64(pair.as_str().parse().unwrap_or(0.0)),
+        Rule::integer => {
+            let n: i64 = pair.as_str().parse().unwrap_or(0);
+            if n > i32::MAX as i64 || n < i32::MIN as i64 {
+                Literal::I64(n)
+            } else {
+                Literal::I32(n as i32)
+            }
+        }
+        Rule::string => {
+            let s = pair.as_str();
+            let content = &s[1..s.len() - 1];
+            Literal::String(
+                content
+                    .replace("\\n", "\n")
+                    .replace("\\r", "\r")
+                    .replace("\\t", "\t")
+                    .replace("\\\"", "\"")
+                    .replace("\\\\", "\\"),
+            )
+        }
+        _ => {
+            // `literal` wraps the actual variant — recurse once.
+            if let Some(inner) = pair.into_inner().next() {
+                parse_literal_value_core(inner)
+            } else {
+                Literal::Unit
+            }
+        }
     }
 }
 
@@ -2038,6 +2224,67 @@ mod tests {
         let module = parse_module(source, "<input>").expect("should parse");
         assert_eq!(module.name.as_str(), "Foo.Bar.Baz");
         assert_eq!(module.decls.len(), 1);
+    }
+
+    // ===== ephapax#61: core `match` parsing =====
+
+    /// AC example from the issue: `match x of | Some(v) => v | None => 0 end`
+    /// parses through the core parser into `ExprKind::Match` with two
+    /// arms, the first using a constructor pattern with a var sub-pattern,
+    /// the second using a nullary constructor pattern.
+    #[test]
+    fn test_parse_core_match_constructor_and_var_patterns() {
+        let expr = parse_ok("match x of | Some(v) => v | None => 0 end");
+        let ExprKind::Match { scrutinee, arms } = expr.kind else {
+            panic!("expected ExprKind::Match, got {:?}", expr.kind);
+        };
+        assert!(matches!(scrutinee.kind, ExprKind::Var(_)));
+        assert_eq!(arms.len(), 2);
+
+        // Arm 0: Some(v) => v
+        let Pattern::Constructor { ctor, args } = &arms[0].pattern else {
+            panic!("expected Constructor pattern, got {:?}", arms[0].pattern);
+        };
+        assert_eq!(ctor.as_str(), "Some");
+        assert_eq!(args.len(), 1);
+        assert!(matches!(&args[0], Pattern::Var(v) if v == "v"));
+        assert!(arms[0].guard.is_none());
+        assert!(matches!(arms[0].body.kind, ExprKind::Var(_)));
+
+        // Arm 1: None => 0
+        let Pattern::Constructor { ctor, args } = &arms[1].pattern else {
+            panic!("expected Constructor pattern, got {:?}", arms[1].pattern);
+        };
+        assert_eq!(ctor.as_str(), "None");
+        assert!(args.is_empty());
+    }
+
+    /// Wildcard pattern (`_`) parses as `Pattern::Wildcard` and is
+    /// accepted alongside other arms.
+    #[test]
+    fn test_parse_core_match_wildcard_pattern() {
+        let expr = parse_ok("match x of | 0 => 1 | _ => 0 end");
+        let ExprKind::Match { arms, .. } = expr.kind else {
+            panic!("expected ExprKind::Match");
+        };
+        assert_eq!(arms.len(), 2);
+        assert!(matches!(arms[0].pattern, Pattern::Literal(Literal::I32(0))));
+        assert!(matches!(arms[1].pattern, Pattern::Wildcard));
+    }
+
+    /// The same AC example parses inside a module declaration via
+    /// `parse_module`, confirming the dispatch in both `parse_expression`
+    /// and `parse_single_expr_core` reaches the new arm.
+    #[test]
+    fn test_parse_module_with_core_match() {
+        let source =
+            "fn unwrap_or_zero(x: I32): I32 = match x of | Some(v) => v | None => 0 end";
+        let module = parse_module(source, "<input>").expect("should parse");
+        assert_eq!(module.decls.len(), 1);
+        let Decl::Fn { body, .. } = &module.decls[0] else {
+            panic!("expected Decl::Fn");
+        };
+        assert!(matches!(body.kind, ExprKind::Match { .. }));
     }
 
     /// `extern "abi" { … }` parses through the core parser too, with

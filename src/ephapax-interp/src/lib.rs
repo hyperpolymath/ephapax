@@ -477,6 +477,9 @@ impl Interpreter {
                     "effect handle not yet implemented in interpreter".into(),
                 ))
             }
+            ExprKind::Match { .. } => Err(RuntimeError::Unimplemented(
+                "core ExprKind::Match not yet implemented in interpreter — use the surface (parse_surface_module → desugar) path which lowers match to nested Case".into(),
+            )),
         }
     }
 

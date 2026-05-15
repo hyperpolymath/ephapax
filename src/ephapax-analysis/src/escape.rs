@@ -195,6 +195,16 @@ impl EscapeAnalysis {
                 }
             }
 
+            ExprKind::Match { scrutinee, arms } => {
+                Self::analyze_expr(scrutinee, escaping, in_escaping_context);
+                for arm in arms {
+                    if let Some(guard) = &arm.guard {
+                        Self::analyze_expr(guard, escaping, in_escaping_context);
+                    }
+                    Self::analyze_expr(&arm.body, escaping, in_escaping_context);
+                }
+            }
+
             // Literals and string allocations never escape
             ExprKind::Lit(_) | ExprKind::StringNew { .. } => {}
         }

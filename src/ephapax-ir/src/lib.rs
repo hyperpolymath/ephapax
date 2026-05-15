@@ -576,6 +576,61 @@ fn expr_to_sexpr(expr: &Expr) -> SExpr {
             }
             SExpr::List(elems)
         }
+        // `(match scrutinee (arm <pattern> <body>) ...)` — added
+        // ephapax#61 so the structured `match` survives IR round-trip.
+        // Guards render as `(arm <pattern> (guard <e>) <body>)`.
+        ExprKind::Match { scrutinee, arms } => {
+            let mut elems =
+                vec![SExpr::Atom("match".into()), expr_to_sexpr(scrutinee)];
+            for arm in arms {
+                let mut arm_elems = vec![
+                    SExpr::Atom("arm".into()),
+                    pattern_to_sexpr(&arm.pattern),
+                ];
+                if let Some(guard) = &arm.guard {
+                    arm_elems.push(SExpr::List(vec![
+                        SExpr::Atom("guard".into()),
+                        expr_to_sexpr(guard),
+                    ]));
+                }
+                arm_elems.push(expr_to_sexpr(&arm.body));
+                elems.push(SExpr::List(arm_elems));
+            }
+            SExpr::List(elems)
+        }
+    }
+}
+
+fn pattern_to_sexpr(pattern: &ephapax_syntax::Pattern) -> SExpr {
+    use ephapax_syntax::Pattern;
+    match pattern {
+        Pattern::Wildcard => SExpr::Atom("_".into()),
+        Pattern::Unit => SExpr::List(vec![SExpr::Atom("unit".into())]),
+        Pattern::Var(v) => SExpr::List(vec![
+            SExpr::Atom("var".into()),
+            SExpr::Atom(escape_atom(v)),
+        ]),
+        Pattern::Literal(lit) => {
+            SExpr::List(vec![SExpr::Atom("lit".into()), lit_to_sexpr(lit)])
+        }
+        Pattern::Pair(l, r) => SExpr::List(vec![
+            SExpr::Atom("pair".into()),
+            pattern_to_sexpr(l),
+            pattern_to_sexpr(r),
+        ]),
+        Pattern::Tuple(ps) => {
+            let mut elems = vec![SExpr::Atom("tuple".into())];
+            elems.extend(ps.iter().map(pattern_to_sexpr));
+            SExpr::List(elems)
+        }
+        Pattern::Constructor { ctor, args } => {
+            let mut elems = vec![
+                SExpr::Atom("ctor".into()),
+                SExpr::Atom(escape_atom(ctor)),
+            ];
+            elems.extend(args.iter().map(pattern_to_sexpr));
+            SExpr::List(elems)
+        }
     }
 }
 

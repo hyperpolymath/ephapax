@@ -200,6 +200,21 @@ impl LivenessAnalysis {
                 Self::compute(body, live);
             }
 
+            ExprKind::Match { scrutinee, arms } => {
+                for arm in arms.iter().rev() {
+                    let mut arm_live = HashSet::new();
+                    Self::compute(&arm.body, &mut arm_live);
+                    if let Some(guard) = &arm.guard {
+                        Self::compute(guard, &mut arm_live);
+                    }
+                    for v in arm.pattern.bound_vars() {
+                        arm_live.remove(&v);
+                    }
+                    live.extend(arm_live);
+                }
+                Self::compute(scrutinee, live);
+            }
+
             ExprKind::Lit(_) | ExprKind::StringNew { .. } => {}
         }
     }

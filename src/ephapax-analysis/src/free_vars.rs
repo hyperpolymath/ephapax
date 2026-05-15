@@ -194,6 +194,20 @@ impl FreeVarAnalysis {
                 }
             }
 
+            ExprKind::Match { scrutinee, arms } => {
+                Self::collect(scrutinee, free, bound);
+                for arm in arms {
+                    let mut arm_bound = bound.clone();
+                    for v in arm.pattern.bound_vars() {
+                        arm_bound.insert(v);
+                    }
+                    if let Some(guard) = &arm.guard {
+                        Self::collect(guard, free, &mut arm_bound);
+                    }
+                    Self::collect(&arm.body, free, &mut arm_bound);
+                }
+            }
+
             ExprKind::Lit(_) | ExprKind::StringNew { .. } => {}
         }
     }

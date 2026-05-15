@@ -35,7 +35,11 @@ anyhow = "1"
 # Regex for parsing
 regex = "1"
 
-# TODO: Add ephapax compiler as dependency once crates are published
+# Intentionally NOT depending on the compiler crates — the standalone
+# tooling exists to avoid linking the full compiler. The compiler-
+# integrated LSP at `src/ephapax-lsp/` uses `ephapax-parser` +
+# `ephapax-typing` directly; both paths coexist by design.
+# (kept for reference)
 # ephapax-syntax = { path = "../../src/ephapax-syntax" }
 # ephapax-typing = { path = "../../src/ephapax-typing" }
 

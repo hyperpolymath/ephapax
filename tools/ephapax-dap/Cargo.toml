@@ -27,7 +27,9 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 # Error handling
 anyhow = "1"
 
-# TODO: Add ephapax compiler as dependency
+# Intentionally NOT depending on the compiler crates — this DAP
+# shim is the lightweight standalone counterpart to the future
+# compiler-integrated debugger. Kept for reference:
 # ephapax-syntax = { path = "../../src/ephapax-syntax" }
 # ephapax-interp = { path = "../../src/ephapax-interp" }
 

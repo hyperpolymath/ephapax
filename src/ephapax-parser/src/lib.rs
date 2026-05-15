@@ -113,7 +113,7 @@ fn parse_identifier(pair: pest::iterators::Pair<Rule>) -> SmolStr {
 // Declaration Parsing
 // ============================================================================
 
-fn parse_import(pair: pest::iterators::Pair<Rule>) -> Result<Import, ParseError> {
+pub(crate) fn parse_import(pair: pest::iterators::Pair<Rule>) -> Result<Import, ParseError> {
     let mut inner = pair.into_inner();
     let module_name_pair = inner
         .next()

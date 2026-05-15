@@ -42,6 +42,7 @@ pub fn parse_surface_module(source: &str, name: &str) -> Result<SurfaceModule, V
         .ok_or_else(|| vec![ParseError::unexpected_end("module")])?;
 
     let mut decls = Vec::new();
+    let mut imports = Vec::new();
     let mut module_name = SmolStr::new(name);
 
     for inner in pair.into_inner() {
@@ -50,6 +51,9 @@ pub fn parse_surface_module(source: &str, name: &str) -> Result<SurfaceModule, V
                 if let Some(qn) = inner.into_inner().next() {
                     module_name = SmolStr::new(qn.as_str());
                 }
+            }
+            Rule::import_decl => {
+                imports.push(crate::parse_import(inner).map_err(|e| vec![e])?);
             }
             Rule::declaration => {
                 decls.push(parse_surface_declaration(inner).map_err(|e| vec![e])?);
@@ -60,6 +64,7 @@ pub fn parse_surface_module(source: &str, name: &str) -> Result<SurfaceModule, V
 
     Ok(SurfaceModule {
         name: module_name,
+        imports,
         decls,
     })
 }
@@ -1705,6 +1710,50 @@ mod tests {
         let module = parse_surface_module(source, "fallback-name").unwrap();
         assert_eq!(module.name.as_str(), "fallback-name");
         assert_eq!(module.decls.len(), 1);
+    }
+
+    /// Bare `import` populates the surface module's imports vector.
+    #[test]
+    fn parse_surface_module_with_bare_import() {
+        let source = "import utils\n\nfn one(): I32 = 1";
+        let module = parse_surface_module(source, "<input>").unwrap();
+        assert_eq!(module.imports.len(), 1);
+        assert_eq!(module.imports[0].module.as_str(), "utils");
+        assert!(module.imports[0].names.is_empty());
+        assert_eq!(module.decls.len(), 1);
+    }
+
+    /// Bare `import` with a slash-separated qualified path.
+    #[test]
+    fn parse_surface_module_with_slash_path_import() {
+        let source = "import hypatia/ui/bridge\n\nfn one(): I32 = 1";
+        let module = parse_surface_module(source, "<input>").unwrap();
+        assert_eq!(module.imports.len(), 1);
+        assert_eq!(module.imports[0].module.as_str(), "hypatia/ui/bridge");
+        assert!(module.imports[0].names.is_empty());
+    }
+
+    /// Selective `import M (a, b)` records each name.
+    #[test]
+    fn parse_surface_module_with_selective_import() {
+        let source = "import utils (foo, bar)\n\nfn one(): I32 = 1";
+        let module = parse_surface_module(source, "<input>").unwrap();
+        assert_eq!(module.imports.len(), 1);
+        assert_eq!(module.imports[0].module.as_str(), "utils");
+        assert_eq!(module.imports[0].names.len(), 2);
+        assert_eq!(module.imports[0].names[0].as_str(), "foo");
+        assert_eq!(module.imports[0].names[1].as_str(), "bar");
+    }
+
+    /// Multiple `import` declarations all land in order.
+    #[test]
+    fn parse_surface_module_with_multiple_imports() {
+        let source = "import a\nimport b/c (x)\n\nfn one(): I32 = 1";
+        let module = parse_surface_module(source, "<input>").unwrap();
+        assert_eq!(module.imports.len(), 2);
+        assert_eq!(module.imports[0].module.as_str(), "a");
+        assert_eq!(module.imports[1].module.as_str(), "b/c");
+        assert_eq!(module.imports[1].names, vec![SmolStr::new("x")]);
     }
 
     /// Empty extern block — must parse, must carry the ABI tag, no items.

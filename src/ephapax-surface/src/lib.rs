@@ -32,7 +32,7 @@ use serde::Serialize;
 use smol_str::SmolStr;
 
 // Re-export shared types from the core AST.
-pub use ephapax_syntax::{BaseTy, BinOp, Linearity, Literal, Span, UnaryOp};
+pub use ephapax_syntax::{BaseTy, BinOp, Import, Linearity, Literal, Span, UnaryOp};
 
 /// Variable identifier (same as core).
 pub type Var = SmolStr;
@@ -438,6 +438,7 @@ pub enum SurfaceExternItem {
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct SurfaceModule {
     pub name: SmolStr,
+    pub imports: Vec<Import>,
     pub decls: Vec<SurfaceDecl>,
 }
 

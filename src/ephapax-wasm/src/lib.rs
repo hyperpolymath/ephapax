@@ -53,6 +53,7 @@ use ephapax_syntax::{
     BaseTy, BinOp, Decl, Expr, ExprKind, ExternItem, Literal, MatchArm, Module as AstModule,
     Pattern, Ty, UnaryOp,
 };
+use smol_str::SmolStr;
 use std::collections::HashMap;
 use wasm_encoder::{
     CodeSection, ConstExpr, ElementSection, Elements, ExportKind, ExportSection, Function,
@@ -2308,139 +2309,238 @@ impl Codegen {
         func.instruction(&Instruction::End);
     }
 
-    /// Compile a core `ExprKind::Match` to a `br_table` dispatch over
-    /// the flat constructor tag recovered from the runtime binary-sum
-    /// encoding.
+    /// Compile a core `ExprKind::Match` via linear per-arm dispatch.
     ///
     /// Encoding (mirrors `ephapax_desugar`):
     /// - Each `inl`/`inr` is an 8-byte heap cell `[tag:i32 @ 0, value:i32 @ 4]`,
     ///   tag 0 = left, tag 1 = right.
-    /// - For a constructor at position `i` out of `n` total:
-    ///   - `i < n-1` ⇒ value path is `i` `inr` cells followed by one
-    ///     `inl` cell that holds the payload at offset 4.
-    ///   - `i == n-1` ⇒ value path is `n-1` `inr` cells, with the
-    ///     payload BARE at offset 4 of the innermost cell.
+    /// - Constructor at position `i` out of `n`: `i < n-1` ⇒ `i` `inr`
+    ///   wraps + one final `inl(payload)`; `i == n-1` ⇒ `n-1` `inr`
+    ///   wraps with the payload BARE at the innermost slot.
     /// - For `n == 1` there is no sum wrap; the value IS the payload.
     ///
-    /// Codegen shape (for `n >= 2`):
+    /// Codegen shape:
     /// ```text
-    ///   compute payload + flat_tag with n-1 unrolled inl/inr checks
+    ///   compute payload + flat_tag (only for data-type scrutinees with n>=2)
     ///   block $done : i32
-    ///     block $arm_{n-1}
-    ///       ...
-    ///       block $arm_0
-    ///         local.get tag
-    ///         br_table $arm_0 .. $arm_{n-1}   ; default = last arm
-    ///       end
-    ///       (arm 0 body) br $done
+    ///     block $arm_0_fail
+    ///       ; arm 0 tag check (if constructor); br_if $arm_0_fail on miss
+    ///       ; recursive sub-pattern destructure; refutable miss → br $arm_0_fail
+    ///       ; emit arm 0 body
+    ///       br $done
     ///     end
-    ///     (arm 1 body) br $done
+    ///     block $arm_1_fail
+    ///       ; same shape
+    ///     end
     ///     ...
-    ///   end ; control falls through last-arm body into $done's end with result on stack
+    ///     block $arm_{N-1}_fail
+    ///       ; same shape
+    ///     end
+    ///     unreachable    ; typechecker proves this is dead for well-typed
+    ///   end
     /// ```
     ///
-    /// Only patterns whose top-level is `Pattern::Constructor`
-    /// (optionally with `Var`/`Wildcard` arg sub-patterns) or a
-    /// `Wildcard`/`Var` catch-all participate in the br_table dispatch.
-    /// Other top-level patterns (literal, pair, tuple) fall back to
-    /// unreachable — follow-up work tracked separately.
+    /// Refutable nested sub-patterns (`Literal`, nested `Constructor`,
+    /// `Pair`/`Tuple` inside ctor args) emit `br_if $arm_i_fail` on
+    /// mismatch, falling through to the next arm. The br_table-based
+    /// dispatch from #65 is replaced by this linear chain because
+    /// br_table can only forward to one arm per tag and cannot fall
+    /// through on inner refutation (needed once #66 admits patterns
+    /// like `Some(Some(_))` + `Some(None)` + `None`).
     fn compile_match(&mut self, func: &mut Function, scrutinee: &Expr, arms: &[MatchArm]) {
         use wasm_encoder::BlockType;
 
-        let parent_info = arms.iter().find_map(|arm| match &arm.pattern {
-            Pattern::Constructor { ctor, .. } => self
-                .data_ctors
-                .get(ctor.as_str())
-                .map(|ci| (ci.parent.clone(), ci.total)),
-            _ => None,
+        // Recover data type info from the first constructor pattern (if any).
+        // For non-data scrutinees (Bool, Pair, Tuple, Unit, Int) no tag
+        // walk is needed — scrut_local IS the payload.
+        let data_info = arms.iter().find_map(|arm| {
+            collect_first_ctor(&arm.pattern).and_then(|c| {
+                self.data_ctors
+                    .get(c.as_str())
+                    .map(|ci| (ci.parent.clone(), ci.total))
+            })
         });
-
-        let Some((_parent, total)) = parent_info else {
-            // No constructor patterns — can't infer the data type's arity,
-            // so we have nothing to br_table on. The typechecker should
-            // accept such matches only when they're trivially exhaustive
-            // (single wildcard arm), but codegen here just emits
-            // unreachable — sound, since the typechecker's job is to
-            // forbid the missing-arm case.
-            func.instruction(&Instruction::Unreachable);
-            return;
-        };
-
-        let mut arm_for_position: Vec<Option<usize>> = vec![None; total];
-        let mut default_arm: Option<usize> = None;
-        for (i, arm) in arms.iter().enumerate() {
-            match &arm.pattern {
-                Pattern::Constructor { ctor, .. } => {
-                    if let Some(ci) = self.data_ctors.get(ctor.as_str()) {
-                        let pos = ci.position;
-                        if arm_for_position[pos].is_none() {
-                            arm_for_position[pos] = Some(i);
-                        }
-                    }
-                }
-                Pattern::Wildcard | Pattern::Var(_) => {
-                    if default_arm.is_none() {
-                        default_arm = Some(i);
-                    }
-                }
-                _ => {}
-            }
-        }
 
         self.compile_expr(func, scrutinee);
         let scrut_local = self.locals.temp();
         func.instruction(&Instruction::LocalSet(scrut_local));
 
         let payload_local = self.locals.temp();
-
-        if total == 1 {
-            // Single-constructor data type: scrutinee IS the payload.
-            func.instruction(&Instruction::LocalGet(scrut_local));
-            func.instruction(&Instruction::LocalSet(payload_local));
-
-            let arm_idx = arm_for_position[0].or(default_arm);
-            self.compile_match_arm_body(func, arm_idx.map(|i| &arms[i]), payload_local);
-            return;
-        }
-
-        // total >= 2: emit the unrolled inl/inr walk to compute payload + tag.
-        let cur_local = self.locals.temp();
         let tag_local = self.locals.temp();
 
-        func.instruction(&Instruction::LocalGet(scrut_local));
-        func.instruction(&Instruction::LocalSet(cur_local));
-
-        self.emit_tag_walk(func, total, cur_local, tag_local, payload_local);
-
-        // Dispatch.
-        func.instruction(&Instruction::Block(BlockType::Result(ValType::I32)));
-        for _ in 0..total {
-            func.instruction(&Instruction::Block(BlockType::Empty));
+        let total = data_info.as_ref().map(|(_, t)| *t).unwrap_or(0);
+        if total >= 2 {
+            let cur_local = self.locals.temp();
+            func.instruction(&Instruction::LocalGet(scrut_local));
+            func.instruction(&Instruction::LocalSet(cur_local));
+            self.emit_tag_walk(func, total, cur_local, tag_local, payload_local);
+        } else {
+            // Single-ctor data type OR non-data scrutinee: payload = scrut.
+            // tag_local stays uninitialized; arms with constructor
+            // patterns over a single-ctor data type don't need to read
+            // it (position is forced to 0).
+            func.instruction(&Instruction::LocalGet(scrut_local));
+            func.instruction(&Instruction::LocalSet(payload_local));
         }
 
-        func.instruction(&Instruction::LocalGet(tag_local));
-        let labels: Vec<u32> = (0..total as u32).collect();
-        let default_label = (total - 1) as u32;
-        func.instruction(&Instruction::BrTable(
-            std::borrow::Cow::Owned(labels),
-            default_label,
-        ));
-        // Close innermost ($arm_0). Subsequent ends close $arm_1, $arm_2, etc.
-        func.instruction(&Instruction::End);
+        // Linear arm dispatch.
+        func.instruction(&Instruction::Block(BlockType::Result(ValType::I32)));
 
-        for i in 0..total {
-            let arm_ref = arm_for_position[i].or(default_arm).map(|j| &arms[j]);
-            self.compile_match_arm_body(func, arm_ref, payload_local);
-            if i + 1 < total {
-                // Br to $done (relative depth = number of still-open arm blocks).
-                // After arm i body, still-open blocks (from inside): $arm_{i+1},
-                // ..., $arm_{n-1}, $done. That's `total - i` blocks; $done is
-                // at depth total - i - 1.
-                func.instruction(&Instruction::Br((total - i - 1) as u32));
-                func.instruction(&Instruction::End);
-            } else {
-                // Last arm body falls through to $done's end.
-                func.instruction(&Instruction::End);
+        for arm in arms.iter() {
+            // Open $arm_i_fail block. Inside, depth 0 = $arm_i_fail,
+            // depth 1 = $done.
+            func.instruction(&Instruction::Block(BlockType::Empty));
+
+            // Tag check for top-level constructor patterns (only when
+            // dispatching over a multi-ctor data type).
+            if let Pattern::Constructor { ctor, .. } = &arm.pattern {
+                if total >= 2 {
+                    if let Some(ci) = self.data_ctors.get(ctor.as_str()) {
+                        func.instruction(&Instruction::LocalGet(tag_local));
+                        func.instruction(&Instruction::I32Const(ci.position as i32));
+                        func.instruction(&Instruction::I32Ne);
+                        func.instruction(&Instruction::BrIf(0));
+                    }
+                }
+            }
+
+            // Top-level pattern binding / refutable check. The arm body
+            // produces an i32 on the stack; we br $done (depth 1) to
+            // carry it past the remaining arms.
+            self.compile_top_pattern(func, &arm.pattern, scrut_local, payload_local);
+            self.compile_expr(func, &arm.body);
+            func.instruction(&Instruction::Br(1));
+
+            func.instruction(&Instruction::End); // close $arm_i_fail
+        }
+
+        // No arm matched at runtime — the typechecker rejects non-
+        // exhaustive matches, so this is dead code for well-typed
+        // programs. Required to satisfy the $done block's i32 result.
+        func.instruction(&Instruction::Unreachable);
+        func.instruction(&Instruction::End); // close $done
+    }
+
+    /// Bind / refute the top-level arm pattern. Refutable failures
+    /// (literal mismatch, nested constructor mismatch) emit `br_if`
+    /// to depth 0 (= the surrounding `$arm_i_fail` block).
+    ///
+    /// For wildcard / var the whole `scrut_local` is bound (or
+    /// ignored). For a constructor pattern the args are destructured
+    /// from `payload_local`. For literal / pair / tuple top-level the
+    /// scrutinee value itself is the value to check / destructure.
+    fn compile_top_pattern(
+        &mut self,
+        func: &mut Function,
+        pat: &Pattern,
+        scrut_local: u32,
+        payload_local: u32,
+    ) {
+        match pat {
+            Pattern::Wildcard => {}
+            Pattern::Var(name) => {
+                let idx = self.locals.bind(name.as_str(), false);
+                func.instruction(&Instruction::LocalGet(scrut_local));
+                func.instruction(&Instruction::LocalSet(idx));
+            }
+            Pattern::Constructor { args, .. } => {
+                self.destructure_payload(func, args, payload_local, 0);
+            }
+            Pattern::Literal(_) | Pattern::Unit | Pattern::Pair(_, _) | Pattern::Tuple(_) => {
+                // Non-data top-level pattern: scrutinee IS the value
+                // to check / destructure. Sub-pattern handles
+                // refutability and binding uniformly.
+                self.compile_sub_pattern(func, pat, scrut_local, 0);
+            }
+        }
+    }
+
+    /// Recursively bind a sub-pattern against an already-extracted
+    /// value (held in `value_local`). Refutable patterns emit
+    /// `br_if fail_depth` on mismatch.
+    fn compile_sub_pattern(
+        &mut self,
+        func: &mut Function,
+        pat: &Pattern,
+        value_local: u32,
+        fail_depth: u32,
+    ) {
+        match pat {
+            Pattern::Wildcard => {}
+            Pattern::Var(name) => {
+                let idx = self.locals.bind(name.as_str(), false);
+                func.instruction(&Instruction::LocalGet(value_local));
+                func.instruction(&Instruction::LocalSet(idx));
+            }
+            Pattern::Unit => {
+                // Single-inhabitant: no check, no binding.
+            }
+            Pattern::Literal(lit) => match lit {
+                Literal::Unit => {}
+                Literal::Bool(b) => {
+                    func.instruction(&Instruction::LocalGet(value_local));
+                    func.instruction(&Instruction::I32Const(if *b { 1 } else { 0 }));
+                    func.instruction(&Instruction::I32Ne);
+                    func.instruction(&Instruction::BrIf(fail_depth));
+                }
+                Literal::I32(n) => {
+                    func.instruction(&Instruction::LocalGet(value_local));
+                    func.instruction(&Instruction::I32Const(*n));
+                    func.instruction(&Instruction::I32Ne);
+                    func.instruction(&Instruction::BrIf(fail_depth));
+                }
+                Literal::I64(_) | Literal::F32(_) | Literal::F64(_) | Literal::String(_) => {
+                    // Wider/non-i32 literal patterns not lowered yet —
+                    // typechecker accepts but codegen surfaces this as
+                    // an immediate fail (br to $arm_i_fail). Real
+                    // support is its own follow-up.
+                    func.instruction(&Instruction::I32Const(1));
+                    func.instruction(&Instruction::BrIf(fail_depth));
+                }
+            },
+            Pattern::Pair(left, right) => {
+                let left_local = self.locals.temp();
+                func.instruction(&Instruction::LocalGet(value_local));
+                func.instruction(&Instruction::I32Load(mem_arg(0)));
+                func.instruction(&Instruction::LocalSet(left_local));
+
+                let right_local = self.locals.temp();
+                func.instruction(&Instruction::LocalGet(value_local));
+                func.instruction(&Instruction::I32Load(mem_arg(4)));
+                func.instruction(&Instruction::LocalSet(right_local));
+
+                self.compile_sub_pattern(func, left, left_local, fail_depth);
+                self.compile_sub_pattern(func, right, right_local, fail_depth);
+            }
+            Pattern::Tuple(parts) => {
+                self.destructure_payload(func, parts, value_local, fail_depth);
+            }
+            Pattern::Constructor { ctor, args } => {
+                let Some(ci) = self.data_ctors.get(ctor.as_str()).cloned() else {
+                    // Unknown ctor — typechecker should have rejected.
+                    func.instruction(&Instruction::Unreachable);
+                    return;
+                };
+                let total = ci.total;
+                let position = ci.position;
+
+                let inner_payload = self.locals.temp();
+                if total >= 2 {
+                    let cur_local = self.locals.temp();
+                    let tag_local = self.locals.temp();
+                    func.instruction(&Instruction::LocalGet(value_local));
+                    func.instruction(&Instruction::LocalSet(cur_local));
+                    self.emit_tag_walk(func, total, cur_local, tag_local, inner_payload);
+                    func.instruction(&Instruction::LocalGet(tag_local));
+                    func.instruction(&Instruction::I32Const(position as i32));
+                    func.instruction(&Instruction::I32Ne);
+                    func.instruction(&Instruction::BrIf(fail_depth));
+                } else {
+                    func.instruction(&Instruction::LocalGet(value_local));
+                    func.instruction(&Instruction::LocalSet(inner_payload));
+                }
+
+                self.destructure_payload(func, args, inner_payload, fail_depth);
             }
         }
     }
@@ -2499,75 +2599,34 @@ impl Codegen {
         round(func, 0, total, cur_local, tag_local, payload_local);
     }
 
-    /// Emit the body for one match arm: bind pattern args (if any),
-    /// compile the body expression. If `arm` is None (no arm covers
-    /// this constructor position and no catch-all exists), emit
-    /// `unreachable` — the typechecker rejects non-exhaustive matches.
-    fn compile_match_arm_body(
-        &mut self,
-        func: &mut Function,
-        arm: Option<&MatchArm>,
-        payload_local: u32,
-    ) {
-        let Some(arm) = arm else {
-            // No arm + no default: shouldn't happen after exhaustiveness
-            // check, but be safe.
-            func.instruction(&Instruction::Unreachable);
-            return;
-        };
-
-        match &arm.pattern {
-            Pattern::Constructor { args, .. } => {
-                self.bind_constructor_payload(func, args, payload_local);
-            }
-            Pattern::Var(name) => {
-                // Catch-all binds the whole scrutinee value (here:
-                // we only have payload, which is the right semantics
-                // for single-ctor types and "close enough" for the
-                // general default case used as a fallback).
-                let idx = self.locals.bind(name.as_str(), false);
-                func.instruction(&Instruction::LocalGet(payload_local));
-                func.instruction(&Instruction::LocalSet(idx));
-            }
-            _ => {}
-        }
-
-        self.compile_expr(func, &arm.body);
-    }
-
-    /// Bind the pattern args of a constructor pattern to locals,
-    /// extracting from the right-nested pair payload.
-    ///
-    /// - 0 args: nothing to bind.
-    /// - 1 arg : payload IS the value.
+    /// Walk a right-nested pair payload and recurse `compile_sub_pattern`
+    /// into each element. Mirrors `ephapax_desugar::build_payload_expr`:
+    /// - 0 args: nothing to do.
+    /// - 1 arg : `payload_local` IS the value.
     /// - N args: payload is `Pair(a0, Pair(a1, ..., Pair(a_{n-2}, a_{n-1})))`;
     ///   each `Pair` is an 8-byte cell with offset 0 / offset 4.
-    fn bind_constructor_payload(
+    fn destructure_payload(
         &mut self,
         func: &mut Function,
         args: &[Pattern],
         payload_local: u32,
+        fail_depth: u32,
     ) {
         match args.len() {
             0 => {}
-            1 => self.bind_single_arg(func, &args[0], payload_local),
+            1 => self.compile_sub_pattern(func, &args[0], payload_local, fail_depth),
             _ => {
                 let mut cur = payload_local;
                 for (i, arg) in args.iter().enumerate() {
                     if i + 1 == args.len() {
-                        // Last arg: cur is the bare value.
-                        self.bind_single_arg(func, arg, cur);
+                        self.compile_sub_pattern(func, arg, cur, fail_depth);
                     } else {
-                        // arg = i32.load offset=0 from cur.
-                        // Stash extracted left value into a fresh local
-                        // for binding.
                         let left = self.locals.temp();
                         func.instruction(&Instruction::LocalGet(cur));
                         func.instruction(&Instruction::I32Load(mem_arg(0)));
                         func.instruction(&Instruction::LocalSet(left));
-                        self.bind_single_arg(func, arg, left);
+                        self.compile_sub_pattern(func, arg, left, fail_depth);
 
-                        // Advance cur to right child: load offset 4.
                         let next = self.locals.temp();
                         func.instruction(&Instruction::LocalGet(cur));
                         func.instruction(&Instruction::I32Load(mem_arg(4)));
@@ -2575,27 +2634,6 @@ impl Codegen {
                         cur = next;
                     }
                 }
-            }
-        }
-    }
-
-    /// Bind a single (already-extracted) value into a sub-pattern.
-    /// Var binds to a fresh local; Wildcard ignores; anything else
-    /// gets dropped on the floor for now (future: nested constructor
-    /// patterns).
-    fn bind_single_arg(&mut self, func: &mut Function, pat: &Pattern, value_local: u32) {
-        match pat {
-            Pattern::Var(name) => {
-                let idx = self.locals.bind(name.as_str(), false);
-                func.instruction(&Instruction::LocalGet(value_local));
-                func.instruction(&Instruction::LocalSet(idx));
-            }
-            Pattern::Wildcard => {}
-            _ => {
-                // Nested patterns not yet supported in br_table dispatch.
-                // Emit unreachable so failures are loud rather than
-                // silently wrong.
-                func.instruction(&Instruction::Unreachable);
             }
         }
     }
@@ -2854,6 +2892,18 @@ impl Codegen {
 // ---------------------------------------------------------------------------
 // Helper: memory argument shorthand
 // ---------------------------------------------------------------------------
+
+/// Top-level pattern's constructor name, if any. Used by
+/// `compile_match` to recover the data type's arity (via the
+/// registry) for the tag-walk path. Returns `None` for `Wildcard`,
+/// `Var`, `Literal`, `Unit`, `Pair`, `Tuple`.
+fn collect_first_ctor(pat: &Pattern) -> Option<SmolStr> {
+    if let Pattern::Constructor { ctor, .. } = pat {
+        Some(ctor.clone())
+    } else {
+        None
+    }
+}
 
 fn mem_arg(offset: u64) -> wasm_encoder::MemArg {
     wasm_encoder::MemArg {
@@ -4669,5 +4719,207 @@ mod tests {
             entries[0].param_kinds,
             vec![typed_wasm_verify::OwnershipKind::Linear]
         );
+    }
+
+    // ----- Nested constructor patterns in arm args (#68) -----
+
+    /// `Some(Some(v))` — nested constructor in an arm arg. Outer
+    /// `Some` matches via top-level tag check; inner `Some` recursively
+    /// computes its own tag and br_if-fails to the outer arm-fail
+    /// block on mismatch.
+    #[test]
+    fn compile_module_match_nested_some_some() {
+        // scrutinee: Some(Some(42)) over Option(Option(I32))
+        let inner = e(ExprKind::Inr {
+            ty: Ty::Base(BaseTy::Unit),
+            value: Box::new(e(ExprKind::Lit(Literal::I32(42)))),
+        });
+        let outer = e(ExprKind::Inr {
+            ty: Ty::Base(BaseTy::Unit),
+            value: Box::new(inner),
+        });
+        let body = e(ExprKind::Match {
+            scrutinee: Box::new(outer),
+            arms: vec![
+                MatchArm {
+                    pattern: P::Constructor {
+                        ctor: "None".into(),
+                        args: vec![],
+                    },
+                    guard: None,
+                    body: e(ExprKind::Lit(Literal::I32(0))),
+                },
+                MatchArm {
+                    pattern: P::Constructor {
+                        ctor: "Some".into(),
+                        args: vec![P::Constructor {
+                            ctor: "None".into(),
+                            args: vec![],
+                        }],
+                    },
+                    guard: None,
+                    body: e(ExprKind::Lit(Literal::I32(1))),
+                },
+                MatchArm {
+                    pattern: P::Constructor {
+                        ctor: "Some".into(),
+                        args: vec![P::Constructor {
+                            ctor: "Some".into(),
+                            args: vec![P::Var("v".into())],
+                        }],
+                    },
+                    guard: None,
+                    body: e(ExprKind::Var("v".into())),
+                },
+            ],
+        });
+        let module = AstModule {
+            name: "t".into(),
+            imports: vec![],
+            decls: vec![
+                option_data_decl(),
+                Decl::Fn {
+                    name: "f".into(),
+                    visibility: Visibility::Private,
+                    type_params: vec![],
+                    params: vec![],
+                    ret_ty: Ty::Base(BaseTy::I32),
+                    body,
+                },
+            ],
+        };
+        let wasm = compile_module(&module).expect("nested Some(Some(_)) should compile");
+        assert_wasm_header(&wasm);
+        validate_wasm(&wasm);
+    }
+
+    /// Refutable literal sub-pattern: `Some(0)` then `Some(_)` then
+    /// `None`. The first arm tests `payload == 0` and br_if-fails to
+    /// the next arm on mismatch.
+    #[test]
+    fn compile_module_match_nested_with_literal() {
+        let scrut = e(ExprKind::Inr {
+            ty: Ty::Base(BaseTy::Unit),
+            value: Box::new(e(ExprKind::Lit(Literal::I32(7)))),
+        });
+        let body = e(ExprKind::Match {
+            scrutinee: Box::new(scrut),
+            arms: vec![
+                MatchArm {
+                    pattern: P::Constructor {
+                        ctor: "Some".into(),
+                        args: vec![P::Literal(Literal::I32(0))],
+                    },
+                    guard: None,
+                    body: e(ExprKind::Lit(Literal::I32(100))),
+                },
+                MatchArm {
+                    pattern: P::Constructor {
+                        ctor: "Some".into(),
+                        args: vec![P::Var("v".into())],
+                    },
+                    guard: None,
+                    body: e(ExprKind::Var("v".into())),
+                },
+                MatchArm {
+                    pattern: P::Constructor {
+                        ctor: "None".into(),
+                        args: vec![],
+                    },
+                    guard: None,
+                    body: e(ExprKind::Lit(Literal::I32(-1))),
+                },
+            ],
+        });
+        let module = AstModule {
+            name: "t".into(),
+            imports: vec![],
+            decls: vec![
+                option_data_decl(),
+                Decl::Fn {
+                    name: "f".into(),
+                    visibility: Visibility::Private,
+                    type_params: vec![],
+                    params: vec![],
+                    ret_ty: Ty::Base(BaseTy::I32),
+                    body,
+                },
+            ],
+        };
+        let wasm =
+            compile_module(&module).expect("Some(0) | Some(v) | None should compile");
+        assert_wasm_header(&wasm);
+        validate_wasm(&wasm);
+    }
+
+    /// Nested constructor inside a multi-field constructor's args:
+    /// `data B = Box(Option(I32))` matched by `Box(Some(v))` and
+    /// `Box(None)`. Exercises `destructure_payload` → `compile_sub_pattern`
+    /// → recursive tag walk for the inner Option.
+    #[test]
+    fn compile_module_match_nested_tuple_ctor() {
+        let box_data = Decl::Data {
+            name: "B".into(),
+            type_params: vec![],
+            constructors: vec![ConstructorDef {
+                name: "Box".into(),
+                fields: vec![Ty::Sum {
+                    left: Box::new(Ty::Base(BaseTy::Unit)),
+                    right: Box::new(Ty::Base(BaseTy::I32)),
+                }],
+            }],
+        };
+        // scrutinee: Box(Some(99))
+        let some99 = e(ExprKind::Inr {
+            ty: Ty::Base(BaseTy::Unit),
+            value: Box::new(e(ExprKind::Lit(Literal::I32(99)))),
+        });
+        let body = e(ExprKind::Match {
+            scrutinee: Box::new(some99),
+            arms: vec![
+                MatchArm {
+                    pattern: P::Constructor {
+                        ctor: "Box".into(),
+                        args: vec![P::Constructor {
+                            ctor: "Some".into(),
+                            args: vec![P::Var("v".into())],
+                        }],
+                    },
+                    guard: None,
+                    body: e(ExprKind::Var("v".into())),
+                },
+                MatchArm {
+                    pattern: P::Constructor {
+                        ctor: "Box".into(),
+                        args: vec![P::Constructor {
+                            ctor: "None".into(),
+                            args: vec![],
+                        }],
+                    },
+                    guard: None,
+                    body: e(ExprKind::Lit(Literal::I32(0))),
+                },
+            ],
+        });
+        let module = AstModule {
+            name: "t".into(),
+            imports: vec![],
+            decls: vec![
+                option_data_decl(),
+                box_data,
+                Decl::Fn {
+                    name: "f".into(),
+                    visibility: Visibility::Private,
+                    type_params: vec![],
+                    params: vec![],
+                    ret_ty: Ty::Base(BaseTy::I32),
+                    body,
+                },
+            ],
+        };
+        let wasm =
+            compile_module(&module).expect("Box(Some(v)) | Box(None) should compile");
+        assert_wasm_header(&wasm);
+        validate_wasm(&wasm);
     }
 }

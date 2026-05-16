@@ -1,0 +1,13 @@
+module std/io
+
+extern "wasm" {
+    fn print_i32(val: I32): ()
+}
+
+pub fn main() -> I32 {
+    let! x = 40
+    let y = 2
+    let! result = x + y
+    print_i32(result)
+    result
+}

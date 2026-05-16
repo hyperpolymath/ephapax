@@ -1,0 +1,8 @@
+// SPDX-License-Identifier: PMPL-1.0-or-later
+// Trivial library module published at the path `lib/math`. Single
+// public function, no data types — keeps the cross-module fixture
+// minimal so the test focuses on import resolution.
+
+module lib/math
+
+pub fn double(n: I32): I32 = n + n

@@ -634,63 +634,20 @@ pub enum Decl {
         value: Expr,
     },
 
-    /// Foreign function and type declarations: `extern "abi" { ... }`.
+    /// Externally provided function — body lives in a host runtime or is
+    /// resolved via a wasm import. Carries the same shape as a `Fn`
+    /// signature, with no body and no polymorphism (extern items are
+    /// declared at concrete types).
     ///
-    /// Items inside the block have no body — they declare signatures
-    /// that resolve to host imports at codegen time. The `abi` string
-    /// names the linkage target (e.g. `"gossamer"`, `"c"`, `"wasm"`).
-    /// Extern types are opaque to the type checker (no constructors,
-    /// no destructors known); extern fns get an ambient binding with
-    /// the declared type.
+    /// Lowered from `SurfaceDecl::Extern(ExternBlock)` one entry per
+    /// `ExternItem::Fn`. Type checking registers the declared signature in
+    /// the module environment. Codegen emits a wasm import directive
+    /// (Phase C of hyperpolymath/ephapax#43).
     Extern {
-        abi: String,
-        items: Vec<ExternItem>,
-    },
-
-    /// Algebraic data type declaration: `data Name(a, b) = C1 | C2(T) | ...`.
-    ///
-    /// Preserves the structured shape (variant names + payloads) for the
-    /// surface IR / LSP / tooling layers. The runtime path
-    /// (surface → desugar → core) does not use this variant — data
-    /// semantics flow through the registry-based encoding in
-    /// `ephapax-desugar`. The core parser produces `Decl::Data` directly
-    /// (instead of folding into `Decl::Type` with a binary-sum encoding
-    /// that discarded constructor names).
-    Data {
         name: Var,
-        #[serde(skip_serializing_if = "Vec::is_empty")]
-        type_params: Vec<SmolStr>,
-        constructors: Vec<ConstructorDef>,
-    },
-}
-
-/// A single constructor inside a `data` declaration.
-///
-/// Mirror of `ephapax_surface::ConstructorDef` but with core `Ty`
-/// field types instead of `SurfaceTy`.
-#[derive(Debug, Clone, PartialEq, Serialize)]
-pub struct ConstructorDef {
-    /// Constructor name (e.g. `"Some"`, `"None"`).
-    pub name: Var,
-    /// Payload types (empty for nullary constructors).
-    #[serde(skip_serializing_if = "Vec::is_empty")]
-    pub fields: Vec<Ty>,
-}
-
-/// A single declaration inside an `extern "abi" { ... }` block.
-///
-/// Extern items declare signatures only — no bodies. The checker
-/// registers them as ambient bindings; codegen lowers fn items to
-/// wasm `import` directives and treats type items as opaque externs.
-#[derive(Debug, Clone, PartialEq, Serialize)]
-#[serde(tag = "kind", rename_all = "snake_case")]
-pub enum ExternItem {
-    /// `type Foo` — declares an opaque foreign type.
-    Type { name: Var },
-    /// `fn name(p1: T1, p2: T2): R` — declares a foreign function
-    /// signature.
-    Fn {
-        name: Var,
+        /// ABI namespace, e.g. `"gossamer"`, `"wasm"`, `"c"`. Passed
+        /// through to the wasm `(import "<abi>" "<name>" ...)` directive.
+        abi: SmolStr,
         params: Vec<(Var, Ty)>,
         ret_ty: Ty,
     },

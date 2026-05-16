@@ -277,72 +277,22 @@ fn decl_to_sexpr(decl: &Decl) -> SExpr {
             ty.as_ref().map(ty_to_sexpr).unwrap_or(SExpr::Atom("_".into())),
             expr_to_sexpr(value),
         ]),
-        // Render `extern "abi" { ... }` as a tagged s-expr so the IR
-        // round-trip preserves the declaration. Item shape mirrors the
-        // wasm view that codegen will eventually consume:
-        //   (extern "abi" ((extern-type Foo) (extern-fn name ((p T)...) R)))
-        Decl::Extern { abi, items } => SExpr::List(vec![
-            SExpr::Atom("extern".into()),
-            SExpr::Atom(format!("{abi:?}")),
-            SExpr::List(
-                items
-                    .iter()
-                    .map(|item| match item {
-                        ephapax_syntax::ExternItem::Type { name } => SExpr::List(vec![
-                            SExpr::Atom("extern-type".into()),
-                            SExpr::Atom(escape_atom(name)),
-                        ]),
-                        ephapax_syntax::ExternItem::Fn {
-                            name,
-                            params,
-                            ret_ty,
-                        } => SExpr::List(vec![
-                            SExpr::Atom("extern-fn".into()),
-                            SExpr::Atom(escape_atom(name)),
-                            SExpr::List(
-                                params
-                                    .iter()
-                                    .map(|(p, t)| {
-                                        SExpr::List(vec![
-                                            SExpr::Atom(escape_atom(p)),
-                                            ty_to_sexpr(t),
-                                        ])
-                                    })
-                                    .collect(),
-                            ),
-                            ty_to_sexpr(ret_ty),
-                        ]),
-                    })
-                    .collect(),
-            ),
-        ]),
-        // Render `data Name(a, b) = C1 | C2(T) | ...` as a tagged s-expr
-        // preserving the constructor shape:
-        //   (data Name (type-params) ((Ctor1 (T1 T2)) (Ctor2 ())))
-        Decl::Data {
+        Decl::Extern {
             name,
-            type_params,
-            constructors,
+            abi,
+            params,
+            ret_ty,
         } => SExpr::List(vec![
-            SExpr::Atom("data".into()),
+            SExpr::Atom("extern".into()),
+            SExpr::Atom(escape_string(abi)),
             SExpr::Atom(escape_atom(name)),
             SExpr::List(
-                type_params
+                params
                     .iter()
-                    .map(|tp| SExpr::Atom(escape_atom(tp)))
+                    .map(|(p, t)| SExpr::List(vec![SExpr::Atom(escape_atom(p)), ty_to_sexpr(t)]))
                     .collect(),
             ),
-            SExpr::List(
-                constructors
-                    .iter()
-                    .map(|ctor| {
-                        SExpr::List(vec![
-                            SExpr::Atom(escape_atom(&ctor.name)),
-                            SExpr::List(ctor.fields.iter().map(ty_to_sexpr).collect()),
-                        ])
-                    })
-                    .collect(),
-            ),
+            ty_to_sexpr(ret_ty),
         ]),
     }
 }
@@ -396,6 +346,33 @@ fn decode_decl(expr: &SExpr) -> Result<Decl, SExprError> {
             name: SmolStr::new(name),
             visibility: Visibility::Private,
             ty,
+        })
+    } else if is_atom(&list[0], "extern") {
+        if list.len() != 5 {
+            return Err(SExprError::Invalid(
+                "extern decl shape: (extern \"abi\" name (params) ret)".into(),
+            ));
+        }
+        let abi = atom_string(&list[1])?;
+        let name = atom_string(&list[2])?;
+        let params = match &list[3] {
+            SExpr::List(items) => items
+                .iter()
+                .map(|p| match p {
+                    SExpr::List(parts) if parts.len() == 2 => {
+                        Ok((SmolStr::new(atom_string(&parts[0])?), decode_ty(&parts[1])?))
+                    }
+                    _ => Err(SExprError::Invalid("extern param must be (name ty)".into())),
+                })
+                .collect::<Result<Vec<_>, _>>()?,
+            _ => return Err(SExprError::Invalid("extern params must be list".into())),
+        };
+        let ret_ty = decode_ty(&list[4])?;
+        Ok(Decl::Extern {
+            name: SmolStr::new(name),
+            abi: SmolStr::new(abi),
+            params,
+            ret_ty,
         })
     } else {
         Err(SExprError::Invalid("unknown decl".into()))

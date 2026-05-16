@@ -1,0 +1,17 @@
+// SPDX-License-Identifier: PMPL-1.0-or-later
+// Extern fn callsite — proves Phase B of #43: the extern signature is
+// in scope from the function body. `entry()` returns the result of an
+// `extern "wasm"`-declared identity function on a literal.
+//
+// The `type` extern item is currently dropped by desugar (Phase B+ will
+// register it as an abstract type). The `fn` extern item desugars to
+// `Decl::Extern`, gets registered in the typechecker env by the
+// pre-pass, and the call resolves cleanly.
+
+module hyperpolymath/ephapax/test
+
+extern "wasm" {
+  fn host_identity(x: I32): I32
+}
+
+fn entry(): I32 = host_identity(7)

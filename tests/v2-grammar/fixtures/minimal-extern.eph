@@ -1,0 +1,15 @@
+// SPDX-License-Identifier: PMPL-1.0-or-later
+// Smallest possible v2-grammar `extern "abi" { ... }` block. Used by
+// the v2-grammar parser test (tests/v2-grammar/extern.rs) to assert the
+// surface parser materialises SurfaceDecl::Extern with both `type` and
+// `fn` items.
+
+module hyperpolymath/ephapax/test
+
+extern "gossamer" {
+  type Window
+  fn window_open(title: String, body: String): Window
+  fn window_close(w: Window): ()
+}
+
+fn entry(): I32 = 0

@@ -393,40 +393,45 @@ pub enum SurfaceDecl {
     /// Function definition (same as core, but with surface types/exprs)
     Fn {
         name: Var,
+        #[serde(default, skip_serializing_if = "SurfaceVisibility::is_private")]
+        visibility: SurfaceVisibility,
         params: Vec<(Var, SurfaceTy)>,
         ret_ty: SurfaceTy,
         body: SurfaceExpr,
     },
 
     /// Type alias (same as core, but with surface types)
-    Type { name: Var, ty: SurfaceTy },
+    Type {
+        name: Var,
+        #[serde(default, skip_serializing_if = "SurfaceVisibility::is_private")]
+        visibility: SurfaceVisibility,
+        ty: SurfaceTy,
+    },
 
     /// Data type declaration (surface-only)
     Data(DataDecl),
 
-    /// Foreign function and type declarations: `extern "abi" { ... }`.
-    ///
-    /// Surface mirror of the core `Decl::Extern`. The desugar pass
-    /// lowers this to the core form by mapping each item's `SurfaceTy`
-    /// fields through `desugar_ty`.
-    Extern {
-        abi: String,
-        items: Vec<SurfaceExternItem>,
-        span: Span,
-    },
+    /// `extern "abi" { ... }` block — host-provided types and functions
+    /// with no body. The implementation lives in the host runtime (for
+    /// `"gossamer"`) or is wired via wasm imports (for `"wasm"`).
+    Extern(ExternBlock),
 }
 
-/// A single declaration inside a surface `extern "abi" { ... }` block.
-///
-/// Mirror of the core `ExternItem`. Differs only in that types are
-/// `SurfaceTy` rather than `Ty`.
+/// An `extern "abi" { ... }` block.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct ExternBlock {
+    /// ABI name, e.g. `"gossamer"`, `"wasm"`, `"c"`.
+    pub abi: SmolStr,
+    pub items: Vec<ExternItem>,
+}
+
+/// A single declaration inside an `extern` block.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
-pub enum SurfaceExternItem {
-    /// `type Foo` — declares an opaque foreign type.
-    Type { name: SmolStr },
-    /// `fn name(p1: T1, p2: T2): R` — declares a foreign function
-    /// signature using surface types.
+pub enum ExternItem {
+    /// Opaque type: `type Foo`. No constructors visible to the checker.
+    Type(SmolStr),
+    /// Function signature: `fn name(p1: T1, ..) : R`. No body.
     Fn {
         name: SmolStr,
         params: Vec<(SmolStr, SurfaceTy)>,
@@ -434,11 +439,41 @@ pub enum SurfaceExternItem {
     },
 }
 
+/// Surface-level visibility — matches `ephapax_syntax::Visibility` but
+/// kept local so the surface AST doesn't need to depend on it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum SurfaceVisibility {
+    /// Accessible from other modules.
+    Public,
+    /// Module-private (default).
+    #[default]
+    Private,
+}
+
+impl SurfaceVisibility {
+    pub fn is_private(&self) -> bool {
+        matches!(self, SurfaceVisibility::Private)
+    }
+}
+
+/// An `import a/b/c` declaration on a surface module.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct SurfaceImport {
+    /// Module path as written in the source. Slashes are preferred but
+    /// dot-form (`Foo.Bar.Baz`) is also accepted by the grammar; downstream
+    /// resolvers normalise to slashes.
+    pub module: SmolStr,
+    /// Specific names imported. Empty = import everything public.
+    pub names: Vec<SmolStr>,
+}
+
 /// A complete surface-level module.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct SurfaceModule {
     pub name: SmolStr,
-    pub imports: Vec<Import>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub imports: Vec<SurfaceImport>,
     pub decls: Vec<SurfaceDecl>,
 }
 

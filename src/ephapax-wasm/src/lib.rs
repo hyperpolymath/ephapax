@@ -80,38 +80,14 @@ pub const MAX_PAGES: u64 = 256;
 // ---------------------------------------------------------------------------
 // Function indices — DYNAMIC since v2-grammar phase 2B-ii (#43).
 // ---------------------------------------------------------------------------
-//
-// Wasm function indices are determined by emission order: the import
-// section is consumed first, then the function section. When the module
-// includes `extern "abi" { fn ... }` blocks, each fn item becomes a
-// wasm import — which means the runtime helpers and user fns shift
-// down by the number of extern imports.
-//
-// The constants below capture the *static* parts: the number of host
-// imports we always emit (`NUM_BUILTIN_IMPORTS`), the per-helper offsets
-// inside the runtime helper block (`OFFSET_*`), and the runtime helper
-// count (`NUM_RUNTIME_FNS`). The runtime *index* of each helper is then
-// `self.import_count() + OFFSET_*`, where `import_count` is
-// `NUM_BUILTIN_IMPORTS + extern_imports.len()` for module compiles, or
-// just `NUM_BUILTIN_IMPORTS` for the standalone-expression path.
 
-/// Number of always-on host imports (print_i32, print_string).
-const NUM_BUILTIN_IMPORTS: u32 = 2;
+/// Number of host imports (print_i32, print_string)
+const NUM_IMPORTS: u32 = 2;
 
-/// Offsets of the built-in runtime helpers inside the helper block.
-/// The wasm function index = `self.import_count() + OFFSET_*`.
-const OFFSET_BUMP_ALLOC: u32 = 0;
-const OFFSET_STRING_NEW: u32 = 1;
-const OFFSET_STRING_LEN: u32 = 2;
-const OFFSET_STRING_CONCAT: u32 = 3;
-const OFFSET_STRING_DROP: u32 = 4;
-const OFFSET_REGION_ENTER: u32 = 5;
-const OFFSET_REGION_EXIT: u32 = 6;
-const OFFSET_LIST_NEW: u32 = 7;
-const OFFSET_LIST_APPEND: u32 = 8;
-const OFFSET_LIST_GET: u32 = 9;
-
-/// Number of runtime helper functions emitted in the code section.
+/// Number of runtime helper functions emitted by [`Codegen::append_runtime_funcs`].
+/// The wasm function indices for the helpers are computed dynamically via
+/// the `Codegen::fn_*` accessors (which depend on the number of user
+/// extern imports for this module).
 const NUM_RUNTIME_FNS: u32 = 10;
 
 // ---------------------------------------------------------------------------
@@ -302,66 +278,21 @@ pub struct Codegen {
     /// Starts after the built-in function indices.
     next_import_idx: u32,
 
-    /// Imports declared via `extern "abi" { ... }` blocks. Populated by
-    /// `collect_extern_imports` before user-fn collection so the
-    /// runtime helper and user-fn indices can be shifted past them.
-    /// Order = emission order in the import section.
-    extern_imports: Vec<ExternImport>,
-
-    /// Lookup: extern fn name -> wasm function index.
-    /// `compile_expr` consults this to resolve `Var(name)` references
-    /// that come from extern blocks; calls become `Call(idx)` into the
-    /// import.
-    extern_fn_indices: HashMap<String, u32>,
-
-    /// Names of extern types declared in the AST. Used only as a
-    /// presence check during typecheck-style queries; the wasm layer
-    /// itself treats extern types as opaque i32 handles.
-    #[allow(dead_code)]
-    extern_type_names: std::collections::HashSet<String>,
-
-    /// Constructor registry for `ExprKind::Match` codegen.
-    /// Populated from `Decl::Data` decls in `collect_signatures` and
-    /// consulted by `compile_match` to compute the flat constructor
-    /// tag for `br_table` dispatch over the binary-sum encoding.
-    data_ctors: HashMap<String, WasmCtorInfo>,
-    /// Constructor names per data type, in declaration order. Lets the
-    /// match compiler look up "what is constructor X's position out of
-    /// N total for this data type" from any single constructor pattern.
-    data_type_ctor_names: HashMap<String, Vec<String>>,
+    /// `extern "abi" { fn name(..): R }` items, in declaration order.
+    /// Indexed into the wasm import section right after the host imports
+    /// (print_i32, print_string), so their function indices are
+    /// `NUM_IMPORTS .. NUM_IMPORTS + extern_imports.len()`. Runtime helpers
+    /// and user functions shift by `extern_imports.len()` accordingly —
+    /// see [`Codegen::extern_count`], [`Codegen::runtime_offset`], and
+    /// [`Codegen::first_user_fn`].
+    extern_imports: Vec<ExternImportInfo>,
 }
 
-/// Per-constructor wasm-codegen info — mirrors the typing-layer
-/// `CtorInfo` but holds only what `compile_match` needs to walk the
-/// runtime sum-cell chain.
 #[derive(Debug, Clone)]
-struct WasmCtorInfo {
-    /// Parent data type name (e.g. "Option" for "Some"/"None").
-    parent: String,
-    /// 0-based position in the parent's constructor list.
-    /// At depth `position`, the chain transitions from `inr` cells
-    /// (tag=1) to either an `inl` cell (tag=0) or — if `position` is
-    /// the last index — to the bare payload.
-    position: usize,
-    /// Total constructors in the parent data type. Together with
-    /// `position` this fully determines the runtime tag chain.
-    total: usize,
-    /// Number of payload fields. Recorded for completeness; the
-    /// pattern's own `args.len()` is what drives the runtime
-    /// destructuring after the typechecker validates arity.
-    #[allow(dead_code)]
-    arity: usize,
-}
-
-/// A single extern fn declaration captured during AST scanning, ready
-/// to be emitted as a wasm `(import "<abi>" "<name>" (func ...))`.
-#[derive(Debug, Clone)]
-struct ExternImport {
-    /// ABI / module name, e.g. `"gossamer"`.
+struct ExternImportInfo {
     abi: String,
-    /// Function name as declared in the source.
     name: String,
-    /// Wasm type-section index for this function's signature.
+    /// Wasm type-section index for this signature.
     wasm_type_idx: u32,
 }
 
@@ -416,96 +347,56 @@ impl Codegen {
             ffi_imports: HashMap::new(),
             next_import_idx: 100, // Start after built-in function indices
             extern_imports: Vec::new(),
-            extern_fn_indices: HashMap::new(),
-            extern_type_names: std::collections::HashSet::new(),
-            data_ctors: HashMap::new(),
-            data_type_ctor_names: HashMap::new(),
         }
     }
 
-    /// Populate the data-constructor registry from a module's `Decl::Data`
-    /// declarations. Called once during `collect_signatures` so the match
-    /// compiler sees every constructor when it consults the registry.
-    fn populate_data_ctors(&mut self, module: &AstModule) {
-        for decl in &module.decls {
-            if let Decl::Data {
-                name, constructors, ..
-            } = decl
-            {
-                let total = constructors.len();
-                let parent = name.as_str().to_string();
-                let mut names = Vec::with_capacity(total);
-                for (position, ctor) in constructors.iter().enumerate() {
-                    let ctor_name = ctor.name.as_str().to_string();
-                    self.data_ctors.insert(
-                        ctor_name.clone(),
-                        WasmCtorInfo {
-                            parent: parent.clone(),
-                            position,
-                            total,
-                            arity: ctor.fields.len(),
-                        },
-                    );
-                    names.push(ctor_name);
-                }
-                self.data_type_ctor_names.insert(parent, names);
-            }
-        }
+    /// Number of user-declared `extern "abi" { fn ... }` items emitted as
+    /// wasm imports. Shifts every downstream function index by this amount.
+    fn extern_count(&self) -> u32 {
+        self.extern_imports.len() as u32
     }
 
-    // -----------------------------------------------------------------------
-    // Dynamic function indices (phase 2B-ii of #43)
-    //
-    // The runtime helpers and user fns live AFTER all imports in the
-    // wasm function index space. `import_count()` returns the total
-    // number of imports we emit, so every helper / user fn index is
-    // `import_count() + OFFSET_*`.
-    // -----------------------------------------------------------------------
-
-    /// Total number of imports the module emits: builtins + extern.
-    /// FFI imports are NOT yet included — see the phase-2C note in
-    /// `ensure_ffi_import`.
-    fn import_count(&self) -> u32 {
-        NUM_BUILTIN_IMPORTS + self.extern_imports.len() as u32
+    /// First wasm function index occupied by a runtime helper. The host
+    /// imports take 0..NUM_IMPORTS, then the user externs, then the helpers.
+    fn runtime_offset(&self) -> u32 {
+        NUM_IMPORTS + self.extern_count()
     }
 
+    /// First wasm function index occupied by a user-defined function.
+    fn first_user_fn(&self) -> u32 {
+        self.runtime_offset() + NUM_RUNTIME_FNS
+    }
+
+    // -- Runtime helper indices, shifted by extern_count --------------------
     fn fn_bump_alloc(&self) -> u32 {
-        self.import_count() + OFFSET_BUMP_ALLOC
+        self.runtime_offset()
     }
     fn fn_string_new(&self) -> u32 {
-        self.import_count() + OFFSET_STRING_NEW
+        self.runtime_offset() + 1
     }
     fn fn_string_len(&self) -> u32 {
-        self.import_count() + OFFSET_STRING_LEN
+        self.runtime_offset() + 2
     }
     fn fn_string_concat(&self) -> u32 {
-        self.import_count() + OFFSET_STRING_CONCAT
+        self.runtime_offset() + 3
     }
     fn fn_string_drop(&self) -> u32 {
-        self.import_count() + OFFSET_STRING_DROP
+        self.runtime_offset() + 4
     }
     fn fn_region_enter(&self) -> u32 {
-        self.import_count() + OFFSET_REGION_ENTER
+        self.runtime_offset() + 5
     }
     fn fn_region_exit(&self) -> u32 {
-        self.import_count() + OFFSET_REGION_EXIT
+        self.runtime_offset() + 6
     }
     fn fn_list_new(&self) -> u32 {
-        self.import_count() + OFFSET_LIST_NEW
+        self.runtime_offset() + 7
     }
     fn fn_list_append(&self) -> u32 {
-        self.import_count() + OFFSET_LIST_APPEND
+        self.runtime_offset() + 8
     }
     fn fn_list_get(&self) -> u32 {
-        self.import_count() + OFFSET_LIST_GET
-    }
-    /// Region allocation aliases bump-allocation today.
-    fn fn_region_alloc(&self) -> u32 {
-        self.fn_bump_alloc()
-    }
-    /// First user-defined fn index, after imports and runtime helpers.
-    fn first_user_fn(&self) -> u32 {
-        self.import_count() + NUM_RUNTIME_FNS
+        self.runtime_offset() + 9
     }
 
     /// Register an FFI symbol as a WASM import from the "env" module.
@@ -736,6 +627,50 @@ impl Codegen {
     // -----------------------------------------------------------------------
 
     fn collect_user_fns(&mut self, ast: &AstModule) -> Result<(), CodegenError> {
+        // First pass: register `extern "abi" { fn name(..): R }` items as
+        // wasm imports. They occupy indices NUM_IMPORTS .. NUM_IMPORTS +
+        // extern_count, *before* the runtime helpers. Resolving an
+        // `ExprKind::Var(name)` that names an extern goes through the
+        // existing `user_fns` lookup — extern entries share that map.
+        for decl in &ast.decls {
+            if let Decl::Extern {
+                name,
+                abi,
+                params,
+                ret_ty,
+            } = decl
+            {
+                let wasm_params: Vec<ValType> =
+                    params.iter().map(|(_, ty)| ty_to_valtype(ty)).collect();
+                let wasm_results = vec![ty_to_valtype(ret_ty)];
+                let type_idx = self.register_type(wasm_params, wasm_results);
+
+                let import_idx = NUM_IMPORTS + self.extern_imports.len() as u32;
+                self.extern_imports.push(ExternImportInfo {
+                    abi: abi.to_string(),
+                    name: name.to_string(),
+                    wasm_type_idx: type_idx,
+                });
+
+                let param_names: Vec<String> =
+                    params.iter().map(|(n, _)| n.to_string()).collect();
+                let param_linear: Vec<bool> =
+                    params.iter().map(|(_, ty)| ty.is_linear()).collect();
+                self.user_fns.insert(
+                    name.to_string(),
+                    UserFnInfo {
+                        wasm_fn_idx: import_idx,
+                        wasm_type_idx: type_idx,
+                        param_names,
+                        param_linear,
+                    },
+                );
+            }
+        }
+
+        // Second pass: register user-defined functions at indices starting
+        // at `self.first_user_fn()` (which already accounts for the externs
+        // pushed above).
         let mut idx = self.first_user_fn();
         for decl in &ast.decls {
             match decl {
@@ -746,7 +681,6 @@ impl Codegen {
                     type_params: _,
                     ..
                 } => {
-                    // Build WASM type for this function
                     let wasm_params: Vec<ValType> =
                         params.iter().map(|(_, ty)| ty_to_valtype(ty)).collect();
                     let wasm_results = vec![ty_to_valtype(ret_ty)];
@@ -770,18 +704,7 @@ impl Codegen {
                 }
                 Decl::Type { .. } => { /* type aliases are erased at runtime */ }
                 Decl::Const { .. } => { /* constants inlined at compile time */ }
-                // TODO(ephapax#43 phase 2B): emit `(import "<abi>" "<name>"
-                // (func ...))` directives for `Decl::Extern { abi, items }`
-                // fn items and treat type items as opaque (i32) externs.
-                // For phase 2A the declaration is accepted by the parser
-                // and stored in the AST but codegen does not yet emit
-                // wasm imports for it.
-                Decl::Extern { .. } => {}
-                // Data types are erased at runtime — the desugar pass
-                // lowers them to the binary-sum encoding before codegen
-                // sees them. The structured Decl::Data is kept in the
-                // AST for tooling only.
-                Decl::Data { .. } => {}
+                Decl::Extern { .. } => { /* handled in the first pass above */ }
             }
         }
         Ok(())
@@ -873,15 +796,13 @@ impl Codegen {
             "print_string",
             wasm_encoder::EntityType::Function(TYPE_I32_I32_VOID),
         );
-        // Imports 2..: extern fn declarations from
-        // `extern "abi" { fn name(...): ret }` blocks. Emission order
-        // matches `collect_extern_imports` registration order so the
-        // index recorded in `extern_fn_indices` matches the actual
-        // wasm import slot. Phase 2B-ii of #43.
+        // User-declared `extern "abi" { fn name(..): R }` items.
+        // Emitted at indices NUM_IMPORTS .. NUM_IMPORTS + extern_count, so
+        // they precede the runtime helpers in the wasm function index space.
         for info in &self.extern_imports {
             imports.import(
-                &info.abi,
-                &info.name,
+                info.abi.as_str(),
+                info.name.as_str(),
                 wasm_encoder::EntityType::Function(info.wasm_type_idx),
             );
         }
@@ -1115,15 +1036,9 @@ impl Codegen {
                 }
                 Decl::Type { .. } => {}
                 Decl::Const { .. } => {} // constants inlined
-                // TODO(ephapax#43 phase 2B): emit no body for extern fns
-                // (they're resolved as `(import …)` directives in the
-                // import section, not via the code section). Until that
-                // wiring lands, phase 2A just skips them here.
+                // Extern items: no body to emit. Wasm import directives
+                // land in Phase C of hyperpolymath/ephapax#43.
                 Decl::Extern { .. } => {}
-                // Data types have no code-section body; runtime
-                // representation comes from the desugar binary-sum
-                // encoding.
-                Decl::Data { .. } => {}
             }
         }
         Ok(())
@@ -2800,7 +2715,7 @@ impl Codegen {
             // Large tuples: allocate in memory (8 bytes per element + 4 header)
             let size = 4 + (elements.len() as i32) * 8;
             func.instruction(&Instruction::I32Const(size));
-            func.instruction(&Instruction::Call(self.fn_region_alloc()));
+            func.instruction(&Instruction::Call(self.fn_bump_alloc()));
             // Store count header
             func.instruction(&Instruction::LocalTee(self.locals.scratch_local()));
             func.instruction(&Instruction::I32Const(elements.len() as i32));

@@ -1,0 +1,7 @@
+// SPDX-License-Identifier: PMPL-1.0-or-later
+// Smallest possible v2-grammar module: a slash-segmented module path
+// followed by a single nullary fn. Used as a parser regression test.
+
+module hyperpolymath/ephapax/test
+
+fn answer(): I32 = 42

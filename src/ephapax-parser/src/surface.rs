@@ -11,8 +11,9 @@
 //! are parsed directly to surface AST.
 
 use ephapax_surface::{
-    BaseTy, BinOp, ConstructorDef, DataDecl, Literal, MatchArm, Pattern, Span, SurfaceDecl,
-    SurfaceExpr, SurfaceExprKind, SurfaceExternItem, SurfaceModule, SurfaceTy, UnaryOp,
+    BaseTy, BinOp, ConstructorDef, DataDecl, ExternBlock, ExternItem, Literal, MatchArm, Pattern,
+    Span, SurfaceDecl, SurfaceExpr, SurfaceExprKind, SurfaceImport, SurfaceModule, SurfaceTy,
+    SurfaceVisibility, UnaryOp,
 };
 use pest::Parser;
 use smol_str::SmolStr;
@@ -47,16 +48,17 @@ pub fn parse_surface_module(source: &str, name: &str) -> Result<SurfaceModule, V
 
     for inner in pair.into_inner() {
         match inner.as_rule() {
+            Rule::declaration => {
+                decls.push(parse_surface_declaration(inner).map_err(|e| vec![e])?);
+            }
+            Rule::import_decl => {
+                imports.push(parse_surface_import(inner).map_err(|e| vec![e])?);
+            }
             Rule::module_decl => {
+                // `module a/b/c` — the qualified_name is the only child.
                 if let Some(qn) = inner.into_inner().next() {
                     module_name = SmolStr::new(qn.as_str());
                 }
-            }
-            Rule::import_decl => {
-                imports.push(crate::parse_import(inner).map_err(|e| vec![e])?);
-            }
-            Rule::declaration => {
-                decls.push(parse_surface_declaration(inner).map_err(|e| vec![e])?);
             }
             _ => {}
         }
@@ -67,6 +69,24 @@ pub fn parse_surface_module(source: &str, name: &str) -> Result<SurfaceModule, V
         imports,
         decls,
     })
+}
+
+fn parse_surface_import(
+    pair: pest::iterators::Pair<Rule>,
+) -> Result<SurfaceImport, ParseError> {
+    let mut inner = pair.into_inner();
+    let module_pair = inner
+        .next()
+        .ok_or_else(|| ParseError::missing("import module path"))?;
+    let module = SmolStr::new(module_pair.as_str());
+
+    let mut names = Vec::new();
+    for item in inner {
+        if item.as_rule() == Rule::identifier {
+            names.push(SmolStr::new(item.as_str()));
+        }
+    }
+    Ok(SurfaceImport { module, names })
 }
 
 /// Parse a single expression into surface AST.
@@ -112,9 +132,13 @@ fn parse_constructor_name(pair: pest::iterators::Pair<Rule>) -> SmolStr {
 // =========================================================================
 
 fn parse_surface_declaration(pair: pest::iterators::Pair<Rule>) -> Result<SurfaceDecl, ParseError> {
+    // A `declaration` is now `annotation* ~ (data_decl | fn_decl | type_decl
+    // | extern_block | const_decl)`. Skip past any leading annotations to
+    // find the actual decl pair. Annotation metadata is dropped at the
+    // parser layer for now — see the `annotation` rule in ephapax.pest.
     let inner = pair
         .into_inner()
-        .next()
+        .find(|p| p.as_rule() != Rule::annotation)
         .ok_or_else(|| ParseError::unexpected_end("declaration"))?;
 
     match inner.as_rule() {
@@ -129,114 +153,112 @@ fn parse_surface_declaration(pair: pest::iterators::Pair<Rule>) -> Result<Surfac
     }
 }
 
-/// Parse an `extern "abi" { ... }` block into a `SurfaceDecl::Extern`.
-///
-/// Mirror of the core parser's `parse_extern_block`, but types stay
-/// in surface form (`SurfaceTy`) until the desugar pass.
 fn parse_extern_block(pair: pest::iterators::Pair<Rule>) -> Result<SurfaceDecl, ParseError> {
-    let span = span_from_pair(&pair);
     let mut inner = pair.into_inner();
 
     let abi_pair = inner
         .next()
         .ok_or_else(|| ParseError::missing("extern ABI string"))?;
-    let abi = unquote_string_literal(abi_pair.as_str());
+    // The ABI token is a `string` (which is `"..."` quoted) — strip the
+    // surrounding quotes.
+    let abi_raw = abi_pair.as_str();
+    let abi = SmolStr::new(abi_raw.trim_start_matches('"').trim_end_matches('"'));
 
-    let mut items: Vec<SurfaceExternItem> = Vec::new();
-    for item_pair in inner {
-        if item_pair.as_rule() == Rule::extern_item {
-            items.push(parse_extern_item(item_pair)?);
+    let mut items = Vec::new();
+    for item in inner {
+        if item.as_rule() == Rule::extern_item {
+            items.push(parse_extern_item(item)?);
         }
     }
 
-    Ok(SurfaceDecl::Extern { abi, items, span })
+    Ok(SurfaceDecl::Extern(ExternBlock { abi, items }))
 }
 
-fn parse_extern_item(pair: pest::iterators::Pair<Rule>) -> Result<SurfaceExternItem, ParseError> {
+fn parse_extern_item(pair: pest::iterators::Pair<Rule>) -> Result<ExternItem, ParseError> {
     let inner = pair
         .into_inner()
         .next()
         .ok_or_else(|| ParseError::unexpected_end("extern item"))?;
 
     match inner.as_rule() {
-        Rule::extern_type_item => {
+        Rule::extern_type => {
             let name_pair = inner
                 .into_inner()
                 .next()
                 .ok_or_else(|| ParseError::missing("extern type name"))?;
-            Ok(SurfaceExternItem::Type {
-                name: parse_identifier(name_pair),
-            })
+            Ok(ExternItem::Type(parse_identifier(name_pair)))
         }
-        Rule::extern_fn_item => {
-            let mut bits = inner.into_inner();
+        Rule::extern_fn => {
+            let mut parts = inner.into_inner();
             let name = parse_identifier(
-                bits.next()
+                parts
+                    .next()
                     .ok_or_else(|| ParseError::missing("extern fn name"))?,
             );
-            let mut params: Vec<(SmolStr, SurfaceTy)> = Vec::new();
-            let mut ret_ty: Option<SurfaceTy> = None;
-            for sub in bits {
-                match sub.as_rule() {
+
+            let mut params = Vec::new();
+            let mut ret_ty = None;
+
+            for item in parts {
+                match item.as_rule() {
                     Rule::param_list => {
-                        for p in sub.into_inner() {
-                            if p.as_rule() == Rule::param {
-                                let mut parts = p.into_inner();
-                                let pn = parse_identifier(
-                                    parts
-                                        .next()
+                        for param in item.into_inner() {
+                            if param.as_rule() == Rule::param {
+                                let mut pp = param.into_inner();
+                                let pname = parse_identifier(
+                                    pp.next()
                                         .ok_or_else(|| ParseError::missing("extern param name"))?,
                                 );
-                                let pt = parse_type(
-                                    parts
-                                        .next()
+                                let pty = parse_type(
+                                    pp.next()
                                         .ok_or_else(|| ParseError::missing("extern param type"))?,
                                 )?;
-                                params.push((pn, pt));
+                                params.push((pname, pty));
                             }
                         }
                     }
                     Rule::ty => {
                         if ret_ty.is_none() {
-                            ret_ty = Some(parse_type(sub)?);
+                            ret_ty = Some(parse_type(item)?);
                         }
                     }
                     _ => {}
                 }
             }
-            Ok(SurfaceExternItem::Fn {
+
+            Ok(ExternItem::Fn {
                 name,
                 params,
                 ret_ty: ret_ty.unwrap_or(SurfaceTy::Base(BaseTy::Unit)),
             })
         }
         other => Err(ParseError::Syntax {
-            message: format!("Unexpected extern item: {other:?}"),
+            message: format!("Unexpected extern item: {:?}", other),
             span: Span::dummy(),
         }),
     }
 }
 
-/// Strip the surrounding double quotes from a pest `string` literal.
-fn unquote_string_literal(raw: &str) -> String {
-    let trimmed = raw.trim_matches('"');
-    trimmed.replace("\\\"", "\"").replace("\\\\", "\\")
-}
-
 fn parse_data_decl(pair: pest::iterators::Pair<Rule>) -> Result<SurfaceDecl, ParseError> {
     let span = span_from_pair(&pair);
-    let mut inner = pair.into_inner();
+    let inner = pair.into_inner();
 
-    let name = parse_constructor_name(
-        inner
-            .next()
-            .ok_or_else(|| ParseError::missing("data type name"))?,
-    );
-
+    // `visibility?` may precede the constructor name (e.g. `pub data
+    // Department = ...`). Surface AST doesn't track data-decl visibility
+    // explicitly today — but we still need to skip past the pair to find
+    // the actual name. Data exports remain implicitly public for now.
+    let mut name: Option<smol_str::SmolStr> = None;
     let mut params = Vec::new();
     let mut constructors = Vec::new();
 
     for item in inner {
+        if name.is_none() && item.as_rule() == Rule::visibility {
+            continue;
+        }
+        if name.is_none() && item.as_rule() == Rule::constructor_name {
+            name = Some(parse_constructor_name(item));
+            continue;
+        }
         match item.as_rule() {
             Rule::type_params => {
                 for p in item.into_inner() {
@@ -253,7 +275,7 @@ fn parse_data_decl(pair: pest::iterators::Pair<Rule>) -> Result<SurfaceDecl, Par
     }
 
     Ok(SurfaceDecl::Data(DataDecl {
-        name,
+        name: name.ok_or_else(|| ParseError::missing("data type name"))?,
         params,
         constructors,
         span,
@@ -290,20 +312,22 @@ fn parse_data_variant(pair: pest::iterators::Pair<Rule>) -> Result<ConstructorDe
 }
 
 fn parse_fn_decl(pair: pest::iterators::Pair<Rule>) -> Result<SurfaceDecl, ParseError> {
-    let mut inner = pair.into_inner();
+    let inner = pair.into_inner();
 
-    let name = parse_identifier(
-        inner
-            .next()
-            .ok_or_else(|| ParseError::missing("function name"))?,
-    );
-
+    let mut visibility = SurfaceVisibility::Private;
+    let mut name: Option<ephapax_surface::Var> = None;
     let mut params = Vec::new();
     let mut ret_ty = None;
     let mut body = None;
 
     for item in inner {
         match item.as_rule() {
+            Rule::visibility => {
+                visibility = SurfaceVisibility::Public;
+            }
+            Rule::identifier if name.is_none() => {
+                name = Some(parse_identifier(item));
+            }
             Rule::param_list => {
                 for param in item.into_inner() {
                     if param.as_rule() == Rule::param {
@@ -335,7 +359,8 @@ fn parse_fn_decl(pair: pest::iterators::Pair<Rule>) -> Result<SurfaceDecl, Parse
     }
 
     Ok(SurfaceDecl::Fn {
-        name,
+        name: name.ok_or_else(|| ParseError::missing("function name"))?,
+        visibility,
         params,
         ret_ty: ret_ty.unwrap_or(SurfaceTy::Base(BaseTy::Unit)),
         body: body.unwrap_or_else(|| SurfaceExpr::dummy(SurfaceExprKind::Lit(Literal::Unit))),
@@ -343,20 +368,91 @@ fn parse_fn_decl(pair: pest::iterators::Pair<Rule>) -> Result<SurfaceDecl, Parse
 }
 
 fn parse_type_decl(pair: pest::iterators::Pair<Rule>) -> Result<SurfaceDecl, ParseError> {
-    let mut inner = pair.into_inner();
-    let name = parse_identifier(
-        inner
-            .next()
-            .ok_or_else(|| ParseError::missing("type name"))?,
-    );
+    let inner = pair.into_inner();
 
-    let next = inner
-        .next()
-        .ok_or_else(|| ParseError::missing("type definition"))?;
+    let mut visibility = SurfaceVisibility::Private;
+    let mut name: Option<ephapax_surface::Var> = None;
+    let mut ty: Option<SurfaceTy> = None;
 
-    let ty = parse_type(next)?;
+    for item in inner {
+        match item.as_rule() {
+            Rule::visibility => visibility = SurfaceVisibility::Public,
+            Rule::identifier if name.is_none() => name = Some(parse_identifier(item)),
+            Rule::ty if ty.is_none() => ty = Some(parse_type(item)?),
+            // `type Foo = { f1: T1, f2: T2 }` — record type alias. Lower
+            // to a right-nested binary product of field types (field
+            // names are not preserved in the surface AST today; record
+            // access happens via tuple `.0`/`.1` projections after
+            // desugar). Bridge.eph relies on this for `type Model = {..}`.
+            Rule::record_type_def if ty.is_none() => {
+                let mut field_tys: Vec<SurfaceTy> = Vec::new();
+                for fld in item.into_inner() {
+                    if fld.as_rule() == Rule::record_field {
+                        // record_field = identifier ~ ":" ~ ty
+                        let mut parts = fld.into_inner();
+                        let _name = parts.next();
+                        if let Some(t) = parts.next() {
+                            field_tys.push(parse_type(t)?);
+                        }
+                    }
+                }
+                ty = Some(field_tys_to_product(field_tys));
+            }
+            // `type Foo = | A | B(I32)` — sum type alias. Same approach,
+            // lower to a binary sum of variant payloads.
+            Rule::sum_type_def if ty.is_none() => {
+                let mut variant_tys: Vec<SurfaceTy> = Vec::new();
+                for v in item.into_inner() {
+                    if v.as_rule() == Rule::sum_variant {
+                        let mut parts = v.into_inner();
+                        let _name = parts.next();
+                        match parts.next() {
+                            Some(t) => variant_tys.push(parse_type(t)?),
+                            None => variant_tys.push(SurfaceTy::Base(BaseTy::Unit)),
+                        }
+                    }
+                }
+                ty = Some(field_tys_to_sum(variant_tys));
+            }
+            _ => {}
+        }
+    }
 
-    Ok(SurfaceDecl::Type { name, ty })
+    Ok(SurfaceDecl::Type {
+        name: name.ok_or_else(|| ParseError::missing("type name"))?,
+        visibility,
+        ty: ty.ok_or_else(|| ParseError::missing("type definition"))?,
+    })
+}
+
+fn field_tys_to_product(tys: Vec<SurfaceTy>) -> SurfaceTy {
+    match tys.len() {
+        0 => SurfaceTy::Base(BaseTy::Unit),
+        1 => tys.into_iter().next().expect("len == 1"),
+        2 => {
+            let mut iter = tys.into_iter();
+            SurfaceTy::Prod {
+                left: Box::new(iter.next().expect("len == 2")),
+                right: Box::new(iter.next().expect("len == 2")),
+            }
+        }
+        _ => SurfaceTy::Tuple(tys),
+    }
+}
+
+fn field_tys_to_sum(tys: Vec<SurfaceTy>) -> SurfaceTy {
+    let mut iter = tys.into_iter().rev();
+    let mut acc = match iter.next() {
+        Some(t) => t,
+        None => return SurfaceTy::Base(BaseTy::Unit),
+    };
+    for t in iter {
+        acc = SurfaceTy::Sum {
+            left: Box::new(t),
+            right: Box::new(acc),
+        };
+    }
+    acc
 }
 
 // =========================================================================
@@ -374,6 +470,7 @@ fn parse_expression(pair: pest::iterators::Pair<Rule>) -> Result<SurfaceExpr, Pa
         Rule::seq_expr => parse_seq_expr(inner),
         // Legacy: if expression directly contains a single_expr child
         Rule::single_expr => parse_single_expr(inner),
+        Rule::block_expr => parse_block_expr(inner),
         Rule::let_expr => parse_let_expr(inner),
         Rule::let_lin_expr => parse_let_lin_expr(inner),
         Rule::lambda_expr => parse_lambda_expr(inner),
@@ -443,6 +540,7 @@ fn parse_single_expr(pair: pest::iterators::Pair<Rule>) -> Result<SurfaceExpr, P
         .ok_or_else(|| ParseError::unexpected_end("single expression"))?;
 
     match inner.as_rule() {
+        Rule::block_expr => parse_block_expr(inner),
         Rule::let_expr => parse_let_expr(inner),
         Rule::let_lin_expr => parse_let_lin_expr(inner),
         Rule::lambda_expr => parse_lambda_expr(inner),
@@ -458,15 +556,183 @@ fn parse_single_expr(pair: pest::iterators::Pair<Rule>) -> Result<SurfaceExpr, P
     }
 }
 
+/// Parse an implicit-`in` block: a chain of `let`/`let!` bindings without
+/// trailing `in` followed by a result expression. Folds into nested
+/// `Let` / `LetLin` AST nodes.
+fn parse_block_expr(pair: pest::iterators::Pair<Rule>) -> Result<SurfaceExpr, ParseError> {
+    let span = span_from_pair(&pair);
+    let children: Vec<_> = pair.into_inner().collect();
+
+    // Children: zero or more `sequential_let` pairs, then exactly one final
+    // `expression`. The grammar guarantees `sequential_let+`, so we can
+    // unwrap the trailing expression.
+    let (lets, trailing): (Vec<_>, Vec<_>) = children
+        .into_iter()
+        .partition(|p| p.as_rule() == Rule::sequential_let);
+    let trailing_expr = trailing
+        .into_iter()
+        .find(|p| p.as_rule() == Rule::expression)
+        .ok_or_else(|| ParseError::missing("block trailing expression"))?;
+    let mut body = parse_expression(trailing_expr)?;
+
+    // Fold from the right: the last let wraps the trailing expression as
+    // its body, the previous let wraps that, etc.
+    for stmt in lets.into_iter().rev() {
+        body = parse_sequential_let(stmt, body, span)?;
+    }
+    Ok(body)
+}
+
+/// Parse one `sequential_let` (a `let` / `let!` without trailing `in`)
+/// against an already-parsed body expression. Reuses the tuple-binder
+/// lowering from [`match_arm_from_tuple_binder`].
+fn parse_sequential_let(
+    pair: pest::iterators::Pair<Rule>,
+    body: SurfaceExpr,
+    span: Span,
+) -> Result<SurfaceExpr, ParseError> {
+    // The first token (`let` or `let!`) is consumed by the grammar but
+    // doesn't appear as a Pair — we detect it from the source slice.
+    let src = pair.as_str();
+    let is_linear = src.trim_start().starts_with("let!");
+
+    let mut inner = pair.into_inner();
+    let binder = parse_let_binder(
+        inner
+            .next()
+            .ok_or_else(|| ParseError::missing("sequential let binder"))?,
+    )?;
+
+    let mut ty = None;
+    let mut value = None;
+    for item in inner {
+        match item.as_rule() {
+            Rule::ty if ty.is_none() => ty = Some(parse_type(item)?),
+            Rule::block_rhs if value.is_none() => value = Some(parse_block_rhs(item)?),
+            _ => {}
+        }
+    }
+    let value = value.ok_or_else(|| ParseError::missing("sequential let value"))?;
+
+    Ok(match (binder, is_linear) {
+        (LetBinder::Single(name), false) => SurfaceExpr::new(
+            SurfaceExprKind::Let {
+                name,
+                ty,
+                value: Box::new(value),
+                body: Box::new(body),
+            },
+            span,
+        ),
+        (LetBinder::Single(name), true) => SurfaceExpr::new(
+            SurfaceExprKind::LetLin {
+                name,
+                ty,
+                value: Box::new(value),
+                body: Box::new(body),
+            },
+            span,
+        ),
+        (LetBinder::Tuple(names), _) => match_arm_from_tuple_binder(names, value, body, span),
+    })
+}
+
+fn parse_block_rhs(pair: pest::iterators::Pair<Rule>) -> Result<SurfaceExpr, ParseError> {
+    let span = span_from_pair(&pair);
+    let inner = pair
+        .into_inner()
+        .next()
+        .ok_or_else(|| ParseError::unexpected_end("block rhs"))?;
+    match inner.as_rule() {
+        Rule::lambda_expr => parse_lambda_expr(inner),
+        Rule::if_expr => parse_if_expr(inner),
+        Rule::region_expr => parse_region_expr(inner),
+        Rule::match_expr => parse_match_expr(inner),
+        Rule::case_expr => parse_case_expr(inner),
+        Rule::or_expr => parse_or_expr(inner),
+        other => Err(ParseError::Syntax {
+            message: format!("Unexpected block rhs rule: {:?}", other),
+            span,
+        }),
+    }
+}
+
+/// A parsed `let_binder` — either a single identifier or a list of
+/// identifiers from a `tuple_binder`. Tuple binders are lowered to a
+/// 1-arm match at the parse site.
+enum LetBinder {
+    Single(ephapax_surface::Var),
+    Tuple(Vec<ephapax_surface::Var>),
+}
+
+fn parse_let_binder(pair: pest::iterators::Pair<Rule>) -> Result<LetBinder, ParseError> {
+    // `let_binder = { tuple_binder | identifier }`
+    let inner = pair
+        .into_inner()
+        .next()
+        .ok_or_else(|| ParseError::unexpected_end("let binder"))?;
+    match inner.as_rule() {
+        Rule::identifier => Ok(LetBinder::Single(parse_identifier(inner))),
+        Rule::tuple_binder => {
+            let names: Vec<_> = inner
+                .into_inner()
+                .filter(|p| p.as_rule() == Rule::identifier)
+                .map(parse_identifier)
+                .collect();
+            if names.len() < 2 {
+                return Err(ParseError::Syntax {
+                    message: "tuple binder must have at least 2 names".into(),
+                    span: Span::dummy(),
+                });
+            }
+            Ok(LetBinder::Tuple(names))
+        }
+        other => Err(ParseError::Syntax {
+            message: format!("Unexpected let binder: {:?}", other),
+            span: Span::dummy(),
+        }),
+    }
+}
+
+/// Build a 1-arm `match scrutinee of | (a, b, ...) => body end` from a
+/// tuple-binder lowering. For N=2 the pattern is `Pattern::Pair`; for N>2
+/// it becomes a right-nested chain of `Pattern::Pair`s to match ephapax's
+/// existing binary-product encoding.
+fn match_arm_from_tuple_binder(
+    binders: Vec<ephapax_surface::Var>,
+    scrutinee: SurfaceExpr,
+    body: SurfaceExpr,
+    span: Span,
+) -> SurfaceExpr {
+    // Build the pair pattern from the right: (a, b, c) → Pair(a, Pair(b, c)).
+    let mut iter = binders.into_iter().rev();
+    let last = iter.next().expect("at least 2 binders");
+    let mut pat = Pattern::Var(last);
+    for name in iter {
+        pat = Pattern::Pair(Box::new(Pattern::Var(name)), Box::new(pat));
+    }
+    SurfaceExpr::new(
+        SurfaceExprKind::Match {
+            scrutinee: Box::new(scrutinee),
+            arms: vec![MatchArm {
+                pattern: pat,
+                guard: None,
+                body,
+            }],
+        },
+        span,
+    )
+}
+
 fn parse_let_expr(pair: pest::iterators::Pair<Rule>) -> Result<SurfaceExpr, ParseError> {
     let span = span_from_pair(&pair);
     let mut inner = pair.into_inner();
 
-    let name = parse_identifier(
+    let binder = parse_let_binder(
         inner
             .next()
-            .ok_or_else(|| ParseError::missing("let name"))?,
-    );
+            .ok_or_else(|| ParseError::missing("let binder"))?,
+    )?;
 
     let mut ty = None;
     let mut value = None;
@@ -481,26 +747,32 @@ fn parse_let_expr(pair: pest::iterators::Pair<Rule>) -> Result<SurfaceExpr, Pars
         }
     }
 
-    Ok(SurfaceExpr::new(
-        SurfaceExprKind::Let {
-            name,
-            ty,
-            value: Box::new(value.ok_or_else(|| ParseError::missing("let value"))?),
-            body: Box::new(body.ok_or_else(|| ParseError::missing("let body"))?),
-        },
-        span,
-    ))
+    let value = value.ok_or_else(|| ParseError::missing("let value"))?;
+    let body = body.ok_or_else(|| ParseError::missing("let body"))?;
+
+    match binder {
+        LetBinder::Single(name) => Ok(SurfaceExpr::new(
+            SurfaceExprKind::Let {
+                name,
+                ty,
+                value: Box::new(value),
+                body: Box::new(body),
+            },
+            span,
+        )),
+        LetBinder::Tuple(names) => Ok(match_arm_from_tuple_binder(names, value, body, span)),
+    }
 }
 
 fn parse_let_lin_expr(pair: pest::iterators::Pair<Rule>) -> Result<SurfaceExpr, ParseError> {
     let span = span_from_pair(&pair);
     let mut inner = pair.into_inner();
 
-    let name = parse_identifier(
+    let binder = parse_let_binder(
         inner
             .next()
-            .ok_or_else(|| ParseError::missing("let! name"))?,
-    );
+            .ok_or_else(|| ParseError::missing("let! binder"))?,
+    )?;
 
     let mut ty = None;
     let mut value = None;
@@ -515,15 +787,21 @@ fn parse_let_lin_expr(pair: pest::iterators::Pair<Rule>) -> Result<SurfaceExpr, 
         }
     }
 
-    Ok(SurfaceExpr::new(
-        SurfaceExprKind::LetLin {
-            name,
-            ty,
-            value: Box::new(value.ok_or_else(|| ParseError::missing("let! value"))?),
-            body: Box::new(body.ok_or_else(|| ParseError::missing("let! body"))?),
-        },
-        span,
-    ))
+    let value = value.ok_or_else(|| ParseError::missing("let! value"))?;
+    let body = body.ok_or_else(|| ParseError::missing("let! body"))?;
+
+    match binder {
+        LetBinder::Single(name) => Ok(SurfaceExpr::new(
+            SurfaceExprKind::LetLin {
+                name,
+                ty,
+                value: Box::new(value),
+                body: Box::new(body),
+            },
+            span,
+        )),
+        LetBinder::Tuple(names) => Ok(match_arm_from_tuple_binder(names, value, body, span)),
+    }
 }
 
 fn parse_lambda_expr(pair: pest::iterators::Pair<Rule>) -> Result<SurfaceExpr, ParseError> {
@@ -1275,6 +1553,46 @@ fn parse_atom_expr(pair: pest::iterators::Pair<Rule>) -> Result<SurfaceExpr, Par
             Ok(SurfaceExpr::new(SurfaceExprKind::ListLit(elements), span))
         }
 
+        // Record literal `{ f1 = v1, f2 = v2 }` (or `f: v` / `f: ty = v`
+        // shorthands). Field names aren't preserved in the surface AST
+        // today — lower to a positional product (`Pair`/`TupleLit`)
+        // matching the lowering used by `type Foo = { f1: T1, f2: T2 }`
+        // in `parse_type_decl`. Bridge.eph + hypatia_gui.eph rely on this.
+        Rule::record_literal => {
+            let mut values = Vec::new();
+            for fld in inner.into_inner() {
+                if fld.as_rule() == Rule::record_field_assign {
+                    let mut value: Option<SurfaceExpr> = None;
+                    for part in fld.into_inner() {
+                        match part.as_rule() {
+                            Rule::expression => value = Some(parse_expression(part)?),
+                            _ => {}
+                        }
+                    }
+                    if let Some(v) = value {
+                        values.push(v);
+                    }
+                }
+            }
+            Ok(match values.len() {
+                0 => SurfaceExpr::new(SurfaceExprKind::Lit(Literal::Unit), span),
+                1 => values.into_iter().next().expect("len == 1"),
+                2 => {
+                    let mut iter = values.into_iter();
+                    let left = iter.next().expect("len == 2");
+                    let right = iter.next().expect("len == 2");
+                    SurfaceExpr::new(
+                        SurfaceExprKind::Pair {
+                            left: Box::new(left),
+                            right: Box::new(right),
+                        },
+                        span,
+                    )
+                }
+                _ => SurfaceExpr::new(SurfaceExprKind::TupleLit(values), span),
+            })
+        }
+
         Rule::paren_or_pair => {
             let mut exprs = Vec::new();
             for p in inner.into_inner() {
@@ -1501,12 +1819,26 @@ fn parse_type_atom(pair: pest::iterators::Pair<Rule>) -> Result<SurfaceTy, Parse
             Ok(SurfaceTy::List(Box::new(elem_ty)))
         }
         Rule::product_ty => {
-            let tys: Vec<SurfaceTy> = inner
+            let mut tys: Vec<SurfaceTy> = inner
                 .into_inner()
                 .filter(|p| p.as_rule() == Rule::ty)
                 .map(parse_type)
                 .collect::<Result<_, _>>()?;
-            Ok(SurfaceTy::Tuple(tys))
+            // Match the value-side convention in `paren_or_pair`: exactly two
+            // elements form a binary product (`Prod`, matched by `fst`/`snd`
+            // and `Pattern::Pair`); three or more elements form a TupleLit /
+            // SurfaceTy::Tuple. This keeps `(I32, I32)` as a type compatible
+            // with `(1, 2)` as a value.
+            if tys.len() == 2 {
+                let right = tys.remove(1);
+                let left = tys.remove(0);
+                Ok(SurfaceTy::Prod {
+                    left: Box::new(left),
+                    right: Box::new(right),
+                })
+            } else {
+                Ok(SurfaceTy::Tuple(tys))
+            }
         }
         Rule::named_ty => {
             let mut parts = inner.into_inner();

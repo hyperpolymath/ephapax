@@ -80,12 +80,8 @@ impl AffineChecker {
                 }
             }
             Decl::Type { .. } | Decl::Const { .. } => {}
-            // Extern declarations have no body — no affine discipline
-            // applies. The signatures only exist to inform codegen.
+            // Extern items declare a host signature with no body; nothing to walk.
             Decl::Extern { .. } => {}
-            // Data decls carry no body — discipline tracking happens
-            // on the desugared core form, not on Decl::Data itself.
-            Decl::Data { .. } => {}
         }
     }
 

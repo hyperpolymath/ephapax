@@ -1,0 +1,17 @@
+// SPDX-License-Identifier: PMPL-1.0-or-later
+// `extern "abi" { type T }` opaque types are now usable in fn signatures.
+// Desugar maps them to `I32` (host handle representation). Combined with
+// the `Unit` and `Bytes` builtin aliases, this is enough for the
+// `extern "gossamer" { ... }` block in hypatia's bridge.eph to desugar.
+
+module hyperpolymath/ephapax/test
+
+extern "host" {
+  type Window
+  type Channel
+  fn open(title: String): Window
+  fn poll(ch: Channel): Bytes
+  fn close(w: Window): Unit
+}
+
+fn entry(w: Window): Window = w

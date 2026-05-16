@@ -536,18 +536,37 @@ fn extract_declarations(module: &Module, _source: &str) -> Vec<DeclInfo> {
                 ),
                 params: Vec::new(),
                 return_type: ty.as_ref().map(|t| format_ty(t)),
-            }),
-            // TODO(ephapax#43 phase 2B): expose extern items as
-            // navigable LSP symbols. For phase 2A the LSP simply
-            // doesn't index extern declarations; the block parses
-            // and lives in the AST but isn't visible to hover /
-            // go-to-definition yet.
-            Decl::Extern { .. } => None,
-            // TODO(ephapax#60 follow-up): expose data decls + their
-            // constructors as LSP symbols (currently the surface
-            // pipeline materialises them only via the desugar
-            // registry; this arm covers the core-parser path).
-            Decl::Data { .. } => None,
+            },
+            Decl::Extern {
+                name,
+                abi,
+                params,
+                ret_ty,
+            } => {
+                let param_strs: Vec<(String, String)> = params
+                    .iter()
+                    .map(|(n, t)| (n.to_string(), format_ty(t)))
+                    .collect();
+                let sig = format!(
+                    "extern \"{}\" fn {}({}) -> {}",
+                    abi,
+                    name,
+                    param_strs
+                        .iter()
+                        .map(|(n, t)| format!("{}: {}", n, t))
+                        .collect::<Vec<_>>()
+                        .join(", "),
+                    format_ty(ret_ty)
+                );
+                DeclInfo {
+                    name: name.to_string(),
+                    kind: DeclKind::Function,
+                    span: Span::dummy(),
+                    signature: sig,
+                    params: param_strs,
+                    return_type: Some(format_ty(ret_ty)),
+                }
+            }
         })
         .collect()
 }

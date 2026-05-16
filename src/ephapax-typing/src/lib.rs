@@ -979,7 +979,11 @@ impl TypeChecker {
     }
 
     fn check_string_new(&self, s: Span, region: &RegionName) -> Result<Ty, SpannedTypeError> {
-        if !self.ctx.region_active(region) {
+        // The wildcard region name `_` is implicitly active everywhere —
+        // it stands for the global / data-section pool that holds bare
+        // string literals lowered by desugar. Other named regions still
+        // require a surrounding `region r { ... }` block.
+        if region.as_str() != "_" && !self.ctx.region_active(region) {
             return Err(self.at(s, TypeError::InactiveRegion(region.clone())));
         }
         Ok(Ty::String(region.clone()))
@@ -2086,13 +2090,23 @@ impl ModuleRegistry {
                     ret_ty,
                     ..
                 } => {
-                    let fn_ty = params
-                        .iter()
-                        .rev()
-                        .fold(ret_ty.clone(), |acc, (_, param_ty)| Ty::Fun {
-                            param: Box::new(param_ty.clone()),
-                            ret: Box::new(acc),
-                        });
+                    // Nullary fn `fn foo(): T = ...` has type `() -> T`,
+                    // not `T`. Without this wrap, `foo()` at a call site
+                    // fails to unify `T applied to ()`.
+                    let fn_ty = if params.is_empty() {
+                        Ty::Fun {
+                            param: Box::new(Ty::Base(BaseTy::Unit)),
+                            ret: Box::new(ret_ty.clone()),
+                        }
+                    } else {
+                        params
+                            .iter()
+                            .rev()
+                            .fold(ret_ty.clone(), |acc, (_, param_ty)| Ty::Fun {
+                                param: Box::new(param_ty.clone()),
+                                ret: Box::new(acc),
+                            })
+                    };
                     let poly_ty =
                         type_params.iter().rev().fold(fn_ty, |acc, tv| Ty::ForAll {
                             var: tv.clone(),
@@ -2110,37 +2124,31 @@ impl ModuleRegistry {
                     let const_ty = ty.clone().unwrap_or(Ty::Base(BaseTy::Unit));
                     entries.push((name.clone(), const_ty, Visibility::Private));
                 }
-                // Cross-module export of extern fn signatures. Extern
-                // type items are nominal — they exist in the type
-                // namespace, not the value namespace, so they have no
-                // entry here. Extern fns are exposed publicly so a
-                // dependent module that imports this one sees the same
-                // signatures the local code sees. Wired in phase 2B-i
-                // alongside the local type-environment registration in
-                // `type_check_module_inner`.
-                Decl::Extern { items, .. } => {
-                    for item in items {
-                        if let ExternItem::Fn {
-                            name,
-                            params,
-                            ret_ty,
-                        } = item
-                        {
-                            let fn_ty = params.iter().rev().fold(
-                                ret_ty.clone(),
-                                |acc, (_, param_ty)| Ty::Fun {
-                                    param: Box::new(param_ty.clone()),
-                                    ret: Box::new(acc),
-                                },
-                            );
-                            entries.push((name.clone(), fn_ty, Visibility::Public));
+                Decl::Extern {
+                    name,
+                    abi: _,
+                    params,
+                    ret_ty,
+                } => {
+                    // Extern items are publicly available to importers — the
+                    // host runtime / wasm imports resolve them; we don't gate
+                    // visibility at the language level here.
+                    let fn_ty = if params.is_empty() {
+                        Ty::Fun {
+                            param: Box::new(Ty::Base(BaseTy::Unit)),
+                            ret: Box::new(ret_ty.clone()),
                         }
-                    }
+                    } else {
+                        params
+                            .iter()
+                            .rev()
+                            .fold(ret_ty.clone(), |acc, (_, param_ty)| Ty::Fun {
+                                param: Box::new(param_ty.clone()),
+                                ret: Box::new(acc),
+                            })
+                    };
+                    entries.push((name.clone(), fn_ty, Visibility::Public));
                 }
-                // Data decls live in the type namespace, not the value
-                // namespace, so they contribute no module-registry entry.
-                // Runtime semantics flow through the desugar registry.
-                Decl::Data { .. } => {}
             }
         }
         self.modules.insert(module.name.clone(), entries);
@@ -2223,16 +2231,7 @@ fn type_check_module_inner(
     tc: &mut TypeChecker,
     module: &Module,
 ) -> Result<(), SpannedTypeError> {
-    // Pre-pass: register all `Decl::Data` declarations so constructor
-    // patterns inside function bodies can resolve via the registry.
-    tc.data_registry
-        .populate_from_module(module)
-        .map_err(|e| SpannedTypeError {
-            error: e,
-            span: Span::dummy(),
-        })?;
-
-    // First pass: collect all function signatures (regular + extern)
+    // First pass: collect all function signatures, including externs.
     for decl in &module.decls {
         match decl {
             Decl::Fn {
@@ -2242,52 +2241,49 @@ fn type_check_module_inner(
                 type_params,
                 ..
             } => {
-                let fn_ty =
+                let fn_ty = if params.is_empty() {
+                    Ty::Fun {
+                        param: Box::new(Ty::Base(BaseTy::Unit)),
+                        ret: Box::new(ret_ty.clone()),
+                    }
+                } else {
                     params
                         .iter()
                         .rev()
                         .fold(ret_ty.clone(), |acc, (_, param_ty)| Ty::Fun {
                             param: Box::new(param_ty.clone()),
                             ret: Box::new(acc),
-                        });
+                        })
+                };
                 let poly_ty = type_params.iter().rev().fold(fn_ty, |acc, tv| Ty::ForAll {
                     var: tv.clone(),
                     body: Box::new(acc),
                 });
                 tc.ctx.extend(name.clone(), poly_ty, BindingForm::Let);
             }
-            // Extern fn items are registered as ambient bindings with
-            // their declared signatures so regular fn bodies that call
-            // them type-check. Extern type items are nominal (resolved
-            // by the desugar pass to `Ty::Var`) and need no binding
-            // entry here — they exist in the type namespace, not the
-            // value namespace.
-            //
-            // Phase 2B-ii will wire wasm codegen to emit `(import …)`
-            // directives for each extern fn item and route call sites
-            // to the import index. Until then the binding type-checks
-            // but the generated wasm has no actual import — the
-            // declaration is observed but not yet honoured by codegen.
-            Decl::Extern { items, .. } => {
-                for item in items {
-                    if let ExternItem::Fn {
-                        name,
-                        params,
-                        ret_ty,
-                    } = item
-                    {
-                        let fn_ty = params.iter().rev().fold(
-                            ret_ty.clone(),
-                            |acc, (_, param_ty)| Ty::Fun {
-                                param: Box::new(param_ty.clone()),
-                                ret: Box::new(acc),
-                            },
-                        );
-                        tc.ctx.extend(name.clone(), fn_ty, BindingForm::Let);
+            Decl::Extern {
+                name,
+                abi: _,
+                params,
+                ret_ty,
+            } => {
+                let fn_ty = if params.is_empty() {
+                    Ty::Fun {
+                        param: Box::new(Ty::Base(BaseTy::Unit)),
+                        ret: Box::new(ret_ty.clone()),
                     }
-                }
+                } else {
+                    params
+                        .iter()
+                        .rev()
+                        .fold(ret_ty.clone(), |acc, (_, param_ty)| Ty::Fun {
+                            param: Box::new(param_ty.clone()),
+                            ret: Box::new(acc),
+                        })
+                };
+                tc.ctx.extend(name.clone(), fn_ty, BindingForm::Let);
             }
-            _ => {}
+            Decl::Type { .. } | Decl::Const { .. } => {}
         }
     }
 
@@ -2331,16 +2327,8 @@ fn type_check_module_inner(
             }
             Decl::Type { .. } => {}
             Decl::Const { .. } => {} // Constants are handled in module registration
-            // TODO(ephapax#43 phase 2B): typecheck extern items —
-            // register extern types as opaque nominal types and extern
-            // fns with their declared signatures. For phase 2A the
-            // declaration parses but does not affect the type
-            // environment.
+            // Extern items have no body to check — registered in first pass.
             Decl::Extern { .. } => {}
-            // Data semantics flow through the desugar registry —
-            // structured Decl::Data is preserved for tooling but the
-            // typechecker has nothing to do with it directly.
-            Decl::Data { .. } => {}
         }
     }
 

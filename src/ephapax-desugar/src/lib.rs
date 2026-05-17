@@ -57,11 +57,18 @@ use std::collections::HashMap;
 
 use ephapax_surface::{
     ConstructorDef, DataDecl, MatchArm, Pattern, Span, SurfaceDecl, SurfaceExpr, SurfaceExprKind,
-    SurfaceExternItem, SurfaceModule, SurfaceTy,
+    SurfaceExternItem, SurfaceModule, SurfaceTy, SurfaceVisibility,
 };
 use ephapax_syntax::{BaseTy, Decl, Expr, ExprKind, ExternItem, Literal, Module, Ty, Visibility};
 use smol_str::SmolStr;
 use thiserror::Error;
+
+fn lower_visibility(v: SurfaceVisibility) -> Visibility {
+    match v {
+        SurfaceVisibility::Public => Visibility::Public,
+        SurfaceVisibility::Private => Visibility::Private,
+    }
+}
 
 /// Desugaring errors.
 #[derive(Debug, Clone, Error)]
@@ -131,6 +138,12 @@ pub struct DataRegistry {
     /// themselves (so values of type `Window` cannot be confused with
     /// `IpcChannel`, etc.).
     extern_types: std::collections::HashSet<SmolStr>,
+    /// `type Foo = T` aliases — captured in their pre-desugar surface
+    /// form so `desugar_named_type` can recursively expand them on
+    /// demand. The stored value is whatever the parser produced for the
+    /// alias body (record/sum decls already pre-lowered to `Prod`/`Sum`/
+    /// `Tuple` by `parse_type_decl`).
+    type_aliases: HashMap<SmolStr, SurfaceTy>,
 }
 
 impl DataRegistry {
@@ -164,6 +177,16 @@ impl DataRegistry {
     /// `extern "abi" { type Foo }`).
     pub fn register_extern_type(&mut self, name: &SmolStr) {
         self.extern_types.insert(name.clone());
+    }
+
+    /// Register a `type Foo = T` alias in surface form. Lookups in
+    /// `desugar_named_type` find the entry and recursively desugar it.
+    pub fn register_type_alias(&mut self, name: SmolStr, ty: SurfaceTy) {
+        self.type_aliases.insert(name, ty);
+    }
+
+    fn lookup_type_alias(&self, name: &str) -> Option<&SurfaceTy> {
+        self.type_aliases.get(name)
     }
 
     /// Look up a constructor by name.
@@ -226,6 +249,9 @@ impl Desugarer {
                         }
                     }
                 }
+                SurfaceDecl::Type { name, ty, .. } => {
+                    self.registry.register_type_alias(name.clone(), ty.clone());
+                }
                 _ => {}
             }
         }
@@ -236,6 +262,7 @@ impl Desugarer {
             match decl {
                 SurfaceDecl::Fn {
                     name,
+                    visibility,
                     params,
                     ret_ty,
                     body,
@@ -248,17 +275,21 @@ impl Desugarer {
                     let core_body = self.desugar_expr(body)?;
                     core_decls.push(Decl::Fn {
                         name: name.clone(),
-                        visibility: Visibility::Private,
+                        visibility: lower_visibility(*visibility),
                         type_params: vec![],
                         params: core_params,
                         ret_ty: core_ret,
                         body: core_body,
                     });
                 }
-                SurfaceDecl::Type { name, ty } => {
+                SurfaceDecl::Type {
+                    name,
+                    visibility,
+                    ty,
+                } => {
                     core_decls.push(Decl::Type {
                         name: name.clone(),
-                        visibility: Visibility::Private,
+                        visibility: lower_visibility(*visibility),
                         ty: self.desugar_ty(ty)?,
                     });
                 }
@@ -314,7 +345,17 @@ impl Desugarer {
         let span = expr.span;
         let kind = match &expr.kind {
             // === Pass-through nodes (structural recursion) ===
-            SurfaceExprKind::Lit(lit) => ExprKind::Lit(lit.clone()),
+            SurfaceExprKind::Lit(lit) => match lit {
+                // Bare string literals (`"hello"` written inline) lower
+                // to a `StringNew` allocating in the synthetic `_`
+                // region — the wildcard region the typechecker uses for
+                // inferred String types (see check_string_new).
+                Literal::String(s) => ExprKind::StringNew {
+                    region: SmolStr::new("_"),
+                    value: s.clone(),
+                },
+                _ => ExprKind::Lit(lit.clone()),
+            },
             SurfaceExprKind::Var(v) => ExprKind::Var(v.clone()),
 
             SurfaceExprKind::StringNew { region, value } => ExprKind::StringNew {
@@ -541,9 +582,52 @@ impl Desugarer {
     /// codegen). Two distinct extern types `Window` and `IpcChannel`
     /// produce two distinct `Ty::Var` rigids that never unify.
     fn desugar_named_type(&self, name: &SmolStr, args: &[SurfaceTy]) -> Result<Ty, DesugarError> {
+        // Built-in type aliases that aren't (yet) keywords in the lexer.
+        // `Unit` is the type-position spelling of the literal `()`;
+        // bridge.eph and other ML-adjacent corpora write it freely.
+        if name.as_str() == "Unit" {
+            if !args.is_empty() {
+                return Err(DesugarError::TypeArityMismatch {
+                    name: name.to_string(),
+                    expected: 0,
+                    got: args.len(),
+                });
+            }
+            return Ok(Ty::Base(BaseTy::Unit));
+        }
+        // `Bytes` is the conventional name for a host-managed buffer.
+        // Until the stdlib publishes a real `Bytes` ADT, treat it as an
+        // I32 handle (the wasm host passes pointer/length pairs across
+        // `__ffi`; for direct extern-fn signatures the handle is enough).
+        if name.as_str() == "Bytes" {
+            if !args.is_empty() {
+                return Err(DesugarError::TypeArityMismatch {
+                    name: name.to_string(),
+                    expected: 0,
+                    got: args.len(),
+                });
+            }
+            return Ok(Ty::Base(BaseTy::I32));
+        }
+
         if self.registry.is_extern_type(name.as_str()) {
             return Ok(Ty::Var(name.clone()));
         }
+
+        // `type Foo = T` aliases — recursively desugar the stored surface
+        // form. Aliases are monomorphic here (parameterised aliases would
+        // carry their args via the body).
+        if let Some(aliased) = self.registry.lookup_type_alias(name.as_str()).cloned() {
+            if !args.is_empty() {
+                return Err(DesugarError::TypeArityMismatch {
+                    name: name.to_string(),
+                    expected: 0,
+                    got: args.len(),
+                });
+            }
+            return self.desugar_ty(&aliased);
+        }
+
         let (params, ctors) = self.registry.get_type_ctors(name.as_str()).ok_or_else(|| {
             DesugarError::UnknownType {
                 name: name.to_string(),
@@ -782,6 +866,64 @@ impl Desugarer {
         }
 
         let core_scrutinee = self.desugar_expr(scrutinee)?;
+
+        // Fast path: a single-arm match whose pattern is not a constructor
+        // is structural destructuring (typically from a tuple-binder
+        // `let (a, b) = e in body` lowered at parse time). Delegate to
+        // `bind_single_pattern`, which handles `Pair`, `Wildcard`, `Var`,
+        // etc. directly without going through the sum-type case tree.
+        if arms.len() == 1
+            && !matches!(arms[0].pattern, Pattern::Constructor { .. })
+            && arms[0].guard.is_none()
+        {
+            let body = self.desugar_expr(&arms[0].body)?;
+            return self.bind_single_pattern(&core_scrutinee, &arms[0].pattern, body, span);
+        }
+
+        // Match on a literal-typed scrutinee (`match n of | 0 => a | 1 =>
+        // b | _ => c end`). All arms are Literal / Wildcard / Var, no
+        // constructor — desugar to nested `if scrutinee == lit then arm
+        // else next` ending in the wildcard/var branch.
+        let all_literal_or_wildcard = arms.iter().all(|a| {
+            matches!(
+                a.pattern,
+                Pattern::Literal(_) | Pattern::Wildcard | Pattern::Var(_)
+            ) && a.guard.is_none()
+        });
+        if all_literal_or_wildcard {
+            // Default: the last Wildcard/Var arm, or unit if none.
+            let mut default = Expr::new(ExprKind::Lit(Literal::Unit), span);
+            for arm in arms.iter().rev() {
+                if matches!(arm.pattern, Pattern::Wildcard | Pattern::Var(_)) {
+                    default = self.desugar_expr(&arm.body)?;
+                    break;
+                }
+            }
+            // Walk literal arms in reverse, wrapping each in an if.
+            let mut acc = default;
+            for arm in arms.iter().rev() {
+                if let Pattern::Literal(lit) = &arm.pattern {
+                    let arm_body = self.desugar_expr(&arm.body)?;
+                    let cond = Expr::new(
+                        ExprKind::BinOp {
+                            op: ephapax_syntax::BinOp::Eq,
+                            left: Box::new(core_scrutinee.clone()),
+                            right: Box::new(Expr::new(ExprKind::Lit(lit.clone()), span)),
+                        },
+                        span,
+                    );
+                    acc = Expr::new(
+                        ExprKind::If {
+                            cond: Box::new(cond),
+                            then_branch: Box::new(arm_body),
+                            else_branch: Box::new(acc),
+                        },
+                        span,
+                    );
+                }
+            }
+            return Ok(acc);
+        }
 
         // Find the data type from constructor patterns
         let data_name = self.find_data_type_from_arms(arms)?;
@@ -1447,6 +1589,7 @@ mod tests {
                 SurfaceDecl::Data(option_decl()),
                 SurfaceDecl::Fn {
                     name: "unwrap_or".into(),
+                    visibility: SurfaceVisibility::Private,
                     params: vec![
                         (
                             "opt".into(),
@@ -1530,6 +1673,7 @@ mod tests {
                 }),
                 SurfaceDecl::Fn {
                     name: "test".into(),
+                    visibility: SurfaceVisibility::Private,
                     params: vec![(
                         "opt".into(),
                         SurfaceTy::Named {
@@ -1594,6 +1738,7 @@ mod tests {
                 }),
                 SurfaceDecl::Fn {
                     name: "test".into(),
+                    visibility: SurfaceVisibility::Private,
                     params: vec![(
                         "opt".into(),
                         SurfaceTy::Named {
@@ -1635,7 +1780,6 @@ mod tests {
             // Should be a Case expression
             if let ExprKind::Case {
                 left_body,
-                right_body,
                 left_var,
                 right_var,
                 ..

@@ -1,0 +1,65 @@
+// SPDX-License-Identifier: PMPL-1.0-or-later
+// Hypatia GUI — Ephapax / Gossamer TEA interface
+//
+// Vendored from hyperpolymath/hypatia src/ui/gossamer/hypatia_gui.eph
+// with three local adaptations to compile against ephapax's v2 grammar:
+//   1. `module hypatia/ui/gui` header added (resolver indexes by module decl)
+//   2. `pub` keywords on the items bridge.eph imports
+//   3. `model.field_name` → positional `.0` / `.1` (named field access
+//      is tracked separately; for now records lower to binary products)
+
+module hypatia/ui/gui
+
+// ── Hypatia Departments ───────────────────────────────────────────────────
+
+pub data Department =
+  | Learning
+  | Symbolic
+  | Verification
+  | Triangle
+
+// ── Model ─────────────────────────────────────────────────────────────────
+
+// Hypatia GUI Model. Held by the TEA runtime on the UI thread; no
+// resource handles, so affine discipline is enough. Field 0 is the
+// current Department; field 1 is the I32 history depth.
+pub type Model = {
+  current_dept: Department,
+  history_depth: I32
+}
+
+// ── Msg ───────────────────────────────────────────────────────────────────
+
+pub data Msg =
+  | Navigate(Department)
+  | PopState
+
+// ── TEA Logic ─────────────────────────────────────────────────────────────
+
+// Initial state: Triangle (Core Safety) with no history.
+pub fn hypatia_init(): Model =
+  { current_dept = Triangle, history_depth = 0 }
+
+// TEA update. Consumes msg + model, produces a new Model.
+pub fn hypatia_update(msg: Msg, model: Model): Model =
+  match msg of
+    | Navigate(new_dept) =>
+        { current_dept = new_dept, history_depth = model.1 + 1 }
+    | PopState =>
+        if model.1 > 0 then
+          { current_dept = Triangle, history_depth = model.1 - 1 }
+        else
+          { current_dept = model.0, history_depth = 0 }
+  end
+
+// View: render the current department as a display string.
+pub fn hypatia_view(model: Model): String =
+  match model.0 of
+    | Learning     => "NEURAL LEARNING (Elixir Pipeline)"
+    | Symbolic     => "SYMBOLIC REASONING (Elixir Rules)"
+    | Verification => "FORMAL VERIFICATION (Idris2 / Lean4 / TLA+)"
+    | Triangle     => "SAFETY TRIANGLE (Eliminate / Substitute / Control)"
+  end
+
+// Subscriptions placeholder.
+pub fn hypatia_subs(model: Model): String = "None"

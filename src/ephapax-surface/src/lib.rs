@@ -393,13 +393,20 @@ pub enum SurfaceDecl {
     /// Function definition (same as core, but with surface types/exprs)
     Fn {
         name: Var,
+        #[serde(default, skip_serializing_if = "SurfaceVisibility::is_private")]
+        visibility: SurfaceVisibility,
         params: Vec<(Var, SurfaceTy)>,
         ret_ty: SurfaceTy,
         body: SurfaceExpr,
     },
 
     /// Type alias (same as core, but with surface types)
-    Type { name: Var, ty: SurfaceTy },
+    Type {
+        name: Var,
+        #[serde(default, skip_serializing_if = "SurfaceVisibility::is_private")]
+        visibility: SurfaceVisibility,
+        ty: SurfaceTy,
+    },
 
     /// Data type declaration (surface-only)
     Data(DataDecl),
@@ -432,6 +439,24 @@ pub enum SurfaceExternItem {
         params: Vec<(SmolStr, SurfaceTy)>,
         ret_ty: SurfaceTy,
     },
+}
+
+/// Surface-level visibility — matches `ephapax_syntax::Visibility` but
+/// kept local so the surface AST doesn't need to depend on it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum SurfaceVisibility {
+    /// Accessible from other modules.
+    Public,
+    /// Module-private (default).
+    #[default]
+    Private,
+}
+
+impl SurfaceVisibility {
+    pub fn is_private(&self) -> bool {
+        matches!(self, SurfaceVisibility::Private)
+    }
 }
 
 /// A complete surface-level module.

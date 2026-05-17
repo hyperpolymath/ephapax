@@ -771,6 +771,7 @@ dependencies = [
  "smol_str",
  "tempfile",
  "typed-wasm-verify",
+ "wasmparser 0.221.3",
  "wasmtime",
 ]
 
@@ -947,6 +948,7 @@ dependencies = [
  "object 0.36.7",
  "serde",
  "serde_json",
+ "smol_str",
  "typed-wasm-verify",
  "wasm-encoder 0.221.3",
  "wasmparser 0.221.3",

@@ -6,15 +6,17 @@
 //!
 //! The main entry point for the Ephapax compiler and tools.
 
+mod import_resolver;
+
 // Note: ariadne removed for now - using simple error output
 use clap::{Parser, Subcommand};
 use colored::Colorize;
-use ephapax_desugar::desugar;
+use ephapax_desugar::{desugar, DataRegistry, Desugarer};
 use ephapax_interp::Interpreter;
 use ephapax_lexer::Lexer;
 use ephapax_parser::{parse, parse_module, parse_surface_module};
 use ephapax_repl::Repl;
-use ephapax_typing::type_check_module;
+use ephapax_typing::{type_check_module, type_check_module_with_registry, ModuleRegistry};
 // AST dump support (sexpr + json output)
 #[allow(unused_imports)]
 use std::fs;
@@ -408,42 +410,131 @@ fn compile_file(
     verify_ownership: bool,
     verbose: bool,
 ) -> Result<(), String> {
-    let content =
-        fs::read_to_string(path).map_err(|e| format!("Cannot read {}: {}", path.display(), e))?;
-
-    let filename = path.to_str().unwrap_or("input");
+    let filename = path.to_str().unwrap_or("input").to_string();
 
     // The mode_str parameter is accepted but ignored — dyadic property is per-binding.
 
-    // Parse → Desugar
-    let module = match parse_surface_module(&content, filename) {
-        Ok(surface_module) => {
-            desugar(&surface_module).map_err(|e| format!("Desugar error: {}", e))?
-        }
-        Err(_) => {
-            // Fallback to core parser
-            parse_module(&content, filename).map_err(|errors| {
+    let base_dir = path
+        .parent()
+        .map(|p| p.to_path_buf())
+        .unwrap_or_else(|| PathBuf::from("."));
+
+    // Try the multi-module pipeline first: load + parse the import graph
+    // (modules returned in topological order, dependencies first, root
+    // last). If the surface parser rejects the root file, fall back to
+    // the legacy single-file core-parser path.
+    let loaded = match import_resolver::load_program(path, &base_dir) {
+        Ok(l) => l,
+        Err(import_resolver::ResolveError::Parse { .. }) => {
+            // Surface parse failed on the root — legacy core-parser fallback.
+            let content = fs::read_to_string(path)
+                .map_err(|e| format!("Cannot read {}: {}", path.display(), e))?;
+            let module = parse_module(&content, &filename).map_err(|errors| {
                 for error in &errors {
-                    report_parse_error(filename, &content, error);
+                    report_parse_error(&filename, &content, error);
                 }
                 format!("{} parse error(s)", errors.len())
-            })?
+            })?;
+            if verbose {
+                println!("{} Parsed {} declarations", "✓".green(), module.decls.len());
+            }
+            type_check_module(&module).map_err(|e| {
+                report_type_error(&filename, &content, &e);
+                format!("Type error: {}", e)
+            })?;
+            if verbose {
+                println!("{} Type check passed", "✓".green());
+            }
+            return finish_compile(module, &filename, path, output, opt_level, debug,
+                verify_ownership, verbose);
         }
+        Err(e) => return Err(e.to_string()),
     };
 
     if verbose {
-        println!("{} Parsed {} declarations", "✓".green(), module.decls.len());
+        println!(
+            "{} Resolved {} module(s) in import graph",
+            "✓".green(),
+            loaded.len()
+        );
     }
 
-    // Type check
-    type_check_module(&module).map_err(|e| {
-        report_type_error(filename, &content, &e);
-        format!("Type error: {}", e)
-    })?;
+    // Multi-module desugar: chain a single DataRegistry across all modules
+    // so imported `data` and `extern type` items are visible.
+    let mut desugarer = Desugarer::with_registry(DataRegistry::new());
+    let mut core_modules = Vec::with_capacity(loaded.len());
+    for lm in &loaded {
+        let core = desugarer
+            .desugar_module(&lm.surface)
+            .map_err(|e| format!("Desugar error in {}: {}", lm.file_path.display(), e))?;
+        core_modules.push(core);
+    }
+
+    // Multi-module typecheck: chain a single ModuleRegistry so imports
+    // resolve.
+    let mut module_registry = ModuleRegistry::new();
+    for core in &core_modules {
+        type_check_module_with_registry(core, &mut module_registry)
+            .map_err(|e| format!("Type error in module `{}`: {:?}", core.name, e))?;
+    }
+
+    // Merge all imported modules into the root for codegen. Wasm produces
+    // a single binary; each imported module's `Fn` declarations become
+    // part of the same wasm module. Duplicate fn/extern names across
+    // modules are dropped (first-seen wins).
+    let mut merged = core_modules
+        .pop()
+        .ok_or_else(|| "import graph produced no modules".to_string())?;
+    // Dedup keys: `fn:<name>` for functions, `extern:<abi>` for whole
+    // extern blocks (an extern block emits one wasm import per fn item;
+    // re-emitting the same ABI block from another module would produce
+    // duplicate imports). First-seen wins.
+    fn dedup_key(d: &ephapax_syntax::Decl) -> Option<String> {
+        match d {
+            ephapax_syntax::Decl::Fn { name, .. } => Some(format!("fn:{name}")),
+            ephapax_syntax::Decl::Extern { abi, .. } => Some(format!("extern:{abi}")),
+            _ => None,
+        }
+    }
+    let mut seen: std::collections::HashSet<String> =
+        merged.decls.iter().filter_map(dedup_key).collect();
+    for dep in core_modules.into_iter() {
+        for decl in dep.decls {
+            if let Some(key) = dedup_key(&decl) {
+                if !seen.insert(key) {
+                    continue; // Skip duplicate fn / extern block.
+                }
+            }
+            merged.decls.push(decl);
+        }
+    }
+    let module = merged;
 
     if verbose {
+        println!(
+            "{} Parsed {} declarations in root module",
+            "✓".green(),
+            module.decls.len()
+        );
         println!("{} Type check passed", "✓".green());
     }
+
+    finish_compile(module, &filename, path, output, opt_level, debug,
+        verify_ownership, verbose)
+}
+
+/// Codegen + optional ownership verification + output write. Shared by
+/// the multi-module and legacy single-file compile paths.
+fn finish_compile(
+    module: ephapax_syntax::Module,
+    filename: &str,
+    path: &PathBuf,
+    output: Option<PathBuf>,
+    opt_level: u8,
+    debug: bool,
+    verify_ownership: bool,
+    verbose: bool,
+) -> Result<(), String> {
 
     // Compile to WASM (with or without debug info)
     let wasm_bytes = if debug {

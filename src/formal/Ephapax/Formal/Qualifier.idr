@@ -15,6 +15,7 @@
 module Ephapax.Formal.Qualifier
 
 import Data.List
+import Data.List.Elem
 
 %default total
 
@@ -184,3 +185,63 @@ public export
 nonDiminishment : (s : Split (MkBinding n Linear t :: rest) left right) -> LinearPreserved s
 nonDiminishment (SplitLinL _) = PreservedLeft
 nonDiminishment (SplitLinR _) = PreservedRight
+
+--------------------------------------------------------------------------------
+-- Linear Coverage (general form of Theorem 5.1)
+--------------------------------------------------------------------------------
+
+||| `nonDiminishment` only covers a linear binding at the HEAD of the context.
+||| The docstring on `Split` (above) makes the stronger claim that *every*
+||| linear binding — at any position in `full` — appears in (at least) one of
+||| the two sub-contexts. That general statement was previously unproven.
+|||
+||| `splitLinearCoverage` discharges it: for any split and any linear binding
+||| that is a member of the full context, that binding is a member of the left
+||| or of the right sub-context (i.e. it is never dropped). The proof is pure
+||| structural induction over the `Split` derivation.
+|||
+||| Scope: this proves COVERAGE (linear bindings are not dropped — the "at
+||| least one" / non-diminishment direction). It does not assert exclusivity
+||| ("exactly one"): with value-equal duplicate bindings that is a distinct,
+||| stronger property and is left as future work; it is intentionally NOT
+||| claimed here.
+private
+Uninhabited (Affine = Linear) where
+  uninhabited Refl impossible
+
+public export
+splitLinearCoverage : (s : Split full left right)
+                    -> (b : Binding)
+                    -> b.bindQual = Linear
+                    -> Elem b full
+                    -> Either (Elem b left) (Elem b right)
+splitLinearCoverage SplitNil _ _ el = absurd el
+-- Linear head goes left
+splitLinearCoverage (SplitLinL _) _ _ Here = Left Here
+splitLinearCoverage (SplitLinL s) b prf (There e) =
+  case splitLinearCoverage s b prf e of
+    Left el  => Left (There el)
+    Right er => Right er
+-- Linear head goes right
+splitLinearCoverage (SplitLinR _) _ _ Here = Right Here
+splitLinearCoverage (SplitLinR s) b prf (There e) =
+  case splitLinearCoverage s b prf e of
+    Left el  => Left el
+    Right er => Right (There er)
+-- Affine head, kept left: the head cannot be our linear `b`
+splitLinearCoverage (SplitAffL _) _ prf Here = absurd prf
+splitLinearCoverage (SplitAffL s) b prf (There e) =
+  case splitLinearCoverage s b prf e of
+    Left el  => Left (There el)
+    Right er => Right er
+-- Affine head, kept right
+splitLinearCoverage (SplitAffR _) _ prf Here = absurd prf
+splitLinearCoverage (SplitAffR s) b prf (There e) =
+  case splitLinearCoverage s b prf e of
+    Left el  => Left el
+    Right er => Right (There er)
+-- Affine head, dropped (weakening): the head cannot be our linear `b`,
+-- and the sub-contexts are unchanged by the drop.
+splitLinearCoverage (SplitAffDrop _) _ prf Here = absurd prf
+splitLinearCoverage (SplitAffDrop s) b prf (There e) =
+  splitLinearCoverage s b prf e

@@ -3234,7 +3234,16 @@ Proof.
      expression slot (which is what `induction Hstep` substitutes for). *)
   remember (mu, R, e) as cfg eqn:Hcfg.
   remember (mu', R', e') as cfg' eqn:Hcfg'.
-  induction Hstep; intros G0 T0 G0' Htype;
+  (* Generalise mu/R/e/mu'/R'/e' and their cfg-equations so the IHs
+     emitted by `induction Hstep` get clean universal quantification
+     over each inner step's config — not the outer cfg pair (which
+     would make the IH non-applicable, since (mu_inner, R_inner,
+     e_inner) ≠ (mu, R, EOuter ...) in general). Without this revert,
+     the 28 congruence cases left after the cross-case discriminate
+     pass have unusable IHs. *)
+  revert mu R e mu' R' e' Hcfg Hcfg'.
+  induction Hstep; intros mu0 R0 e0 mu0' R0' e0' Hcfg Hcfg';
+    intros G0 T0 G0' Htype;
     inversion Hcfg; subst;
     inversion Hcfg'; subst;
     inversion Htype; subst;
@@ -3337,6 +3346,74 @@ Proof.
               [ exact Hnotin' | exact Hfr | apply region_add_typing; exact Hout ] ]
         end
     end).
+  (* === Goal-closing chain for the post-remember-cfg 29 residuals ===
+     Added 2026-05-20 evening per formal/PRESERVATION-HANDOFF.md per-case
+     checklist. Each `all: try solve [...]` targets one residual class. *)
+
+  (* Axiom cases (S_StringNew / S_StringConcat): result is `ELoc l r`
+     and the *goal's* type is `TString r0` (named from inversion of
+     the OUTER typing). To close, invert the sibling-location's typing
+     premise (`H : R; G |- ELoc _ r : TString r0 -| G'`) which is
+     itself a T_Loc — that derives `r0 = r` and `region_active R r`.
+     Then T_Loc applies. *)
+  all: try solve [
+    match goal with
+    | [ H : has_type _ _ (ELoc _ _) (TString _) _
+        |- exists _ : ctx, has_type _ _ (ELoc _ _) (TString _) _ ] =>
+        inversion H; subst; eexists; apply T_Loc; assumption
+    end
+  ].
+
+  (* S_StringNew: result is `ELoc l r` at `TString r` (no sibling
+     typing in scope, but the step's `In r R` is). *)
+  all: try solve [eexists; apply T_Loc; unfold region_active in *; assumption].
+
+  (* S_StringLen: result is `EI32 (String.length s)` at `TBase TI32`. *)
+  all: try solve [eexists; apply T_I32].
+
+  (* S_Drop: result is `EUnit` at `TBase TUnit`. *)
+  all: try solve [eexists; apply T_Unit].
+
+  (* S_Copy: result is `EPair v v` at `TProd T T`. Constructor +
+     assumption on the value's typing premise (carried over by the
+     inversion of T_Copy). *)
+  all: try solve [eexists; apply T_Pair; eassumption].
+
+  (* β-reduction cases (S_Let_Val, S_LetLin_Val, S_App_Fun, S_Fst,
+     S_Snd, S_Case_Inl/Inr): close via the existing
+     subst_preserves_typing lemma. *)
+  all: try solve [eexists; eapply subst_preserves_typing; eassumption].
+
+  (* S_If_True / S_If_False: pick the appropriate branch's typing premise. *)
+  all: try solve [eexists; eassumption].
+
+  (* Congruence cases (S_*_Step variants): the IH (after the revert)
+     is universally quantified over each inner step's config — we
+     specialise with the constructor's inner-step args + reflexivity
+     on the cfg equations. Pattern after revert mu/R/e/mu'/R'/e'/Hcfg/Hcfg':
+
+       IH : forall mu R e mu' R' e',
+              (?mu_in, ?R_in, ?e_in) = (mu, R, e) ->
+              (?mu_out, ?R_out, ?e_out) = (mu', R', e') ->
+              forall G T G', R; G |- e : T -| G' ->
+                             exists G_out, R'; G |- e' : T -| G_out
+
+     We use edestruct + eq_refl x 2 on the universal cfg equations,
+     supply the inner-expr typing premise from inversion, then close
+     by econstructor + eauto. The eauto fallback handles cases where
+     the sibling premises need light glue (e.g. region invariance
+     follows from the step's region-non-change). *)
+  all: try solve [
+    match goal with
+    | [ IH : forall _ _ _ _ _ _, _ = _ -> _ = _ -> forall _ _ _, _ -> _,
+        Hi : has_type _ _ ?e_inner _ _ |- _ ] =>
+        let G_out_inner := fresh "G_out_inner" in
+        let Hout_inner := fresh "Hout_inner" in
+        edestruct (IH _ _ _ _ _ _ eq_refl eq_refl _ _ _ Hi) as [G_out_inner Hout_inner];
+        eexists; econstructor; eauto
+    end
+  ].
+
 Admitted.
 (* PROOF STATUS [preservation] — ADMITTED, but down from 910 → ~29 open goals.
 

@@ -1,0 +1,57 @@
+# SPDX-License-Identifier: PMPL-1.0-or-later
+# Copyright (c) 2026 Jonathan D.A. Jewell (hyperpolymath) <j.d.a.jewell@open.ac.uk>
+#
+# abi-verify.yml — machine-checks the Ephapax Rust↔SPARK ABI seam.
+#
+# The seam (src/abi/Ephapax/ABI/{Types,Foreign,Invariants}.idr) states
+# the correctness-critical invariants E1–E6 (see PROOF-NEEDS.md and
+# RUST-SPARK-STANCE.adoc). Some properties have discharged proofs in
+# the broader formalisation (cited from Invariants.idr — e.g.
+# `splitLinearCoverage`, `noEscapeTheorem`); the rest are explicit
+# erased OWED obligations.
+#
+# This gate exists so the discharged proofs cannot silently regress
+# and an OWED postulate cannot quietly become a `believe_me`. Mirrors
+# the proof-of-work `abi-verify.yml` (snazzybucket/idris2 container,
+# the estate-standard image). HARD GATE.
+
+name: ABI Seam Verification
+
+on:
+  pull_request:
+    paths:
+      - 'src/abi/**'
+      - '.github/workflows/abi-verify.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'src/abi/**'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  idris2-abi:
+    name: Idris2 ABI seam (ephapax-abi.ipkg)
+    runs-on: ubuntu-latest
+    container:
+      image: snazzybucket/idris2:latest  # estate-standard Idris2 image
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v4
+
+      - name: Build (typecheck) the ABI seam
+        working-directory: src/abi
+        run: |
+          idris2 --version
+          # --build typechecks every module in the .ipkg in dependency
+          # order. A real regression (ill-typed lemma, a discharged
+          # proof that stops reducing, a stray `?hole`/`believe_me`)
+          # fails here. The intentional erased OWED postulates are
+          # well-typed and do NOT fail the build — they are tracked in
+          # PROOF-NEEDS.md, not hidden.
+          idris2 --build ephapax-abi.ipkg

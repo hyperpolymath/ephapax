@@ -1,15 +1,19 @@
 // SPDX-License-Identifier: PMPL-1.0-or-later
-= Ephapax -- Show Me The Receipts
+= Ephapax — Show Me The Receipts
 :toc:
 :toclevels: 3
 :icons: font
 
-The README makes claims. This file backs them up.
+The README makes claims. This file backs them up — every assertion in
+README.adoc is tied to a specific file, test, or proof obligation.
 
 [quote, README]
 ____
-A dyadic language -- one part affine, the other linear -- as a type system
-with safe memory management targeting WebAssembly.
+A dyadic linear+affine type system for compile-time WebAssembly
+memory safety. Resources are tracked through the type system so the
+compiler can guarantee — without a garbage collector — that no value
+is used after being freed, no resource is leaked, and region-scoped
+allocations are deallocated in bulk at scope exit.
 ____
 
 == Claim: Dyadic Type System
@@ -141,21 +145,154 @@ Test `test_region_string_allocation` verifies in-region allocation.
 | `conformance/` | Conformance test suite (valid/invalid programs)
 |===
 
+== Claim: Mechanically Proved Soundness
+
+*Evidence*: Two complementary formalisations, both run on every push.
+
+=== Coq (`formal/`)
+
+The Coq operational semantics is a small-step substitution-based
+calculus over the Tofte-Talpin region-linear type system.
+
+[cols="3,1,2"]
+|===
+| Theorem | Status | Where
+
+| `no_leaks`
+| ✅ Qed
+| `formal/Semantics.v`
+
+| `subst_preserves_typing`
+| ✅ Qed
+| `formal/Semantics.v` (line 2808)
+
+| `typing_ctx_transfer`
+| ✅ Qed
+| `formal/Semantics.v`
+
+| `region_env_perm_typing`, `region_add_typing`, `region_shrink_preserves_typing`
+| ✅ Qed
+| `formal/Semantics.v` (lines 2960, 3042, 3107)
+
+| **`preservation`**
+| 🟡 Admitted
+| `formal/Semantics.v` (Theorem at line 3207). **22 open goals** as of 2026-05-20 (was 910). See `formal/PRESERVATION-HANDOFF.md`.
+|===
+
+The `preservation` reduction story is recent and load-bearing:
+
+* **910 → 29 goals** via the standard preservation pattern
+  (`remember (mu, R, e) as cfg eqn:Hcfg` + `inversion Hcfg; subst`
+  inside each case). Lands as PR #102 (2026-05-20). 97% reduction.
+* **29 → 22 goals** via `revert mu R e mu' R' e' Hcfg Hcfg'` before
+  `induction Hstep`, so each case's IH carries clean universal
+  quantification over the inner step's config rather than the
+  inconsistent outer-cfg equation. Lands as PR #106.
+* The remaining 22 need (a) region invariance for non-region step
+  constructors, (b) linearity-context preservation for sibling
+  premises in congruence cases, (c) the documented region-env
+  weakening lemma for non-values (the S_Region_Step + T_Region_Active
+  case the in-file comment originally identified as "the one open").
+
+An earlier in-file comment (corrected by PR #92, 2026-05-20) claimed
+preservation was Qed-closed on 2026-04-27. That claim was
+unsubstantiated — `coqc` 8.18.0 rejected the proof script. The
+chain above is the honest closure work in progress.
+
+=== Idris2 (`idris2/src/Ephapax/` + `src/formal/`)
+
+Two Idris2 developments:
+
+**Frontend (parser / typechecker / IR codec)** —
+`idris2/src/Ephapax/` is the actual Idris2-side of the two-phase
+pipeline. As of 2026-05-20, all 9 files compile under `%default
+total` (8 files) or `%default covering` (1 file, the recursive-
+descent parser).
+
+[cols="3,1,2"]
+|===
+| Module | Default | Notes
+
+| `IR/SExpr`, `Parse/Stream`, `Parse/Util`, `Parse/Lexer`, `Affine/Typecheck`
+| `%default total`
+| Fueled mutual recursion where Idris2 SCT couldn't trace structural
+  decrease through `Stream`-indexed parsers.
+
+| `IR/AST`, `IR/Decode`, `Affine/Emit`
+| `%default total` + 14 `covering`
+| `covering` markers are documented Idris2 0.8.0 SCT limits
+  (showPrec / (/=) interface-dispatch loops, map/traverse through
+  recursive types). Strictly stronger than the previous `%default
+  partial` state.
+
+| `Parse/Parser`
+| `%default covering`
+| LL(k) recursive descent through ~30 mutually-recursive Stream-
+  indexed parser combinators. Fueling all of them is a substantial
+  separate refactor, deferred to a later campaign.
+|===
+
+**Zero `believe_me`, zero `assert_total`, zero `assert_smaller`** in
+the entire frontend. The campaign that achieved this (PRs #89, #90,
+#91, #93, #94, #96, #97, #99, #100, all merged 2026-05-20) is
+documented in the project memory.
+
+**Region-linearity theorems** — `src/formal/` proves structural
+properties of the region-linear calculus:
+
+[cols="3,2"]
+|===
+| Theorem | Where
+
+| `noEscapeTheorem`
+| `src/formal/Ephapax/Formal/NoEscape.idr`
+
+| `regionSafetyTheorem`
+| `src/formal/Ephapax/Formal/RegionSafety.idr`
+
+| `noGCTheorem`
+| `src/formal/Ephapax/Formal/NoGC.idr`
+
+| `orthogonalityLemma`
+| `src/formal/Ephapax/Formal/Orthogonality.idr`
+
+| `splitLinearCoverage`
+| `src/formal/Ephapax/Formal/Qualifier.idr` (PR #85, 2026-05-19) —
+  generalises `nonDiminishment` from head-position to all linear
+  bindings.
+|===
+
+All five with zero `believe_me`, zero postulates, under `%default
+total`.
+
 == Test Evidence
 
-229 tests across 19 crates, 0 failures. Key test categories:
+~229 tests across ~19 crates, 0 failures. Key test categories:
 
-* *Type checker dyadic tests*: let vs let! semantics, branch agreement, region exit
-* *Desugar tests*: constructor encoding, match desugaring, exhaustiveness
-* *Parser tests*: surface syntax (data, match, constructors, named types)
+* *Type checker dyadic tests*: `let` vs `let!` semantics, branch
+  agreement, region exit (`ephapax-typing`)
+* *Desugar tests*: constructor encoding, match desugaring,
+  exhaustiveness (`ephapax-desugar`)
+* *Parser tests*: surface syntax (data, match, constructors, named
+  types) (`ephapax-parser`)
 * *Discipline tests*: linear vs affine checker divergence
-* *Integration tests*: parse -> desugar -> typecheck end-to-end
+  (`ephapax-linear`)
+* *Integration tests*: parse → desugar → typecheck end-to-end
+* *Conformance tests*: `conformance/pass/` programs must type-check,
+  `conformance/fail/` programs must be rejected
 
 == Design Documents
 
-* `spec/ephapax-v2-grammar.ebnf` -- Complete v2 grammar (modules, generics, effects, traits, comptime, contracts)
-* `docs/specs/DESIGN-DECISIONS.adoc` -- 17 ADRs with rationale
-* `docs/specs/LANGUAGE-COMPARISON.adoc` -- Comparison against 10 languages
+* `spec/ephapax-v2-grammar.ebnf` — complete v2 grammar (modules,
+  generics, effects, traits, comptime, contracts) — work in flight
+  on `feat/v2-grammar-*` branches
+* `docs/specs/DESIGN-DECISIONS.adoc` — 17 ADRs with rationale
+* `docs/specs/LANGUAGE-COMPARISON.adoc` — comparison against 10 languages
+* `docs/vision/EPHAPAX-VISION.adoc` — design rationale, why dyadic +
+  regions + WASM
+* `formal/PRESERVATION-HANDOFF.md` — per-case checklist for the 22
+  remaining preservation goals
+* `PROOF-NEEDS.md` — outstanding proof obligations + leverage
 
 == Questions?
 

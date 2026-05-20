@@ -1,0 +1,37 @@
+// SPDX-License-Identifier: PMPL-1.0-or-later
+// Copyright (c) 2026 Jonathan D.A. Jewell (hyperpolymath) <j.d.a.jewell@open.ac.uk>
+//
+// Ephapax.Argv — command-line argument access for wasm modules
+// compiled by ephapax.
+//
+// Argv lives at the wasm-host boundary, so it is exposed as an
+// `extern "env" { ... }` block rather than a compiler intrinsic. Any
+// host that embeds an ephapax .wasm module (e.g. the gossamer launcher,
+// a wasmtime wrapper, a browser harness) must provide implementations of
+// `env::argv_count`, `env::argv_arg_len`, and `env::argv_arg_get`.
+//
+// Buffer convention follows the WASI args_get/args_sizes_get shape:
+// the host writes raw UTF-8 bytes into a caller-supplied region of the
+// wasm linear memory. This avoids any allocation contract between host
+// and guest.
+//
+// Host contract:
+//   - argv_count() returns the number of CLI arguments, including argv[0].
+//   - argv_arg_len(idx) returns the byte length of argument `idx`, or -1
+//     when `idx` is out of range. The length excludes any trailing NUL.
+//   - argv_arg_get(idx, buf_ptr, buf_len) copies argument `idx` into the
+//     wasm linear-memory region [buf_ptr, buf_ptr + buf_len). Returns the
+//     number of bytes actually written (== argv_arg_len(idx) on success),
+//     or -1 if `idx` is out of range or `buf_len` is insufficient.
+//
+// Higher-level helpers (slice → String, full Array<String> materialisation)
+// will land once region-scoped String allocation and a List/Array story
+// stabilise in the v2 stdlib. For now, callers work at the byte level.
+
+module Argv
+
+extern "env" {
+  fn argv_count(): I32
+  fn argv_arg_len(idx: I32): I32
+  fn argv_arg_get(idx: I32, buf_ptr: I32, buf_len: I32): I32
+}

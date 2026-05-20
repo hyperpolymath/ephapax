@@ -3326,14 +3326,47 @@ Proof.
     end).
 Admitted.
 (* PROOF STATUS [preservation] — ADMITTED.
-   Earlier in-file note claimed "FULLY CLOSED (2026-04-27). Zero Admitted." with
-   `Qed.` here, but `coqc` (8.18.0) rejects that with "Attempt to save an
-   incomplete proof (there are remaining open goals)" — the proof script's nested
-   tactic combinator does not discharge every case of the inductive predicate.
-   Until the open goals are identified and closed, the honest mark is `Admitted.`
-   so the Coq formalisation builds and downstream docs (ROADMAP, PROOF-NEEDS)
-   accurately reflect the proof state. Supporting lemmas remain Qed:
+
+   Earlier in-file note (above, around line 3269) claimed "Only ONE
+   case remains open: S_Region_Step + T_Region_Active." Diagnostic
+   build (Admitted -> Qed + `all: match goal with |- ?G => idtac G end`
+   inserted before the Qed) on 2026-05-20 disproves that count:
+   ~40 goals remain open across the following type-shape variants —
+
+     exists G_out, R'; G  |- e' : T0           -| G_out   (many)
+     exists G_out, R'; G  |- e' : TBase TUnit  -| G_out
+     exists G_out, R'; G  |- e' : TBase TBool  -| G_out
+     exists G_out, R'; G  |- e' : TBase TI32   -| G_out
+     exists G_out, R'; G0 |- e' : TString r0   -| G_out
+     exists G_out, R'; G0 |- e' : TFun  T1 T2  -| G_out
+     exists G_out, R'; G0 |- e' : TProd T1 T2  -| G_out
+     exists G_out, R'; G0 |- e' : TSum  T1 T2  -| G_out
+     exists G_out, R'; G0 |- e' : TBorrow T    -| G_out
+     exists G_out, R'; G0 |- e' : TProd T T    -| G_out
+
+   The "only ONE case" framing — accurate for the *language-design*
+   bottleneck (S_Region_Step + T_Region_Active needs region-env
+   weakening for non-values) — has obscured that the surrounding
+   try-solve scaffolding ALSO fails to close many simpler congruence
+   cases. The proof script's IH-application pattern
+       match goal with
+       | [ IH : forall _ _ _, _ -> exists _, _ |- _ ] =>
+         match goal with
+         | [ H : has_type _ _ _ _ _ |- _ ] =>
+             destruct (IH _ _ _ H) ...
+       end end
+   picks ANY has_type in scope; with multiple inversion-introduced
+   has_types it often picks the wrong one and the subsequent
+   `eassumption` fails silently inside `try solve [...]`.
+
+   Closing the additional ~40 goals is multi-day proof engineering:
+   each step-constructor's congruence case needs its IH applied to
+   the specific inner-expression typing (not just any has_type), then
+   the outer typing reconstructed by the matching typing constructor.
+   Tracked separately from the S_Region_Step language-design item.
+
+   Supporting lemmas remain Qed:
      region_env_perm_typing: Qed (transfers typing across region-env permutations).
      region_add_typing: Qed (adding a region to R preserves typing).
      region_shrink_preserves_typing: Qed (T_Region_Active shadowing case closed via in_dec).
-   preservation itself: Admitted, pending discharge of the residual open goals. *)
+   preservation itself: Admitted, pending discharge of the residual ~40 open goals. *)

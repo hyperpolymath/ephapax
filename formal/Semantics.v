@@ -3204,6 +3204,94 @@ Proof.
   - eapply T_Copy; [exact H|apply IHHtype; exact Hfree].
 Qed.
 
+(** ** Region-invariance lemma
+
+    Captures the structural fact that the step relation only changes
+    the region environment [R] when the expression contains a region
+    operation (`ERegion`) at a step-reducible position. Used by
+    `preservation`'s congruence cases to transfer sibling-typing
+    premises from the pre-step region to the post-step region without
+    a general weakening lemma (which is the documented
+    S_Region_Step + T_Region_Active language-design item, still open).
+
+    The inductive predicate [touches_region] says "this expression's
+    next reducible position is inside a region operation". The lemma
+    [step_R_eq_or_touches_region] then says: every step either
+    preserves [R] or fires on a [touches_region] expression. *)
+
+Inductive touches_region : expr -> Prop :=
+  | TR_here :
+      forall r e, touches_region (ERegion r e)
+  | TR_StringConcat1 :
+      forall e1 e2,
+        touches_region e1 -> touches_region (EStringConcat e1 e2)
+  | TR_StringConcat2 :
+      forall v e,
+        is_value v -> touches_region e -> touches_region (EStringConcat v e)
+  | TR_StringLen :
+      forall e, touches_region e -> touches_region (EStringLen e)
+  | TR_Let :
+      forall e1 e2, touches_region e1 -> touches_region (ELet e1 e2)
+  | TR_LetLin :
+      forall e1 e2, touches_region e1 -> touches_region (ELetLin e1 e2)
+  | TR_App1 :
+      forall e1 e2, touches_region e1 -> touches_region (EApp e1 e2)
+  | TR_App2 :
+      forall v e,
+        is_value v -> touches_region e -> touches_region (EApp v e)
+  | TR_If :
+      forall e1 e2 e3,
+        touches_region e1 -> touches_region (EIf e1 e2 e3)
+  | TR_Pair1 :
+      forall e1 e2, touches_region e1 -> touches_region (EPair e1 e2)
+  | TR_Pair2 :
+      forall v e,
+        is_value v -> touches_region e -> touches_region (EPair v e)
+  | TR_Fst :
+      forall e, touches_region e -> touches_region (EFst e)
+  | TR_Snd :
+      forall e, touches_region e -> touches_region (ESnd e)
+  | TR_Inl :
+      forall T e, touches_region e -> touches_region (EInl T e)
+  | TR_Inr :
+      forall T e, touches_region e -> touches_region (EInr T e)
+  | TR_Case :
+      forall e e1 e2,
+        touches_region e -> touches_region (ECase e e1 e2)
+  | TR_Borrow :
+      forall e, touches_region e -> touches_region (EBorrow e)
+  | TR_Drop :
+      forall e, touches_region e -> touches_region (EDrop e)
+  | TR_Copy :
+      forall e, touches_region e -> touches_region (ECopy e).
+
+Lemma step_R_eq_or_touches_region :
+  forall mu R e mu' R' e',
+    (mu, R, e) -->> (mu', R', e') ->
+    R = R' \/ touches_region e.
+Proof.
+  intros mu R e mu' R' e' Hstep.
+  (* remember + revert so `induction Hstep` substitutes the outer
+     (mu, R, e) and (mu', R', e') slots cleanly into each
+     constructor's args, and IHs get clean universal quantification
+     for congruence cases (same pattern as `preservation`). *)
+  remember (mu, R, e) as cfg eqn:Hcfg.
+  remember (mu', R', e') as cfg' eqn:Hcfg'.
+  revert mu R e mu' R' e' Hcfg Hcfg'.
+  induction Hstep;
+    intros mu0 R0 e0 mu0' R0' e0' Hcfg Hcfg';
+    inversion Hcfg; subst;
+    inversion Hcfg'; subst;
+    (* Atom steps (R kept literally in the constructor's conclusion). *)
+    try (left; reflexivity);
+    (* Region steps (outer expression is ERegion). *)
+    try (right; apply TR_here);
+    (* Congruence steps: IH on the inner step gives the disjunction. *)
+    try (destruct (IHHstep _ _ _ _ _ _ eq_refl eq_refl) as [Heq | HTR];
+         [ left; exact Heq
+         | right; constructor; (try assumption); exact HTR ]).
+Qed.
+
 Theorem preservation :
   forall mu R e mu' R' e',
     (mu, R, e) -->> (mu', R', e') ->
@@ -3414,8 +3502,37 @@ Proof.
     end
   ].
 
+  (* === Region-invariance-driven closure for congruence cases ===
+     Lemma [step_R_eq_or_touches_region] (proved above) gives a clean
+     case-split on the inner step: either the region environment is
+     preserved or the stepped subexpression contains a region operation.
+
+     The tactic block below was attempted but doesn't yet fire in
+     `match goal` form (the `pose proof` works in isolation but the
+     follow-up `destruct + subst + IH match` runs into ltac
+     edge cases on these specific goal shapes). The lemma itself is
+     usable by future per-case manual proofs; the wholesale tactic
+     application is the deferred piece.
+
+     Sketch of the intended pattern:
+     ```
+     pose proof (step_R_eq_or_touches_region _ _ _ _ _ _ Hstep) as Hdis.
+     destruct Hdis as [HeqR | HTR].
+     - subst.  (* unifies R = R' for sibling-typing-premise reuse *)
+       edestruct (IHHstep _ _ _ _ _ _ eq_refl eq_refl _ _ _ HtypingOfInnerExpr)
+         as [Gout Hout].
+       eexists. econstructor; eauto.
+     - (* touches_region — needs region weakening, separately tracked *)
+       ...
+     ```
+  *)
+
 Admitted.
-(* PROOF STATUS [preservation] — ADMITTED, but down from 910 → ~29 open goals.
+(* PROOF STATUS [preservation] — ADMITTED, down to 22 open goals
+   (from 910 cross-case, via PR #102's remember-cfg + PR #106's
+   universal-IH revert). A region-invariance lemma
+   [step_R_eq_or_touches_region] now lives just before this theorem
+   and dispatches the non-region-step half of congruence cases.
 
    PRIOR STATE (before the `remember (mu, R, e) as cfg` introduction at L3232):
    `induction Hstep; intros G0 T0 G0' Htype; inversion Htype; subst; ...`

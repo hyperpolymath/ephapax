@@ -6,11 +6,28 @@
 
 @state(version="2.0"):
 phase: "implementation"
-next_action: "Wire real PipeWire session through type checker (PipeWire Proving Ground)"
-last_action: "Standardized to RSR 2026 with v2 STATE format and 6a2 alignment"
-updated: 2026-04-23T13:00:00Z
+next_action: "Close residual ~29 open goals in formal/Semantics.v preservation theorem (see formal/PRESERVATION-HANDOFF.md for per-case checklist)"
+last_action: "Rust/SPARK ABI seam landed (PR#95); preservation proof now Admitted with honest open-goal count after 910 -> 29 reduction (PR#102)"
+updated: 2026-05-20T19:00:00Z
 
 @blockers:
-# No active blockers. Formal proofs FULLY CLOSED (67 Qed, 0 Admitted).
+# Formal proofs NOT fully closed (earlier "FULLY CLOSED (67 Qed, 0 Admitted)"
+# claim was wrong — `coqc` 8.18.0 rejects `Qed.` on preservation).
+#   - formal/Semantics.v `preservation`: Admitted (down from 910 to ~29 open
+#     goals via remember-cfg pattern, PR#102). The prior in-file `Qed.` was
+#     rejected with "Attempt to save an incomplete proof"; the build-oracle
+#     is now source of truth. PR#92 marked it Admitted and reverted PR#87's
+#     propagated "Qed, closed 2026-04-27" claim from ROADMAP+PROOF-NEEDS.
+#   - src/formal/Ephapax/Formal/RegionLinear.idr `regionSafetyExtract` /
+#     `noGCExtract`: vacuous wrappers (body is the input unchanged); ROADMAP
+#     citing them as "regionSafetyTheorem"/"noGCTheorem" complete is
+#     overstated. Honest E3/E4 obligations stated in src/abi/Ephapax/ABI/
+#     Invariants.idr (PR#95-MERGED).
+#   - src/abi/Ephapax/ABI/Invariants.idr E1-E6: E1 (preservation) OWED;
+#     E2 (linear consumption) PARTIAL (head form discharged via
+#     splitLinearCoverage PR#85); E3 (region no-escape) PARTIAL (narrow
+#     form discharged via noEscapeTheorem); E4 (no-runtime-GC) OWED;
+#     E5 (WASM compilation) OWED; E6 (IR lowering) OWED.
+# Estate proof-debt arm: standards#134 (OPEN).
 @end
 @end

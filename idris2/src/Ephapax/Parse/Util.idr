@@ -4,7 +4,7 @@ import Data.List
 import Ephapax.Parse.Lexer
 import Ephapax.Parse.Stream
 
-%default partial
+%default total
 
 public export
 data ParseError = PE String (Maybe Pos)
@@ -56,12 +56,17 @@ expectIdent stream =
 public export
 many : Parser a -> Parser (List a)
 many p stream =
-  case p stream of
-    Left _ => Right ([], stream)
-    Right (v, rest) =>
-      case many p rest of
-        Left err => Left err
-        Right (vs, rest2) => Right (v :: vs, rest2)
+  manyFuel (integerToNat (cast (stream.len - stream.index))) p stream
+  where
+    manyFuel : Nat -> Parser a -> Parser (List a)
+    manyFuel Z _ s = Right ([], s)
+    manyFuel (S k) p s =
+      case p s of
+        Left _ => Right ([], s)
+        Right (v, rest) =>
+          case manyFuel k p rest of
+            Left err => Left err
+            Right (vs, rest2) => Right (v :: vs, rest2)
 
 public export
 optional : Parser a -> Parser (Maybe a)
@@ -156,16 +161,18 @@ sepBy : Parser a -> Parser sep -> Parser (List a)
 sepBy p sep stream =
   case p stream of
     Left _ => Right ([], stream)
-    Right (v, rest) => sepTail [v] rest
+    Right (v, rest) =>
+      sepTailFuel (integerToNat (cast (rest.len - rest.index))) [v] rest
   where
-    sepTail : List a -> Parser (List a)
-    sepTail acc stream2 =
+    sepTailFuel : Nat -> List a -> Parser (List a)
+    sepTailFuel Z acc stream2 = Right (reverse acc, stream2)
+    sepTailFuel (S k) acc stream2 =
       case sep stream2 of
         Left _ => Right (reverse acc, stream2)
         Right (_, rest) =>
           case p rest of
             Left err => Left err
-            Right (v, rest2) => sepTail (v :: acc) rest2
+            Right (v, rest2) => sepTailFuel k (v :: acc) rest2
 
 public export
 sepBy1 : Parser a -> Parser sep -> Parser (List a)

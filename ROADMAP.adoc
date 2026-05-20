@@ -123,8 +123,8 @@ Separate Idris2 development proving structural properties of the
 region-linear calculus:
 
 * `noEscapeTheorem` — region references cannot leak past their scope
-* `regionSafetyTheorem` — typed expressions don't dereference freed regions
-* `noGCTheorem` — bulk deallocation at region exit is sound
+* `regionSafetyExtract` — typed expressions don't dereference freed regions
+* `noGCExtract` — bulk deallocation at region exit is sound
 * `orthogonalityLemma` — the linear / region disciplines compose
 * `splitLinearCoverage` (PR #85, 2026-05-19) — generalises
   `nonDiminishment` from head-position to all linear bindings

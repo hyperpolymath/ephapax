@@ -245,16 +245,16 @@ properties of the region-linear calculus:
 | Theorem | Where
 
 | `noEscapeTheorem`
-| `src/formal/Ephapax/Formal/NoEscape.idr`
+| `src/formal/Ephapax/Formal/RegionLinear.idr:129`
 
-| `regionSafetyTheorem`
-| `src/formal/Ephapax/Formal/RegionSafety.idr`
+| `regionSafetyExtract`
+| `src/formal/Ephapax/Formal/RegionLinear.idr:139`
 
-| `noGCTheorem`
-| `src/formal/Ephapax/Formal/NoGC.idr`
+| `noGCExtract`
+| `src/formal/Ephapax/Formal/RegionLinear.idr:151`
 
 | `orthogonalityLemma`
-| `src/formal/Ephapax/Formal/Orthogonality.idr`
+| `src/formal/Ephapax/Formal/RegionLinear.idr:164`
 
 | `splitLinearCoverage`
 | `src/formal/Ephapax/Formal/Qualifier.idr` (PR #85, 2026-05-19) —

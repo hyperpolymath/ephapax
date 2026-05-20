@@ -10,96 +10,209 @@ _Linear-type language with dual formalisation (Coq + Idris2) targeting WebAssemb
 
 toc::[]
 
-== Current State
+== Status snapshot (2026-05-20)
 
-Ephapax is an early-development linear-type language implemented across 19 Rust crates
-with a two-phase compiler pipeline (Idris2 type-checking -> Rust/WASM backend). The core
-type system design, lexer, parser, interpreter, REPL, and CLI are complete. The type
-checker and WASM code generation are in progress.
+Ephapax is an early-development linear-type language implemented across
+~19 Rust crates with a two-phase compiler pipeline (Idris2 type-checking
+→ Rust/WASM backend). Lexer, parser, interpreter, REPL, CLI, S-expression
+IR, two-phase pipeline, Zig FFI, and conformance test suite are
+complete. Type checker and WASM code generation are in progress.
 
-**Dual formalisation status:**
+== Formal-proof status
 
-* **Coq** (`formal/`): `no_leaks` (Qed), `typing_ctx_transfer` (Qed),
-  `subst_preserves_typing` (Qed), `preservation` (Admitted — earlier in-file
-  comment claiming "Qed, closed 2026-04-27" was unsubstantiated; `coqc` rejects
-  the proof script with remaining open goals).
-* Coq admitted proofs remaining in `formal/Semantics.v`: 1 (`preservation`)
-* **Idris2** (`src/formal/`): `noEscapeTheorem`, `regionSafetyTheorem`, `noGCTheorem`,
-  `orthogonalityLemma` -- all complete with zero unsafe patterns. Added 2026-05-19:
-  `splitLinearCoverage` in `Ephapax/Formal/Qualifier.idr` (PR #85) — generalises
-  `nonDiminishment` from head-position to all linear bindings.
+=== Coq (`formal/`)
 
-**Interpreter:** Environment-leak fix applied (2026-03-28). Proofs chain and effects
-chain are sound.
+The Coq side has the Tofte-Talpin region-linear calculus with small-step
+substitution semantics:
 
-== v0.1.0 -- Core Language (In Progress)
+[cols="3,1,2"]
+|===
+| Theorem / lemma | Status | Notes
+
+| `no_leaks`
+| ✅ Qed
+| Memory-safety property — every linear resource freed at region exit.
+
+| `typing_ctx_transfer`
+| ✅ Qed
+| Context-transfer machinery used by preservation's congruence cases.
+
+| `subst_preserves_typing`
+| ✅ Qed
+| Substitution lemma — the core technical lemma underpinning preservation.
+
+| `region_env_perm_typing`
+| ✅ Qed
+| Region-permutation invariance of typing.
+
+| `region_add_typing`
+| ✅ Qed
+| Adding a fresh region to `R` preserves typing.
+
+| `region_shrink_preserves_typing`
+| ✅ Qed
+| Closing a region scope preserves typing of the body's value form.
+
+| **`preservation`**
+| 🟡 Admitted
+| **22 open goals** after the in-flight reduction chain (PRs #92 / #102 / #104 / #106). Started at 910 cross-case open goals; reduced by 97.6% via standard preservation pattern + universal-IH revert. Remaining 22 need region-invariance + linearity-context preservation lemmas + the documented S_Region_Step language-design item (region-env weakening for non-values). See `formal/PRESERVATION-HANDOFF.md` for per-case checklist.
+|===
+
+**Historical note**: an earlier in-file comment claimed `preservation`
+was Qed-closed on 2026-04-27. That claim was unsubstantiated; `coqc`
+8.18.0 rejected the proof script. PR #92 (2026-05-20) corrected the
+status to `Admitted.` with honest framing. The "92%" `progress`
+proof referenced in older docs was deleted in the substitution-
+semantics rewrite and is not currently formalised in this tree.
+
+=== Idris2 (`idris2/src/Ephapax/`)
+
+The Idris2 side has totality-tightening across the entire parser /
+typechecker / encoder layer:
+
+[cols="3,1,2"]
+|===
+| Module | Default | Notes
+
+| `IR/SExpr`
+| `%default total`
+| Fueled mutual parser; fuel = `length input`, every primitive consumes ≥1 char.
+
+| `Parse/Stream`
+| `%default total`
+| Fueled `remaining/build`; fuel = `s.len - s.index`.
+
+| `Parse/Util`
+| `%default total`
+| Fueled `many` + `sepBy.sepTail`; fuel = remaining tokens.
+
+| `Parse/Lexer`
+| `%default total`
+| Fueled `lex.go` across all 57 recursive call sites.
+
+| `IR/AST`
+| `%default total`
+| 6 retained `covering` markers for showPrec / (/=) interface-dispatch loop (documented Idris2 0.8.0 SCT limit, not unsoundness).
+
+| `IR/Decode`
+| `%default total`
+| 7 retained `covering` markers for map/traverse-through-recursive-type SCT limit.
+
+| `Affine/Typecheck`
+| `%default total`
+| Full type checker provably total. Incidental baseline-rot fix for an `if-then-else` layout.
+
+| `Parse/Parser`
+| `%default covering`
+| LL(k) recursive descent through ~30 mutually-recursive Stream-indexed parsers; fueling the whole parser is a deferred separate campaign.
+
+| `Affine/Emit`
+| `%default total`
+| One-line `encode` wrapper, `covering` matches `Decode.encode`.
+|===
+
+Net post-campaign (PRs #89/#90/#91/#93/#94/#96/#97/#99/#100,
+all merged 2026-05-20): 80+ atomic functions provably total, zero
+`assert_total` / `believe_me` introduced anywhere in the source.
+14 `covering` markers retained, each for a documented Idris2 0.8.0
+SCT limit. No `%default partial` remains in `idris2/src/Ephapax/`.
+
+=== Idris2 region-linearity layer (`src/formal/`)
+
+Separate Idris2 development proving structural properties of the
+region-linear calculus:
+
+* `noEscapeTheorem` — region references cannot leak past their scope
+* `regionSafetyTheorem` — typed expressions don't dereference freed regions
+* `noGCTheorem` — bulk deallocation at region exit is sound
+* `orthogonalityLemma` — the linear / region disciplines compose
+* `splitLinearCoverage` (PR #85, 2026-05-19) — generalises
+  `nonDiminishment` from head-position to all linear bindings
+
+All four headline theorems complete with **zero `believe_me` /
+`assert_total` / postulates**.
+
+== v0.1.0 — Core language (in progress)
 
 * [x] Core type system design (affine + linear modes)
 * [x] Lexer (logos-based tokenizer)
 * [x] Parser (chumsky-based)
-* [x] Tree-walking interpreter with env-leak fix
+* [x] Tree-walking interpreter with env-leak fix (2026-03-28)
 * [x] REPL
 * [x] CLI (`ephapax-cli`)
-* [x] Coq formalisation: `no_leaks` proof (Qed)
-* [x] Coq formalisation: `memory_safety` proof (Qed)
-* [x] Idris2 formalisation: all four theorems complete
+* [x] Coq: `no_leaks`, `subst_preserves_typing`, region lemmas (all Qed)
+* [x] Idris2: all four region-linearity theorems complete (zero unsafe)
+* [x] Idris2: `%default partial → total` campaign for parser / typechecker / encoder layer (PR chain #89–#100, merged 2026-05-20)
 * [x] S-expression IR (`ephapax-ir`)
-* [x] Two-phase pipeline: Idris2 type-check -> Rust WASM backend
+* [x] Two-phase pipeline: Idris2 type-check → Rust/WASM backend
 * [x] Zig FFI token buffer (`Ephapax.Parse.ZigBuffer`)
-* [x] Conformance test suite (pass/fail cases)
+* [x] Conformance test suite (pass / fail cases)
 * [ ] Type checker completion (`ephapax-typing`)
 * [ ] WASM code generation: lambda/app compilation (closure conversion)
-* [x] Coq: close `ctx_transfer` proof
-* [x] Coq: close `subst_lemma` proof
-* [ ] Coq: close `preservation` proof (currently `Admitted` —
-  earlier in-file claim of "Qed, 2026-04-27" was unsubstantiated, `coqc`
-  rejects the proof script with remaining open goals)
-* [-] Coq: `progress` proof — N/A. `progress` was deleted in the
-  substitution-semantics rewrite and is not currently formalised
-  in this tree. The previous "92%" claim was stale.
+* [x] Coq: `subst_preserves_typing` (Qed)
+* [ ] **Coq: close `preservation` to Qed** — the v0.1 blocker. 22 open
+      goals remain (down from 910); needs region-invariance + context-
+      preservation lemmas + the documented region-env weakening lemma
+      for non-values. Multi-day proof engineering. Tracked in
+      `formal/PRESERVATION-HANDOFF.md`.
 
-== v0.2.0 -- Backend Maturity
+== v0.2.0 — Backend maturity
 
 * [x] Closure conversion for WASM backend
 * [ ] Native backend via Cranelift
 * [ ] Region-based allocation in WASM linear memory
 * [ ] Bulk deallocation on region exit
-* [ ] Standard library foundation (`ephapax-stdlib`) -- partial implementation
+* [ ] Standard library foundation (`ephapax-stdlib`) — partial implementation
 * [ ] Surface syntax desugaring pipeline (`ephapax-desugar`)
-* [x] Package system (`ephapax-package`) -- complete core functionality
-* [ ] LSP server (`ephapax-lsp`) -- basic diagnostics implemented, needs completion
+* [x] Package system (`ephapax-package`) — complete core functionality
+* [ ] LSP server (`ephapax-lsp`) — basic diagnostics implemented, needs completion
 
-== v0.3.0 -- PipeWire Proving Ground
+== v0.3.0 — PipeWire proving ground
 
-PipeWire filter node as a real-world validation of linear types for audio buffer management.
+PipeWire filter node as a real-world validation of linear types for
+audio buffer management:
 
 * [ ] PipeWire filter node implementation in Ephapax
 * [ ] Linear buffer types proving zero-copy audio safety
 * [ ] Real-time constraints validation (no GC pauses)
 * [ ] Integration with AmbientOps audio pipeline
 
-== v0.4.0 -- Tooling and Ecosystem
+== v0.4.0 — Tooling and ecosystem
 
-* [ ] Tree-sitter grammar (`editors/tree-sitter-ephapax`) integration with editors
-* [ ] LSP server -- full features (hover, go-to-definition, completions)
+* [ ] Tree-sitter grammar (`editors/tree-sitter-ephapax`) editor integration
+* [ ] LSP server — full features (hover, go-to-definition, completions)
 * [ ] Documentation generator (`ephapax-doc`)
 * [ ] VRAM cache for GPU-side linear resources (`ephapax-vram-cache`)
 * [ ] Static analysis module (`ephapax-analysis`)
 * [ ] Error recovery in parser for IDE use
 
-== v1.0.0 -- Production Ready
+== v1.0.0 — Production ready
 
-* [x] All Coq `Admitted` proofs closed in `formal/Semantics.v` (zero remaining as of 2026-04-27).
-* [x] `preservation` proof (Qed, 2026-04-27). `progress` is not currently formalised; if it re-enters scope post-rewrite, add it back here.
+* [ ] **All Coq `Admitted` proofs closed in `formal/Semantics.v`**
+      (currently 1: `preservation` with 22 open goals; see Status above)
+* [ ] Idris2 `Parse/Parser.idr` upgraded from `%default covering` to
+      `%default total` (LL(k) fuel-refactor; deferred separate campaign)
 * [ ] Stable surface syntax (already locked, but confirm no changes needed)
 * [ ] Comprehensive standard library
 * [ ] Cross-platform WASM + native compilation
 * [ ] Performance benchmarks vs Rust/C for linear workloads
 * [ ] Published language specification (`spec/`)
 
-== Long-Term
+== Long-term
 
 * [ ] Session-sentinel integration (Ephapax rewrite of session management)
 * [ ] Gossamer integration for UI applications
-* [ ] IDApTIK migration from current stack to Ephapax where linear types add value
+* [ ] IDApTIK migration to Ephapax where linear types add value
 * [ ] Self-hosting: Ephapax compiler written in Ephapax
+
+== Related documents
+
+* link:README.adoc[README] — project overview + quickstart
+* link:EXPLAINME.adoc[EXPLAINME] — "show me the receipts" for the README's claims
+* link:PROOF-NEEDS.md[PROOF-NEEDS] — outstanding proof obligations + leverage
+* link:RUST-SPARK-STANCE.adoc[RUST-SPARK-STANCE] — comparison + interop notes
+* link:formal/PRESERVATION-HANDOFF.md[PRESERVATION-HANDOFF] — per-case Coq
+  preservation checklist (the 22 remaining goals)
+* link:docs/vision/EPHAPAX-VISION.adoc[Vision document] — design rationale
+* link:docs/specs/DESIGN-DECISIONS.adoc[Design decisions] — 17 ADRs
+* link:docs/specs/LANGUAGE-COMPARISON.adoc[Language comparison] — vs 10 other languages

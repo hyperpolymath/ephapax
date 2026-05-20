@@ -20,10 +20,13 @@ checker and WASM code generation are in progress.
 **Dual formalisation status:**
 
 * **Coq** (`formal/`): `no_leaks` (Qed), `typing_ctx_transfer` (Qed),
-  `subst_preserves_typing` (Qed), `preservation` currently `Admitted`.
-* Coq admitted proofs remaining: 1
+  `subst_preserves_typing` (Qed), `preservation` (Qed, closed
+  2026-04-27 — see in-file comment at `formal/Semantics.v` L3328).
+* Coq admitted proofs remaining in `formal/Semantics.v`: 0
 * **Idris2** (`src/formal/`): `noEscapeTheorem`, `regionSafetyTheorem`, `noGCTheorem`,
-  `orthogonalityLemma` -- all complete with zero unsafe patterns.
+  `orthogonalityLemma` -- all complete with zero unsafe patterns. Added 2026-05-19:
+  `splitLinearCoverage` in `Ephapax/Formal/Qualifier.idr` (PR #85) — generalises
+  `nonDiminishment` from head-position to all linear bindings.
 
 **Interpreter:** Environment-leak fix applied (2026-03-28). Proofs chain and effects
 chain are sound.
@@ -47,8 +50,10 @@ chain are sound.
 * [ ] WASM code generation: lambda/app compilation (closure conversion)
 * [x] Coq: close `ctx_transfer` proof
 * [x] Coq: close `subst_lemma` proof
-* [ ] Coq: close `preservation` proof (currently `Admitted`)
-* [ ] Coq: `progress` proof completion (currently 92%)
+* [x] Coq: close `preservation` proof (Qed, 2026-04-27)
+* [-] Coq: `progress` proof — N/A. `progress` was deleted in the
+  substitution-semantics rewrite and is not currently formalised
+  in this tree. The previous "92%" claim was stale.
 
 == v0.2.0 -- Backend Maturity
 
@@ -81,8 +86,8 @@ PipeWire filter node as a real-world validation of linear types for audio buffer
 
 == v1.0.0 -- Production Ready
 
-* [ ] All Coq `Admitted` proofs closed (zero remaining)
-* [ ] Full `preservation` and `progress` proofs (Qed)
+* [x] All Coq `Admitted` proofs closed in `formal/Semantics.v` (zero remaining as of 2026-04-27).
+* [x] `preservation` proof (Qed, 2026-04-27). `progress` is not currently formalised; if it re-enters scope post-rewrite, add it back here.
 * [ ] Stable surface syntax (already locked, but confirm no changes needed)
 * [ ] Comprehensive standard library
 * [ ] Cross-platform WASM + native compilation

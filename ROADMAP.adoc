@@ -20,9 +20,10 @@ checker and WASM code generation are in progress.
 **Dual formalisation status:**
 
 * **Coq** (`formal/`): `no_leaks` (Qed), `typing_ctx_transfer` (Qed),
-  `subst_preserves_typing` (Qed), `preservation` (Qed, closed
-  2026-04-27 — see in-file comment at `formal/Semantics.v` L3328).
-* Coq admitted proofs remaining in `formal/Semantics.v`: 0
+  `subst_preserves_typing` (Qed), `preservation` (Admitted — earlier in-file
+  comment claiming "Qed, closed 2026-04-27" was unsubstantiated; `coqc` rejects
+  the proof script with remaining open goals).
+* Coq admitted proofs remaining in `formal/Semantics.v`: 1 (`preservation`)
 * **Idris2** (`src/formal/`): `noEscapeTheorem`, `regionSafetyTheorem`, `noGCTheorem`,
   `orthogonalityLemma` -- all complete with zero unsafe patterns. Added 2026-05-19:
   `splitLinearCoverage` in `Ephapax/Formal/Qualifier.idr` (PR #85) — generalises
@@ -50,7 +51,9 @@ chain are sound.
 * [ ] WASM code generation: lambda/app compilation (closure conversion)
 * [x] Coq: close `ctx_transfer` proof
 * [x] Coq: close `subst_lemma` proof
-* [x] Coq: close `preservation` proof (Qed, 2026-04-27)
+* [ ] Coq: close `preservation` proof (currently `Admitted` —
+  earlier in-file claim of "Qed, 2026-04-27" was unsubstantiated, `coqc`
+  rejects the proof script with remaining open goals)
 * [-] Coq: `progress` proof — N/A. `progress` was deleted in the
   substitution-semantics rewrite and is not currently formalised
   in this tree. The previous "92%" claim was stale.

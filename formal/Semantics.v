@@ -3324,9 +3324,16 @@ Proof.
               [ exact Hnotin' | exact Hfr | apply region_add_typing; exact Hout ] ]
         end
     end).
-Qed.
-(* PROOF STATUS [preservation] — FULLY CLOSED (2026-04-27). Zero Admitted.
-   region_env_perm_typing: Qed (new lemma — transfers typing across region-env permutations).
-   region_add_typing: Qed (new lemma — adding a region to R preserves typing).
-   region_shrink_preserves_typing: Qed (T_Region_Active shadowing case closed via in_dec).
-   preservation: Qed (S_Region_Step+T_Region_Active closed by in_dec on r ∈ R'). *)
+Admitted.
+(* PROOF STATUS [preservation] — ADMITTED.
+   Earlier in-file note claimed "FULLY CLOSED (2026-04-27). Zero Admitted." with
+   `Qed.` here, but `coqc` (8.18.0) rejects that with "Attempt to save an
+   incomplete proof (there are remaining open goals)" — the proof script's nested
+   tactic combinator does not discharge every case of the inductive predicate.
+   Until the open goals are identified and closed, the honest mark is `Admitted.`
+   so the Coq formalisation builds and downstream docs (ROADMAP, PROOF-NEEDS)
+   accurately reflect the proof state. Supporting lemmas remain Qed:
+     region_env_perm_typing: Qed (transfers typing across region-env permutations).
+     region_add_typing: Qed (adding a region to R preserves typing).
+     region_shrink_preserves_typing: Qed (T_Region_Active shadowing case closed via in_dec).
+   preservation itself: Admitted, pending discharge of the residual open goals. *)

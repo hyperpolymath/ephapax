@@ -1,0 +1,318 @@
+// SPDX-License-Identifier: PMPL-1.0-or-later
+// SPDX-FileCopyrightText: 2026 Jonathan D.A. Jewell
+= Session: Proof-Engineering Lessons (2026-05-20)
+Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk>
+:toc:
+:toclevels: 3
+
+== Summary
+
+A single day's work under standards#124 (estate proof-debt epic) surfaced
+four recurring failure modes in proof-bearing code that future humans and
+agents will hit if they don't know to look. This file is the catalogue.
+Each lesson is named, has a reproducer, and lists where in the codebase
+the pattern bit us so the cross-reference is auditable.
+
+Companion machine-readable artefact:
+`.machine_readable/agent_instructions/lessons.a2ml`.
+
+PRs that surfaced these (this repo, 2026-05-20):
+proof-of-work#63, ephapax#92, ephapax#95, ephapax#98, ephapax#102,
+ephapax#103.
+
+== Lesson 1: in-file proof-status comments are NOT authoritative — build is the only oracle
+
+=== The pattern
+
+A `.v` / `.idr` / `.lean` source file carries a comment block like:
+
+[source,coq]
+----
+Qed.
+(* PROOF STATUS [preservation] — FULLY CLOSED (2026-04-27). Zero Admitted.
+   region_env_perm_typing: Qed (new lemma — …).
+   preservation: Qed (S_Region_Step + T_Region_Active closed by in_dec on r ∈ R'). *)
+----
+
+Downstream agents (humans + AI) read the comment, summarise it into
+human-readable docs (`ROADMAP.adoc`, `PROOF-NEEDS.md`) and machine-
+readable docs (`.machine_readable/6a2/STATE.a2ml`) WITHOUT RE-RUNNING
+the build. If the source comment was ever wrong — or silently drifted
+out of date — the lie propagates across the repo unchallenged.
+
+=== Where it bit us
+
+`ephapax/formal/Semantics.v` L3328 carried "FULLY CLOSED (2026-04-27).
+Zero Admitted." with `Qed.` immediately above. **`coqc` 8.18.0 rejected
+that `Qed.`** with "Attempt to save an incomplete proof (there are
+remaining open goals)". The `rust-ci.yml` "Coq proofs" job had been
+failing on every push to main for at least 3 runs (back to 2026-05-19).
+
+ephapax#87 (MERGED 2026-05-20 morning) read that in-file comment and
+propagated "Qed, closed 2026-04-27" into `ROADMAP.adoc` and
+`PROOF-NEEDS.md` without running `coqc`. PR#92 reverted that doc drift
+and changed the source `Qed.` to `Admitted.` so the CI gate would go
+green; PR#102 then reduced the open-goal count from 910 to ~29 via the
+correct proof pattern (see Lesson 4).
+
+The same pattern was caught earlier the same day in `.machine_readable/6a2/STATE.a2ml`
+which claimed "Formal proofs FULLY CLOSED (67 Qed, 0 Admitted)" — also
+false. PR#103 reverted that.
+
+=== The recipe
+
+Never trust an in-file proof-status comment. Before citing one — let
+alone summarising it into docs — run the build:
+
+[source,bash]
+----
+# Coq
+cd formal && coq_makefile -f _CoqProject -o Makefile.coq && make -f Makefile.coq
+
+# Idris2
+idris2 --build <whatever>.ipkg
+
+# Lean4
+lake build
+----
+
+If the build is green, the claim is supported. If it's not, the claim
+is bogus regardless of what the in-file comment says.
+
+For Coq specifically, when a `Qed.` fails or is uncertain, the precise
+diagnostic is Lesson 3.
+
+== Lesson 2: "Theorem name in formal/" can be vacuous — check the body, not the header
+
+=== The pattern
+
+A formalisation file carries:
+
+[source,idris]
+----
+||| Region Safety: a RegionBlock proves its result doesn't reference r.
+public export
+0 regionSafetyExtract :
+  (r : RegionId) -> (ctx : RegionContext) -> (t : Type) ->
+  (0 ne : NoRegionInType r t) -> (0 lc : AllLinearsConsumed r ctx) ->
+  NoRegionInType r t
+regionSafetyExtract r ctx t ne lc = ne
+----
+
+The header docstring claims "region safety". The signature looks
+substantive. **The body is `= ne`** — return the input unchanged. The
+theorem proves nothing about region safety; it just extracts a witness
+already given.
+
+This is sound (no `believe_me`, no escape hatches) but content-free.
+Downstream summaries citing "regionSafetyTheorem complete" are
+overstated.
+
+=== Where it bit us
+
+`ephapax/src/formal/Ephapax/Formal/RegionLinear.idr`:
+
+- `regionSafetyExtract r ctx t ne lc = ne` — tautological.
+- `noGCExtract r ctx t ne lc = (ne, lc)` — tautological.
+
+`ROADMAP.adoc` cited these as "regionSafetyTheorem" and "noGCTheorem"
+complete. PR#95 (the Rust/SPARK ABI seam) added the honest E3 and E4
+obligations (region no-escape at the operational level; no-runtime-GC)
+to `src/abi/Ephapax/ABI/Invariants.idr` and flagged the vacuous
+wrappers in `RUST-SPARK-STANCE.adoc` § Honest gaps.
+
+(Same pattern was previously caught in `vcl-ut` — see memory entry
+`project_vclut_hole_deeper_than_documented`. There the L2/L3/L5
+predicates were vacuously inhabited by `AllParameterised`.)
+
+=== The recipe
+
+When reviewing a "Theorem complete" claim:
+
+. Find the theorem in source.
+. Look at the BODY, not the header docstring.
+. If the body is `= <one of the inputs>`, the theorem is tautological.
+. If the body is `= absurd ...` over a constructor with no inhabitants,
+   the theorem is narrow (the absurdity might be valid but the theorem
+   doesn't say what the header suggests).
+. If the body is `Refl` and the LHS / RHS are textually identical, same.
+. If the body is `believe_me`, `idris_crash`, `assert_total`, etc. —
+   that's a documented escape, separate problem.
+
+A real theorem either chains supporting lemmas, does case analysis with
+non-trivial branches, or constructs evidence. `= <input>` is a name, not
+a proof.
+
+== Lesson 3: `Show. Show Existentials.` is the precise diagnostic for unfinished Coq proofs
+
+=== The pattern
+
+A Coq proof script fails with:
+
+[source]
+----
+Error: (in proof X): Attempt to save an incomplete proof (there are remaining open goals).
+----
+
+The natural assumption: "one more tactic". The reality: count the
+goals first. The proof might be closing zero goals, not one off from
+closure.
+
+=== Where it bit us
+
+`ephapax/formal/Semantics.v::preservation` — `coqc` rejected `Qed.`
+with the error above. An in-file comment block claimed "Only ONE case
+remains open: S_Region_Step + T_Region_Active." The natural reaction:
+add one more `try solve [...]` line.
+
+The actual count via Show was **910 goals open = 35 step rules × 26
+typing rules** — the FULL cross-case combinatorial. The existing
+`try solve [...]` chain was closing **ZERO** of them. The fix was not
+"one more tactic"; it was Lesson 4 (a structural change to the
+induction pattern).
+
+=== The recipe
+
+When a Coq `Qed.` fails or you're triaging a long `Admitted.`:
+
+[source,coq]
+----
+    end).
+Show.            (* prints current goal *)
+Show Existentials. (* prints all unresolved metavariables *)
+Admitted.
+----
+
+Then:
+
+[source,bash]
+----
+cd formal
+coq_makefile -f _CoqProject -o Makefile.coq && make -f Makefile.coq
+----
+
+`coqc` prints the goal count at the top + every open existential with
+its context. Restore the `Admitted.` afterwards.
+
+For Idris2, the analogue is `?hole` (introduce a hole, build, look at
+the hole's expected type) for individual goals; there is no single
+"show me everything open" command equivalent.
+
+For Lean4, `#print preservation` after `sorry`, or use the language
+server.
+
+== Lesson 4: `induction Hstep` doesn't substitute outer expression slots — `remember (cfg) as cfg eqn:Hcfg` is the standard fix
+
+=== The pattern
+
+A preservation-style theorem:
+
+[source,coq]
+----
+Theorem preservation :
+  forall mu R e mu' R' e',
+    (mu, R, e) -->> (mu', R', e') ->
+    forall G T G',
+    R; G |- e : T -| G' ->
+    exists G_out, R'; G |- e' : T -| G_out.
+Proof.
+  intros mu R e mu' R' e' Hstep.
+  induction Hstep; intros G0 T0 G0' Htype;
+    inversion Htype; subst;
+    try solve [...].
+  ...
+----
+
+After `induction Hstep`, you expect the outer `e` to be substituted to
+the constructor's "from" expression (e.g. `e := EStringNew r s` for
+the `S_StringNew` case). **It doesn't.** The outer expression slot
+stays abstract. `inversion Htype` then produces ALL typing arms for
+the abstract `e`, not just the diagonal that matches the step's
+constructor.
+
+For a system with `n` step rules and `m` typing rules, you get `n × m`
+cross-cases instead of `n` diagonals. The trivial `try solve [exfalso;
+discriminate | exfalso; congruence]` closures fail because there's no
+equation in scope discriminating the step's "from" expression from
+the typing's expression.
+
+=== Where it bit us
+
+`ephapax/formal/Semantics.v::preservation` had 35 step rules × 26
+typing rules = **910 open goals**. The existing `try solve [...]`
+chain closed ZERO of them.
+
+=== The fix (standard preservation pattern)
+
+[source,coq]
+----
+Proof.
+  intros mu R e mu' R' e' Hstep.
+  remember (mu, R, e) as cfg eqn:Hcfg.        (* NEW *)
+  remember (mu', R', e') as cfg' eqn:Hcfg'.   (* NEW *)
+  induction Hstep; intros G0 T0 G0' Htype;
+    inversion Hcfg; subst;                    (* NEW *)
+    inversion Hcfg'; subst;                   (* NEW *)
+    inversion Htype; subst;
+    try solve [...].
+----
+
+`remember` turns `Hstep : step (mu, R, e) (mu', R', e')` into `Hstep :
+step cfg cfg'` with two side equations. After `induction Hstep` for
+`S_StringNew`, `Hcfg` becomes
+`(mu0, R0, EStringNew r s) = (mu, R, e)`. `inversion Hcfg; subst`
+decomposes this and substitutes `e := EStringNew r s` everywhere
+including in `Htype`. Then `inversion Htype; subst` only generates
+the diagonal `T_StringNew` arm; the 25 cross-arms are eliminated by
+inversion's constructor-mismatch check.
+
+ephapax#102 applied this and reduced 910 → 29 open goals (97%
+reduction).
+
+=== Anti-pattern alert
+
+The proof originally had:
+
+[source,coq]
+----
+    try (match type of Htype with
+         | has_type _ _ ?e_typed _ _ => remember e_typed as e_orig eqn:He_orig
+         end);
+    inversion Htype; subst;
+----
+
+This was a MISDIAGNOSIS of the same problem: it remembered the
+*typing's* `e` (which was already abstract — same shape as before)
+instead of the *config's* expression slot (which is what `induction
+Hstep` substitutes for and where the missing equation lives).
+Remembering the wrong thing closed nothing.
+
+=== When to apply
+
+Any preservation-style proof where:
+
+. The induction principle is on an `step`/`reduce`/`eval` relation
+   that has expression slots in its config.
+. The outer theorem statement quantifies over those expression slots.
+. The proof needs the step's expression form pinned down for typing-
+   side inversion to work.
+
+The pattern generalises to any inductive predicate where you induct on
+an instance whose "input slots" are universally quantified outer
+variables; `remember` the input tuple before `induction`, then
+`inversion` the equation inside each case to recover substitutions.
+
+== Cross-references
+
+* `ephapax/formal/PRESERVATION-HANDOFF.md` — the per-case checklist
+  for the 29 remaining preservation goals after Lesson 4's fix landed.
+* `ephapax/RUST-SPARK-STANCE.adoc` § Honest gaps — vacuous wrappers
+  (Lesson 2) flagged at the seam level.
+* `proof-of-work/src/abi/ProofOfWork/ABI/Foreign.idr` — comment block
+  on the `Integer`-bounded predicates carries a related lesson:
+  Idris2 0.8.0's elaborator hangs on `Nat` bounds of `2^32` placed
+  under `LT n bound` in a data constructor's type (~4×10⁹ `S` ctors).
+  Use `So (natToInteger n < bound)` instead. Discovered via
+  proof-of-work#63 (MERGED 2026-05-20).
+* `standards#124` — estate proof-debt epic; this session's PRs (and
+  this lessons doc) all `Refs standards#134` (the ephapax sub-issue).

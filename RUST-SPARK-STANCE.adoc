@@ -1,0 +1,182 @@
+// SPDX-License-Identifier: PMPL-1.0-or-later
+= Rust/SPARK Stance — ephapax
+:toc: macro
+:toclevels: 2
+
+toc::[]
+
+== Summary
+
+This repository implements a dyadic-linear programming language. The
+implementation is a 19-crate Rust pipeline (surface parser → discipline
+checker → IR → WASM backend, with a Zig FFI token buffer). Per the
+estate language policy
+(`standards/rhodium-standard-repositories/spec/LANGUAGE-POLICY.adoc`
+§Terminology), *"Rust" means "Rust/SPARK"*: Rust is the primary
+implementation language now, but the project is *designed to admit
+SPARK/Ada verification modules* across a stable, Idris2-typed
+boundary, with Zig as the FFI layer. Rust here is never the ABI/API/FFI
+layer.
+
+Before this PR (2026-05-20) the crate had a `formal/` Coq metatheory +
+a `src/formal/` Idris2 region/linearity metatheory + a `src/abi/`
+directory that did not exist — no named seam, no SPARK admission path,
+no stance doc. The `src/abi/` package below brings the project into
+structural compliance; the remaining proof work is tracked in
+`PROOF-NEEDS.md` and standards#134.
+
+== What is correctness-critical here
+
+This is a programming language whose claimed properties are *linear-type
+consumption*, *region safety*, *GC-freedom*, and *type preservation*.
+The boundaries where these can be silently broken are: the discipline
+check (typing pass), the IR lowering (qualifier erasure), the WASM
+backend (lowering to a different operational model), and the Zig FFI
+(non-typed integer marshalling).
+
+[cols="1,2,3",options="header"]
+|===
+| Audit framing | Real counterpart | Where in code
+
+| Type preservation
+| `well_typed t T && t ⇒ t' → well_typed t' T`
+| `formal/Semantics.v::preservation` (currently **`Admitted`** —
+  earlier in-file comment claiming "Qed, closed 2026-04-27" was
+  unsubstantiated; `coqc` rejects the proof script with remaining
+  open goals — see ephapax#92).
+
+| Linear consumption
+| Every linear binding used exactly once across a context split
+| `src/formal/Ephapax/Formal/Qualifier.idr::splitLinearCoverage`
+  (DISCHARGED, MERGED 2026-05-19 via ephapax#85 — head/position form).
+  Cross-control-flow form (conditionals, pattern-match arms, region
+  exit) OWED.
+
+| Region safety
+| Values scoped to `r` never escape `r` at runtime
+| `src/formal/Ephapax/Formal/RegionLinear.idr::noEscapeTheorem`
+  (DISCHARGED — real proof, narrow form: `NoRegionInType r (Scoped r a)
+  -> Void`). Operational form OWED.
+
+| GC-freedom
+| No runtime collector needed — every heap value's lifetime is
+  statically bounded by an enclosing region
+| `src/formal/Ephapax/Formal/RegionLinear.idr::noGCExtract`
+  (**VACUOUS** — body is `(ne, lc)`, just returns its inputs; flagged
+  in seam, real content OWED).
+
+| WASM compilation correctness
+| Lowering preserves typing + semantics
+| `src/ephapax-wasm/` (no formalisation today — entire compiler
+  metatheory OWED).
+|===
+
+== The seam
+
+[cols="1,3",options="header"]
+|===
+| File | Role
+
+| `src/abi/Ephapax/ABI/Types.idr`
+| Idris2 boundary types — faithful total models of `Qual`, `Ty`, `Term`,
+  `CtxEntry`/`TypeCtx`, `SExpr`, `WasmExpr`, `RegionId`. Constructor
+  order is ABI-significant and matches the Rust enums in
+  `src/ephapax-syntax/`, `src/ephapax-typing/`, `src/ephapax-ir/`,
+  `src/ephapax-wasm/`.
+
+| `src/abi/Ephapax/ABI/Invariants.idr`
+| Type-level statements of invariants E1–E6. **E2 head-form is
+  DISCHARGED** at `Ephapax.Formal.Qualifier.splitLinearCoverage`
+  (cited). **E3 narrow-form is DISCHARGED** at
+  `Ephapax.Formal.RegionLinear.noEscapeTheorem` (cited). E1
+  (preservation) is OWED on the Coq side and remains `Admitted`.
+  E2 control-flow generalisation, E3 operational form, E4
+  (no-runtime-GC), E5 (WASM compilation), E6 (IR lowering) are stated
+  as erased postulates so the obligations are explicit and discoverable.
+  Authoritative per-ID status: `PROOF-NEEDS.md` § Invariant register.
+
+| `src/abi/Ephapax/ABI/Foreign.idr`
+| Zig/WASM-FFI boundary: u32/i32 range obligations for marshalling
+  (function indices, local indices, literal magnitudes), the stable
+  C-ABI `CompileResult` codes, and the contract tying a `CompileOk`
+  return to an E5 `WasmTyped` certificate.
+
+| `src/abi/ephapax-abi.ipkg`
+| Idris2 package mapping the `Ephapax.ABI.*` namespace to the source
+  tree. Without this package the modules would not load
+  (`import Ephapax.ABI.Types` would fail), so the seam would be
+  structurally present but never machine-checked.
+|===
+
+The seam is machine-checked: `idris2 --build ephapax-abi.ipkg` (run
+from `src/abi/`) typechecks all three modules, and a future
+`.github/workflows/abi-verify.yml` (filed alongside this seam) enforces
+it on every change to `src/abi/**`. The stated obligations therefore
+cannot silently regress, and an OWED postulate cannot quietly become
+a `believe_me`.
+
+== Bounds encoding choice (Integer, not Nat)
+
+`Foreign.idr` uses `Integer` for the u32/i32 bounds, not `Nat`. This
+is a deliberate carry-over from `proof-of-work#63`: a `Nat` constant
+of `2^32` placed under an `LT n bound` predicate inside a data
+constructor's type forces the Idris2 0.8.0 elaborator to reduce the
+literal to ~4×10⁹ `S` constructors during the data declaration's
+elaboration, which hangs `--build` indefinitely. The boundary
+predicate is `So (natToInteger n < bound)` instead — propositionally
+equivalent (the Rust `u32` round-trips to precisely the Nats with
+`natToInteger n < 2^32`) but without unary expansion. Do not rewrite
+back to `LT n bound`.
+
+== SPARK/Ada admission path
+
+The boundary is the Idris2 seam above. A future SPARK/Ada
+re-implementation of any of:
+
+* the discipline checker (would discharge a refined E2),
+* the IR lowering (would discharge E6),
+* the WASM backend (would discharge E5),
+
+sits on the far side of `Foreign.compileOkImpliesWasmTyped` without
+changing the contract: it must return `CompileOk` only when it can
+produce a `WasmTyped (compile t) T` certificate. No SPARK code exists
+yet; the seam exists so it *can* be added without redesign, which is
+exactly what §Terminology requires of a "designed to admit SPARK/Ada"
+Rust project.
+
+== Honest gaps
+
+* `formal/Semantics.v::preservation` is **`Admitted`** — the proof
+  script at L3215–L3326 leaves residual open goals (`coqc` 8.18.0
+  rejects `Qed.` with "Attempt to save an incomplete proof"). PR#87
+  (earlier today) propagated an in-file comment's "Qed, closed
+  2026-04-27" claim into ROADMAP + PROOF-NEEDS without running the
+  build; **the comment was the lie**. ephapax#92 (open) reverts that
+  doc drift and marks the source `Admitted.` honestly so the Coq CI
+  goes green.
+* `src/formal/Ephapax/Formal/RegionLinear.idr::regionSafetyExtract`
+  and `noGCExtract` are **vacuous wrappers** — body is the input
+  unchanged (`= ne`, `= (ne, lc)`). The proofs are sound (no escape
+  hatches) but the *content* is vacuous: they don't establish region
+  safety or GC-freedom, they just extract a witness already given.
+  The honest seam invariants E3 (operational region-no-escape) and
+  E4 (no-runtime-GC) are therefore OWED, not "complete".
+* No formalisation of WASM lowering exists anywhere in the repo. E5
+  is the highest-leverage compiler-correctness gap.
+* `ephapax-parse-tests.ipkg` fails on origin/main
+  (`testLexPositions` / `parseWithBuf` undefined). Independent of the
+  seam, flagged here for awareness — separate issue.
+
+== References
+
+* `standards/rhodium-standard-repositories/spec/LANGUAGE-POLICY.adoc`
+  §Terminology, §"Rust is never the ABI"
+* `PROOF-NEEDS.md` (this repo) — invariant ledger and priorities
+* `ROADMAP.adoc` (this repo) — Coq/Idris2 dual formalisation status
+* Estate exemplar seam: `proof-of-work/src/abi/{Types,Foreign,Invariants}.idr`
+  + `RUST-SPARK-STANCE.adoc`
+* standards#134 — estate proof-debt sub-issue tracking ephapax
+* ephapax#85 — `splitLinearCoverage` discharge (MERGED 2026-05-19)
+* ephapax#88 — `idris2/src/*.idr` SPDX headers (OPEN)
+* ephapax#92 — `Qed.` → `Admitted.` on `preservation` (OPEN — companion
+  to this PR; the doc-honesty fix this stance doc cites)

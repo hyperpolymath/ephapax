@@ -3,7 +3,7 @@
 --
 module Ephapax.IR.AST
 
-%default partial
+%default total
 
 public export
 data Linearity = Linear | Unrestricted

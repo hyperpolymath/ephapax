@@ -10,7 +10,7 @@ import Ephapax.Parse.Util
 import Ephapax.Parse.ZigBuffer
 import Ephapax.IR.AST
 
-%default partial
+%default covering
 
 parseDecl : Parser Decl
 parseFnDecl : Parser Decl

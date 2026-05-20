@@ -1,0 +1,22 @@
+-- SPDX-License-Identifier: PMPL-1.0-or-later
+-- Build/typecheck package for the Ephapax Rust↔SPARK ABI seam.
+--
+-- The seam modules are namespaced `Ephapax.ABI.*`; Idris2 requires the
+-- on-disk path to mirror the module path, so the sources live under
+-- `src/abi/Ephapax/ABI/`. This package makes the seam machine-checked;
+-- CI (`.github/workflows/abi-verify.yml`) runs `idris2 --build` on
+-- every change to `src/abi/**` so the stated obligations cannot
+-- silently rot into `believe_me` or get out of sync with the Rust
+-- pipeline.
+
+package ephapax-abi
+version = 0.1.0
+authors = "Jonathan D.A. Jewell (hyperpolymath)"
+license = "PMPL-1.0-or-later"
+sourcedir = "."
+
+modules = Ephapax.ABI.Types
+        , Ephapax.ABI.Invariants
+        , Ephapax.ABI.Foreign
+
+depends = base

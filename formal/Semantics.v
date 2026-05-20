@@ -3212,18 +3212,31 @@ Theorem preservation :
     exists G_out, R'; G |- e' : T -| G_out.
 Proof.
   intros mu R e mu' R' e' Hstep.
+  (* Remember the configs so `induction Hstep` generates explicit equations on
+     the outer expression slots. Without these remembers, `induction Hstep`
+     leaves the outer `e`/`e'` abstract — for an axiom step rule like
+     S_StringNew the constructor pre-conditions land in the context but the
+     equation `e = EStringNew r s` does not, so cross-cases (e.g. S_StringNew
+     step + T_Unit typing) have no discriminating equation in scope and the
+     `try solve [exfalso; discriminate | exfalso; congruence]` chain below
+     cannot close them.
+     Empirically (Coq 8.18.0, 2026-05-20): without these remembers,
+     `inversion Htype; subst` produces the FULL 35 × 26 = 910 cross-case
+     combinatorial and the `try solve [...]` chain closes ZERO of them.
+     With these remembers + `inversion Hcfg; subst; inversion Hcfg'; subst;`,
+     `inversion Htype` only generates the diagonal arm per step rule (since
+     the expression slot is concrete after substitution), and the chain
+     closes the trivially-dischargeable ones, leaving ~29 real proof
+     obligations. Standard preservation pattern; cf. Software Foundations
+     `Stlc.preservation`. The prior `remember e_typed as e_orig` was a
+     misdiagnosis of the same problem — it remembered the WRONG expression
+     (the typing's `e`, which was already abstract) instead of the config's
+     expression slot (which is what `induction Hstep` substitutes for). *)
+  remember (mu, R, e) as cfg eqn:Hcfg.
+  remember (mu', R', e') as cfg' eqn:Hcfg'.
   induction Hstep; intros G0 T0 G0' Htype;
-    (* Before inversion: remember the typed expression so that cross-case unification
-       (inversion Htype on a free variable `e`) does not lose the step-case equation.
-       After `induction Hstep; intros ... Htype`, the expression in Htype may still be
-       a free variable `e` with a separate hypothesis `He : e = EStringNew r s` etc.
-       If `inversion Htype; subst` fires for a cross-case typing rule (e.g. T_Unit
-       typing `e := EUnit`), subst can eliminate `e` and consume `He` in a direction
-       that loses the discriminating information. `remember` pins the form as `He_orig`
-       so congruence / discriminate can close all expression-mismatch goals. *)
-    try (match type of Htype with
-         | has_type _ _ ?e_typed _ _ => remember e_typed as e_orig eqn:He_orig
-         end);
+    inversion Hcfg; subst;
+    inversion Hcfg'; subst;
     inversion Htype; subst;
     try solve [eexists; econstructor; eassumption];
     try solve [eexists; eassumption];
@@ -3324,9 +3337,41 @@ Proof.
               [ exact Hnotin' | exact Hfr | apply region_add_typing; exact Hout ] ]
         end
     end).
-Qed.
-(* PROOF STATUS [preservation] — FULLY CLOSED (2026-04-27). Zero Admitted.
-   region_env_perm_typing: Qed (new lemma — transfers typing across region-env permutations).
-   region_add_typing: Qed (new lemma — adding a region to R preserves typing).
-   region_shrink_preserves_typing: Qed (T_Region_Active shadowing case closed via in_dec).
-   preservation: Qed (S_Region_Step+T_Region_Active closed by in_dec on r ∈ R'). *)
+Admitted.
+(* PROOF STATUS [preservation] — ADMITTED, but down from 910 → ~29 open goals.
+
+   PRIOR STATE (before the `remember (mu, R, e) as cfg` introduction at L3232):
+   `induction Hstep; intros G0 T0 G0' Htype; inversion Htype; subst; ...`
+   left **910 goals open** = 35 (step rules) × 26 (typing rules) — the FULL
+   cross-case combinatorial, because `induction Hstep` did not substitute
+   the outer expression slot `e` to the constructor's form, so `inversion
+   Htype` produced all 26 arms instead of just the diagonal. Cross-cases
+   (e.g. S_StringNew step + T_Unit type) had no discriminating equation in
+   scope, so `try solve [exfalso; discriminate | exfalso; congruence]` closed
+   none of them.
+
+   CURRENT STATE: ~29 real diagonal goals remain — one per step rule, modulo
+   the 6 that the existing `try solve [...]` chain closes once the expression
+   slots are concrete. Remediation per case:
+     - Axiom cases needing explicit reconstruction: S_StringNew, S_StringConcat,
+       S_StringLen (typing the result location/literal via T_Loc/T_I32).
+     - β-reduction cases needing `subst_preserves_typing`: S_Let_Val,
+       S_LetLin_Val, S_App_Fun, S_If_True/False, S_Fst, S_Snd,
+       S_Case_Inl/Inr.
+     - Congruence cases needing IH + reconstruction: S_*_Step variants.
+     - Region: S_Region_Enter, S_Region_Step, S_Region_Exit (the prior named
+       "remaining case" + 2 the in-file comment did not name).
+     - Linear: S_Drop, S_Copy.
+
+   Supporting lemmas already Qed: subst_preserves_typing,
+   region_env_perm_typing, region_add_typing, region_shrink_preserves_typing,
+   values_dont_step. Per the handoff doc, the S_Region_Step + T_Region_Active
+   case still blocks on a region-env *weakening* lemma for non-values, which
+   does not yet exist. The other 28 are per-case tactic glue.
+
+   97% reduction (910 → 29) via the standard preservation pattern (remember
+   the configs so `induction Hstep`'s substitution is recovered through
+   `inversion Hcfg; subst`). See formal/PRESERVATION-HANDOFF.md for the
+   per-case checklist (the handoff doc's 910-goal diagnostic captures the
+   PRIOR state; the same Show. recipe applied here yields the 29-goal
+   diagnostic for ongoing work). *)

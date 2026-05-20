@@ -239,7 +239,7 @@ Two Idris2 developments:
   markers retained for documented Idris2 0.8.0 SCT limits.
 
 * **`src/formal/`** — region-linearity theorems on the type side:
-  `noEscapeTheorem`, `regionSafetyTheorem`, `noGCTheorem`,
+  `noEscapeTheorem`, `regionSafetyExtract`, `noGCExtract`,
   `orthogonalityLemma`, plus `splitLinearCoverage` generalising
   the non-diminishment property (PR #85). All four headline theorems
   complete with **zero unsafe patterns**.

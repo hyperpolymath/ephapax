@@ -209,14 +209,18 @@ Currently `Qed`-closed: `no_leaks`, `subst_preserves_typing`,
 `typing_ctx_transfer`, `region_env_perm_typing`, `region_add_typing`,
 `region_shrink_preserves_typing`, plus 70+ supporting lemmas.
 
-Currently `Admitted`: `preservation`. **22 open goals remain** after
-the in-flight reduction chain — down from **910** at the start of the
-campaign (PRs #92 / #102 / #104 / #106, 2026-05-20). The remaining 22
-need (a) a region-invariance lemma for non-region step constructors,
-(b) a linearity-context preservation lemma for sibling premises in
-congruence cases, and (c) the documented S_Region_Step language-design
-item (region-env weakening for non-values). See
-`formal/PRESERVATION-HANDOFF.md` for the per-case checklist.
+Currently `Admitted`: `preservation`. **12 open goals remain** after
+the reduction chain — down from **910** at the start of the campaign
+(98.7% reduction across PRs #92 / #102 / #104 / #106 / #114 / #116 /
+#117 / #121, 2026-05-20 → 2026-05-21). Phase 1 scaffold of the
+closure plan (Lemma B `step_output_context_eq`) landed; per-case
+discharges next. The remaining 12 are 11 congruence cases (blocked
+on Lemma B's per-case proofs — linearity-context drift between IH
+and sibling) + 1 `S_Region_Step + T_Region_Active` case (blocked on
+region-env weakening for non-values). Canonical closure path:
+**`ROADMAP.adoc` §"Preservation closure plan"** (5 phases, ~3
+sessions of focused work). See also `formal/PRESERVATION-HANDOFF.md`
+for the per-case diagnostic record.
 
 [source,bash]
 ----

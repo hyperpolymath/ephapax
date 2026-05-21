@@ -55,7 +55,7 @@ substitution semantics:
 
 | **`preservation`**
 | 🟡 Admitted
-| **22 open goals** after the in-flight reduction chain (PRs #92 / #102 / #104 / #106). Started at 910 cross-case open goals; reduced by 97.6% via standard preservation pattern + universal-IH revert. Remaining 22 need region-invariance + linearity-context preservation lemmas + the documented S_Region_Step language-design item (region-env weakening for non-values). See `formal/PRESERVATION-HANDOFF.md` for per-case checklist.
+| **12 open goals** after the reduction chain (PRs #92 / #102 / #104 / #106 / #114 / #116 / #117 / #121). Started at 910; 98.7% reduced. Phase 1 scaffold (Lemma B `step_output_context_eq`) landed; per-case discharges next. Remaining 12 = 11 congruence cases (blocked on Lemma B per-case closure) + 1 region case (`S_Region_Step + T_Region_Active`, blocked on region-env weakening). Canonical closure path: ROADMAP §"Preservation closure plan" below.
 |===
 
 **Historical note**: an earlier in-file comment claimed `preservation`
@@ -398,7 +398,8 @@ audio buffer management:
 == v1.0.0 — Production ready
 
 * [ ] **All Coq `Admitted` proofs closed in `formal/Semantics.v`**
-      (currently 1: `preservation` with 22 open goals; see Status above)
+      (currently 1: `preservation` with 12 open goals; see
+      <<preservation-closure-plan,Preservation closure plan>>)
 * [ ] Idris2 `Parse/Parser.idr` upgraded from `%default covering` to
       `%default total` (LL(k) fuel-refactor; deferred separate campaign)
 * [ ] Stable surface syntax (already locked, but confirm no changes needed)

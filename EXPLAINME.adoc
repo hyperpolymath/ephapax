@@ -176,7 +176,7 @@ calculus over the Tofte-Talpin region-linear type system.
 
 | **`preservation`**
 | 🟡 Admitted
-| `formal/Semantics.v` (Theorem at line 3207). **22 open goals** as of 2026-05-20 (was 910). See `formal/PRESERVATION-HANDOFF.md`.
+| `formal/Semantics.v` (Theorem at line 3207). **12 open goals** as of 2026-05-21 (was 910). See ROADMAP §"Preservation closure plan" + `formal/PRESERVATION-HANDOFF.md`.
 |===
 
 The `preservation` reduction story is recent and load-bearing:
@@ -188,11 +188,22 @@ The `preservation` reduction story is recent and load-bearing:
   `induction Hstep`, so each case's IH carries clean universal
   quantification over the inner step's config rather than the
   inconsistent outer-cfg equation. Lands as PR #106.
-* The remaining 22 need (a) region invariance for non-region step
-  constructors, (b) linearity-context preservation for sibling
-  premises in congruence cases, (c) the documented region-env
-  weakening lemma for non-values (the S_Region_Step + T_Region_Active
-  case the in-file comment originally identified as "the one open").
+* **22 → 12 goals** via per-case manual proofs using the new
+  `step_R_eq_or_touches_region` region-invariance lemma (PR #114
+  for the lemma, PR #116 for the 10 case closures: β-reduction,
+  value-step, and atomic cases like `S_Let_Val`, `S_App_Fun`,
+  `S_If_True/False`, `S_Fst`, `S_Snd`, `S_Case_Inl/Inr`, `S_Copy`).
+* **Phase 1 scaffold landed** (PR #121): `step_output_context_eq`
+  (Lemma B) stated with induction-on-step skeleton. Per-case
+  discharges are the next session's substantive work.
+* The remaining 12 are 11 congruence cases blocked on Lemma B
+  (linearity-context drift between IH's output context and
+  sibling's pre-context) + 1 `S_Region_Step + T_Region_Active`
+  case blocked on the documented region-env weakening lemma for
+  non-values.
+
+The canonical closure path is **`ROADMAP.adoc` §"Preservation
+closure plan"** — 5 phases, ~3 sessions of focused work.
 
 An earlier in-file comment (corrected by PR #92, 2026-05-20) claimed
 preservation was Qed-closed on 2026-04-27. That claim was

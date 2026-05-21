@@ -2,10 +2,15 @@
 
 # Hand-off: closing `preservation` in `formal/Semantics.v`
 
-Diagnostic + remediation log. The proof is still `Admitted.`, but as of
-2026-05-20 it's **down from 910 open goals to ~29 real ones** via the
-standard preservation pattern. This file tells whoever picks it up
-next exactly what's open and why.
+Diagnostic + remediation log. The proof is still `Admitted.`, but as
+of **2026-05-21** it's **down from 910 open goals to 12** via four
+landed PRs. This file tells whoever picks it up next exactly what's
+open and what the canonical closure path is.
+
+> **The canonical closure plan is now in `ROADMAP.adoc` §
+> "Preservation closure plan".** This file remains as the per-case
+> diagnostic record. Read ROADMAP first; come back here for case
+> detail.
 
 ## State at a glance
 
@@ -13,7 +18,10 @@ next exactly what's open and why.
 |------|-----------:|-------|
 | 2026-04-27 | "fully closed" | In-file comment — but `coqc` rejected the `Qed.`. The claim was unsubstantiated; the proof never closed. |
 | 2026-05-20 (am) | 910 | Discovered via `Show. Show Existentials.` before the `Admitted.`. Exactly 35 (step rules) × 26 (typing rules). The existing `try solve [...]` chain closes ZERO. |
-| 2026-05-20 (pm) | **29** | After the standard preservation pattern (`remember (mu, R, e) as cfg` + symmetric for cfg', then `inversion Hcfg; subst; inversion Hcfg'; subst;` inside each case). 97% reduction. |
+| 2026-05-20 (pm) | 29 | After the standard preservation pattern (`remember (mu, R, e) as cfg` + symmetric for cfg', then `inversion Hcfg; subst; inversion Hcfg'; subst;` inside each case). 97% reduction. PR #102. |
+| 2026-05-20 (eve) | 22 | After `revert mu R e mu' R' e' Hcfg Hcfg'` before `induction Hstep` so each case's IH carries universal quantification over the inner step's config. PR #106. |
+| 2026-05-20 (eve) | 22 | Region-invariance lemma `step_R_eq_or_touches_region` landed as infrastructure (no goal closures). PR #114. |
+| 2026-05-20 (night) | **12** | 10 β-reduction / value-step cases discharged via per-case manual proofs using the lemma. PR #116. **98.7% reduction across one day.** |
 
 ## What the 910 → 29 fix did
 

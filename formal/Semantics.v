@@ -3292,6 +3292,42 @@ Proof.
          | right; constructor; (try assumption); exact HTR ]).
 Qed.
 
+(** ** Lemma B — Linearity-context invariance for siblings under step.
+
+    For `preservation`'s congruence cases (`S_StringConcat_Step1`,
+    `S_Let_Step`, `S_App_Step1`, ...), the IH yields the stepped
+    subexpression's typing at the post-step region but with an output
+    linearity context [G_out] that's a fresh metavariable. The
+    sibling-typing premise still references the PRE-step output
+    context [G_end]. To reconstruct the compound typing, the two
+    must coincide.
+
+    [step_output_context_eq] establishes that: any two typings of
+    [e] and [e'] starting from the same input context [G] end at the
+    same context, when [e] steps to [e']. This is the linearity-
+    tracking analogue of the existing [type_determinacy] (which
+    handles the type).
+
+    Phase 1 of the closure plan in ROADMAP §"Preservation closure plan". *)
+
+Lemma step_output_context_eq :
+  forall mu R e mu' R' e',
+    (mu, R, e) -->> (mu', R', e') ->
+    forall G T G_a G_b,
+      R;  G |- e  : T -| G_a ->
+      R'; G |- e' : T -| G_b ->
+      G_a = G_b.
+Proof.
+  intros mu R e mu' R' e' Hstep.
+  induction Hstep; intros G0 T0 Ga Gb Htype_e Htype_e'.
+  (* Attempt: aggressive inversion + auto on each case. The hope is
+     that for the syntax-directed typing relation, inversion of both
+     typings extracts component typings with matching output
+     contexts, which `eauto` then unifies. *)
+  all: try (inversion Htype_e; inversion Htype_e'; subst; auto).
+  all: admit.
+Admitted.
+
 Theorem preservation :
   forall mu R e mu' R' e',
     (mu, R, e) -->> (mu', R', e') ->

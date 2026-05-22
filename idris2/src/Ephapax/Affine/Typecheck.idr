@@ -1,10 +1,13 @@
+-- SPDX-License-Identifier: PMPL-1.0-or-later
+-- Copyright (c) 2026 Jonathan D.A. Jewell (hyperpolymath) <j.d.a.jewell@open.ac.uk>
+--
 module Ephapax.Affine.Typecheck
 
 import Data.List
 import Data.Maybe
 import Ephapax.IR.AST
 
-%default partial
+%default total
 
 public export
 data Mode = Affine | Linear
@@ -181,9 +184,7 @@ check mode ctx expr =
       Right (tb, ctx4)
     LetLin name _ val body => do
       (tv, ctx1) <- check mode ctx val
-      if not (isLinear tv) then
-        Left (LetLinNonLinear name tv)
-      else do
+      if not (isLinear tv) then Left (LetLinNonLinear name tv) else do
         let ctx2 = setVars ctx1 (extendVar (MkEntry name tv False) (vars ctx1))
         (tb, ctx3) <- check mode ctx2 body
         checkBoundUsed mode name ctx3.vars

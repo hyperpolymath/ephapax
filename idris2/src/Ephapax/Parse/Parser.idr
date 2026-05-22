@@ -1,3 +1,6 @@
+-- SPDX-License-Identifier: PMPL-1.0-or-later
+-- Copyright (c) 2026 Jonathan D.A. Jewell (hyperpolymath) <j.d.a.jewell@open.ac.uk>
+--
 module Ephapax.Parse.Parser
 
 import Data.List
@@ -7,7 +10,7 @@ import Ephapax.Parse.Util
 import Ephapax.Parse.ZigBuffer
 import Ephapax.IR.AST
 
-%default partial
+%default covering
 
 parseDecl : Parser Decl
 parseFnDecl : Parser Decl

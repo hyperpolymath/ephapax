@@ -1,0 +1,196 @@
+# SPDX-License-Identifier: PMPL-1.0-or-later
+# Copyright (c) 2026 Jonathan D.A. Jewell (hyperpolymath) <j.d.a.jewell@open.ac.uk>
+#
+# lessons.a2ml — proof-engineering lessons surfaced through real failures.
+# Read at session start by any AI agent touching formal-verification code
+# (Coq, Idris2, Lean4, Agda). Each lesson is named, has a reproducer, and
+# tells the agent what to do (and what NOT to do) when it hits the pattern.
+#
+# Human-readable companion:
+#   docs/sessions/SESSION-2026-05-20-proof-engineering-lessons.adoc
+#
+# Reference: ADR-002 in standards/agentic-a2ml/docs/
+
+[metadata]
+version = "1.0.0"
+last-updated = "2026-05-20"
+surfaced-by = "standards#124 (estate proof-debt epic), single day's work 2026-05-20"
+surfaced-via-prs = ["proof-of-work#63", "ephapax#92", "ephapax#95", "ephapax#98", "ephapax#102", "ephapax#103"]
+
+# ============================================================================
+# LESSON 1: in-file proof-status comments are NOT authoritative
+# ============================================================================
+
+[[lesson]]
+id = "build-is-the-only-oracle"
+title = "In-file proof-status comments are NOT authoritative — build is the only oracle"
+severity = "high"
+applies-to = ["coq", "idris2", "lean4", "agda"]
+
+pattern = """
+A source file carries a comment block claiming proof status:
+  Qed.
+  (* PROOF STATUS — FULLY CLOSED. Zero Admitted. ... *)
+The agent reads the comment, summarises it into downstream docs
+(ROADMAP, PROOF-NEEDS, STATE.a2ml) WITHOUT running the build.
+If the comment was ever wrong or silently drifted, the lie propagates.
+"""
+
+bit-us-where = "ephapax/formal/Semantics.v L3328 claimed 'FULLY CLOSED (2026-04-27). Zero Admitted.' with Qed.; coqc 8.18.0 rejected it. ephapax#87 propagated the lie into ROADMAP + PROOF-NEEDS. ephapax/.machine_readable/6a2/STATE.a2ml claimed '67 Qed, 0 Admitted' — also false."
+
+do = "Before citing or summarising any in-file proof-status claim, RUN THE BUILD:\n  Coq: cd formal && coq_makefile -f _CoqProject -o Makefile.coq && make -f Makefile.coq\n  Idris2: idris2 --build <pkg>.ipkg\n  Lean4: lake build\nGreen build supports the claim. Red build invalidates the claim regardless of what the comment says."
+
+dont = "Don't trust the comment. Don't propagate it into docs without running the build. Don't summarise 'Qed' as 'proven' without verification."
+
+fixed-by-pr = ["ephapax#92", "ephapax#103"]
+
+# ============================================================================
+# LESSON 2: "Theorem name in formal/" can be vacuous
+# ============================================================================
+
+[[lesson]]
+id = "vacuous-wrapper-theorems"
+title = "A theorem can be vacuous — check the body, not the header docstring"
+severity = "high"
+applies-to = ["coq", "idris2", "lean4", "agda"]
+
+pattern = """
+A formalisation file carries:
+  ||| Region Safety: a RegionBlock proves its result doesn't reference r.
+  public export
+  0 regionSafetyExtract :
+    (r : RegionId) -> ... -> NoRegionInType r t -> ... -> NoRegionInType r t
+  regionSafetyExtract r ctx t ne lc = ne
+Header claims something substantive. Body is = ne (return input
+unchanged). The theorem is sound (no escape hatches) but content-free.
+"""
+
+bit-us-where = "ephapax/src/formal/Ephapax/Formal/RegionLinear.idr: regionSafetyExtract and noGCExtract both have tautological bodies. ROADMAP cited them as 'regionSafetyTheorem' / 'noGCTheorem' complete. Vacuous. Also seen earlier in vcl-ut (L2/L3/L5 predicates vacuously inhabited by AllParameterised)."
+
+do = """
+When reviewing a 'Theorem complete' claim:
+  1. Find the theorem in source.
+  2. Look at the BODY, not the header docstring.
+  3. If the body is `= <one of the inputs>`, the theorem is tautological — flag it.
+  4. If the body is `= absurd <constructor>` over a no-inhabitant ctor, the theorem
+     is narrow — check the header doesn't overstate.
+  5. If the body is `Refl` with textually-identical LHS/RHS, same — vacuous.
+A real theorem chains supporting lemmas, does non-trivial case analysis,
+or constructs evidence.
+"""
+
+dont = "Don't conclude 'theorem complete' from the type signature alone. Don't trust grep for theorem names — the name is a label, not a proof."
+
+fixed-by-pr = ["ephapax#95"]  # E3/E4 honestly OWED in the seam
+
+# ============================================================================
+# LESSON 3: Show. + Show Existentials. for Coq diagnostics
+# ============================================================================
+
+[[lesson]]
+id = "coq-show-existentials-recipe"
+title = "Show. Show Existentials. is the precise diagnostic for unfinished Coq proofs"
+severity = "medium"
+applies-to = ["coq"]
+
+pattern = """
+A Coq proof script fails with:
+  Error: (in proof X): Attempt to save an incomplete proof
+  (there are remaining open goals).
+Natural assumption: 'one more tactic'. Often the reality: the script
+is closing zero goals, not one off from closure.
+"""
+
+bit-us-where = "ephapax/formal/Semantics.v::preservation — coqc rejected Qed.; in-file comment claimed 'Only ONE case remains open'. Actual count via Show: 910 goals = 35 step rules × 26 typing rules. The try solve chain was closing ZERO."
+
+do = """
+Before adding tactics blindly:
+  end).
+  Show.            (* prints current goal *)
+  Show Existentials. (* lists every unresolved metavariable + context *)
+  Admitted.
+Then build. coqc prints the goal count at the top + every existential.
+Restore the Admitted. afterwards. Count tells you whether you need one
+more tactic or a structural rewrite (see lesson 'induction-doesnt-substitute').
+"""
+
+dont = "Don't add 'try solve [...]' lines hoping for the best. Don't trust comment claims about which case is left open without running Show."
+
+# ============================================================================
+# LESSON 4: induction doesn't substitute outer expression slots
+# ============================================================================
+
+[[lesson]]
+id = "induction-doesnt-substitute-outer-slots"
+title = "induction Hstep doesn't substitute outer expression slots — remember (cfg) as cfg eqn:Hcfg is the standard fix"
+severity = "high"
+applies-to = ["coq"]
+
+pattern = """
+A preservation-style theorem:
+  Theorem preservation :
+    forall mu R e mu' R' e',
+      step (mu, R, e) (mu', R', e') ->
+      forall G T G', has_type R G e T G' ->
+      exists G_out, has_type R' G e' T G_out.
+  Proof.
+    intros mu R e mu' R' e' Hstep.
+    induction Hstep; intros G0 T0 G0' Htype;
+      inversion Htype; subst; ...
+
+After `induction Hstep`, the outer `e` STAYS ABSTRACT. inversion Htype
+then produces ALL typing arms (m arms), not just the diagonal matching
+the step's expression. For n step rules × m typing rules you get n × m
+cross-cases. Trivial 'try solve [exfalso; discriminate]' fails because
+no discriminating equation is in scope.
+"""
+
+bit-us-where = "ephapax/formal/Semantics.v::preservation — 35 step rules × 26 typing rules = 910 open goals. Existing try solve chain closed ZERO."
+
+do = """
+Add `remember` BEFORE induction:
+  intros mu R e mu' R' e' Hstep.
+  remember (mu, R, e) as cfg eqn:Hcfg.
+  remember (mu', R', e') as cfg' eqn:Hcfg'.
+  induction Hstep; intros G0 T0 G0' Htype;
+    inversion Hcfg; subst;
+    inversion Hcfg'; subst;
+    inversion Htype; subst;
+    try solve [...].
+Now `Hcfg` after induction becomes (e.g. for S_StringNew):
+  (mu0, R0, EStringNew r s) = (mu, R, e)
+inversion Hcfg; subst substitutes e := EStringNew r s everywhere
+including Htype. Then inversion Htype only generates the diagonal arm;
+the m-1 cross-arms are eliminated by constructor mismatch.
+ephapax#102 used this and reduced 910 → 29 (97%).
+"""
+
+dont = """
+ANTI-PATTERN: `remember e_typed as e_orig eqn:He_orig` from `type of
+Htype`. This remembers the TYPING's expression (already abstract) — same
+shape as before. Solves nothing. Remember the CONFIG's expression slot
+(what induction Hstep substitutes for), not the typing's.
+
+Also don't:
+- Replace induction with inversion — loses IHs for congruence cases.
+- Use dependent induction without thinking — can over-substitute and
+  break the IH for congruence-rule cases too.
+"""
+
+when-to-apply = "Any preservation-style proof where (a) the induction is on a relation with expression slots in its config, (b) the outer theorem quantifies over those slots, (c) typing-side inversion needs the expression form pinned."
+
+fixed-by-pr = ["ephapax#102"]
+human-readable-doc = "docs/sessions/SESSION-2026-05-20-proof-engineering-lessons.adoc"
+
+# ============================================================================
+# CROSS-CUTTING NOTES
+# ============================================================================
+
+[notes]
+estate-pattern = "All four lessons cluster around the same root: claimed-but-unverified proof state. Lesson 1 = claims propagated without verification; Lesson 2 = claims look substantive but lack content; Lesson 3 = the precise way to verify a claim; Lesson 4 = the fix for a specific failure mode that triggers Lesson 1."
+
+related-memory = [
+  "feedback_foundation_first",          # build-is-the-only-oracle rule
+  "project_vclut_hole_deeper_than_documented",  # vacuous predicates analog
+  "project_proof_debt_rust_spark_audit_2026_05_18"  # epic context
+]

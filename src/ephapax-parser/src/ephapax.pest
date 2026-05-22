@@ -34,7 +34,15 @@ import_decl = {
 // Declarations
 // ============================================================================
 
-declaration = { extern_block | data_decl | fn_decl | type_decl | const_decl }
+declaration = { annotation* ~ (extern_block | data_decl | fn_decl | type_decl | const_decl) }
+
+// `@identifier` decorators attached to top-level declarations. Currently
+// parser-only — annotations are parsed and stored on the surface AST so
+// they survive round-tripping, but the typechecker and codegen ignore
+// them. They exist so that downstream tools (hypatia's `@tail_recursive`,
+// future `@inline`, `@no_mangle`, etc.) can hang metadata off a decl
+// without breaking the parser today.
+annotation = { "@" ~ identifier }
 
 // ============================================================================
 // Extern Blocks
@@ -82,8 +90,9 @@ named_record_type_def = { constructor_name ~ "{" ~ record_field ~ ("," ~ record_
 linearity = { "linear" | "affine" }
 
 // Data type declaration: data Option(a) = None | Some(a)
+// Optional `pub` prefix makes the type + its constructors importable.
 data_decl = {
-    "data" ~ constructor_name ~ type_params? ~ "=" ~ "|"? ~ data_variant ~ ("|" ~ data_variant)*
+    visibility? ~ "data" ~ constructor_name ~ type_params? ~ "=" ~ "|"? ~ data_variant ~ ("|" ~ data_variant)*
 }
 
 type_params = { "(" ~ identifier ~ ("," ~ identifier)* ~ ")" }
@@ -156,9 +165,39 @@ expression = {
 seq_expr = { single_expr ~ (";" ~ single_expr)* }
 
 single_expr = {
-    let_lin_expr
+    // Implicit-`in` block: a chain of `let`/`let!` bindings without `in`
+    // keywords, followed by a final result expression. Tried first so
+    // bridge-eph-style sequences parse without explicit `in`. PEG ordering
+    // means the legacy `let x = e in body` form still works — if the
+    // parser sees `in` after the rhs, `block_expr` fails and `let_expr`
+    // (next) succeeds.
+    block_expr
+    | let_lin_expr
     | let_expr
     | lambda_expr
+    | if_expr
+    | region_expr
+    | match_expr
+    | case_expr
+    | handle_expr
+    | or_expr
+}
+
+// One or more `sequential_let`s followed by a trailing result expression.
+// The trailing expression can itself be any `expression` (which folds back
+// through `seq_expr` / `single_expr`), so nested block forms and explicit
+// `let ... in ...` both compose normally.
+block_expr = { sequential_let+ ~ expression }
+
+sequential_let = {
+    ("let!" | "let") ~ let_binder ~ (":" ~ ty)? ~ "=" ~ block_rhs
+}
+
+// A `sequential_let`'s rhs may be any expression form *except* a top-level
+// `let`/`let!` — those participate in the block via the next iteration of
+// `sequential_let`.
+block_rhs = {
+    lambda_expr
     | if_expr
     | region_expr
     | match_expr
@@ -193,12 +232,23 @@ var_pattern = { identifier }
 pattern_list = { pattern ~ ("," ~ pattern)* }
 
 let_expr = {
-    "let" ~ identifier ~ (":" ~ ty)? ~ "=" ~ expression ~ "in" ~ expression
+    "let" ~ let_binder ~ (":" ~ ty)? ~ "=" ~ expression ~ "in" ~ expression
 }
 
 let_lin_expr = {
-    "let!" ~ identifier ~ (":" ~ ty)? ~ "=" ~ expression ~ "in" ~ expression
+    "let!" ~ let_binder ~ (":" ~ ty)? ~ "=" ~ expression ~ "in" ~ expression
 }
+
+// Either a single identifier (the common case) or a parenthesised tuple
+// of identifiers for destructuring binds:
+//
+//   let (a, b) = pair() in ...
+//   let! (ch2, msg_bytes) = ipc_recv(ch) in ...
+//
+// Tuple binders desugar to a 1-arm `match scrutinee of | (a, b) => body end`
+// at parse time, reusing the existing pair-pattern handling.
+let_binder = { tuple_binder | identifier }
+tuple_binder = { "(" ~ identifier ~ ("," ~ identifier)+ ~ ")" }
 
 lambda_expr = {
     "fn" ~ "(" ~ identifier ~ ":" ~ ty ~ ")" ~ "->" ~ expression
@@ -330,7 +380,18 @@ ffi_expr = {
 }
 
 record_literal = { "{" ~ record_field_assign ~ ("," ~ record_field_assign)* ~ ","? ~ "}" }
-record_field_assign = { identifier ~ (":" ~ ty)? ~ "=" ~ expression }
+// Three surface forms, all producing the same AST node:
+//   1. `field: ty = value`  (typed, explicit assignment)
+//   2. `field = value`      (untyped, explicit assignment)
+//   3. `field: value`       (ML/Haskell-style shorthand — value
+//                            expression directly after `:`, no `=`)
+// PEG ordering: the `=` forms are tried first; the shorthand fires
+// only when no `=` follows the named-ty.
+record_field_assign = {
+      identifier ~ ":" ~ ty ~ "=" ~ expression
+    | identifier ~ "=" ~ expression
+    | identifier ~ ":" ~ expression
+}
 
 string_method = {
     "String" ~ "." ~ identifier ~ ("@" ~ identifier)? ~ "(" ~ expr_list? ~ ")"

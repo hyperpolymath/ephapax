@@ -1,0 +1,9 @@
+// SPDX-License-Identifier: PMPL-1.0-or-later
+// Cross-module compile target. Imports `lib/math` and calls its public
+// `double` function from a local fn.
+
+module app
+
+import lib/math
+
+fn quadruple(n: I32): I32 = double(double(n))

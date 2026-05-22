@@ -1,9 +1,12 @@
+-- SPDX-License-Identifier: PMPL-1.0-or-later
+-- Copyright (c) 2026 Jonathan D.A. Jewell (hyperpolymath) <j.d.a.jewell@open.ac.uk>
+--
 module Ephapax.Parse.Stream
 
 import Ephapax.Parse.Lexer
 import Ephapax.Parse.ZigBuffer
 
-%default partial
+%default total
 
 public export
 record Stream where
@@ -45,12 +48,13 @@ atEnd s = s.index >= s.len
 
 public export
 remaining : Stream -> List Token
-remaining s = build s.index
+remaining s = buildFuel (integerToNat (cast (s.len - s.index))) s.index
   where
-    build : Int -> List Token
-    build i =
+    buildFuel : Nat -> Int -> List Token
+    buildFuel Z _ = []
+    buildFuel (S k) i =
       if i >= s.len then []
-      else MkToken (getTokKind s.buf i) (getTokPos s.buf i) :: build (i + 1)
+      else MkToken (getTokKind s.buf i) (getTokPos s.buf i) :: buildFuel k (i + 1)
 
 public export
 at : Int -> Stream -> Maybe Token

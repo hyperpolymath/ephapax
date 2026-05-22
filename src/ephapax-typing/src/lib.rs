@@ -979,7 +979,11 @@ impl TypeChecker {
     }
 
     fn check_string_new(&self, s: Span, region: &RegionName) -> Result<Ty, SpannedTypeError> {
-        if !self.ctx.region_active(region) {
+        // The wildcard region name `_` is implicitly active everywhere —
+        // it stands for the global / data-section pool that holds bare
+        // string literals lowered by desugar. Other named regions still
+        // require a surrounding `region r { ... }` block.
+        if region.as_str() != "_" && !self.ctx.region_active(region) {
             return Err(self.at(s, TypeError::InactiveRegion(region.clone())));
         }
         Ok(Ty::String(region.clone()))
@@ -2091,13 +2095,23 @@ impl ModuleRegistry {
                     ret_ty,
                     ..
                 } => {
-                    let fn_ty = params
-                        .iter()
-                        .rev()
-                        .fold(ret_ty.clone(), |acc, (_, param_ty)| Ty::Fun {
-                            param: Box::new(param_ty.clone()),
-                            ret: Box::new(acc),
-                        });
+                    // Nullary fn `fn foo(): T = ...` has type `() -> T`,
+                    // not `T`. Without this wrap, `foo()` at a call site
+                    // fails to unify `T` applied to `()`.
+                    let fn_ty = if params.is_empty() {
+                        Ty::Fun {
+                            param: Box::new(Ty::Base(BaseTy::Unit)),
+                            ret: Box::new(ret_ty.clone()),
+                        }
+                    } else {
+                        params
+                            .iter()
+                            .rev()
+                            .fold(ret_ty.clone(), |acc, (_, param_ty)| Ty::Fun {
+                                param: Box::new(param_ty.clone()),
+                                ret: Box::new(acc),
+                            })
+                    };
                     let poly_ty =
                         type_params.iter().rev().fold(fn_ty, |acc, tv| Ty::ForAll {
                             var: tv.clone(),
@@ -2131,13 +2145,20 @@ impl ModuleRegistry {
                             ret_ty,
                         } = item
                         {
-                            let fn_ty = params.iter().rev().fold(
-                                ret_ty.clone(),
-                                |acc, (_, param_ty)| Ty::Fun {
-                                    param: Box::new(param_ty.clone()),
-                                    ret: Box::new(acc),
-                                },
-                            );
+                            let fn_ty = if params.is_empty() {
+                                Ty::Fun {
+                                    param: Box::new(Ty::Base(BaseTy::Unit)),
+                                    ret: Box::new(ret_ty.clone()),
+                                }
+                            } else {
+                                params.iter().rev().fold(
+                                    ret_ty.clone(),
+                                    |acc, (_, param_ty)| Ty::Fun {
+                                        param: Box::new(param_ty.clone()),
+                                        ret: Box::new(acc),
+                                    },
+                                )
+                            };
                             entries.push((name.clone(), fn_ty, Visibility::Public));
                         }
                     }
@@ -2247,14 +2268,21 @@ fn type_check_module_inner(
                 type_params,
                 ..
             } => {
-                let fn_ty =
+                // Nullary fn `fn foo(): T = ...` has type `() -> T`.
+                let fn_ty = if params.is_empty() {
+                    Ty::Fun {
+                        param: Box::new(Ty::Base(BaseTy::Unit)),
+                        ret: Box::new(ret_ty.clone()),
+                    }
+                } else {
                     params
                         .iter()
                         .rev()
                         .fold(ret_ty.clone(), |acc, (_, param_ty)| Ty::Fun {
                             param: Box::new(param_ty.clone()),
                             ret: Box::new(acc),
-                        });
+                        })
+                };
                 let poly_ty = type_params.iter().rev().fold(fn_ty, |acc, tv| Ty::ForAll {
                     var: tv.clone(),
                     body: Box::new(acc),
@@ -2281,13 +2309,20 @@ fn type_check_module_inner(
                         ret_ty,
                     } = item
                     {
-                        let fn_ty = params.iter().rev().fold(
-                            ret_ty.clone(),
-                            |acc, (_, param_ty)| Ty::Fun {
-                                param: Box::new(param_ty.clone()),
-                                ret: Box::new(acc),
-                            },
-                        );
+                        let fn_ty = if params.is_empty() {
+                            Ty::Fun {
+                                param: Box::new(Ty::Base(BaseTy::Unit)),
+                                ret: Box::new(ret_ty.clone()),
+                            }
+                        } else {
+                            params.iter().rev().fold(
+                                ret_ty.clone(),
+                                |acc, (_, param_ty)| Ty::Fun {
+                                    param: Box::new(param_ty.clone()),
+                                    ret: Box::new(acc),
+                                },
+                            )
+                        };
                         tc.ctx.extend(name.clone(), fn_ty, BindingForm::Let);
                     }
                 }
@@ -3432,15 +3467,16 @@ mod tests {
     // and extern fn signatures are added to the type environment so
     // regular fn bodies can call them.
 
-    /// A module with an extern block + a regular fn that returns an
-    /// extern fn's value type-checks successfully. The extern fn is
-    /// nullary (`open_handle(): Window`) so its type is just
-    /// `Ty::Var("Window")` after the signature fold — referencing it
-    /// directly in the body should produce that opaque type.
+    /// A module with an extern block + a regular fn that calls a nullary
+    /// extern fn type-checks successfully. Since #80 Phase J, a nullary
+    /// signature `open_handle(): Window` is exposed as `() -> Window`
+    /// (not bare `Window`), so the call site must apply it to `()`:
+    /// `open_handle()`. This keeps nullary fns callable like every other
+    /// fn (required for bridge.eph's `hypatia_init()` etc.).
     #[test]
     fn typecheck_extern_nullary_fn_callable() {
         // extern "gossamer" { fn open_handle(): Window }
-        // fn entry(): Window = open_handle
+        // fn entry(): Window = open_handle()
         let module = Module {
             name: "test".into(),
             imports: vec![],
@@ -3459,12 +3495,15 @@ mod tests {
                     type_params: vec![],
                     params: vec![],
                     ret_ty: Ty::Var("Window".into()),
-                    body: Expr::dummy(ExprKind::Var("open_handle".into())),
+                    body: Expr::dummy(ExprKind::App {
+                        func: Box::new(Expr::dummy(ExprKind::Var("open_handle".into()))),
+                        arg: Box::new(Expr::dummy(ExprKind::Lit(Literal::Unit))),
+                    }),
                 },
             ],
         };
 
-        type_check_module(&module).expect("extern reference should type-check");
+        type_check_module(&module).expect("extern nullary call should type-check");
     }
 
     /// A unary extern fn called with the correct argument type-checks;

@@ -1,3 +1,6 @@
+-- SPDX-License-Identifier: PMPL-1.0-or-later
+-- Copyright (c) 2026 Jonathan D.A. Jewell (hyperpolymath) <j.d.a.jewell@open.ac.uk>
+--
 module Ephapax.IR.Decode
 
 import Data.List
@@ -5,7 +8,7 @@ import Data.String
 import Ephapax.IR.SExpr
 import Ephapax.IR.AST
 
-%default partial
+%default total
 
 baseToAtom : BaseTy -> String
 baseToAtom Unit = "unit"
@@ -154,6 +157,7 @@ decodeTy (List [Atom "borrow", inner]) = pure (Borrow !(decodeTy inner))
 decodeTy (List [Atom "var", Atom v]) = pure (Var v)
 decodeTy _ = Left (Invalid "unknown type")
 
+covering
 encodeExpr : Expr -> SExpr
 encodeExpr (Lit lit) = List [Atom "lit", encodeLit lit]
 encodeExpr (VarE name) = List [Atom "var", Atom name]
@@ -181,6 +185,7 @@ encodeExpr (Block es) = List (Atom "block" :: map encodeExpr es)
 encodeExpr (BinOpE op a b) = List [Atom "binop", Atom (binopToAtom op), encodeExpr a, encodeExpr b]
 encodeExpr (UnOpE op e) = List [Atom "unop", Atom (unaryToAtom op), encodeExpr e]
 
+covering
 decodeExpr : SExpr -> Either ParseError Expr
 decodeExpr (List (Atom tag :: rest)) =
   case tag of
@@ -273,12 +278,14 @@ decodeParam (List [Atom name, ty]) = do
   pure (name, t)
 decodeParam _ = Left (Invalid "param must be (name ty)")
 
+covering
 encodeDecl : Decl -> SExpr
 encodeDecl (Fn name params ret body) =
   List [Atom "fn", Atom name, List (map encodeParam params), encodeTy ret, encodeExpr body]
 encodeDecl (TypeDecl name ty) =
   List [Atom "type", Atom name, encodeTy ty]
 
+covering
 decodeDecl : SExpr -> Either ParseError Decl
 decodeDecl (List (Atom "fn" :: Atom name :: List params :: ret :: body :: [])) = do
   ps <- traverse decodeParam params
@@ -291,6 +298,7 @@ decodeDecl (List (Atom "type" :: Atom name :: ty :: [])) = do
 decodeDecl _ = Left (Invalid "unknown decl")
 
 public export
+covering
 fromSExpr : SExpr -> Either ParseError Module
 fromSExpr (List (Atom "module" :: Atom name :: List decls :: [])) = do
   ds <- traverse decodeDecl decls
@@ -298,10 +306,12 @@ fromSExpr (List (Atom "module" :: Atom name :: List decls :: [])) = do
 fromSExpr _ = Left (Invalid "expected (module name (decls...))")
 
 public export
+covering
 toSExpr : Module -> SExpr
 toSExpr (MkModule name decls) =
   List [Atom "module", Atom name, List (map encodeDecl decls)]
 
 public export
+covering
 encode : Module -> String
 encode = show . toSExpr

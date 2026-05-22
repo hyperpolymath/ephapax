@@ -4,9 +4,8 @@ image:https://img.shields.io/badge/Philosophy-Palimpsest-indigo.svg[Palimpsest,l
 image:https://github.com/hyperpolymath/ephapax/actions/workflows/codeql.yml/badge.svg?branch=main[CodeQL,link="https://github.com/hyperpolymath/ephapax/actions/workflows/codeql.yml"]
 image:https://api.thegreenwebfoundation.org/greencheckimage/ephapax.org[Green Hosting,link="https://www.thegreenwebfoundation.org/green-web-check/?url=ephapax.org"]
 
-
 // SPDX-License-Identifier: PMPL-1.0-or-later
-// SPDX-FileCopyrightText: 2025 Jonathan D.A. Jewell
+// SPDX-FileCopyrightText: 2025-2026 Jonathan D.A. Jewell
 :toc: macro
 :toclevels: 3
 :icons: font
@@ -15,111 +14,88 @@ image:https://api.thegreenwebfoundation.org/greencheckimage/ephapax.org[Green Ho
 
 = Ephapax
 
+_ἐφάπαξ — once for all._
 
+A dyadic linear+affine type system for compile-time WebAssembly
+memory safety. Resources are tracked through the type system so the
+compiler can guarantee — without a garbage collector — that no value
+is used after being freed, no resource is leaked, and region-scoped
+allocations are deallocated in bulk at scope exit.
 
-_ἐφάπαξ — once for all_
-
-image:[Rust 1.83+]
-image:[Coq 8.18+]
-image:https://img.shields.io/badge/target-wasm32-purple.svg[WASM]
-
-A dyadic language - one part affine, the other linear - as a type system with safe memory management targeting WebAssembly.
+The core calculus is mechanically formalised. Soundness theorems on
+the dynamic side (Coq) and structural-safety theorems on the type
+side (Idris2) are checked by their respective proof assistants on
+every push.
 
 toc::[]
 
-== Surface Syntax (Locked)
+== Why "Ephapax"?
 
-Ephapax uses a compact, statement-delimited block syntax. Newlines act as
-statement separators (equivalent to `;`).
+The Greek _ἐφάπαξ_ ("ephapax") means **once for all**. It is the
+guarantee linear types make: every resource is used **exactly once**.
+You consume it, or you transfer ownership of it, or you drop it —
+but you cannot reach for it twice, and you cannot forget about it.
 
-[source]
+== What this is
+
+Ephapax is a programming language with:
+
+[cols="1,3"]
+|===
+| Property | What this means
+
+| **Dyadic discipline**
+| Each binding is *either* affine (`let` — used at most once,
+  weakening allowed) *or* linear (`let!` — used exactly once,
+  weakening forbidden). Type checker enforces.
+
+| **Region-based memory**
+| Allocations live in named regions (`region r: ...`); when the
+  region's scope ends, the runtime bulk-frees every resource in it.
+  No allocator overhead per object; no per-object frees.
+
+| **Second-class borrows**
+| `&x` gives temporary access without consuming `x`. Borrows cannot
+  be stored, escape their introduction scope, or be used after the
+  borrowed resource is freed.
+
+| **Compile-time memory safety**
+| No use-after-free, no double-free, no leaks of linear resources
+  — caught at type-check time, before a binary is produced.
+
+| **WebAssembly target**
+| `wasm32-unknown-unknown` primary; native via Cranelift secondary.
+
+| **No GC, no allocator runtime**
+| Region exits do the bulk deallocation. No tracing collector, no
+  reference counting, no allocator-per-object metadata.
+|===
+
+== What this isn't
+
+* **Not Rust.** Rust uses ownership + borrowing with a single discipline
+  (affine-ish, with linearisation via `Drop`). Ephapax separates the
+  two disciplines explicitly: `let` is affine, `let!` is linear, and
+  the user chooses per-binding.
+* **Not a research vapourware.** ~19 Rust crates exist; the lexer,
+  parser, interpreter, REPL, CLI, S-expression IR, two-phase pipeline,
+  Zig FFI, and conformance test suite are complete. Type checker and
+  WASM codegen are in progress. See `ROADMAP.adoc`.
+* **Not yet self-hosting.** The compiler is written in Rust. The
+  formalisation is in Coq + Idris2. Self-hosting is a v1.0+ goal.
+
+== Hello, world
+
+[source,ephapax]
 ----
-// Function declaration
 fn main() -> i32 {
     let x = 1 + 2;
     let y = x * 3;
     y
 }
-
-// Linear let-binding
-let! z = copy(x) in z
 ----
 
-Grammar highlights:
-
-* Functions: `fn name(params) -> Ty { ... }` or `fn name(params) : Ty { ... }`
-* Let bindings: `let x = expr in expr`
-* Linear let bindings: `let! x = expr in expr`
-* Block expressions: `{ expr1; expr2; ...; exprN }` (final expr is the result)
-* Comments: `//` to end-of-line
-
-== Quickstart
-
-[source,bash]
-----
-just idris-build
-just golden
-----
-
-This runs tests, builds all crates, and verifies Coq proofs.
-
-== Current Limitations
-
-* The WASM backend currently assumes `i32` representation for pairs/sums.
-* Lambda/app compilation is stubbed (closure conversion not yet implemented).
-
-== Seam Analysis
-
-Key interfaces where correctness and stability matter:
-
-* Idris2 -> S-expression IR (`Ephapax.IR.Decode` encoding/decoding).
-* Zig FFI token buffer -> Idris2 parser stream (`Ephapax.Parse.ZigBuffer`).
-* S-expression IR -> Rust/WASM backend (`ephapax-ir` and `ephapax-wasm`).
-
-We now include the `proven` library as a dependency to harden string handling
-paths over time (e.g., JSON-style escaping for IR boundaries).
-
-== Overview
-
-Ephapax is a programming language with a linear type system that guarantees:
-
-[cols="1,3"]
-|===
-| Guarantee | Mechanism
-
-| **No use-after-free**
-| Linear resources cannot be accessed after consumption
-
-| **No memory leaks**
-| Linear resources must be consumed exactly once
-
-| **Region-based deallocation**
-| Bulk memory management without garbage collection
-
-| **Zero-cost abstractions**
-| Safety guarantees enforced at compile time
-|===
-
-== Design Principles
-
-[cols="1,3"]
-|===
-| Principle | Mechanism
-
-| **Linearity**
-| Every linear value used exactly once
-
-| **Regions**
-| Scoped allocation with bulk deallocation
-
-| **Second-class borrows**
-| Temporary access without ownership transfer
-
-| **Explicit copies**
-| Duplication requires explicit syntax
-|===
-
-== Example
+A region with linear strings:
 
 [source,ephapax]
 ----
@@ -133,39 +109,188 @@ region r:
     -- Concatenation consumes both strings
     let result = String.concat(s1, s2)
 
-    -- result is consumed by returning
+    -- result is consumed by being returned
     result
--- Region exits: any remaining allocations freed
+-- Region exits: any remaining allocations bulk-freed.
 ----
 
-== Project Structure
+A linear binding (must consume):
+
+[source,ephapax]
+----
+fn process(input: i32) -> i32 {
+    let! z = copy(input) in
+    z + 1  -- z is consumed exactly once
+}
+----
+
+More examples in `examples/` and `conformance/pass/`.
+
+== Quickstart
+
+[source,bash]
+----
+# Build all crates
+just build
+
+# Build the Idris2 affine stage
+just idris-build
+
+# Verify Coq proofs
+just proofs
+
+# Run conformance tests + build + proofs
+just golden
+
+# Compile an .eph file through Idris2 + WASM backend
+just compile-affine input.eph affine output.wasm
+----
+
+Prerequisites:
+
+* Rust 1.83+ with `wasm32-unknown-unknown` target
+* Coq 8.18+ (for proof verification)
+* Idris2 0.8.0 (needs `IDRIS2_PREFIX` pointing at a prefix with TTCs)
+* https://just.systems/[just] (task runner)
+
+== Project structure
 
 [source]
 ----
 ephapax/
-├── formal/              # Coq formalisation of type system
-│   ├── Syntax.v         # AST and types
-│   ├── Typing.v         # Linear typing rules
-│   └── Semantics.v      # Operational semantics & soundness
-├── src/                 # Implementation
-│   ├── ephapax-syntax/  # AST definitions
-│   ├── ephapax-typing/  # Linear type checker
-│   ├── ephapax-lexer/   # Tokenizer (logos)
-│   ├── ephapax-parser/  # Parser (chumsky)
-│   ├── ephapax-interp/  # Tree-walking interpreter
-│   ├── ephapax-wasm/    # WASM code generation
-│   ├── ephapax-runtime/ # Runtime support
-│   ├── ephapax-repl/    # Interactive shell
-│   └── ephapax-cli/     # Command-line interface
-├── conformance/         # Type system conformance tests
-│   ├── pass/            # Programs that should type-check
-│   └── fail/            # Programs that should be rejected
-├── spec/                # Language specification
-├── .machine_read/       # Machine-readable specs for tooling
-└── docs/                # Documentation
+├── formal/                       # Coq operational semantics + soundness
+│   ├── Syntax.v                  # AST and types
+│   ├── Typing.v                  # Region-linear typing rules
+│   ├── Semantics.v               # Small-step substitution semantics
+│   └── PRESERVATION-HANDOFF.md   # Per-case checklist for preservation
+├── idris2/                       # Idris2 frontend (parser + typechecker)
+│   ├── src/Ephapax/IR/           # AST, decode/encode, S-expression IR
+│   ├── src/Ephapax/Parse/        # Lexer, parser, stream, ZigBuffer FFI
+│   └── src/Ephapax/Affine/       # Type checker, emitter
+├── src/formal/                   # Idris2 region-linearity theorems
+│   └── Ephapax/Formal/           # noEscape, regionSafety, noGC, orthogonality
+├── src/                          # Rust implementation
+│   ├── ephapax-syntax/           # Core AST (Coq-proven shape)
+│   ├── ephapax-surface/          # Surface AST (data, match, patterns)
+│   ├── ephapax-desugar/          # Surface → Core
+│   ├── ephapax-typing/           # Dyadic type checker
+│   ├── ephapax-parser/           # Pest PEG parser
+│   ├── ephapax-lexer/            # logos tokenizer
+│   ├── ephapax-interp/           # Tree-walking interpreter
+│   ├── ephapax-wasm/             # WASM code generator
+│   ├── ephapax-runtime/          # no_std WASM runtime with regions
+│   ├── ephapax-cli/              # CLI
+│   ├── ephapax-lsp/              # Language server
+│   └── ephapax-analysis/         # Escape / free-vars / liveness analysis
+├── ephapax-linear/               # Standalone dual-discipline checker
+├── ffi/zig/                      # Zig FFI implementation
+├── conformance/                  # Type-system conformance tests
+├── spec/                         # Language specification
+└── docs/                         # Vision, ADRs, comparisons, reports
 ----
 
-== Build Targets
+== Formal foundations
+
+The type system is grounded in:
+
+* **Intuitionistic linear logic** — resource-sensitive reasoning
+* **Separation logic** — memory ownership and framing
+* **Tofte-Talpin region calculus** — scoped allocation
+
+Two complementary formalisations, both run on every push:
+
+=== Coq (`formal/`)
+
+Operational semantics with small-step reduction over a substitution-
+based calculus. Proves dynamic properties (no stuck states, region
+exits free everything, substitution preserves typing).
+
+Currently `Qed`-closed: `no_leaks`, `subst_preserves_typing`,
+`typing_ctx_transfer`, `region_env_perm_typing`, `region_add_typing`,
+`region_shrink_preserves_typing`, plus 70+ supporting lemmas.
+
+Currently `Admitted`: `preservation`. **12 open goals remain** after
+the reduction chain — down from **910** at the start of the campaign
+(98.7% reduction across PRs #92 / #102 / #104 / #106 / #114 / #116 /
+#117 / #121, 2026-05-20 → 2026-05-21). Phase 1 scaffold of the
+closure plan (Lemma B `step_output_context_eq`) landed; per-case
+discharges next. The remaining 12 are 11 congruence cases (blocked
+on Lemma B's per-case proofs — linearity-context drift between IH
+and sibling) + 1 `S_Region_Step + T_Region_Active` case (blocked on
+region-env weakening for non-values). Canonical closure path:
+**`ROADMAP.adoc` §"Preservation closure plan"** (5 phases, ~3
+sessions of focused work). See also `formal/PRESERVATION-HANDOFF.md`
+for the per-case diagnostic record.
+
+[source,bash]
+----
+# Verify Coq proofs
+just proofs                   # via Makefile.coq
+# Or per-file:
+cd formal && coqc -Q . Ephapax Semantics.v
+----
+
+=== Idris2 (`idris2/src/Ephapax/` + `src/formal/`)
+
+Two Idris2 developments:
+
+* **`idris2/src/Ephapax/`** — the actual frontend (parser, type
+  checker, IR codec). As of 2026-05-20, the entire layer is under
+  `%default total` (8 of 9 files) or `%default covering` (the
+  recursive-descent parser, where fueling 30 mutually-recursive
+  combinators is a deferred separate campaign). Zero `assert_total`,
+  zero `believe_me`, zero `assert_smaller` introduced; 14 `covering`
+  markers retained for documented Idris2 0.8.0 SCT limits.
+
+* **`src/formal/`** — region-linearity theorems on the type side:
+  `noEscapeTheorem`, `regionSafetyExtract`, `noGCExtract`,
+  `orthogonalityLemma`, plus `splitLinearCoverage` generalising
+  the non-diminishment property (PR #85). All four headline theorems
+  complete with **zero unsafe patterns**.
+
+[source,bash]
+----
+# Verify Idris2 frontend total/covering
+just idris-build
+
+# Verify Idris2 region-linearity theorems
+cd src/formal && idris2 --build ephapax-formal.ipkg
+----
+
+== Surface syntax (locked)
+
+[source]
+----
+// Function declaration
+fn main() -> i32 {
+    let x = 1 + 2;
+    let y = x * 3;
+    y
+}
+
+// Linear binding
+let! z = copy(x) in z
+
+// Region scope
+region r:
+    let s = String.new@r("data")
+    String.len(&s)
+----
+
+Grammar highlights:
+
+* Functions: `fn name(params) -> Ty { ... }` or `fn name(params) : Ty { ... }`
+* Affine bindings: `let x = expr in expr`
+* Linear bindings: `let! x = expr in expr`
+* Block expressions: `{ expr1; expr2; …; exprN }` (final expr is the result)
+* Newlines are statement separators (equivalent to `;`)
+* Comments: `//` and `--` to end-of-line
+
+Full grammar: `spec/ephapax-spec.md`. The v2 grammar work (modules,
+generics, effects, traits, comptime, contracts) lives on
+`feat/v2-grammar-cross-module` branches; see GitHub PRs for status.
+
+== Build targets
 
 [cols="1,2,1"]
 |===
@@ -180,161 +305,198 @@ ephapax/
 | Secondary
 |===
 
-== Formal Foundations
+== Component status
 
-The type system is grounded in:
-
-* **Intuitionistic linear logic** — Resource-sensitive reasoning
-* **Separation logic** — Memory ownership and framing
-* **Region calculus (Tofte-Talpin)** — Scoped allocation
-
-=== Dual Formalisation
-
-Ephapax has **two complementary formalisations**:
-
-* **Coq** (`formal/`) — Operational semantics with small-step reduction. Proves `no_leaks` (Qed), `memory_safety` (Qed), `progress` (92% complete), `preservation` (50% complete). Build: `just proofs`
-* **Idris2** (`src/formal/`) — Type-theoretic proofs via dependent types. Proves `noEscapeTheorem`, `regionSafetyTheorem`, `noGCTheorem`, `orthogonalityLemma` — all complete with zero unsafe patterns. Build: `just idris-build`
-
-The Coq development proves properties about _runtime execution_ (no stuck states, no use-after-free). The Idris2 development proves properties about _type structure_ (no region escape, qualifier orthogonality). Together they cover both the static and dynamic guarantees of the region-linear system.
-
-== Quick Start
-
-=== Prerequisites
-
-* Rust 1.83+ with `wasm32-unknown-unknown` target
-* Coq 8.18+ (optional, for proof verification)
-* https://just.systems/[just] (task runner)
-
-=== Build
-
-[source,bash]
-----
-# Build all crates
-just build
-
-# Build for WASM
-just build-wasm
-
-# Build Idris2 affine stage
-just idris-build
-
-# Verify Coq proofs (optional, requires Coq 8.18+)
-just proofs
-----
-
-=== Test
-
-[source,bash]
-----
-# Run all tests
-just test
-
-# Run conformance test suite
-just conformance
-
-# Run golden path (test + build + proofs)
-just golden
-----
-
-== Documentation
-
-* link:spec/SPEC.md[Language Specification]
-* link:formal/[Coq Formalisation] (`just proofs` to verify)
-* link:src/formal/[Idris2 Formalisation] (`just idris-build` to verify)
-
-== Two-Phase Compiler (Idris2 → WASM)
-
-Ephapax includes an experimental two-stage pipeline:
-
-* **Stage 1 (Idris2)**: parse concrete Ephapax syntax (or S-expression IR) and type-check in affine or linear mode.
-* **Stage 2 (Rust)**: compile the checked IR to WebAssembly.
-
-Run:
-
-[source,bash]
-----
-# Compile a module through Idris2 + WASM backend (concrete syntax)
-just compile-affine input.eph affine output.wasm
-
-# Compile an S-expression module through Idris2 + WASM backend
-scripts/compile-affine.sh input.sexpr --mode affine --out output.wasm --sexpr
-
-# Or call the CLI directly for Stage 2
-cargo run -p ephapax-cli -- compile-sexpr input.sexpr -o output.wasm
-----
-
-=== Parser Tests & Bench
-
-[source,bash]
-----
-# Run Idris2 parser tests
-just idris-parse-test
-
-# Benchmark Idris2 parser (parse-only)
-just idris-parse-bench input.eph 10
-
-# Build Zig token buffer (FFI)
-scripts/build-zig-ffi.sh
-----
-
-== Status
-
-🚧 **Early Development**
-
-[cols="1,1"]
+[cols="2,1,2"]
 |===
-| Component | Status
+| Component | Status | Notes
 
-| Core type system design
+| Core type-system design (affine + linear)
 | ✅ Complete
+| Locked in `formal/Typing.v`
 
-| Formal semantics (Coq)
+| Lexer (logos)
 | ✅ Complete
+|
 
-| Lexer
+| Parser (chumsky + Pest)
 | ✅ Complete
+|
 
-| Parser
+| Interpreter (tree-walking)
 | ✅ Complete
-
-| Type checker
-| 🚧 In Progress
-
-| WASM code generation
-| 🚧 In Progress
-
-| Interpreter
-| ✅ Complete
+| Environment-leak fix applied 2026-03-28
 
 | REPL
 | ✅ Complete
+|
 
-| CLI
+| CLI (`ephapax-cli`)
 | ✅ Complete
+|
+
+| Idris2 frontend (S-expression IR)
+| ✅ Complete (`%default total` 8/9)
+| Parser is `covering`; total upgrade deferred
+
+| Type checker (`ephapax-typing`)
+| 🚧 In progress
+|
+
+| WASM code generation
+| 🚧 In progress
+| Lambda/app closure conversion landed; some pair/sum cases use `i32` placeholder representation
+
+| Conformance test suite
+| ✅ Complete
+| Pass/fail cases; covers dyadic discipline
+
+| Coq `no_leaks` + region lemmas
+| ✅ Qed
+|
+
+| Coq `preservation`
+| 🟡 Admitted (22 open / 910 closed)
+| Multi-day proof-engineering campaign in flight
+
+| Idris2 region-linearity theorems
+| ✅ Complete (zero unsafe)
+|
+
+| LSP server
+| 🟡 Partial
+| Basic diagnostics; completion in progress
 
 | Standard library
 | 🔲 Planned
+| `ephapax-stdlib` skeleton exists
 |===
 
-== Related Work
+== Documentation map
 
-* https://www.rust-lang.org/[Rust] — Ownership and borrowing
-* https://ghc.gitlab.haskell.org/ghc/doc/users_guide/exts/linear_types.html[Linear Haskell] — Linear types in GHC
-* https://www.cl.cam.ac.uk/research/mvg/tom/mlkit/[MLKit] — Region-based memory management
-* https://cyclone.thelanguage.org/[Cyclone] — Safe C dialect with regions
+[cols="1,3"]
+|===
+| Document | What it covers
+
+| link:README.adoc[README]
+| You are here. Overview + quickstart.
+
+| link:EXPLAINME.adoc[EXPLAINME.adoc]
+| "Show me the receipts" — every claim in this README backed by a
+  specific file, test, or proof.
+
+| link:ROADMAP.adoc[ROADMAP.adoc]
+| Quantitative milestones (v0.1.0 → v1.0.0), per-version checklists,
+  current open work.
+
+| link:PROOF-NEEDS.md[PROOF-NEEDS.md]
+| Outstanding proof obligations: what's `Admitted` / `covering` /
+  `partial` and why.
+
+| link:formal/PRESERVATION-HANDOFF.md[formal/PRESERVATION-HANDOFF.md]
+| Per-case checklist for the 22 remaining preservation goals. Read
+  this if you're picking up the Coq proof work.
+
+| link:RUST-SPARK-STANCE.adoc[RUST-SPARK-STANCE.adoc]
+| Stance on Rust + SPARK interop and where Ephapax fits.
+
+| link:TOPOLOGY.md[TOPOLOGY.md]
+| Module dependency graph + crate layering.
+
+| link:TEST-NEEDS.md[TEST-NEEDS.md]
+| Outstanding test coverage gaps.
+
+| link:CHANGELOG.md[CHANGELOG.md]
+| Per-release change log.
+
+| link:docs/vision/EPHAPAX-VISION.adoc[docs/vision/EPHAPAX-VISION.adoc]
+| Design rationale — why dyadic, why regions, why WASM.
+
+| link:docs/specs/DESIGN-DECISIONS.adoc[docs/specs/DESIGN-DECISIONS.adoc]
+| 17 architecture decision records with rationale.
+
+| link:docs/specs/LANGUAGE-COMPARISON.adoc[docs/specs/LANGUAGE-COMPARISON.adoc]
+| Comparison against 10 other languages on the linear/affine axis.
+
+| link:spec/[spec/]
+| Language specification + grammar EBNF.
+
+| link:CONTRIBUTING.adoc[CONTRIBUTING.adoc]
+| Contribution guide.
+
+| link:CODE_OF_CONDUCT.md[CODE_OF_CONDUCT.md]
+| Code of conduct.
+
+| link:SECURITY.md[SECURITY.md]
+| Security policy.
+|===
+
+== Quickstart files by audience
+
+[cols="1,3"]
+|===
+| Audience | Start here
+
+| **End user** (just want to compile `.eph` files)
+| link:QUICKSTART-USER.adoc[QUICKSTART-USER.adoc]
+
+| **Developer** (extending the compiler / language)
+| link:QUICKSTART-DEV.adoc[QUICKSTART-DEV.adoc]
+
+| **Maintainer** (release / governance)
+| link:QUICKSTART-MAINTAINER.adoc[QUICKSTART-MAINTAINER.adoc]
+
+| **Outside observer** (what is this even?)
+| Read this README → `EXPLAINME.adoc` → `docs/vision/EPHAPAX-VISION.adoc`
+|===
+
+== Seam analysis
+
+Key interfaces where correctness and stability matter:
+
+* Idris2 → S-expression IR (`Ephapax.IR.Decode` encoding/decoding)
+* Zig FFI token buffer → Idris2 parser stream (`Ephapax.Parse.ZigBuffer`)
+* S-expression IR → Rust/WASM backend (`ephapax-ir` and `ephapax-wasm`)
+* Surface AST → Core AST (`ephapax-desugar` — proofs target core only)
+
+The `proven` library is a dependency so string-handling paths over
+the IR boundary harden over time (JSON-style escaping, etc.).
+
+== Related work
+
+* https://www.rust-lang.org/[Rust] — ownership and borrowing
+* https://ghc.gitlab.haskell.org/ghc/doc/users_guide/exts/linear_types.html[Linear Haskell] — linear types in GHC
+* https://www.cl.cam.ac.uk/research/mvg/tom/mlkit/[MLKit] — region-based memory management
+* https://cyclone.thelanguage.org/[Cyclone] — safe C dialect with regions
+* https://github.com/granule-project/granule[Granule] — graded modal types with linear/affine ledger
+* Tofte-Talpin 1997 — region calculus original paper
+
+`docs/specs/LANGUAGE-COMPARISON.adoc` has a feature-by-feature
+comparison against ten of these.
 
 == Contributing
 
-Contributions are welcome! Please see:
+Contributions welcome. Please see:
 
-* link:CONTRIBUTING.adoc[Contributing Guide]
-* link:CODE_OF_CONDUCT.md[Code of Conduct]
+* link:CONTRIBUTING.adoc[CONTRIBUTING.adoc] — getting started
+* link:CODE_OF_CONDUCT.md[CODE_OF_CONDUCT.md] — community standards
+
+The highest-leverage open work, in priority order:
+
+1. **Close `preservation` to Qed** (`formal/PRESERVATION-HANDOFF.md`)
+   — multi-day proof engineering, 22 goals remaining.
+2. **Fuel-refactor `Parse/Parser.idr`** from `%default covering` to
+   `%default total`. Substantial — ~30 mutually-recursive combinators
+   threaded through a `Stream` record.
+3. **Type-checker completion** (`ephapax-typing`) and **WASM codegen
+   for lambda/app** (`ephapax-wasm`).
+4. **Native backend via Cranelift** (v0.2.0).
 
 == Licence
 
-PMPL-1.0-or-later — See link:LICENSES/PMPL-1.0-or-later.txt[PMPL-1.0-or-later.txt]
+PMPL-1.0-or-later — see link:LICENSES/PMPL-1.0-or-later.txt[PMPL-1.0-or-later.txt].
 
-MPL-2.0 fallback available — See link:LICENSES/MPL-2.0.txt[MPL-2.0.txt]
+MPL-2.0 fallback available — see link:LICENSES/MPL-2.0.txt[MPL-2.0.txt].
 
 == Author
 

@@ -3204,6 +3204,130 @@ Proof.
   - eapply T_Copy; [exact H|apply IHHtype; exact Hfree].
 Qed.
 
+(** ** Region-invariance lemma
+
+    Captures the structural fact that the step relation only changes
+    the region environment [R] when the expression contains a region
+    operation (`ERegion`) at a step-reducible position. Used by
+    `preservation`'s congruence cases to transfer sibling-typing
+    premises from the pre-step region to the post-step region without
+    a general weakening lemma (which is the documented
+    S_Region_Step + T_Region_Active language-design item, still open).
+
+    The inductive predicate [touches_region] says "this expression's
+    next reducible position is inside a region operation". The lemma
+    [step_R_eq_or_touches_region] then says: every step either
+    preserves [R] or fires on a [touches_region] expression. *)
+
+Inductive touches_region : expr -> Prop :=
+  | TR_here :
+      forall r e, touches_region (ERegion r e)
+  | TR_StringConcat1 :
+      forall e1 e2,
+        touches_region e1 -> touches_region (EStringConcat e1 e2)
+  | TR_StringConcat2 :
+      forall v e,
+        is_value v -> touches_region e -> touches_region (EStringConcat v e)
+  | TR_StringLen :
+      forall e, touches_region e -> touches_region (EStringLen e)
+  | TR_Let :
+      forall e1 e2, touches_region e1 -> touches_region (ELet e1 e2)
+  | TR_LetLin :
+      forall e1 e2, touches_region e1 -> touches_region (ELetLin e1 e2)
+  | TR_App1 :
+      forall e1 e2, touches_region e1 -> touches_region (EApp e1 e2)
+  | TR_App2 :
+      forall v e,
+        is_value v -> touches_region e -> touches_region (EApp v e)
+  | TR_If :
+      forall e1 e2 e3,
+        touches_region e1 -> touches_region (EIf e1 e2 e3)
+  | TR_Pair1 :
+      forall e1 e2, touches_region e1 -> touches_region (EPair e1 e2)
+  | TR_Pair2 :
+      forall v e,
+        is_value v -> touches_region e -> touches_region (EPair v e)
+  | TR_Fst :
+      forall e, touches_region e -> touches_region (EFst e)
+  | TR_Snd :
+      forall e, touches_region e -> touches_region (ESnd e)
+  | TR_Inl :
+      forall T e, touches_region e -> touches_region (EInl T e)
+  | TR_Inr :
+      forall T e, touches_region e -> touches_region (EInr T e)
+  | TR_Case :
+      forall e e1 e2,
+        touches_region e -> touches_region (ECase e e1 e2)
+  | TR_Borrow :
+      forall e, touches_region e -> touches_region (EBorrow e)
+  | TR_Drop :
+      forall e, touches_region e -> touches_region (EDrop e)
+  | TR_Copy :
+      forall e, touches_region e -> touches_region (ECopy e).
+
+Lemma step_R_eq_or_touches_region :
+  forall mu R e mu' R' e',
+    (mu, R, e) -->> (mu', R', e') ->
+    R = R' \/ touches_region e.
+Proof.
+  intros mu R e mu' R' e' Hstep.
+  (* remember + revert so `induction Hstep` substitutes the outer
+     (mu, R, e) and (mu', R', e') slots cleanly into each
+     constructor's args, and IHs get clean universal quantification
+     for congruence cases (same pattern as `preservation`). *)
+  remember (mu, R, e) as cfg eqn:Hcfg.
+  remember (mu', R', e') as cfg' eqn:Hcfg'.
+  revert mu R e mu' R' e' Hcfg Hcfg'.
+  induction Hstep;
+    intros mu0 R0 e0 mu0' R0' e0' Hcfg Hcfg';
+    inversion Hcfg; subst;
+    inversion Hcfg'; subst;
+    (* Atom steps (R kept literally in the constructor's conclusion). *)
+    try (left; reflexivity);
+    (* Region steps (outer expression is ERegion). *)
+    try (right; apply TR_here);
+    (* Congruence steps: IH on the inner step gives the disjunction. *)
+    try (destruct (IHHstep _ _ _ _ _ _ eq_refl eq_refl) as [Heq | HTR];
+         [ left; exact Heq
+         | right; constructor; (try assumption); exact HTR ]).
+Qed.
+
+(** ** Lemma B — Linearity-context invariance for siblings under step.
+
+    For `preservation`'s congruence cases (`S_StringConcat_Step1`,
+    `S_Let_Step`, `S_App_Step1`, ...), the IH yields the stepped
+    subexpression's typing at the post-step region but with an output
+    linearity context [G_out] that's a fresh metavariable. The
+    sibling-typing premise still references the PRE-step output
+    context [G_end]. To reconstruct the compound typing, the two
+    must coincide.
+
+    [step_output_context_eq] establishes that: any two typings of
+    [e] and [e'] starting from the same input context [G] end at the
+    same context, when [e] steps to [e']. This is the linearity-
+    tracking analogue of the existing [type_determinacy] (which
+    handles the type).
+
+    Phase 1 of the closure plan in ROADMAP §"Preservation closure plan". *)
+
+Lemma step_output_context_eq :
+  forall mu R e mu' R' e',
+    (mu, R, e) -->> (mu', R', e') ->
+    forall G T G_a G_b,
+      R;  G |- e  : T -| G_a ->
+      R'; G |- e' : T -| G_b ->
+      G_a = G_b.
+Proof.
+  intros mu R e mu' R' e' Hstep.
+  induction Hstep; intros G0 T0 Ga Gb Htype_e Htype_e'.
+  (* Attempt: aggressive inversion + auto on each case. The hope is
+     that for the syntax-directed typing relation, inversion of both
+     typings extracts component typings with matching output
+     contexts, which `eauto` then unifies. *)
+  all: try (inversion Htype_e; inversion Htype_e'; subst; auto).
+  all: admit.
+Admitted.
+
 Theorem preservation :
   forall mu R e mu' R' e',
     (mu, R, e) -->> (mu', R', e') ->
@@ -3212,18 +3336,40 @@ Theorem preservation :
     exists G_out, R'; G |- e' : T -| G_out.
 Proof.
   intros mu R e mu' R' e' Hstep.
-  induction Hstep; intros G0 T0 G0' Htype;
-    (* Before inversion: remember the typed expression so that cross-case unification
-       (inversion Htype on a free variable `e`) does not lose the step-case equation.
-       After `induction Hstep; intros ... Htype`, the expression in Htype may still be
-       a free variable `e` with a separate hypothesis `He : e = EStringNew r s` etc.
-       If `inversion Htype; subst` fires for a cross-case typing rule (e.g. T_Unit
-       typing `e := EUnit`), subst can eliminate `e` and consume `He` in a direction
-       that loses the discriminating information. `remember` pins the form as `He_orig`
-       so congruence / discriminate can close all expression-mismatch goals. *)
-    try (match type of Htype with
-         | has_type _ _ ?e_typed _ _ => remember e_typed as e_orig eqn:He_orig
-         end);
+  (* Remember the configs so `induction Hstep` generates explicit equations on
+     the outer expression slots. Without these remembers, `induction Hstep`
+     leaves the outer `e`/`e'` abstract — for an axiom step rule like
+     S_StringNew the constructor pre-conditions land in the context but the
+     equation `e = EStringNew r s` does not, so cross-cases (e.g. S_StringNew
+     step + T_Unit typing) have no discriminating equation in scope and the
+     `try solve [exfalso; discriminate | exfalso; congruence]` chain below
+     cannot close them.
+     Empirically (Coq 8.18.0, 2026-05-20): without these remembers,
+     `inversion Htype; subst` produces the FULL 35 × 26 = 910 cross-case
+     combinatorial and the `try solve [...]` chain closes ZERO of them.
+     With these remembers + `inversion Hcfg; subst; inversion Hcfg'; subst;`,
+     `inversion Htype` only generates the diagonal arm per step rule (since
+     the expression slot is concrete after substitution), and the chain
+     closes the trivially-dischargeable ones, leaving ~29 real proof
+     obligations. Standard preservation pattern; cf. Software Foundations
+     `Stlc.preservation`. The prior `remember e_typed as e_orig` was a
+     misdiagnosis of the same problem — it remembered the WRONG expression
+     (the typing's `e`, which was already abstract) instead of the config's
+     expression slot (which is what `induction Hstep` substitutes for). *)
+  remember (mu, R, e) as cfg eqn:Hcfg.
+  remember (mu', R', e') as cfg' eqn:Hcfg'.
+  (* Generalise mu/R/e/mu'/R'/e' and their cfg-equations so the IHs
+     emitted by `induction Hstep` get clean universal quantification
+     over each inner step's config — not the outer cfg pair (which
+     would make the IH non-applicable, since (mu_inner, R_inner,
+     e_inner) ≠ (mu, R, EOuter ...) in general). Without this revert,
+     the 28 congruence cases left after the cross-case discriminate
+     pass have unusable IHs. *)
+  revert mu R e mu' R' e' Hcfg Hcfg'.
+  induction Hstep; intros mu0 R0 e0 mu0' R0' e0' Hcfg Hcfg';
+    intros G0 T0 G0' Htype;
+    inversion Hcfg; subst;
+    inversion Hcfg'; subst;
     inversion Htype; subst;
     try solve [eexists; econstructor; eassumption];
     try solve [eexists; eassumption];
@@ -3324,9 +3470,514 @@ Proof.
               [ exact Hnotin' | exact Hfr | apply region_add_typing; exact Hout ] ]
         end
     end).
-Qed.
-(* PROOF STATUS [preservation] — FULLY CLOSED (2026-04-27). Zero Admitted.
-   region_env_perm_typing: Qed (new lemma — transfers typing across region-env permutations).
-   region_add_typing: Qed (new lemma — adding a region to R preserves typing).
-   region_shrink_preserves_typing: Qed (T_Region_Active shadowing case closed via in_dec).
-   preservation: Qed (S_Region_Step+T_Region_Active closed by in_dec on r ∈ R'). *)
+  (* === Goal-closing chain for the post-remember-cfg 29 residuals ===
+     Added 2026-05-20 evening per formal/PRESERVATION-HANDOFF.md per-case
+     checklist. Each `all: try solve [...]` targets one residual class. *)
+
+  (* Axiom cases (S_StringNew / S_StringConcat): result is `ELoc l r`
+     and the *goal's* type is `TString r0` (named from inversion of
+     the OUTER typing). To close, invert the sibling-location's typing
+     premise (`H : R; G |- ELoc _ r : TString r0 -| G'`) which is
+     itself a T_Loc — that derives `r0 = r` and `region_active R r`.
+     Then T_Loc applies. *)
+  all: try solve [
+    match goal with
+    | [ H : has_type _ _ (ELoc _ _) (TString _) _
+        |- exists _ : ctx, has_type _ _ (ELoc _ _) (TString _) _ ] =>
+        inversion H; subst; eexists; apply T_Loc; assumption
+    end
+  ].
+
+  (* S_StringNew: result is `ELoc l r` at `TString r` (no sibling
+     typing in scope, but the step's `In r R` is). *)
+  all: try solve [eexists; apply T_Loc; unfold region_active in *; assumption].
+
+  (* S_StringLen: result is `EI32 (String.length s)` at `TBase TI32`. *)
+  all: try solve [eexists; apply T_I32].
+
+  (* S_Drop: result is `EUnit` at `TBase TUnit`. *)
+  all: try solve [eexists; apply T_Unit].
+
+  (* S_Copy: result is `EPair v v` at `TProd T T`. Constructor +
+     assumption on the value's typing premise (carried over by the
+     inversion of T_Copy). *)
+  all: try solve [eexists; apply T_Pair; eassumption].
+
+  (* β-reduction cases (S_Let_Val, S_LetLin_Val, S_App_Fun, S_Fst,
+     S_Snd, S_Case_Inl/Inr): close via the existing
+     subst_preserves_typing lemma. *)
+  all: try solve [eexists; eapply subst_preserves_typing; eassumption].
+
+  (* S_If_True / S_If_False: pick the appropriate branch's typing premise. *)
+  all: try solve [eexists; eassumption].
+
+  (* Congruence cases (S_*_Step variants): the IH (after the revert)
+     is universally quantified over each inner step's config — we
+     specialise with the constructor's inner-step args + reflexivity
+     on the cfg equations. Pattern after revert mu/R/e/mu'/R'/e'/Hcfg/Hcfg':
+
+       IH : forall mu R e mu' R' e',
+              (?mu_in, ?R_in, ?e_in) = (mu, R, e) ->
+              (?mu_out, ?R_out, ?e_out) = (mu', R', e') ->
+              forall G T G', R; G |- e : T -| G' ->
+                             exists G_out, R'; G |- e' : T -| G_out
+
+     We use edestruct + eq_refl x 2 on the universal cfg equations,
+     supply the inner-expr typing premise from inversion, then close
+     by econstructor + eauto. The eauto fallback handles cases where
+     the sibling premises need light glue (e.g. region invariance
+     follows from the step's region-non-change). *)
+  all: try solve [
+    match goal with
+    | [ IH : forall _ _ _ _ _ _, _ = _ -> _ = _ -> forall _ _ _, _ -> _,
+        Hi : has_type _ _ ?e_inner _ _ |- _ ] =>
+        let G_out_inner := fresh "G_out_inner" in
+        let Hout_inner := fresh "Hout_inner" in
+        edestruct (IH _ _ _ _ _ _ eq_refl eq_refl _ _ _ Hi) as [G_out_inner Hout_inner];
+        eexists; econstructor; eauto
+    end
+  ].
+
+  (* === Region-invariance-driven closure for congruence cases ===
+     Lemma [step_R_eq_or_touches_region] (proved above) gives a clean
+     case-split on the inner step: either the region environment is
+     preserved (so the sibling typing premises and the constructor
+     can be re-applied to the post-step expression with the same R)
+     or the stepped subexpression contains a region operation (which
+     needs region weakening — left open).
+
+     For each S_*_Step constructor, we discharge the LEFT branch by:
+       1. pose the disjunction, destruct,
+       2. in the [HeqR] branch, [subst] R0' so the post-step region
+          equals the pre-step region,
+       3. specialise IHHstep with eq_refl/eq_refl on cfg-equations
+          and the inner-expr's typing premise (named explicitly to
+          avoid pattern-match ambiguity with sibling premises),
+       4. close the goal by [eexists; econstructor; ...] with the
+          stepped-expr typing + any sibling premises.
+     The RIGHT branch (touches_region) is left to fall through to
+     [Admitted.] — these still need a region-env weakening lemma
+     for non-values, separately tracked in PRESERVATION-HANDOFF.md. *)
+
+  (* β-reduction cases that need explicit hypothesis-named applications
+     of subst_preserves_typing because the implicit eassumption
+     doesn't pick the right has_type for the body (multiple
+     R; _ |- _ : _ -| _ premises live in scope and the lemma's first
+     arg requires the body's typing, not v's). *)
+
+  (* S_Let_Val and S_LetLin_Val: same shape (modulo linearity
+     premise — both succeed without it). H_v: typing of v1 in (G0 → G').
+     value_context_unchanged on H_v ⇒ G' = G0, so the body typing
+     becomes (T1, false) :: G0 |- e2 : ... and subst_preserves_typing
+     applies. *)
+  all: try solve [
+    match goal with
+    | [ Hv : is_value ?v,
+        Hev : ?R; ?G |- ?v : ?T1 -| ?Gmid,
+        Hbody : ?R; ctx_extend ?Gmid ?T1 |- ?e2 : ?T0 -| (?T1, true) :: _
+        |- exists _ : ctx, ?R; ?G |- subst 0 ?v ?e2 : ?T0 -| _ ] =>
+        assert (Hgeq: Gmid = G) by (eapply value_context_unchanged; eassumption);
+        subst Gmid;
+        eapply subst_preserves_typing; eassumption
+    end
+  ].
+
+  (* S_App_Fun: H4: R0'; G0 |- ELam T ebody : TFun T1 T0 -| G',
+                H7: R0'; G' |- v2 : T1 -| G0',
+                H : is_value v2. *)
+  all: try solve [
+    match goal with
+    | [ Hv : is_value ?v2,
+        Hlam : ?R; ?G |- ELam ?T ?ebody : TFun ?T1 ?T0 -| ?Gmid,
+        Harg : ?R; ?Gmid |- ?v2 : ?T1 -| ?Ge
+        |- exists _ : ctx, ?R; ?G |- subst 0 ?v2 ?ebody : ?T0 -| _ ] =>
+        inversion Hlam; subst;
+        assert (Hgeq: Ge = Gmid) by (eapply value_context_unchanged; eassumption);
+        subst Ge;
+        eapply subst_preserves_typing; eassumption
+    end
+  ].
+
+  (* S_If_True / S_If_False: branch typing exists but in (G' → G0')
+     context; the bool's typing gives G0 → G', and EBool b is a value
+     so G' = G0. Then the branch's typing matches the goal. *)
+  all: try solve [
+    match goal with
+    | [ Hbool : has_type ?R ?G (EBool ?b) (TBase TBool) ?Gmid,
+        Hbr : has_type ?R ?Gmid ?ebr ?T ?G'
+        |- exists _ : ctx, has_type ?R ?G ?ebr ?T _ ] =>
+        assert (Hgeq: Gmid = G) by (eapply value_context_unchanged; [exact Hbool | constructor]);
+        subst Gmid; eexists; exact Hbr
+    end
+  ].
+
+  (* S_Case_Inl: H5: EInl T v : TSum T1 T2, H8: e1 body under extended ctx.
+     inversion H5; subst gives R0'; G0 |- v : T1 -| G' (named some Hi).
+     value_context_unchanged ⇒ G' = G0; then subst + Gmid = G0;
+     then subst_preserves_typing closes. *)
+  all: try solve [
+    match goal with
+    | [ Hv : is_value ?vv,
+        Hsum : has_type ?R ?G (EInl ?Tann ?vv) (TSum ?T1 ?T2) ?Gmid
+        |- exists _ : ctx, has_type ?R ?G (subst 0 ?vv ?ebody) ?T0 _ ] =>
+        inversion Hsum; subst;
+        match goal with
+        | [ Hvt2 : has_type ?R ?G ?vv ?T1 ?Ge,
+            Hbr2 : has_type ?R (ctx_extend ?Ge ?T1) ?ebody ?T0 ((?T1, true) :: _)
+            |- _ ] =>
+            assert (Hgex: Ge = G) by (eapply value_context_unchanged; eassumption);
+            subst Ge;
+            eapply subst_preserves_typing; [ exact Hbr2 | exact Hvt2 | exact Hv ]
+        end
+    end
+  ].
+
+  (* S_Case_Inr: symmetric — pick the RIGHT branch body via ?T2. *)
+  all: try solve [
+    match goal with
+    | [ Hv : is_value ?vv,
+        Hsum : has_type ?R ?G (EInr ?Tann ?vv) (TSum ?T1 ?T2) ?Gmid
+        |- exists _ : ctx, has_type ?R ?G (subst 0 ?vv ?ebody) ?T0 _ ] =>
+        inversion Hsum; subst;
+        match goal with
+        | [ Hvt2 : has_type ?R ?G ?vv ?T2 ?Ge,
+            Hbr2 : has_type ?R (ctx_extend ?Ge ?T2) ?ebody ?T0 ((?T2, true) :: _)
+            |- _ ] =>
+            assert (Hgex: Ge = G) by (eapply value_context_unchanged; eassumption);
+            subst Ge;
+            eapply subst_preserves_typing; [ exact Hbr2 | exact Hvt2 | exact Hv ]
+        end
+    end
+  ].
+
+  (* S_Fst: Hp: EPair v1 v2 : TProd T0 T2, goal: v1 typing.
+     Inverting Hp gives v1 : T0 -| ?Gmid and v2 : T2 -| G'.
+     eassumption matches the v1 typing (post-context is irrelevant
+     since the goal's post-context is existential). *)
+  all: try solve [
+    match goal with
+    | [ Hp : has_type ?R ?G (EPair ?v1 ?v2) (TProd ?T0 ?T2) ?G'
+        |- exists _ : ctx, has_type ?R ?G ?v1 ?T0 _ ] =>
+        inversion Hp; subst; eexists; eassumption
+    end
+  ].
+
+  (* S_Snd: Hp: EPair v1 v2 : TProd T1 T0 (G0 → G0'), goal: v2 typing
+     under (G0 → G_out). After inverting Hp, the first child v1 typing
+     has post-context Gmid; value_context_unchanged on it ⇒ Gmid = G0
+     (since v1 is a value); then the second child's typing
+     (Gmid → G0') becomes (G0 → G0'), which matches the goal. *)
+  all: try solve [
+    match goal with
+    | [ Hv : is_value ?v1,
+        Hp : has_type ?R ?G (EPair ?v1 ?v2) (TProd ?T1 ?T0) ?G'
+        |- exists _ : ctx, has_type ?R ?G ?v2 ?T0 _ ] =>
+        inversion Hp; subst;
+        match goal with
+        | [ Hv1t : has_type ?R ?G ?v1 ?T1 ?Gmid |- _ ] =>
+            assert (Hgeq: Gmid = G) by (eapply value_context_unchanged; eassumption);
+            subst Gmid; eexists; eassumption
+        end
+    end
+  ].
+
+  (* S_Copy: H4: R0'; G0 |- v : T -| G0' (single typing of v),
+              H1: is_linear_ty T = false,
+              H : is_value v.
+     Goal: exists G_out, R0'; G0 |- EPair v v : TProd T T -| G_out.
+     value_context_unchanged on H4 ⇒ G0' = G0; then T_Pair applies
+     with both child typings being H4 (now (G0 → G0)). *)
+  all: try solve [
+    match goal with
+    | [ Hv : is_value ?v,
+        Hvt : has_type ?R ?G ?v ?T ?G',
+        Hnl : is_linear_ty ?T = false
+        |- exists _ : ctx, has_type ?R ?G (EPair ?v ?v) (TProd ?T ?T) _ ] =>
+        assert (Hgeq: G' = G) by (eapply value_context_unchanged; eassumption);
+        subst G';
+        eexists; eapply T_Pair; eassumption
+    end
+  ].
+
+  (* === Congruence cases (S_*_Step) ===
+     KNOWN BLOCKER (2026-05-21): These tactic blocks pose the
+     region-invariance disjunction and specialise the IH, but the
+     final [eapply T_Foo; [exact Hout | exact Hsibling]] fails
+     because the IH's output context (a Skolem variable from the
+     existential) is not in general equal to the sibling premise's
+     pre-context. Closing these would require either:
+       (a) a "step preserves output context" lemma that says: if
+           [R; G |- e : T -| G'] and [(mu, R, e) -->> (mu', R', e')],
+           then the IH's existential output equals G'; or
+       (b) using [typing_ctx_transfer] / [type_determinacy] +
+           [typing_types_agree] to re-type the sibling under the
+           IH's output context.
+     Both are non-trivial extra lemmas. The blocks below remain in
+     place as documentation of the intended pattern; the [fail] in
+     the RIGHT branch + the output-context mismatch in the LEFT
+     branch leaves them unclosed, so they fall through to Admitted.
+     RIGHT branch (touches_region) is independently open — needs
+     region weakening for non-values. *)
+
+  (* S_StringConcat_Step1: inner step is on e1. After step_R_eq_or_touches_region
+     gives R = R', rewrite HeqR in * unifies all R-mentions (including H1, H2
+     and the IH) so the sibling H2 (under pre-step R) becomes compatible with
+     the IH's conclusion (under post-step R'). *)
+  all: try solve [
+    match goal with
+    | [ H1 : has_type ?R ?G ?e1 (TString ?r0) ?Gmid,
+        H2 : has_type ?R ?Gmid ?e2 (TString ?r0) ?Gout1
+        |- exists _ : ctx, has_type ?Rp ?G (EStringConcat ?e1' ?e2) (TString ?r0) _ ] =>
+        pose proof (step_R_eq_or_touches_region _ _ _ _ _ _ Hstep) as Hdis;
+        destruct Hdis as [HeqR | HTR];
+        [ rewrite HeqR in *;
+          edestruct (IHHstep _ _ _ _ _ _ eq_refl eq_refl _ _ _ H1) as [Gout2 Hout];
+          eexists; eapply T_StringConcat; [exact Hout | exact H2]
+        | fail ]
+    end
+  ].
+
+  (* S_StringConcat_Step2: inner step is on e2; v1 is a value so
+     value_context_unchanged ⇒ v1's post-context equals its pre-context. *)
+  all: try solve [
+    match goal with
+    | [ Hv : is_value ?v1,
+        H1 : has_type ?R ?G ?v1 (TString ?r0) ?Gmid,
+        H2 : has_type ?R ?Gmid ?e2 (TString ?r0) ?G'
+        |- exists _ : ctx, has_type ?R' ?G (EStringConcat ?v1 ?e2') (TString ?r0) _ ] =>
+        pose proof (step_R_eq_or_touches_region _ _ _ _ _ _ Hstep) as Hdis;
+        destruct Hdis as [HeqR | HTR];
+        [ rewrite <- HeqR;
+          assert (Hgeq: Gmid = G) by (eapply value_context_unchanged; eassumption);
+          subst Gmid;
+          edestruct (IHHstep _ _ _ _ _ _ eq_refl eq_refl _ _ _ H2) as [Gout Hout];
+          eexists; eapply T_StringConcat; [exact H1 | exact Hout]
+        | fail ]
+    end
+  ].
+
+  (* S_StringLen_Step: Hb: EBorrow e : TBorrow (TString r). IH is on
+     the inner step on e; invert Hb to get e's typing, feed to IH,
+     reconstruct EStringLen e' via T_StringLen ∘ T_Borrow. *)
+  all: try solve [
+    match goal with
+    | [ Hb : has_type ?R ?G (EBorrow ?e) (TBorrow (TString ?r0)) ?G'
+        |- exists _ : ctx, has_type ?R' ?G (EStringLen ?e') (TBase TI32) _ ] =>
+        pose proof (step_R_eq_or_touches_region _ _ _ _ _ _ Hstep) as Hdis;
+        destruct Hdis as [HeqR | HTR];
+        [ rewrite <- HeqR;
+          inversion Hb; subst;
+          match goal with
+          | [ Het : has_type ?R ?G ?e (TString ?r0) ?Ge |- _ ] =>
+              edestruct (IHHstep _ _ _ _ _ _ eq_refl eq_refl _ _ _ Het) as [Gout Hout];
+              eexists; eapply T_StringLen; eapply T_Borrow; exact Hout
+          end
+        | fail ]
+    end
+  ].
+
+  (* S_Let_Step *)
+  all: try solve [
+    match goal with
+    | [ H1 : has_type ?R ?G ?e1 ?T1 ?Gmid,
+        H2 : has_type ?R (ctx_extend ?Gmid ?T1) ?e2 ?T0 ((?T1, true) :: ?G')
+        |- exists _ : ctx, has_type ?R' ?G (ELet ?e1' ?e2) ?T0 _ ] =>
+        pose proof (step_R_eq_or_touches_region _ _ _ _ _ _ Hstep) as Hdis;
+        destruct Hdis as [HeqR | HTR];
+        [ rewrite <- HeqR;
+          edestruct (IHHstep _ _ _ _ _ _ eq_refl eq_refl _ _ _ H1) as [Gout Hout];
+          eexists; eapply T_Let; [exact Hout | exact H2]
+        | fail ]
+    end
+  ].
+
+  (* S_LetLin_Step *)
+  all: try solve [
+    match goal with
+    | [ Hlin : is_linear_ty ?T1 = true,
+        H1 : has_type ?R ?G ?e1 ?T1 ?Gmid,
+        H2 : has_type ?R (ctx_extend ?Gmid ?T1) ?e2 ?T0 ((?T1, true) :: ?G')
+        |- exists _ : ctx, has_type ?R' ?G (ELetLin ?e1' ?e2) ?T0 _ ] =>
+        pose proof (step_R_eq_or_touches_region _ _ _ _ _ _ Hstep) as Hdis;
+        destruct Hdis as [HeqR | HTR];
+        [ rewrite <- HeqR;
+          edestruct (IHHstep _ _ _ _ _ _ eq_refl eq_refl _ _ _ H1) as [Gout Hout];
+          eexists; eapply T_LetLin; [exact Hlin | exact Hout | exact H2]
+        | fail ]
+    end
+  ].
+
+  (* S_App_Step1 *)
+  all: try solve [
+    match goal with
+    | [ H1 : has_type ?R ?G ?e1 (TFun ?T1 ?T0) ?Gmid,
+        H2 : has_type ?R ?Gmid ?e2 ?T1 ?G'
+        |- exists _ : ctx, has_type ?R' ?G (EApp ?e1' ?e2) ?T0 _ ] =>
+        pose proof (step_R_eq_or_touches_region _ _ _ _ _ _ Hstep) as Hdis;
+        destruct Hdis as [HeqR | HTR];
+        [ rewrite <- HeqR;
+          edestruct (IHHstep _ _ _ _ _ _ eq_refl eq_refl _ _ _ H1) as [Gout Hout];
+          eexists; eapply T_App; [exact Hout | exact H2]
+        | fail ]
+    end
+  ].
+
+  (* S_App_Step2: v1 is a value so its post-context equals pre-context. *)
+  all: try solve [
+    match goal with
+    | [ Hv : is_value ?v1,
+        H1 : has_type ?R ?G ?v1 (TFun ?T1 ?T0) ?Gmid,
+        H2 : has_type ?R ?Gmid ?e2 ?T1 ?G'
+        |- exists _ : ctx, has_type ?R' ?G (EApp ?v1 ?e2') ?T0 _ ] =>
+        pose proof (step_R_eq_or_touches_region _ _ _ _ _ _ Hstep) as Hdis;
+        destruct Hdis as [HeqR | HTR];
+        [ rewrite <- HeqR;
+          assert (Hgeq: Gmid = G) by (eapply value_context_unchanged; eassumption);
+          subst Gmid;
+          edestruct (IHHstep _ _ _ _ _ _ eq_refl eq_refl _ _ _ H2) as [Gout Hout];
+          eexists; eapply T_App; [exact H1 | exact Hout]
+        | fail ]
+    end
+  ].
+
+  (* S_If_Step *)
+  all: try solve [
+    match goal with
+    | [ H1 : has_type ?R ?G ?e1 (TBase TBool) ?Gmid,
+        H2 : has_type ?R ?Gmid ?e2 ?T0 ?G',
+        H3 : has_type ?R ?Gmid ?e3 ?T0 ?G'
+        |- exists _ : ctx, has_type ?R' ?G (EIf ?e1' ?e2 ?e3) ?T0 _ ] =>
+        pose proof (step_R_eq_or_touches_region _ _ _ _ _ _ Hstep) as Hdis;
+        destruct Hdis as [HeqR | HTR];
+        [ rewrite <- HeqR;
+          edestruct (IHHstep _ _ _ _ _ _ eq_refl eq_refl _ _ _ H1) as [Gout Hout];
+          eexists; eapply T_If; [exact Hout | exact H2 | exact H3]
+        | fail ]
+    end
+  ].
+
+  (* S_Pair_Step1 *)
+  all: try solve [
+    match goal with
+    | [ H1 : has_type ?R ?G ?e1 ?T1 ?Gmid,
+        H2 : has_type ?R ?Gmid ?e2 ?T2 ?G'
+        |- exists _ : ctx, has_type ?R' ?G (EPair ?e1' ?e2) (TProd ?T1 ?T2) _ ] =>
+        pose proof (step_R_eq_or_touches_region _ _ _ _ _ _ Hstep) as Hdis;
+        destruct Hdis as [HeqR | HTR];
+        [ rewrite <- HeqR;
+          edestruct (IHHstep _ _ _ _ _ _ eq_refl eq_refl _ _ _ H1) as [Gout Hout];
+          eexists; eapply T_Pair; [exact Hout | exact H2]
+        | fail ]
+    end
+  ].
+
+  (* S_Pair_Step2: v1 is a value. *)
+  all: try solve [
+    match goal with
+    | [ Hv : is_value ?v1,
+        H1 : has_type ?R ?G ?v1 ?T1 ?Gmid,
+        H2 : has_type ?R ?Gmid ?e2 ?T2 ?G'
+        |- exists _ : ctx, has_type ?R' ?G (EPair ?v1 ?e2') (TProd ?T1 ?T2) _ ] =>
+        pose proof (step_R_eq_or_touches_region _ _ _ _ _ _ Hstep) as Hdis;
+        destruct Hdis as [HeqR | HTR];
+        [ rewrite <- HeqR;
+          assert (Hgeq: Gmid = G) by (eapply value_context_unchanged; eassumption);
+          subst Gmid;
+          edestruct (IHHstep _ _ _ _ _ _ eq_refl eq_refl _ _ _ H2) as [Gout Hout];
+          eexists; eapply T_Pair; [exact H1 | exact Hout]
+        | fail ]
+    end
+  ].
+
+  (* S_Case_Step *)
+  all: try solve [
+    match goal with
+    | [ H1 : has_type ?R ?G ?e (TSum ?T1 ?T2) ?Gmid,
+        H2 : has_type ?R (ctx_extend ?Gmid ?T1) ?e1 ?T0 ((?T1, true) :: ?G'),
+        H3 : has_type ?R (ctx_extend ?Gmid ?T2) ?e2 ?T0 ((?T2, true) :: ?G')
+        |- exists _ : ctx, has_type ?R' ?G (ECase ?e' ?e1 ?e2) ?T0 _ ] =>
+        pose proof (step_R_eq_or_touches_region _ _ _ _ _ _ Hstep) as Hdis;
+        destruct Hdis as [HeqR | HTR];
+        [ rewrite <- HeqR;
+          edestruct (IHHstep _ _ _ _ _ _ eq_refl eq_refl _ _ _ H1) as [Gout Hout];
+          eexists; eapply T_Case; [exact Hout | exact H2 | exact H3]
+        | fail ]
+    end
+  ].
+
+(* Show Existentials. *)  (* uncomment to dump the remaining open goals
+                              for diagnostic per-case work — currently
+                              12 goals (10 closed via per-case tactics
+                              2026-05-21; see PROOF STATUS below). *)
+Admitted.
+(* PROOF STATUS [preservation] — ADMITTED, down to 12 open goals
+   (from 910 cross-case, via PR #102's remember-cfg + PR #106's
+   universal-IH revert + 2026-05-21 per-case per-step closures for
+   β-reduction, projection, branch-selection, and linear-copy cases).
+   A region-invariance lemma [step_R_eq_or_touches_region] now lives
+   just before this theorem and dispatches the non-region-step half
+   of congruence cases (left branch only — see CLOSURE STATUS below).
+
+   CLOSURE STATUS (2026-05-21):
+     Closed (via per-case [all: try solve [match goal ...]]):
+       S_Let_Val, S_LetLin_Val (β with subst_preserves_typing)
+       S_App_Fun                (β with inversion of ELam typing)
+       S_If_True, S_If_False    (branch-select via VBool unchanged-ctx)
+       S_Fst, S_Snd             (projection via pair-inversion)
+       S_Case_Inl, S_Case_Inr   (β with inversion of EInl/EInr typing)
+       S_Copy                   (linear via value_context_unchanged + T_Pair)
+     Still open (12 goals — see Existential dump above):
+       S_StringConcat_Step1/2, S_StringLen_Step,
+       S_Let_Step, S_LetLin_Step, S_App_Step1/2,
+       S_If_Step, S_Pair_Step1/2, S_Case_Step
+         BLOCKER: the IH's output context (a Skolem variable) is
+         not in general equal to the sibling premise's pre-context,
+         so the [exact Hout; exact Hsibling] closure fails at
+         T_Foo's middle-context unification. Either a "step
+         preserves output context" lemma OR a context-transfer
+         re-typing of the sibling is needed.
+       S_Region_Step
+         BLOCKER: needs region-env weakening for non-values
+         (touches_region branch of step_R_eq_or_touches_region).
+   Tactic blocks for all twelve open S_*_Step cases remain in place
+   as documentation of the intended pattern — they pose the
+   disjunction lemma and dispatch the left branch, but [fail] in
+   the right (touches_region) branch and silently fail in the left
+   branch when the output-context mismatch blocks the final eapply. *)
+(* PROOF STATUS PRIOR HISTORY:
+
+   PRIOR STATE (before the `remember (mu, R, e) as cfg` introduction at L3232):
+   `induction Hstep; intros G0 T0 G0' Htype; inversion Htype; subst; ...`
+   left **910 goals open** = 35 (step rules) × 26 (typing rules) — the FULL
+   cross-case combinatorial, because `induction Hstep` did not substitute
+   the outer expression slot `e` to the constructor's form, so `inversion
+   Htype` produced all 26 arms instead of just the diagonal. Cross-cases
+   (e.g. S_StringNew step + T_Unit type) had no discriminating equation in
+   scope, so `try solve [exfalso; discriminate | exfalso; congruence]` closed
+   none of them.
+
+   CURRENT STATE: ~29 real diagonal goals remain — one per step rule, modulo
+   the 6 that the existing `try solve [...]` chain closes once the expression
+   slots are concrete. Remediation per case:
+     - Axiom cases needing explicit reconstruction: S_StringNew, S_StringConcat,
+       S_StringLen (typing the result location/literal via T_Loc/T_I32).
+     - β-reduction cases needing `subst_preserves_typing`: S_Let_Val,
+       S_LetLin_Val, S_App_Fun, S_If_True/False, S_Fst, S_Snd,
+       S_Case_Inl/Inr.
+     - Congruence cases needing IH + reconstruction: S_*_Step variants.
+     - Region: S_Region_Enter, S_Region_Step, S_Region_Exit (the prior named
+       "remaining case" + 2 the in-file comment did not name).
+     - Linear: S_Drop, S_Copy.
+
+   Supporting lemmas already Qed: subst_preserves_typing,
+   region_env_perm_typing, region_add_typing, region_shrink_preserves_typing,
+   values_dont_step. Per the handoff doc, the S_Region_Step + T_Region_Active
+   case still blocks on a region-env *weakening* lemma for non-values, which
+   does not yet exist. The other 28 are per-case tactic glue.
+
+   97% reduction (910 → 29) via the standard preservation pattern (remember
+   the configs so `induction Hstep`'s substitution is recovered through
+   `inversion Hcfg; subst`). See formal/PRESERVATION-HANDOFF.md for the
+   per-case checklist (the handoff doc's 910-goal diagnostic captures the
+   PRIOR state; the same Show. recipe applied here yields the 29-goal
+   diagnostic for ongoing work). *)

@@ -3232,6 +3232,116 @@ Proof.
   - eapply T_Copy; [exact H|apply IHHtype; exact Hfree].
 Qed.
 
+(** ** Output-context determinacy
+
+    Two derivations of the same expression in the same region
+    environment and input linearity context produce the same output
+    linearity context. The typing relation is syntax-directed up to
+    a small choice for variables / regions / borrow, and each
+    choice is disambiguated by a typing-rule premise
+    ([is_linear_ty], [In r R], [is_value]) — so given the same input
+    state, only one rule applies and its output context is
+    determined.
+
+    Direct prerequisite for [step_output_context_eq] (Lemma B) on
+    beta-reduction cases (Cluster A): combining
+    [subst_preserves_typing_strong] (one typing of the substituted
+    form at a specific output) with the post-step typing
+    [Htype_e'] (another typing at [Gb]) collapses to [Ga = Gb] via
+    this lemma. *)
+Lemma output_ctx_det :
+  forall R G e T G_a,
+    R; G |- e : T -| G_a ->
+    forall G_b, R; G |- e : T -| G_b -> G_a = G_b.
+Proof.
+  intros R G e T G_a H1.
+  induction H1; intros G_b H2; inversion H2; subst.
+  (* Identity-output value rules (T_Unit, T_Bool, T_I32, T_Loc,
+     T_StringNew, T_Lam, T_Borrow): output = input, both derivations
+     give the same output literally. *)
+  all: try reflexivity.
+  (* T_Var_Lin/T_Var_Lin and T_Var_Unr/T_Var_Unr close above via
+     reflexivity. Remaining: T_Var_Lin+T_Var_Unr cross cases where
+     the linear/unrestricted premises contradict. *)
+  all: try (exfalso; match goal with
+    | [ Hlin : is_linear_ty ?T = true, Hunr : is_linear_ty ?T = false |- _ ] =>
+        congruence
+    end).
+  (* Compound rules: chain IHs. Heavy automation first. *)
+  all: try (
+    repeat match goal with
+    | [ IH : forall Gb, ?R; ?G |- ?e : ?T -| Gb -> ?Ga = Gb,
+        H : ?R; ?G |- ?e : ?T -| ?Gb |- _ ] =>
+        let Heq := fresh "Heq" in
+        assert (Heq : Ga = Gb) by (apply IH; exact H);
+        clear IH; subst
+    end;
+    reflexivity).
+  (* T_Region / T_Region_Active: dispatch on [In r R] vs [~ In r R]. *)
+  all: try (exfalso; match goal with
+    | [ Hin : In ?r ?R, Hnin : ~ In ?r ?R |- _ ] => contradiction
+    end).
+  (* T_Borrow / T_Borrow_Val: T_Borrow needs [EVar i], T_Borrow_Val
+     needs [is_value v]. EVar is not a value. *)
+  all: try (exfalso; match goal with
+    | [ H : is_value (EVar _) |- _ ] => inversion H
+    end).
+  (* Compound rules where the IH application needs explicit
+     type-metavariable alignment via [type_determinacy] before
+     unification succeeds. Uniform tactic: for each (single-IH) goal,
+     find the two has_type hypotheses for the same sub-expression
+     and align their types via type_determinacy, then apply the IH. *)
+  all: try solve [
+    match goal with
+    | [ IH : forall G_b, ?R; ?G |- ?e : ?T -| G_b -> ?Ga = G_b,
+        H1 : ?R; ?G |- ?e : ?T -| ?Ga,
+        H2 : ?R; ?G |- ?e : ?T' -| ?G_b
+        |- ?Ga = ?G_b ] =>
+        let HTeq := fresh "HTeq" in
+        assert (HTeq : T = T')
+          by (eapply type_determinacy;
+              [exact H1 | exact H2 | apply ctx_types_agree_refl]);
+        try (inversion HTeq; subst; clear HTeq);
+        try subst;
+        apply IH; exact H2
+    end
+  ].
+  (* Two-IH compound rules (T_Let, T_LetLin, T_App, T_Case): chain
+     IH on the first sub-expression (to align its output context)
+     then IH on the second. The first-step uses `first [...]` to
+     handle both constructor-equality (T_App's TFun, T_Case's TSum)
+     via [inversion] and var-equality (T_Let, T_LetLin) via plain
+     [subst]. *)
+  all: try solve [
+    match goal with
+    | [ IH1 : forall G_b, ?R; ?G |- ?e1 : ?T1 -| G_b -> ?G_mid = G_b,
+        H1a : ?R; ?G |- ?e1 : ?T1 -| ?G_mid,
+        H2a : ?R; ?G |- ?e1 : ?T1' -| ?G_mid'
+        |- _ ] =>
+        let HTeq := fresh "HTeq" in
+        assert (HTeq : T1 = T1')
+          by (eapply type_determinacy;
+              [exact H1a | exact H2a | apply ctx_types_agree_refl]);
+        first [ inversion HTeq; subst; clear HTeq
+              | subst T1' ; try clear HTeq
+              | subst T1  ; try clear HTeq ];
+        let Hmid := fresh "Hmid" in
+        assert (Hmid : G_mid = G_mid') by (apply IH1; exact H2a);
+        subst G_mid';
+        match goal with
+        | [ IH2 : forall G_b, ?R; ?Gext |- ?e2 : ?T2 -| G_b -> ?Gout = G_b,
+            H2b : ?R; ?Gext |- ?e2 : ?T2 -| ?Gout' |- _ ] =>
+            let Hout := fresh "Hout" in
+            assert (Hout : Gout = Gout') by (apply IH2; exact H2b);
+            (* Hout is of form ((T,b)::G_a) = ((T,b)::G_b); inject
+               head/tail and the tail-equality matches the goal. *)
+            first [ injection Hout; intros; assumption
+                  | exact Hout ]
+        end
+    end
+  ].
+Qed.
+
 (** ** Region-invariance lemma
 
     Captures the structural fact that the step relation only changes

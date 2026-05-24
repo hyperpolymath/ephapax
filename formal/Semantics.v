@@ -3601,14 +3601,112 @@ Proof.
         end
     end
   ].
-  (* S_Case_Inl and S_Case_Inr are deferred: the v's typing emerges
-     from [inversion Hsum] (T_Inl/T_Inr) AFTER T_Case inversion, and
-     the nested [match goal with] re-binds pattern vars per Ltac
-     scoping rules — the inner [?vv] doesn't carry the outer Ltac
-     binding, so the match picks branch typings instead of v's typing.
-     Recipe needed: flatten the nested matches OR use [lazymatch] +
-     [pose proof] to manually extract the v's typing into a named
-     hypothesis after both inversions. *)
+  (* S_If_True: e = EIf (EBool true) e2 e3 -> e2. After T_If inversion,
+     the bool typing is a value so its post-context equals its pre-context;
+     the true-branch typing is then at the input context and matches Hte'
+     for output_ctx_det. *)
+  all: try solve [
+    match goal with
+    | [ Hte : has_type ?R ?G (EIf (EBool true) ?e2x ?e3x) ?T ?Ga,
+        Hte' : has_type ?R ?G ?e2x ?T ?Gb |- ?Ga = ?Gb ] =>
+        inversion Hte; subst;
+        match goal with
+        | [ Hbool : has_type ?R ?G (EBool true) (TBase TBool) ?Gmid,
+            Hbranch : has_type ?R ?Gmid ?e2x ?T ?Ga |- _ ] =>
+            assert (HGmid : Gmid = G) by
+              (eapply value_context_unchanged;
+               [exact Hbool | constructor]);
+            subst Gmid;
+            eapply output_ctx_det; [exact Hbranch | exact Hte']
+        end
+    end
+  ].
+  (* S_If_False: symmetric for the false branch e3. *)
+  all: try solve [
+    match goal with
+    | [ Hte : has_type ?R ?G (EIf (EBool false) ?e2x ?e3x) ?T ?Ga,
+        Hte' : has_type ?R ?G ?e3x ?T ?Gb |- ?Ga = ?Gb ] =>
+        inversion Hte; subst;
+        match goal with
+        | [ Hbool : has_type ?R ?G (EBool false) (TBase TBool) ?Gmid,
+            Hbranch : has_type ?R ?Gmid ?e3x ?T ?Ga |- _ ] =>
+            assert (HGmid : Gmid = G) by
+              (eapply value_context_unchanged;
+               [exact Hbool | constructor]);
+            subst Gmid;
+            eapply output_ctx_det; [exact Hbranch | exact Hte']
+        end
+    end
+  ].
+  (* S_Case_Inl: e = ECase (EInl Tann v) e1 e2 -> subst 0 v e1.
+     Three-step inversion chain (T_Case, value_context_unchanged on
+     EInl, T_Inl). After this, the v-typing's output equals the
+     input context G, ready for the closing pattern. *)
+  all: try (match goal with
+    | [ Hte : has_type _ _ (ECase (EInl _ ?vv) _ _) _ _,
+        Hv : is_value ?vv |- _ ] =>
+        inversion Hte; subst;
+        match goal with
+        | [ Hsum : has_type _ ?G (EInl _ ?vv) (TSum _ _) ?Gmid |- _ ] =>
+            assert (HGsum : Gmid = G) by
+              (eapply value_context_unchanged;
+               [exact Hsum | constructor; assumption]);
+            subst Gmid;
+            inversion Hsum; subst
+        end
+    end).
+  all: try solve [
+    match goal with
+    | [ Hv : is_value ?vv,
+        Hvt : has_type ?R ?G ?vv ?T1 ?G,
+        Hbr : has_type ?R (ctx_extend ?G ?T1) ?ebody ?T
+                                              ((?T1, true) :: ?Ga),
+        Hte' : has_type ?R ?G (subst 0 ?vv ?ebody) ?T ?Gb
+        |- ?Ga = ?Gb ] =>
+        destruct (subst_preserves_typing_strong _ _ _ _ _ _ _ _
+                    Hbr Hvt Hv) as [_ Hsub];
+        eapply output_ctx_det; [exact Hsub | exact Hte']
+    end
+  ].
+  (* S_Case_Inr: symmetric — same recipe with EInr / VInr. *)
+  all: try (match goal with
+    | [ Hte : has_type _ _ (ECase (EInr _ ?vv) _ _) _ _,
+        Hv : is_value ?vv |- _ ] =>
+        inversion Hte; subst;
+        match goal with
+        | [ Hsum : has_type _ ?G (EInr _ ?vv) (TSum _ _) ?Gmid |- _ ] =>
+            assert (HGsum : Gmid = G) by
+              (eapply value_context_unchanged;
+               [exact Hsum | constructor; assumption]);
+            subst Gmid;
+            inversion Hsum; subst
+        end
+    end).
+  all: try solve [
+    match goal with
+    | [ Hv : is_value ?vv,
+        Hvt : has_type ?R ?G ?vv ?T2 ?G,
+        Hbr : has_type ?R (ctx_extend ?G ?T2) ?ebody ?T
+                                              ((?T2, true) :: ?Ga),
+        Hte' : has_type ?R ?G (subst 0 ?vv ?ebody) ?T ?Gb
+        |- ?Ga = ?Gb ] =>
+        destruct (subst_preserves_typing_strong _ _ _ _ _ _ _ _
+                    Hbr Hvt Hv) as [_ Hsub];
+        eapply output_ctx_det; [exact Hsub | exact Hte']
+    end
+  ].
+  (* 24 cases remain (Cluster A fully closed). Three clusters:
+       - Cluster B congruence (~18): every S_*_Step except S_Borrow_Step.
+         Recipe: step_R_eq_or_touches_region for the R = R' branch,
+         IH on the inner step, recursive Lemma B for siblings.
+         RIGHT branch (touches_region) shares preservation's Phase 3
+         region-env weakening bottleneck.
+       - Cluster C compound-value (~5): S_StringLen (atomic),
+         S_Copy, S_Fst, S_Snd. Each needs careful inversion of
+         compound-value typings (T_StringLen / T_Borrow_Val,
+         T_Pair, T_Copy).
+       - Region atomic (~3): S_Region_Enter, S_Region_Exit,
+         S_Region_Step. Last blocks on Phase 3. *)
   all: admit.
 Admitted.
 

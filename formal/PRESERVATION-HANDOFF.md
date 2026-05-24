@@ -155,26 +155,27 @@ atomic-axiom closure tactic. **4 of 35 step rules close**; 31 remain.
 | `S_Drop` | atomic: `EDrop (ELoc _) → EUnit`, both T_Drop and T_Unit are identity-output |
 | `S_Borrow_Step` | **accidental congruence closure**: both `T_Borrow` and `T_Borrow_Val` output the input context unchanged, so `Ga = G = Gb` regardless of whether the inner step is reachable. Vacuous-but-closes. |
 
-### Open (31)
+### Open (24, was 31)
 
-Three clusters, ordered by closure tractability:
+#### Cluster A — β-reduction ✅ FULLY CLOSED (2026-05-24)
 
-#### Cluster A — β-reduction (~7)
+All 7 β-reduction cases closed via
+`subst_preserves_typing_strong` (PR: this branch) + `output_ctx_det`
+(PR: this branch). Recipe per case:
+1. Invert the outer compound typing (`T_Let`, `T_App`, `T_If`,
+   `T_Case`) to expose body + value premises.
+2. For T_App: also invert `T_Lam` on the function value.
+3. For T_Case: apply `value_context_unchanged` on the EInl/EInr
+   premise, then invert `T_Inl`/`T_Inr`.
+4. Apply `value_context_unchanged` on the value premise(s) to
+   align intermediate contexts with the input context.
+5. `destruct (subst_preserves_typing_strong ...)` to construct a
+   typing of the substituted form at the specific output context.
+6. `eapply output_ctx_det` against `Htype_e'` to conclude
+   `Ga = Gb`.
 
-Need a strengthened `subst_preserves_typing_strong` exposing the
-specific output context (currently hidden behind an existential).
-`subst_typing_gen` already has the `remove_at k Gout` shape — wrap
-it.
-
-| Step rule | Post-step expr (from coqc dump) |
-|-----------|---------------------------------|
-| `S_Let_Val` | `subst 0 v1 e2` |
-| `S_LetLin_Val` | `subst 0 v1 e2` |
-| `S_App_Fun` | `subst 0 v2 ebody` |
-| `S_If_True` | `e0'` (the `e2` branch, abstract) |
-| `S_If_False` | `e0'` (the `e3` branch, abstract) |
-| `S_Case_Inl` | `subst 0 v e1` |
-| `S_Case_Inr` | `subst 0 v e2` |
+Closed cases: `S_Let_Val`, `S_LetLin_Val`, `S_App_Fun`,
+`S_If_True`, `S_If_False`, `S_Case_Inl`, `S_Case_Inr`.
 
 #### Cluster B — congruence (~18)
 

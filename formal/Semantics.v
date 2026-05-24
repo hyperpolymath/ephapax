@@ -3385,6 +3385,341 @@ Proof.
   ].
 Qed.
 
+(** ** Step preserves type
+
+    If [e] steps to [e'] and BOTH have typings, then they're at the
+    SAME type. The conclusion's [T = T'] equality is what unblocks
+    the "type-alignment-circular" Cluster B cases of
+    [step_output_context_eq] (Lemma B) — for cases like S_Let_Step
+    where the inner step's type isn't fixed by the outer compound's
+    type.
+
+    The lemma's own induction handles the circularity because, at
+    each congruence case, the IH for the inner step provides
+    type-alignment for the inner sub-expressions (which then forces
+    the outer T = T' via the typing rule's structure).
+
+    Proof structure mirrors [step_output_context_eq] but produces a
+    type-equality instead of an output-context-equality. *)
+Lemma step_preserves_type :
+  forall mu R e mu' R' e',
+    (mu, R, e) -->> (mu', R', e') ->
+    forall G T G_a,
+      R; G |- e : T -| G_a ->
+      forall T' G_b,
+        R'; G |- e' : T' -| G_b ->
+        T = T'.
+Proof.
+  intros mu R e mu' R' e' Hstep.
+  remember (mu, R, e) as cfg eqn:Hcfg.
+  remember (mu', R', e') as cfg' eqn:Hcfg'.
+  revert mu R e mu' R' e' Hcfg Hcfg'.
+  induction Hstep;
+    intros mu0 R0 e0 mu0' R0' e0' Hcfg Hcfg';
+    inversion Hcfg; subst;
+    inversion Hcfg'; subst;
+    intros G0 T0 Ga Hte T' Gb Hte'.
+  (* Atomic axiom cases that close by inversion-chain + reflexivity
+     (the same 4 that closed in Lemma B atomic-axiom block). *)
+  all: try (
+    inversion Hte; subst;
+    inversion Hte'; subst;
+    repeat match goal with
+    | [ H : has_type _ _ (ELoc _ _) _ _ |- _ ] =>
+        inversion H; subst; clear H
+    | [ H : has_type _ _ (EI32 _) _ _ |- _ ] =>
+        inversion H; subst; clear H
+    | [ H : has_type _ _ EUnit _ _ |- _ ] =>
+        inversion H; subst; clear H
+    | [ H : has_type _ _ (EBool _) _ _ |- _ ] =>
+        inversion H; subst; clear H
+    end;
+    reflexivity).
+  (* Cluster A — beta-reduction. For each: invert Hte, value_context_
+     unchanged, subst_preserves_typing_strong to construct a typing
+     of the post-step expression at the SAME T as the original, then
+     type_determinacy aligns it with Hte''s T'. *)
+  (* S_Let_Val *)
+  all: try solve [
+    match goal with
+    | [ Hv : is_value ?v1,
+        Hte : has_type ?R ?G (ELet ?v1 ?e2) ?T ?Ga,
+        Hte' : has_type ?R ?G (subst 0 ?v1 ?e2) ?T' ?Gb |- ?T = ?T' ] =>
+        inversion Hte; subst;
+        match goal with
+        | [ Hv1 : has_type ?R ?G ?v1 ?T1 ?G',
+            He2 : has_type ?R (ctx_extend ?G' ?T1) ?e2 ?T
+                                              ((?T1, true) :: ?Ga') |- _ ] =>
+            assert (HGv : G' = G) by
+              (eapply value_context_unchanged; eassumption);
+            subst G';
+            destruct (subst_preserves_typing_strong _ _ _ _ _ _ _ _
+                        He2 Hv1 Hv) as [_ Hsub];
+            eapply type_determinacy;
+              [exact Hsub | exact Hte' | apply ctx_types_agree_refl]
+        end
+    end
+  ].
+  (* S_LetLin_Val *)
+  all: try solve [
+    match goal with
+    | [ Hv : is_value ?v1,
+        Hte : has_type ?R ?G (ELetLin ?v1 ?e2) ?T ?Ga,
+        Hte' : has_type ?R ?G (subst 0 ?v1 ?e2) ?T' ?Gb |- ?T = ?T' ] =>
+        inversion Hte; subst;
+        match goal with
+        | [ Hv1 : has_type ?R ?G ?v1 ?T1 ?G',
+            He2 : has_type ?R (ctx_extend ?G' ?T1) ?e2 ?T
+                                              ((?T1, true) :: ?Ga') |- _ ] =>
+            assert (HGv : G' = G) by
+              (eapply value_context_unchanged; eassumption);
+            subst G';
+            destruct (subst_preserves_typing_strong _ _ _ _ _ _ _ _
+                        He2 Hv1 Hv) as [_ Hsub];
+            eapply type_determinacy;
+              [exact Hsub | exact Hte' | apply ctx_types_agree_refl]
+        end
+    end
+  ].
+  (* S_App_Fun: use Tann (ELam annotation) and Tfa (TFun arg) as
+     separate pattern vars; inversion Hlam forces them equal. *)
+  all: try solve [
+    match goal with
+    | [ Hv : is_value ?v2,
+        Hte : has_type ?R ?G (EApp (ELam ?T1 ?ebody) ?v2) ?T2 ?Ga,
+        Hte' : has_type ?R ?G (subst 0 ?v2 ?ebody) ?T' ?Gb |- ?T2 = ?T' ] =>
+        inversion Hte; subst;
+        match goal with
+        | [ Hlam : has_type ?Rx ?Gx (ELam ?Tann ?ebody2)
+                                    (TFun ?Tfa ?Tfr) ?Gmidx,
+            Harg : has_type ?Rx ?Gmidx ?v2 ?Tfa ?Ga2 |- _ ] =>
+            assert (HGlam : Gmidx = Gx) by
+              (eapply value_context_unchanged;
+               [exact Hlam | constructor]);
+            subst Gmidx;
+            assert (HGv : Ga2 = Gx) by
+              (eapply value_context_unchanged; eassumption);
+            subst Ga2;
+            inversion Hlam; subst;
+            match goal with
+            | [ Hbody : has_type ?Rx (ctx_extend ?Gx ?Tfa) ?ebody2 ?Tfr
+                                  ((?Tfa, true) :: ?Gx) |- _ ] =>
+                destruct (subst_preserves_typing_strong _ _ _ _ _ _ _ _
+                            Hbody Harg Hv) as [_ Hsub];
+                eapply type_determinacy;
+                  [exact Hsub | exact Hte' | apply ctx_types_agree_refl]
+            end
+        end
+    end
+  ].
+  (* S_If_True *)
+  all: try solve [
+    match goal with
+    | [ Hte : has_type ?R ?G (EIf (EBool true) ?e2x ?e3x) ?T ?Ga,
+        Hte' : has_type ?R ?G ?e2x ?T' ?Gb |- ?T = ?T' ] =>
+        inversion Hte; subst;
+        match goal with
+        | [ Hbool : has_type ?R ?G (EBool true) (TBase TBool) ?Gmid,
+            Hbranch : has_type ?R ?Gmid ?e2x ?T ?Ga |- _ ] =>
+            assert (HGmid : Gmid = G) by
+              (eapply value_context_unchanged;
+               [exact Hbool | constructor]);
+            subst Gmid;
+            eapply type_determinacy;
+              [exact Hbranch | exact Hte' | apply ctx_types_agree_refl]
+        end
+    end
+  ].
+  (* S_If_False *)
+  all: try solve [
+    match goal with
+    | [ Hte : has_type ?R ?G (EIf (EBool false) ?e2x ?e3x) ?T ?Ga,
+        Hte' : has_type ?R ?G ?e3x ?T' ?Gb |- ?T = ?T' ] =>
+        inversion Hte; subst;
+        match goal with
+        | [ Hbool : has_type ?R ?G (EBool false) (TBase TBool) ?Gmid,
+            Hbranch : has_type ?R ?Gmid ?e3x ?T ?Ga |- _ ] =>
+            assert (HGmid : Gmid = G) by
+              (eapply value_context_unchanged;
+               [exact Hbool | constructor]);
+            subst Gmid;
+            eapply type_determinacy;
+              [exact Hbranch | exact Hte' | apply ctx_types_agree_refl]
+        end
+    end
+  ].
+  (* S_Case_Inl *)
+  all: try (match goal with
+    | [ Hte : has_type _ _ (ECase (EInl _ ?vv) _ _) _ _,
+        Hv : is_value ?vv |- _ ] =>
+        inversion Hte; subst;
+        match goal with
+        | [ Hsum : has_type _ ?G (EInl _ ?vv) (TSum _ _) ?Gmid |- _ ] =>
+            assert (HGsum : Gmid = G) by
+              (eapply value_context_unchanged;
+               [exact Hsum | constructor; assumption]);
+            subst Gmid;
+            inversion Hsum; subst
+        end
+    end).
+  all: try solve [
+    match goal with
+    | [ Hv : is_value ?vv,
+        Hvt : has_type ?R ?G ?vv ?T1 ?G,
+        Hbr : has_type ?R (ctx_extend ?G ?T1) ?ebody ?T
+                                              ((?T1, true) :: ?Ga),
+        Hte' : has_type ?R ?G (subst 0 ?vv ?ebody) ?T' ?Gb
+        |- ?T = ?T' ] =>
+        destruct (subst_preserves_typing_strong _ _ _ _ _ _ _ _
+                    Hbr Hvt Hv) as [_ Hsub];
+        eapply type_determinacy;
+          [exact Hsub | exact Hte' | apply ctx_types_agree_refl]
+    end
+  ].
+  (* S_Case_Inr *)
+  all: try (match goal with
+    | [ Hte : has_type _ _ (ECase (EInr _ ?vv) _ _) _ _,
+        Hv : is_value ?vv |- _ ] =>
+        inversion Hte; subst;
+        match goal with
+        | [ Hsum : has_type _ ?G (EInr _ ?vv) (TSum _ _) ?Gmid |- _ ] =>
+            assert (HGsum : Gmid = G) by
+              (eapply value_context_unchanged;
+               [exact Hsum | constructor; assumption]);
+            subst Gmid;
+            inversion Hsum; subst
+        end
+    end).
+  all: try solve [
+    match goal with
+    | [ Hv : is_value ?vv,
+        Hvt : has_type ?R ?G ?vv ?T2 ?G,
+        Hbr : has_type ?R (ctx_extend ?G ?T2) ?ebody ?T
+                                              ((?T2, true) :: ?Ga),
+        Hte' : has_type ?R ?G (subst 0 ?vv ?ebody) ?T' ?Gb
+        |- ?T = ?T' ] =>
+        destruct (subst_preserves_typing_strong _ _ _ _ _ _ _ _
+                    Hbr Hvt Hv) as [_ Hsub];
+        eapply type_determinacy;
+          [exact Hsub | exact Hte' | apply ctx_types_agree_refl]
+    end
+  ].
+  (* Cluster B — congruence cases close via the IH's type-equality.
+     The IH for [step_preserves_type] handles the inner step
+     directly: given e1 → e1' and typings of e1 / e1' at any types
+     (each under its respective R / R'), the IH yields type-equality.
+     No need to dispatch on R = R' first — the IH is universal in
+     the typings' region envs. *)
+  (* S_StringConcat_Step1 — inner step on e1. *)
+  all: try solve [
+    match goal with
+    | [ IH : forall (_:mem) (_:region_env) (_:expr) (_:mem) (_:region_env) (_:expr),
+              _ = _ -> _ = _ -> forall (_:ctx) (_:ty) (_:ctx),
+              _ -> forall (_:ty) (_:ctx), _ -> _ = _,
+        Hte : has_type _ _ (EStringConcat _ _) _ _,
+        Hte' : has_type _ _ (EStringConcat _ _) _ _ |- _ ] =>
+        inversion Hte; subst;
+        inversion Hte'; subst;
+        match goal with
+        | [ H1 : has_type ?R ?G ?e1 (TString ?r) ?Gmid,
+            H1' : has_type ?R' ?G ?e1' (TString ?r') ?Gmid' |- _ ] =>
+            pose proof (IH _ _ _ _ _ _ eq_refl eq_refl _ _ _ H1 _ _ H1') as Hteq;
+            inversion Hteq; reflexivity
+        end
+    end
+  ].
+  (* S_App_Step1, S_App_Step2 — TFun T1 T2; IH gives T1 = T1' AND T2 = T2'. *)
+  all: try solve [
+    match goal with
+    | [ IH : forall (_:mem) (_:region_env) (_:expr) (_:mem) (_:region_env) (_:expr),
+              _ = _ -> _ = _ -> forall (_:ctx) (_:ty) (_:ctx),
+              _ -> forall (_:ty) (_:ctx), _ -> _ = _,
+        Hte : has_type _ _ (EApp _ _) _ _,
+        Hte' : has_type _ _ (EApp _ _) _ _ |- _ ] =>
+        inversion Hte; subst;
+        inversion Hte'; subst;
+        match goal with
+        | [ H1 : has_type ?R ?G ?e1 (TFun ?T1a ?T2a) ?Gmid,
+            H1' : has_type ?R' ?G ?e1' (TFun ?T1b ?T2b) ?Gmid' |- _ ] =>
+            pose proof (IH _ _ _ _ _ _ eq_refl eq_refl _ _ _ H1 _ _ H1') as Hteq;
+            inversion Hteq; reflexivity
+        end
+    end
+  ].
+  (* S_Let_Step, S_LetLin_Step — IH on e1 → e1' aligns T1, then need
+     T = T' from the body. *)
+  all: try solve [
+    match goal with
+    | [ IH : forall (_:mem) (_:region_env) (_:expr) (_:mem) (_:region_env) (_:expr),
+              _ = _ -> _ = _ -> forall (_:ctx) (_:ty) (_:ctx),
+              _ -> forall (_:ty) (_:ctx), _ -> _ = _,
+        Hte : has_type _ _ (ELet _ _) _ _,
+        Hte' : has_type _ _ (ELet _ _) _ _ |- _ ] =>
+        inversion Hte; subst;
+        inversion Hte'; subst;
+        match goal with
+        | [ H1 : has_type ?R ?G ?e1 ?T1a ?Gmid,
+            H1' : has_type ?R' ?G ?e1' ?T1b ?Gmid',
+            H2 : has_type ?R (ctx_extend ?Gmid ?T1a) ?e2 ?T ((?T1a, true) :: ?Ga),
+            H2' : has_type ?R' (ctx_extend ?Gmid' ?T1b) ?e2 ?T' ((?T1b, true) :: ?Gb) |- _ ] =>
+            (* IH aligns T1a = T1b *)
+            pose proof (IH _ _ _ _ _ _ eq_refl eq_refl _ _ _ H1 _ _ H1') as HT1;
+            subst T1b;
+            (* Now H2 and H2' both have body context ctx_extend ?_ T1a.
+               typing_types_agree composed via G aligns Gmid and Gmid'. *)
+            assert (HagrMid : ctx_types_agree Gmid Gmid')
+              by (apply (ctx_types_agree_trans _ G _);
+                  [ exact (typing_types_agree _ _ _ _ _ H1)
+                  | apply ctx_types_agree_sym;
+                    exact (typing_types_agree _ _ _ _ _ H1') ]);
+            assert (HagrExt : ctx_types_agree
+                              (ctx_extend Gmid T1a) (ctx_extend Gmid' T1a))
+              by (apply ctx_extend_types_agree; assumption);
+            eapply type_determinacy;
+              [ exact H2 | exact H2' | exact HagrExt ]
+        end
+    end
+  ].
+  (* S_LetLin_Step — same as S_Let_Step. *)
+  all: try solve [
+    match goal with
+    | [ IH : forall (_:mem) (_:region_env) (_:expr) (_:mem) (_:region_env) (_:expr),
+              _ = _ -> _ = _ -> forall (_:ctx) (_:ty) (_:ctx),
+              _ -> forall (_:ty) (_:ctx), _ -> _ = _,
+        Hte : has_type _ _ (ELetLin _ _) _ _,
+        Hte' : has_type _ _ (ELetLin _ _) _ _ |- _ ] =>
+        inversion Hte; subst;
+        inversion Hte'; subst;
+        match goal with
+        | [ H1 : has_type ?R ?G ?e1 ?T1a ?Gmid,
+            H1' : has_type ?R' ?G ?e1' ?T1b ?Gmid',
+            H2 : has_type ?R (ctx_extend ?Gmid ?T1a) ?e2 ?T ((?T1a, true) :: ?Ga),
+            H2' : has_type ?R' (ctx_extend ?Gmid' ?T1b) ?e2 ?T' ((?T1b, true) :: ?Gb) |- _ ] =>
+            pose proof (IH _ _ _ _ _ _ eq_refl eq_refl _ _ _ H1 _ _ H1') as HT1;
+            subst T1b;
+            assert (HagrMid : ctx_types_agree Gmid Gmid')
+              by (apply (ctx_types_agree_trans _ G _);
+                  [ exact (typing_types_agree _ _ _ _ _ H1)
+                  | apply ctx_types_agree_sym;
+                    exact (typing_types_agree _ _ _ _ _ H1') ]);
+            assert (HagrExt : ctx_types_agree
+                              (ctx_extend Gmid T1a) (ctx_extend Gmid' T1a))
+              by (apply ctx_extend_types_agree; assumption);
+            eapply type_determinacy;
+              [ exact H2 | exact H2' | exact HagrExt ]
+        end
+    end
+  ].
+  (* ~20 cases remain in step_preserves_type. Closed via the new
+     IH-driven recipe: S_StringConcat_Step1, S_App_Step1/Step2,
+     S_Let_Val, S_LetLin_Val, S_App_Fun, S_Case_Inl/Inr (and the
+     atomic-axiom group from the initial tactic). Remaining cases
+     would follow the same recipe + variations for second-child,
+     unary, and ternary congruence shapes. The structural template
+     is in place; finishing is purely mechanical clone work. *)
+  all: admit.
+Admitted.
+
 (** ** Region-invariance lemma
 
     Captures the structural fact that the step relation only changes

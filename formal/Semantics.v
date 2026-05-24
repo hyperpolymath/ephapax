@@ -4253,19 +4253,89 @@ Proof.
         end
     end
   ].
-  (* S_Region_Enter and S_StringLen remain open. Both are tractable
-     but blocked on Ltac pattern-matching mechanics that ate too much
-     budget this session. Deferred to follow-up:
-       - S_Region_Enter: T_Region/T_Region_Active inversions expose
-         the inner expression's typings under (r :: R); G with outputs
-         Ga and Gb. Goal-conclusion-binding match should pick them but
-         Coq's hypothesis backtracking interacts oddly with the
-         post-inversion duplicate-shape state. Workaround: invert
-         manually with [destruct Hte; destruct Hte'] and use explicit
-         hypothesis names.
-       - S_StringLen: EBorrow-of-ELoc chain needs THREE nested
-         inversions (T_StringLen -> T_Borrow_Val -> T_Loc) and the
-         current repeat-inversion tactic doesn't follow the chain. *)
+  (* S_StringLen (atomic): EStringLen (ELoc l r) -> EI32 n. The step
+     rule's input is EStringLen on a raw ELoc (NOT EBorrow-wrapped);
+     T_StringLen's typing wraps it as EBorrow (ELoc l r) at type
+     TBorrow (TString r). Inversion chain: T_StringLen ->
+     T_Borrow_Val (since ELoc is a value, T_Borrow's EVar form is
+     impossible) -> T_Loc. Each preserves the context unchanged,
+     so Ga = G. Hte' (T_I32) gives Gb = G. Reflexivity. *)
+  all: try solve [
+    match goal with
+    | [ Hte : has_type ?R ?G (EStringLen (ELoc _ _)) ?T ?Ga,
+        Hte' : has_type ?R ?G (EI32 _) ?T ?Gb |- ?Ga = ?Gb ] =>
+        inversion Hte; subst;
+        match goal with
+        | [ Hb : has_type _ _ (EBorrow (ELoc _ _)) _ _ |- _ ] =>
+            inversion Hb; subst;
+            try (match goal with
+                 | [ Hev : has_type _ _ (EVar _) _ _ |- _ ] =>
+                     inversion Hev
+                 end);
+            inversion Hte'; subst;
+            repeat match goal with
+            | [ H : has_type _ _ (ELoc _ _) _ _ |- _ ] =>
+                inversion H; subst; clear H
+            end;
+            reflexivity
+        end
+    end
+  ].
+  (* S_Region_Enter: 4 inversion sub-goals; handle each contradiction
+     branch explicitly + use output_ctx_det on the valid sub-goal. *)
+  all: try solve [
+    match goal with
+    | [ Hn : ~ In ?r _,
+        Hte : has_type _ _ (ERegion ?r ?e) ?T ?Ga,
+        Hte' : has_type _ _ (ERegion ?r ?e) ?T ?Gb |- ?Ga = ?Gb ] =>
+        inversion Hte; subst;
+        inversion Hte'; subst;
+        first
+          [ (* C, D: Hte was T_Region_Active forcing In r R0, but
+               step rule premise Hn : ~ In r R0. tauto closes. *)
+            exfalso; tauto
+          | (* A: Hte' was T_Region forcing ~ In r (r :: R0); trivially false. *)
+            exfalso;
+            match goal with
+            | [ H : ~ In ?r (?r :: _) |- _ ] =>
+                apply H; left; reflexivity
+            end
+          | (* B (valid): output_ctx_det on the two inner typings of e. *)
+            match goal with
+            | [ H1 : has_type ?R ?G ?e ?T ?Gax,
+                H2 : has_type ?R ?G ?e ?T ?Gbx |- ?Gax = ?Gbx ] =>
+                eapply output_ctx_det; [exact H1 | exact H2]
+            end ]
+    end
+  ].
+  (* S_Region_Enter: ERegion r e (under R, ~In r R) -> ERegion r e
+     (under r :: R). Inversion of Hte branches into T_Region (valid,
+     since ~In r R0 from step premise) and T_Region_Active (forces
+     In r R0, contradicts step premise). Inversion of Hte' branches
+     into T_Region (forces ~In r (r :: R0), trivially false) and
+     T_Region_Active (valid, since In r (r :: R0) trivially holds).
+     4 sub-goals total; close 3 contradictions with exfalso+tauto,
+     close the valid one with output_ctx_det on the two inner
+     typings of e. *)
+  all: try solve [
+    match goal with
+    | [ Hn : ~ In ?r _,
+        Hte : has_type _ _ (ERegion ?r ?e) ?T ?Ga,
+        Hte' : has_type _ _ (ERegion ?r ?e) ?T ?Gb |- ?Ga = ?Gb ] =>
+        inversion Hte; subst;
+        inversion Hte'; subst;
+        first [ exfalso; tauto
+              | (* The valid sub-goal: both inner typings of e at
+                   (r :: R0); G with outputs Ga and Gb. *)
+                match goal with
+                | [ H1 : has_type ?R ?G ?e ?T ?Gax,
+                    H2 : has_type ?R ?G ?e ?T ?Gbx |- ?Gax = ?Gbx ] =>
+                    eapply output_ctx_det; [exact H1 | exact H2]
+                end ]
+    end
+  ].
+  (* Both S_StringLen (atomic) and S_Region_Enter are now closed
+     (above) — Cluster C COMPLETE. *)
   (* S_Region_Exit: ERegion r v -> v (R becomes remove_first r R).
      T_Region_Active inversion + value_context_unchanged twice. *)
   all: try solve [
@@ -4286,7 +4356,9 @@ Proof.
         end
     end
   ].
-  (* 9 cases remain (74% closed from 35).
+  (* 7 cases remain (80% closed from 35). All blocked on
+     **type-alignment circularity WITHOUT independent-context
+     sibling** + Phase 3 region-env weakening.
        - 6 type-alignment-circular WITHOUT independent-context sibling:
          S_Let_Step, S_LetLin_Step, S_Case_Step (sibling exists but
          its context depends on the unconstrained type), S_Drop_Step,
@@ -4294,9 +4366,6 @@ Proof.
          genuinely needs preservation: the outer type doesn't fix
          all inner types, and no auxiliary lemma within Lemma B's
          induction can align them.
-       - 2 Cluster C deferred (S_Region_Enter, S_StringLen atomic):
-         tractable but blocked on Ltac inversion mechanics in this
-         session.
        - 1 Phase 3 blocker (S_Region_Step): needs region-env
          weakening for non-values.
        - Implicit: all RIGHT branches (touches_region) of the closed

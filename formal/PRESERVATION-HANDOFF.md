@@ -240,18 +240,26 @@ preservation. Circular.
    the type-only part of preservation) and prove it separately
    via a more restricted induction.
 
-#### Cluster C — region / compound-value (4 of 6 closed, 2 open)
+#### Cluster C — region / compound-value ✅ FULLY CLOSED (2026-05-24)
 
-**Closed (2026-05-24)**: `S_Fst`, `S_Snd`, `S_Copy`, `S_Region_Exit`.
+**Closed**: `S_Fst`, `S_Snd`, `S_Copy`, `S_Region_Exit`,
+`S_StringLen` (atomic), `S_Region_Enter`. All 6.
 
-Recipe: invert the compound typing rule (T_Fst → T_Pair, T_Snd →
-T_Pair, T_Copy, T_Region_Active), apply `value_context_unchanged`
-on each value-typing premise to align intermediate contexts with
-the input context G, then `reflexivity` closes the resulting
-`G = G` goal (output_ctx_det not even needed when both sides
-collapse to G).
-
-**Still open**:
+Recipes:
+- `S_Fst`, `S_Snd`, `S_Copy`, `S_Region_Exit`: invert the compound
+  rule (T_Fst → T_Pair, T_Snd → T_Pair, T_Copy, T_Region_Active),
+  apply `value_context_unchanged` on each value-typing premise to
+  align intermediate contexts with G, then `reflexivity` closes.
+- `S_StringLen` atomic: 3-level inversion chain T_StringLen →
+  T_Borrow_Val (T_Borrow's EVar form contradicted by ELoc) → T_Loc.
+  Each preserves the context, so Ga = G. T_I32 on Hte' gives Gb = G.
+- `S_Region_Enter`: 4 inversion sub-goals from T_Region /
+  T_Region_Active × Hte / Hte'. Two contradiction patterns:
+  `tauto` closes Hn-vs-`In r R0` cases; explicit
+  `apply H; left; reflexivity` closes the `~ In r (r :: R0)`
+  case. The valid sub-goal (Hte = T_Region, Hte' = T_Region_Active)
+  closes via `output_ctx_det` on the two inner typings of `e` at
+  `(r :: R0); G`.
 
 
 

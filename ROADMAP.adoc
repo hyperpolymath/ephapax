@@ -188,6 +188,14 @@ up the proof should follow.
 | After per-case manual closures
 | **12**
 | 10 β-reduction / value-step cases discharged. PR #116.
+
+| Phase 1 scaffold (Lemma B stated, body `Admitted`)
+| 12
+| `step_output_context_eq` introduced. PR #121.
+
+| Phase 1 empirical baseline (2026-05-24)
+| 12 (preservation) / **31 of 35** (Lemma B itself)
+| `cfg`-remember pattern + atomic-axiom tactic on Lemma B closes 4 of its 35 step-rule cases (`S_StringNew`, `S_StringConcat`, `S_Drop`, `S_Borrow_Step`); the remaining 31 cluster across β-reduction / congruence / region-and-compound-value branches. Per-case map in `formal/PRESERVATION-HANDOFF.md`.
 |===
 
 98.7% reduction across one day. Remaining 12 = 11 congruence cases
@@ -218,11 +226,31 @@ via `G' = G_out`.
 **Approach**: induction on `step` with `type_determinacy` per case.
 Same pattern as `step_R_eq_or_touches_region`.
 
-**Effort**: 3–4 hours focused session.
+**Effort**: ~~3–4 hours focused session~~ → **8–15 focused hours**
+(revised 2026-05-24). Empirical baseline from `coqc 8.18.0`: the
+`cfg`-remember + atomic-axiom tactic closes 4 of 35 step rules
+(`S_StringNew`, `S_StringConcat`, `S_Drop`, `S_Borrow_Step`); the
+remaining 31 split across 3 clusters needing distinct recipes. Full
+per-case map in `formal/PRESERVATION-HANDOFF.md` §"Lemma B per-case
+status".
 
-**Risk**: `G_end = G_out` may need weakening to "context-equivalent up
-to flag positions" via the existing `types_agree` machinery. If so,
-the lemma is slightly harder but still tractable.
+**Risk**:
+
+. **Type-determinacy across stepped pairs**: some Cluster B
+  congruence cases need to know `e` and `e'` have the same type
+  before applying the IH. `type_determinacy` only handles
+  same-expression pairs; the natural "step preserves type" lemma
+  is part of preservation itself. Watch for circularity when
+  attacking the first congruence case.
+. **Output-context equality may need weakening** to
+  "context-equivalent up to flag positions" via the existing
+  `types_agree` machinery. If so, the lemma is slightly harder
+  but still tractable.
+. **Strengthened subst lemma needed for Cluster A**: the existing
+  `subst_preserves_typing` hides the output context behind an
+  existential; the 7 β-reduction cases need a
+  `subst_preserves_typing_strong` variant exposing the specific
+  `remove_at k Gout` shape already present in `subst_typing_gen`.
 
 === Phase 2 — Apply Lemma B → close 11 congruence cases
 

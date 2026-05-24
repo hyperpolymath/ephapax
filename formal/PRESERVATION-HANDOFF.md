@@ -177,20 +177,63 @@ All 7 β-reduction cases closed via
 Closed cases: `S_Let_Val`, `S_LetLin_Val`, `S_App_Fun`,
 `S_If_True`, `S_If_False`, `S_Case_Inl`, `S_Case_Inr`.
 
-#### Cluster B — congruence (~18)
+#### Cluster B — congruence (10 of 18 closed, 8 open)
 
-Every `S_*_Step` except `S_Borrow_Step`. Recipe per case: apply
-`step_R_eq_or_touches_region` → in the R-equal branch, apply IH for
-the inner step + recursive Lemma B for siblings. RIGHT branch
-(`touches_region`) is blocked on the same region-env weakening
-lemma as preservation Phase 3 — these cases share the bottleneck.
+**Closed (2026-05-24)**: `S_StringConcat_Step1`,
+`S_StringConcat_Step2`, `S_Pair_Step1`, `S_Pair_Step2`,
+`S_Inl_Step`, `S_Inr_Step`, `S_Copy_Step`, `S_If_Step`,
+`S_StringLen_Step`. (Plus `S_Borrow_Step` closed accidentally
+earlier.)
 
-`S_StringConcat_Step1`, `S_StringConcat_Step2`, `S_StringLen_Step`,
-`S_Let_Step`, `S_LetLin_Step`, `S_App_Step1`, `S_App_Step2`,
-`S_If_Step`, `S_Pair_Step1`, `S_Pair_Step2`, `S_Fst_Step`,
-`S_Snd_Step`, `S_Inl_Step`, `S_Inr_Step`, `S_Case_Step`,
-`S_Drop_Step`, `S_Copy_Step`. (17 listed; +1 region congruence
-`S_Region_Step` belongs to cluster C.)
+Recipe (canonical two-child congruence, e.g.
+`S_StringConcat_Step1`):
+1. Invert both `Hte` and `Hte'`.
+2. `pose proof step_R_eq_or_touches_region` to dispatch `R = R'`.
+3. LEFT (R = R'): apply IH on inner step's typings to get
+   `Gmid = Gmid'`; `output_ctx_det` on the unchanged sibling
+   closes.
+4. RIGHT (`touches_region`): locally `admit` per-case.
+
+Variants:
+- Second-child congruences (`S_StringConcat_Step2`,
+  `S_Pair_Step2`): use `value_context_unchanged` on the first
+  child (the value) to align contexts before IH on the second
+  child.
+- Single-child congruences (`S_Inl_Step`, `S_Inr_Step`,
+  `S_Copy_Step`): no sibling, IH directly closes.
+- `S_If_Step`: condition at `TBase TBool` (fixed type), branches
+  at outer `T` — fully constrained.
+- `S_StringLen_Step`: vacuous via inversion chain (T_StringLen →
+  T_Borrow / T_Borrow_Val: the inner must be `EVar` or a value;
+  neither steps).
+
+**Open (8)** — all blocked on the **type-alignment circularity**:
+
+| Step rule | Inner-type that's NOT fixed by outer T |
+|-----------|----------------------------------------|
+| `S_App_Step1` | `T_App`'s arg type `T1` (TFun T1 T2) |
+| `S_App_Step2` | same |
+| `S_Let_Step` | `T_Let`'s binding type `T1` |
+| `S_LetLin_Step` | `T_LetLin`'s binding type `T1` |
+| `S_Case_Step` | `T_Case`'s scrutinee `TSum T1 T2` |
+| `S_Drop_Step` | `T_Drop`'s arg type `T` (outer is `TBase TUnit`) |
+| `S_Fst_Step` | `T_Fst`'s second component `T2` |
+| `S_Snd_Step` | `T_Snd`'s first component `T1` |
+
+For each: T_X inversion of Hte and Hte' produces independent
+fresh type-vars for the unconstrained inner types. To apply
+Lemma B's IH on the inner step, we'd need to know both typings
+are at the SAME inner type — but establishing that requires
+preservation. Circular.
+
+**Resolution paths**:
+1. Prove Lemma B and preservation by **simultaneous mutual
+   induction** (restructure both proofs).
+2. **Re-state Lemma B** with a conclusion that doesn't need
+   shared T (weaker output-context-equivalence).
+3. Add a **type-preservation-under-step** sub-lemma (essentially
+   the type-only part of preservation) and prove it separately
+   via a more restricted induction.
 
 #### Cluster C — region / compound-value (4 of 6 closed, 2 open)
 

@@ -207,12 +207,17 @@ Variants:
   T_Borrow / T_Borrow_Val: the inner must be `EVar` or a value;
   neither steps).
 
-**Open (8)** — all blocked on the **type-alignment circularity**:
+**Open (6 of original 8)** — blocked on **type-alignment circularity WITHOUT independent-context sibling**:
+
+S_App_Step1 and S_App_Step2 closed via the "sibling type_determinacy"
+trick (their sibling's context — `Gmid` for Step1, `G` for Step2 via
+value_context_unchanged — is independent of the unconstrained `T1`).
+
+For the remaining cases, no such sibling exists or its context
+depends on the unconstrained type:
 
 | Step rule | Inner-type that's NOT fixed by outer T |
 |-----------|----------------------------------------|
-| `S_App_Step1` | `T_App`'s arg type `T1` (TFun T1 T2) |
-| `S_App_Step2` | same |
 | `S_Let_Step` | `T_Let`'s binding type `T1` |
 | `S_LetLin_Step` | `T_LetLin`'s binding type `T1` |
 | `S_Case_Step` | `T_Case`'s scrutinee `TSum T1 T2` |

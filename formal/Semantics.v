@@ -2860,6 +2860,49 @@ Proof.
   intro G. split; [reflexivity|]. intros. eexists. exact H.
 Qed.
 
+(** [ctx_types_agree] is symmetric: same length + same type at each
+    position (modulo used-flag) is a symmetric relation. *)
+Lemma ctx_types_agree_sym : forall G1 G2,
+  ctx_types_agree G1 G2 -> ctx_types_agree G2 G1.
+Proof.
+  intros G1 G2 [Hlen Hpos].
+  split; [symmetry; exact Hlen|].
+  intros i T u Hlk.
+  (* Hlk : ctx_lookup G2 i = Some (T, u). Need: exists u', ctx_lookup G1 i = Some (T, u'). *)
+  (* Strategy: G1 has same length as G2, so G1[i] exists. Use Hpos in
+     the forward direction by case on what G1[i] is. *)
+  destruct (ctx_lookup G1 i) as [[T1 u1]|] eqn:Hg1.
+  - (* G1[i] = (T1, u1). By Hpos, G2[i] = (T1, ?u'). Combined with
+       Hlk : G2[i] = (T, u), get T = T1. The [destruct ... eqn:Hg1]
+       above rewrites [ctx_lookup G1 i] in the goal to [Some (T1, u1)],
+       so after [subst T1] the goal becomes [Some (T, u1) = Some (T, u1)]
+       which closes by reflexivity. *)
+    pose proof (Hpos i T1 u1 Hg1) as [u' Hg2].
+    assert (HT : T = T1) by congruence. subst T1.
+    exists u1. reflexivity.
+  - (* G1[i] = None. But |G1| = |G2| and G2[i] exists (from Hlk), so
+       G1[i] should also exist. Contradiction. ctx_lookup is just
+       nth_error, so we unfold and use nth_error_Some. *)
+    exfalso.
+    unfold ctx_lookup in *.
+    assert (Hi : i < length G2).
+    { apply nth_error_Some. rewrite Hlk. discriminate. }
+    rewrite <- Hlen in Hi.
+    apply nth_error_Some in Hi. apply Hi. exact Hg1.
+Qed.
+
+(** [ctx_types_agree] is transitive. *)
+Lemma ctx_types_agree_trans : forall G1 G2 G3,
+  ctx_types_agree G1 G2 -> ctx_types_agree G2 G3 -> ctx_types_agree G1 G3.
+Proof.
+  intros G1 G2 G3 [Hlen12 Hpos12] [Hlen23 Hpos23].
+  split; [transitivity (length G2); assumption|].
+  intros i T u Hg1.
+  destruct (Hpos12 i T u Hg1) as [u2 Hg2].
+  destruct (Hpos23 i T u2 Hg2) as [u3 Hg3].
+  exists u3. exact Hg3.
+Qed.
+
 Lemma ctx_false_preserved_refl : forall G, ctx_false_preserved G G.
 Proof. unfold ctx_false_preserved. auto. Qed.
 
@@ -4082,6 +4125,86 @@ Proof.
           end
         | admit ]
     end).
+  (* S_App_Step1: inner step on e1. T_App's T1 (arg type) is NOT
+     fixed by outer T — so direct IH application would need
+     T1_a = T1_b across the two inversions. Resolution: apply
+     type_determinacy on the sibling e2 (same expression!) with
+     ctx_types_agree on its input contexts (which agree by
+     typing_types_agree + sym + trans through G). *)
+  all: try (
+    match goal with
+    | [ IH : forall (_:mem) (_:region_env) (_:expr) (_:mem) (_:region_env) (_:expr),
+              _ = _ -> _ = _ -> forall (_:ctx) (_:ty) (_:ctx) (_:ctx),
+              _ -> _ -> _ = _,
+        Hin : step _ _,
+        Hte : has_type ?R ?G (EApp ?e1 ?e2) ?T ?Ga,
+        Hte' : has_type ?R' ?G (EApp ?e1' ?e2) ?T ?Gb
+        |- ?Ga = ?Gb ] =>
+        inversion Hte; subst;
+        inversion Hte'; subst;
+        pose proof (step_R_eq_or_touches_region _ _ _ _ _ _ Hin) as Hdis;
+        destruct Hdis as [HeqR | HTR];
+        [ subst R';
+          match goal with
+          | [ H1 : has_type ?R ?G ?e1 (TFun ?T1a ?T) ?Gmid,
+              H2 : has_type ?R ?Gmid ?e2 ?T1a ?Ga,
+              H1' : has_type ?R ?G ?e1' (TFun ?T1b ?T) ?Gmid',
+              H2' : has_type ?R ?Gmid' ?e2 ?T1b ?Gb |- _ ] =>
+              (* Align T1a = T1b via type_determinacy on e2 with
+                 ctx_types_agree Gmid Gmid' (composed via G). *)
+              assert (HagrMid : ctx_types_agree Gmid Gmid')
+                by (apply (ctx_types_agree_trans _ G _);
+                    [ exact (typing_types_agree _ _ _ _ _ H1)
+                    | apply ctx_types_agree_sym;
+                      exact (typing_types_agree _ _ _ _ _ H1') ]);
+              assert (HTeq : T1a = T1b)
+                by (eapply type_determinacy;
+                    [ exact H2 | exact H2' | exact HagrMid ]);
+              subst T1b;
+              pose proof (IH _ _ _ _ _ _ eq_refl eq_refl _ _ _ _ H1 H1') as Hmid;
+              subst Gmid';
+              eapply output_ctx_det; [exact H2 | exact H2']
+          end
+        | admit ]
+    end).
+  (* S_App_Step2: inner step on e2, v1 unchanged (value). Use
+     type_determinacy on v1 (same expression, R, G inputs match via
+     value_context_unchanged) to align T1_a = T1_b directly. *)
+  all: try (
+    match goal with
+    | [ IH : forall (_:mem) (_:region_env) (_:expr) (_:mem) (_:region_env) (_:expr),
+              _ = _ -> _ = _ -> forall (_:ctx) (_:ty) (_:ctx) (_:ctx),
+              _ -> _ -> _ = _,
+        Hin : step _ _,
+        Hv : is_value ?v1,
+        Hte : has_type ?R ?G (EApp ?v1 ?e2) ?T ?Ga,
+        Hte' : has_type ?R' ?G (EApp ?v1 ?e2') ?T ?Gb
+        |- ?Ga = ?Gb ] =>
+        inversion Hte; subst;
+        inversion Hte'; subst;
+        pose proof (step_R_eq_or_touches_region _ _ _ _ _ _ Hin) as Hdis;
+        destruct Hdis as [HeqR | HTR];
+        [ subst R';
+          match goal with
+          | [ H1 : has_type ?R ?G ?v1 (TFun ?T1a ?T) ?Gmid,
+              H2 : has_type ?R ?Gmid ?e2 ?T1a ?Ga,
+              H1' : has_type ?R ?G ?v1 (TFun ?T1b ?T) ?Gmid',
+              H2' : has_type ?R ?Gmid' ?e2' ?T1b ?Gb |- _ ] =>
+              assert (HGm : Gmid = G) by
+                (eapply value_context_unchanged; eassumption);
+              subst Gmid;
+              assert (HGm' : Gmid' = G) by
+                (eapply value_context_unchanged; eassumption);
+              subst Gmid';
+              assert (HTeq : TFun T1a T = TFun T1b T)
+                by (eapply type_determinacy;
+                    [ exact H1 | exact H1' | apply ctx_types_agree_refl ]);
+              inversion HTeq; subst T1b;
+              pose proof (IH _ _ _ _ _ _ eq_refl eq_refl _ _ _ _ H2 H2') as Hgeq;
+              exact Hgeq
+          end
+        | admit ]
+    end).
   (* S_If_Step: inner step on e1 (the bool). T_If has all types
      constrained — cond is TBase TBool, branches at outer T. *)
   all: try (
@@ -4163,22 +4286,14 @@ Proof.
         end
     end
   ].
-  (* 11 cases remain. Major reduction from the 35-of-35 starting
-     point (69% closed). Breakdown:
-       - 7 type-alignment circular (Cluster B): S_App_Step1/Step2,
-         S_Let_Step, S_LetLin_Step, S_Case_Step, S_Drop_Step,
-         S_Fst_Step, S_Snd_Step. Each blocks on the same pattern:
-         the outer compound type does NOT fix all the inner types,
-         so T_X inversion of Hte and Hte' produces independent
-         fresh type-vars (e.g., T_App's T1 arg type, T_Let's
-         binding type, T_Case's TSum components, T_Fst's T2). To
-         apply Lemma B's IH on the inner step, we'd need to know
-         the two typings are at the SAME inner type — but
-         establishing that requires preservation (which is what
-         Lemma B is helping to prove). Resolution path: prove
-         Lemma B and preservation by simultaneous mutual induction,
-         OR re-state Lemma B with a weaker conclusion that doesn't
-         need shared T.
+  (* 9 cases remain (74% closed from 35).
+       - 6 type-alignment-circular WITHOUT independent-context sibling:
+         S_Let_Step, S_LetLin_Step, S_Case_Step (sibling exists but
+         its context depends on the unconstrained type), S_Drop_Step,
+         S_Fst_Step, S_Snd_Step (no unchanged sibling at all). Each
+         genuinely needs preservation: the outer type doesn't fix
+         all inner types, and no auxiliary lemma within Lemma B's
+         induction can align them.
        - 2 Cluster C deferred (S_Region_Enter, S_StringLen atomic):
          tractable but blocked on Ltac inversion mechanics in this
          session.
@@ -4186,7 +4301,14 @@ Proof.
          weakening for non-values.
        - Implicit: all RIGHT branches (touches_region) of the closed
          Cluster B cases are admitted locally inside each tactic;
-         they share preservation's Phase 3 bottleneck. *)
+         they share preservation's Phase 3 bottleneck.
+
+     S_App_Step1 and S_App_Step2 — once thought circular — closed
+     via the "sibling type_determinacy" trick: the unchanged sibling
+     [e2] (or [v1]) provides another typing of the SAME expression at
+     R, G with input contexts that ctx_types_agree (composed through
+     G via typing_types_agree + sym + trans). type_determinacy then
+     aligns the unconstrained T1 across Hte and Hte's inversions. *)
   all: admit.
 Admitted.
 

@@ -143,15 +143,22 @@ mechanical 28 are 1–2 days of tactic work.
 
 Empirically verified against `coqc 8.18.0`. The 12 cases identified
 as "remaining open" after the f499c82 clone-out have now each been
-given an explicit per-case proof skeleton. **Two iterations**:
+given an explicit per-case proof skeleton. **Three iterations**:
 
 1. **First pass**: dispatched on `step_R_eq_or_touches_region`,
    closed the LEFT (R = R') branches, admitted RIGHT. 8 admits remained.
 2. **Second pass**: introduced finer `step_R_change_shape` (3-way
    disjunction: equal / prepend r / remove_first r), closed the MIDDLE
    (prepend) branch for all 7 congruence cases via `region_add_typing`.
-   **Still 8 admits**, but each now tied to the strictly-narrower
+   Still 8 admits, but each tied to the strictly-narrower
    "remove_first r R" sub-case rather than the broader "touches_region".
+3. **Third pass**: added the `remove_first_then_cons_membership_eq`
+   helper (proving `r :: remove_first r R` and `R` have the same
+   membership whenever `In r R`, no `NoDup R` required) and used it
+   with `region_env_perm_typing` to close the RIGHT (`remove_first`)
+   sub-case in all 7 congruence proofs. **Now 1 admit remains**,
+   tied to S_Region_Step's exfalso when the inner step exits the
+   outer region from inside (r = r1 sub-case).
 
 **Moved** `touches_region` + `step_R_eq_or_touches_region` to before
 `step_preserves_type` so the latter can dispatch on the LEFT
@@ -166,36 +173,35 @@ given an explicit per-case proof skeleton. **Two iterations**:
 | 10 | `S_Region_Exit` (ERegion r v → v) | `region_shrink_preserves_typing` bridges R0 and remove_first r R0, then `type_determinacy` |
 | 12 | `S_Copy` atomic (ECopy v → EPair v v) | `value_context_unchanged` on first projection + two `type_determinacy` calls on v |
 
-### Partially closed — LEFT + MIDDLE closed, RIGHT admitted (7 of 12)
+### Fully closed via R-shape dispatch (7 of 12 congruence cases)
 
-After the second pass with `step_R_change_shape`, each of these has
-2 of 3 sub-cases closed mechanically. Residual admit is the
-removal sub-case only:
+After the third pass, every congruence case closes via the 3-way
+dispatch on `step_R_change_shape`:
 
 | Goal | Step rule | LEFT (R = R') | MIDDLE (R' = r :: R) | RIGHT (R' = remove_first r R) |
 |------|-----------|----------------|----------------------|-------------------------------|
-| 2 | `S_Let_Step` | ✅ type_determinacy on body | ✅ `region_add_typing` on body + type_determinacy | ❌ Phase 3 |
-| 3 | `S_LetLin_Step` | ✅ same as Goal 2 | ✅ same as Goal 2 | ❌ Phase 3 |
-| 4 | `S_App_Step2` | ✅ type_determinacy on v1's TFun | ✅ `region_add_typing` on v1 + type_determinacy | ❌ Phase 3 |
-| 5 | `S_If_Step` | ✅ type_determinacy on branch | ✅ `region_add_typing` on branch + type_determinacy | ❌ Phase 3 |
-| 6 | `S_Pair_Step1` | ✅ type_determinacy on e2 | ✅ `region_add_typing` on e2 + type_determinacy | ❌ Phase 3 |
-| 7 | `S_Pair_Step2` | ✅ type_determinacy on v1 + IH on e2 | ✅ `region_add_typing` on v1 + IH on e2 | ❌ Phase 3 |
-| 9 | `S_Case_Step` | ✅ type_determinacy on branch | ✅ `region_add_typing` on branch + type_determinacy | ❌ Phase 3 |
+| 2 | `S_Let_Step` | ✅ | ✅ via `region_add_typing` | ✅ via lift+perm |
+| 3 | `S_LetLin_Step` | ✅ | ✅ | ✅ |
+| 4 | `S_App_Step2` | ✅ | ✅ | ✅ |
+| 5 | `S_If_Step` | ✅ | ✅ | ✅ |
+| 6 | `S_Pair_Step1` | ✅ | ✅ | ✅ |
+| 7 | `S_Pair_Step2` | ✅ | ✅ | ✅ |
+| 9 | `S_Case_Step` | ✅ | ✅ | ✅ |
 
-The 7 RIGHT admits all share a single root cause: with `R0' = remove_first r R0`,
-bridging a sibling typing requires `expr_free_of_region r e_sibling`, which
-would follow from `~In r R0'` (the sibling typed under shrunk R wouldn't
-reference r). But without a region-uniqueness invariant on `R`, `~In r R0'`
-isn't derivable — `remove_first` only kills the head occurrence; if `r`
-appeared twice in `R0`, it survives in `R0'`. So the proper resolution is
-either to add `NoDup R` as an invariant (and thread it through preservation)
-or to formulate region-shrinking more permissively (Phase 3 work).
+The RIGHT sub-case (when the inner step exits a region) is closed by:
+1. `region_add_typing` lifts the post-step sibling typing from
+   `remove_first r R0` to `r :: remove_first r R0`.
+2. `region_env_perm_typing` converts to `R0` via
+   `remove_first_then_cons_membership_eq` — the new helper that proves
+   `r :: remove_first r R0` and `R0` have the same membership when
+   `In r R0` (NO `NoDup R` invariant needed; works even for duplicates).
+3. `type_determinacy` aligns the types under the now-shared `R0`.
 
 ### Partially closed — one sub-case admitted (1 of 12)
 
-| Goal | Step rule | Closure | Admit |
-|------|-----------|---------|-------|
-| 11 | `S_Region_Step` (ERegion r e → ERegion r e') | T_Region_Active × T_Region_Active sub-case closes via IH on inner step; T_Region × T_Region contradicted | T_Region_Active × T_Region sub-case (inner step exits the outer region r, breaking T_Region_Active in Hte') needs region weakening |
+| Goal | Step rule | Closures | Remaining admit |
+|------|-----------|----------|-----------------|
+| 11 | `S_Region_Step` (ERegion r e → ERegion r e') | T_Region (Hte) contradicted by `In r R0`; T_Region_Active × T_Region_Active via IH; T_Region_Active × T_Region 3 of 4 R-shape sub-cases close (R = R', R' = r1::R0, R' = remove_first r1 R0 with r ≠ r1) — all by contradiction with `~In r R0'` | One sub-case: T_Region_Active × T_Region with `R0' = remove_first r R0` (the outer r is exited from inside). Closing requires `expr_free_of_region r e'` to shrink the post-step inner typing, derivable but requires further inversion on `Hstep` to reach the underlying `S_Region_Exit`'s premise. |
 
 ### Net effect
 
@@ -203,21 +209,31 @@ or to formulate region-shrinking more permissively (Phase 3 work).
   goals — every case admitted with no structure.
 - **After (pass 1)**: 4 of 12 closed fully, 7 of 12 had LEFT (R = R')
   branch closed, 1 of 12 had main branch closed. 8 admits.
-- **After (pass 2)**: same goal count, but each congruence admit
-  narrowed to just the `R' = remove_first r R` sub-case via the new
-  `step_R_change_shape` lemma + `region_add_typing` for the MIDDLE
-  branch. Still 8 admits but each strictly narrower.
+- **After (pass 2)**: each congruence admit narrowed to just the
+  `R' = remove_first r R` sub-case via `step_R_change_shape` +
+  `region_add_typing`. Still 8 admits but each strictly narrower.
+- **After (pass 3)**: all 7 congruence RIGHT sub-cases closed via the
+  new `remove_first_then_cons_membership_eq` helper +
+  `region_env_perm_typing`. **1 admit remains** — the
+  `T_Region_Active × T_Region` cross-case of `S_Region_Step` when
+  the inner step exits the outer region from inside.
 
-New supporting lemmas added (both Qed):
-- `step_R_change_shape`: refines `step_R_eq_or_touches_region` into a
-  3-way disjunction (`R = R'` ∨ `R' = r :: R` ∨ `R' = remove_first r R`).
-  Provable by direct induction on `step`. ~10 LOC.
+New supporting lemmas added (all `Qed.`):
+- `step_R_change_shape` (~10 LOC): refines the 2-way disjunction
+  into 3-way, also exposing `~In r R` / `In r R` for the prepend /
+  remove cases.
+- `remove_first_then_cons_membership_eq` (~15 LOC): proves
+  `(r :: remove_first r R)` and `R` have the same membership when
+  `In r R`. NO `NoDup R` required.
 
-The remaining 8 admits all concentrate on the same root cause:
-**need either a `NoDup R` invariant or a more permissive
-region-shrinking lemma** so that a sibling typing under
-`remove_first r R0` can be re-lifted to `R0` (or via permutation).
-Once that lands, all 8 admits close mechanically.
+The single remaining admit is genuinely the hardest sub-case: the
+inner step exits the outer ERegion's own region, producing a typing
+that under `r :: remove_first r R` re-introduces `r` as fresh. To
+close it, we need `expr_free_of_region r e'` for the post-step inner
+expression. This follows from the underlying `S_Region_Exit`'s
+`expr_free_of_region r v` premise, but extracting it requires
+further inversion on `Hstep` to reach that base step. Small
+follow-up — `step_exit_implies_free_of_exited_region` would settle it.
 
 ## Lemma B per-case status (2026-05-24)
 

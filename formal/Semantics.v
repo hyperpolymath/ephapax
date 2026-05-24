@@ -3096,6 +3096,34 @@ Proof.
   - (* T_Copy *) eapply T_Copy; [exact H | eapply IHHtype; exact Hagree].
 Qed.
 
+(** [remove_first_then_cons_membership_eq]: if [r ∈ R], then
+    [r :: remove_first r R] and [R] have exactly the same membership.
+    Note that this does NOT require [NoDup R] — even if [r] appears
+    multiple times in [R], removing one occurrence and prepending one
+    yields a list with the same set of elements.
+
+    Used by [step_preserves_type]'s remove-first sub-case to bridge
+    a sibling typing under [remove_first r R0] back to one under [R0]
+    via [region_add_typing] + [region_env_perm_typing]. *)
+Lemma remove_first_then_cons_membership_eq :
+  forall r R,
+    In r R ->
+    forall r0, In r0 (r :: remove_first r R) <-> In r0 R.
+Proof.
+  intros r R HInr r0.
+  destruct (String.eqb r r0) eqn:Heq.
+  - apply String.eqb_eq in Heq. subst r0.
+    split; intros _.
+    + exact HInr.
+    + left; reflexivity.
+  - apply String.eqb_neq in Heq.
+    split; intros Hin.
+    + destruct Hin as [Heq' | Hin].
+      * exfalso. apply Heq. exact Heq'.
+      * apply (region_shrink_in_preserves r r0 R Heq) in Hin. exact Hin.
+    + right. apply (region_shrink_in_preserves r r0 R Heq). exact Hin.
+Qed.
+
 (** [region_add_typing]: adding a region to the environment preserves
     typing, even though the region set grows.  The only structural
     difficulty is T_Region for a sub-expression [ERegion r0 e0]:
@@ -3481,8 +3509,8 @@ Lemma step_R_change_shape :
   forall mu R e mu' R' e',
     (mu, R, e) -->> (mu', R', e') ->
     R = R' \/
-    (exists r, R' = r :: R) \/
-    (exists r, R' = remove_first r R).
+    (exists r, R' = r :: R /\ ~ In r R) \/
+    (exists r, R' = remove_first r R /\ In r R).
 Proof.
   intros mu R e mu' R' e' Hstep.
   remember (mu, R, e) as cfg eqn:Hcfg.
@@ -3496,10 +3524,10 @@ Proof.
     try (left; reflexivity);
     (* Congruence rules: inherit from inner step. *)
     try (apply (IHHstep _ _ _ _ _ _ eq_refl eq_refl)).
-  - (* S_Region_Enter: R0' = r :: R0 *)
-    right; left; exists r; reflexivity.
-  - (* S_Region_Exit: R0' = remove_first r R0 *)
-    right; right; exists r; reflexivity.
+  - (* S_Region_Enter: R0' = r :: R0, ~ In r R0 *)
+    right; left; exists r; split; [reflexivity | assumption].
+  - (* S_Region_Exit: R0' = remove_first r R0, In r R0 *)
+    right; right; exists r; split; [reflexivity | assumption].
 Qed.
 
 (** ** Step preserves type
@@ -4236,11 +4264,11 @@ Proof.
   }
 
   (* Goal 2: S_Let_Step. Outer T = body's type. Dispatch on
-     step_R_eq_or_touches_region: if R = R' (the only branch closable
-     without region weakening), type_determinacy on the body H6/H8
-     under the shared R aligns T0 = T'. The touches_region branch
-     genuinely needs region-env weakening for non-values (Phase 3),
-     so admit there. *)
+     step_R_change_shape (3-way: R = R', or R' = r :: R, or
+     R' = remove_first r R). LEFT closes via type_determinacy on body.
+     MIDDLE: lift H6 via region_add_typing. RIGHT: lift H8 via
+     region_add_typing + region_env_perm_typing (using
+     remove_first_then_cons_membership_eq), then type_determinacy. *)
   1: {
     inversion Hte; subst.
     inversion Hte'; subst.
@@ -4253,7 +4281,7 @@ Proof.
         pose proof (IHHstep _ _ _ _ _ _ eq_refl eq_refl _ _ _ He1 _ _ He1') as HT12
     end.
     subst.
-    pose proof (step_R_change_shape _ _ _ _ _ _ Hstep) as [HeqR | [[r Hadd] | [r Hrem]]].
+    pose proof (step_R_change_shape _ _ _ _ _ _ Hstep) as [HeqR | [[r [Hadd Hnotin]] | [r [Hrem HinR]]]].
     - (* LEFT: R = R'. *)
       subst.
       match goal with
@@ -4288,10 +4316,20 @@ Proof.
       assert (HagrExt : ctx_types_agree (ctx_extend G' T2) (ctx_extend G'0 T2))
         by (apply ctx_extend_types_agree; assumption).
       eapply type_determinacy; [ exact He2lifted | exact H8 | exact HagrExt ].
-    - (* RIGHT: R0' = remove_first r R0. Needs expr_free_of_region r e2
-         (derivable from H8 typing e2 under shrunk R0' IF r is unique
-         in R0 — currently no uniqueness invariant in scope). Phase 3. *)
-      admit.
+    - (* RIGHT: R0' = remove_first r R0 (with In r R0). Lift the body's
+         shrunk-R typing back to R0 via region_add_typing + permutation
+         (r :: remove_first r R0 and R0 have same membership when In r R0). *)
+      subst R0'.
+      pose proof (region_add_typing _ _ _ _ _ r H8) as H8lift.
+      pose proof (region_env_perm_typing _ _ _ _ _ H8lift R0
+                    (remove_first_then_cons_membership_eq r R0 HinR)) as H8underR0.
+      assert (HagrMid : ctx_types_agree G' G'0)
+        by (eapply ctx_types_agree_trans;
+            [ eapply typing_types_agree; exact H3
+            | apply ctx_types_agree_sym; eapply typing_types_agree; exact H4 ]).
+      assert (HagrExt : ctx_types_agree (ctx_extend G' T2) (ctx_extend G'0 T2))
+        by (apply ctx_extend_types_agree; assumption).
+      eapply type_determinacy; [ exact H6 | exact H8underR0 | exact HagrExt ].
   }
 
   (* Goal 3: S_LetLin_Step. Identical structure to Goal 2 (T_LetLin
@@ -4307,7 +4345,7 @@ Proof.
         pose proof (IHHstep _ _ _ _ _ _ eq_refl eq_refl _ _ _ He1 _ _ He1') as HT12
     end.
     subst.
-    pose proof (step_R_change_shape _ _ _ _ _ _ Hstep) as [HeqR | [[r Hadd] | [r Hrem]]].
+    pose proof (step_R_change_shape _ _ _ _ _ _ Hstep) as [HeqR | [[r [Hadd Hnotin]] | [r [Hrem HinR]]]].
     - (* LEFT *)
       subst.
       match goal with
@@ -4337,8 +4375,19 @@ Proof.
       assert (HagrExt : ctx_types_agree (ctx_extend G' T2) (ctx_extend G'0 T2))
         by (apply ctx_extend_types_agree; assumption).
       eapply type_determinacy; [ exact Hlift | exact H10 | exact HagrExt ].
-    - (* RIGHT: R0' = remove_first r R0. Phase 3. *)
-      admit.
+    - (* RIGHT: R0' = remove_first r R0 (with In r R0). Bridge via
+         region_add_typing + region_env_perm_typing. *)
+      subst R0'.
+      pose proof (region_add_typing _ _ _ _ _ r H10) as H10lift.
+      pose proof (region_env_perm_typing _ _ _ _ _ H10lift R0
+                    (remove_first_then_cons_membership_eq r R0 HinR)) as H10underR0.
+      assert (HagrMid : ctx_types_agree G' G'0)
+        by (eapply ctx_types_agree_trans;
+            [ eapply typing_types_agree; exact H4
+            | apply ctx_types_agree_sym; eapply typing_types_agree; exact H6 ]).
+      assert (HagrExt : ctx_types_agree (ctx_extend G' T2) (ctx_extend G'0 T2))
+        by (apply ctx_extend_types_agree; assumption).
+      eapply type_determinacy; [ exact H7 | exact H10underR0 | exact HagrExt ].
   }
 
   (* Goal 4: S_App_Step2 — EApp v1 e2 → EApp v1 e2'. Outer T = T2.
@@ -4348,7 +4397,7 @@ Proof.
   1: {
     inversion Hte; subst.
     inversion Hte'; subst.
-    pose proof (step_R_change_shape _ _ _ _ _ _ Hstep) as [HeqR | [[r Hadd] | [r Hrem]]].
+    pose proof (step_R_change_shape _ _ _ _ _ _ Hstep) as [HeqR | [[r [Hadd Hnotin]] | [r [Hrem HinR]]]].
     - (* LEFT *)
       subst.
       match goal with
@@ -4383,8 +4432,27 @@ Proof.
                 [exact Hv1lifted | exact Hv1' | apply ctx_types_agree_refl]);
           inversion HTfun; subst; reflexivity
       end.
-    - (* RIGHT: Phase 3. *)
-      admit.
+    - (* RIGHT: R0' = remove_first r R0. Lift v1's shrunk-R typing
+         back to R0 via region_add_typing + permutation. *)
+      subst R0'.
+      match goal with
+      | [ Hv : is_value ?v1,
+          Hv1 : has_type R0 ?G ?v1 (TFun ?T1a ?T2a) ?Gmid,
+          Hv1' : has_type (remove_first r R0) ?G ?v1 (TFun ?T1b ?T2b) ?Gmid' |- _ ] =>
+          assert (Gmid = G) by
+            (eapply value_context_unchanged; [exact Hv1 | exact Hv]);
+          assert (Gmid' = G) by
+            (eapply value_context_unchanged; [exact Hv1' | exact Hv]);
+          subst Gmid Gmid';
+          pose proof (region_add_typing _ _ _ _ _ r Hv1') as Hv1lift;
+          pose proof (region_env_perm_typing _ _ _ _ _ Hv1lift R0
+                        (remove_first_then_cons_membership_eq r R0 HinR))
+            as Hv1underR0;
+          assert (HTfun : TFun T1a T2a = TFun T1b T2b)
+            by (eapply type_determinacy;
+                [exact Hv1 | exact Hv1underR0 | apply ctx_types_agree_refl]);
+          inversion HTfun; subst; reflexivity
+      end.
   }
 
   (* Goal 5: S_If_Step — EIf e1 e2 e3 → EIf e1' e2 e3. Dispatch on R:
@@ -4394,7 +4462,7 @@ Proof.
   1: {
     inversion Hte; subst.
     inversion Hte'; subst.
-    pose proof (step_R_change_shape _ _ _ _ _ _ Hstep) as [HeqR | [[r Hadd] | [r Hrem]]].
+    pose proof (step_R_change_shape _ _ _ _ _ _ Hstep) as [HeqR | [[r [Hadd Hnotin]] | [r [Hrem HinR]]]].
     - (* LEFT *)
       subst.
       match goal with
@@ -4431,8 +4499,18 @@ Proof.
           HagrMid : ctx_types_agree ?Gmid ?Gmid' |- ?Ta = ?Tb ] =>
           eapply type_determinacy; [ exact Hlift | exact H2' | exact HagrMid ]
       end.
-    - (* RIGHT: Phase 3. *)
-      admit.
+    - (* RIGHT: R0' = remove_first r R0. Lift post-step branch e2 typing
+         back to R0 via region_add_typing + permutation. *)
+      subst R0'.
+      assert (HagrMid : ctx_types_agree G' G'0)
+        by (eapply ctx_types_agree_trans;
+            [ eapply typing_types_agree; exact H4
+            | apply ctx_types_agree_sym; eapply typing_types_agree; exact H5 ]).
+      pose proof (region_add_typing _ _ _ _ _ r H10) as H10lift.
+      pose proof (region_env_perm_typing _ _ _ _ _ H10lift R0
+                    (remove_first_then_cons_membership_eq r R0 HinR))
+        as H10underR0.
+      eapply type_determinacy; [ exact H7 | exact H10underR0 | exact HagrMid ].
   }
 
   (* Goal 6: S_Pair_Step1 — EPair e1 e2 → EPair e1' e2. Outer T =
@@ -4447,7 +4525,7 @@ Proof.
         pose proof (IHHstep _ _ _ _ _ _ eq_refl eq_refl _ _ _ He1 _ _ He1') as HT12
     end.
     subst.
-    pose proof (step_R_change_shape _ _ _ _ _ _ Hstep) as [HeqR | [[r Hadd] | [r Hrem]]].
+    pose proof (step_R_change_shape _ _ _ _ _ _ Hstep) as [HeqR | [[r [Hadd Hnotin]] | [r [Hrem HinR]]]].
     - (* LEFT *)
       subst.
       match goal with
@@ -4488,8 +4566,21 @@ Proof.
             by (eapply type_determinacy; [ exact Hlift | exact H2' | exact Hagr ]);
           subst T2b; reflexivity
       end.
-    - (* RIGHT: Phase 3. *)
-      admit.
+    - (* RIGHT: R0' = remove_first r R0. Lift post-step e2 typing back
+         to R0 via region_add_typing + permutation. Use direct names
+         (H3/H4 = e1/e1', H6/H8 = e2 pre/post). *)
+      subst R0'.
+      assert (Hagr : ctx_types_agree G' G'0)
+        by (eapply ctx_types_agree_trans;
+            [ eapply typing_types_agree; exact H3
+            | apply ctx_types_agree_sym; eapply typing_types_agree; exact H4 ]).
+      pose proof (region_add_typing _ _ _ _ _ r H8) as H8lift.
+      pose proof (region_env_perm_typing _ _ _ _ _ H8lift R0
+                    (remove_first_then_cons_membership_eq r R0 HinR))
+        as H8underR0.
+      assert (HT2 : T2 = T3)
+        by (eapply type_determinacy; [ exact H6 | exact H8underR0 | exact Hagr ]).
+      subst T3; reflexivity.
   }
 
   (* Goal 7: S_Pair_Step2 — EPair v1 e2 → EPair v1 e2'. v1 value;
@@ -4498,7 +4589,7 @@ Proof.
   1: {
     inversion Hte; subst.
     inversion Hte'; subst.
-    pose proof (step_R_change_shape _ _ _ _ _ _ Hstep) as [HeqR | [[r Hadd] | [r Hrem]]].
+    pose proof (step_R_change_shape _ _ _ _ _ _ Hstep) as [HeqR | [[r [Hadd Hnotin]] | [r [Hrem HinR]]]].
     - (* LEFT *)
       subst.
       match goal with
@@ -4547,8 +4638,34 @@ Proof.
           pose proof (IHHstep _ _ _ _ _ _ eq_refl eq_refl _ _ _ He2 _ _ He2') as HT2;
           subst; reflexivity
       end.
-    - (* RIGHT: Phase 3. *)
-      admit.
+    - (* RIGHT: R0' = remove_first r R0. v1 aligned via lift+perm
+         from post-step typing back to R0; e2-side closes via IH. *)
+      subst R0'.
+      match goal with
+      | [ Hv : is_value ?v1,
+          Hv1 : has_type R0 ?G ?v1 ?T1a ?Gmid,
+          Hv1' : has_type (remove_first r R0) ?G ?v1 ?T1b ?Gmid' |- _ ] =>
+          assert (Gmid = G) by
+            (eapply value_context_unchanged; [exact Hv1 | exact Hv]);
+          assert (Gmid' = G) by
+            (eapply value_context_unchanged; [exact Hv1' | exact Hv]);
+          subst Gmid Gmid';
+          pose proof (region_add_typing _ _ _ _ _ r Hv1') as Hv1lift;
+          pose proof (region_env_perm_typing _ _ _ _ _ Hv1lift R0
+                        (remove_first_then_cons_membership_eq r R0 HinR))
+            as Hv1underR0;
+          assert (HT1 : T1a = T1b)
+            by (eapply type_determinacy;
+                [exact Hv1 | exact Hv1underR0 | apply ctx_types_agree_refl]);
+          subst T1b
+      end.
+      match goal with
+      | [ He2 : has_type R0 ?G ?e2s _ _,
+          He2' : has_type (remove_first r R0) ?G ?e2s' _ _,
+          Hs : (_, R0, ?e2s) -->> (_, remove_first r R0, ?e2s') |- _ ] =>
+          pose proof (IHHstep _ _ _ _ _ _ eq_refl eq_refl _ _ _ He2 _ _ He2') as HT2;
+          subst; reflexivity
+      end.
   }
 
   (* Goal 8: S_Snd atomic — ESnd (EPair v1 v2) → v2. No R change.
@@ -4589,7 +4706,7 @@ Proof.
         pose proof (IHHstep _ _ _ _ _ _ eq_refl eq_refl _ _ _ Hsc _ _ Hsc') as Hsum;
         inversion Hsum; subst
     end.
-    pose proof (step_R_change_shape _ _ _ _ _ _ Hstep) as [HeqR | [[r Hadd] | [r Hrem]]].
+    pose proof (step_R_change_shape _ _ _ _ _ _ Hstep) as [HeqR | [[r [Hadd Hnotin]] | [r [Hrem HinR]]]].
     - (* LEFT *)
       subst.
       match goal with
@@ -4621,8 +4738,20 @@ Proof.
       assert (HagrExt : ctx_types_agree (ctx_extend G' T3) (ctx_extend G'0 T3))
         by (apply ctx_extend_types_agree; assumption).
       eapply type_determinacy; [ exact Hb1lift | exact H10 | exact HagrExt ].
-    - (* RIGHT: Phase 3. *)
-      admit.
+    - (* RIGHT: R0' = remove_first r R0. Lift post-step branch e1 typing
+         back to R0 via region_add_typing + permutation. *)
+      subst R0'.
+      pose proof (region_add_typing _ _ _ _ _ r H10) as H10lift.
+      pose proof (region_env_perm_typing _ _ _ _ _ H10lift R0
+                    (remove_first_then_cons_membership_eq r R0 HinR))
+        as H10underR0.
+      assert (HagrMid : ctx_types_agree G' G'0)
+        by (eapply ctx_types_agree_trans;
+            [ eapply typing_types_agree; exact H4
+            | apply ctx_types_agree_sym; eapply typing_types_agree; exact H5 ]).
+      assert (HagrExt : ctx_types_agree (ctx_extend G' T3) (ctx_extend G'0 T3))
+        by (apply ctx_extend_types_agree; assumption).
+      eapply type_determinacy; [ exact H7 | exact H10underR0 | exact HagrExt ].
   }
 
   (* Goal 10: S_Region_Exit — ERegion r v → v. R0 → remove_first r R0.
@@ -4647,29 +4776,52 @@ Proof.
   }
 
   (* Goal 11: S_Region_Step — ERegion r e → ERegion r e' (In r R0).
-     Both Hte and Hte' invert into T_Region (contradicts In r R)
-     or T_Region_Active (passes through inner e's typing). The
-     T_Region_Active case applies IH directly on the inner step;
-     T_Region cases are contradictory. *)
+     Both Hte and Hte' invert into T_Region (~In r R) or T_Region_Active
+     (In r R), giving four sub-cases:
+       (a) Hte=T_Region: ~In r R0 contradicts S_Region_Step's H : In r R0.
+       (b) Hte=Active, Hte'=T_Region: ~In r R0' — possibly inconsistent
+           with H : In r R0 depending on step's R-change. Cases:
+              - R0=R0': direct contradiction.
+              - R0' = r1::R0 or remove_first r1 R0 with r≠r1: contradiction
+                via region_shrink_in_preserves / In propagation.
+              - R0' = remove_first r R0 (r=r1, r exited from inside):
+                CONSISTENT. Use membership-eq to bridge Hte's e (under R0)
+                and Hte's e' (under r :: R0' = same membership as R0)
+                via region_env_perm_typing, then IH.
+       (c) Hte=Active, Hte'=Active: IH applies directly. *)
   1: {
     inversion Hte; subst.
-    - (* T_Region: ~ In r R0 contradicts H : In r R0. *)
+    - (* (a) T_Region: ~ In r R0 contradicts H : In r R0. *)
       exfalso; auto.
-    - (* T_Region_Active in Hte. Now invert Hte'. *)
-      inversion Hte'; subst.
-      + (* T_Region in Hte': ~ In r R0' contradicts touches_region
-           transitivity. By step_R_eq_or_touches_region, R0' either
-           equals R0 (so r ∈ R0' from H : In r R0) or the step
-           touches a region — in either case r remains in R0'. *)
-        exfalso.
-        match goal with
-        | [ Hni : ~ In ?r _, Hin : In ?r ?R0 |- _ ] =>
-            apply Hni;
-            pose proof (step_R_eq_or_touches_region _ _ _ _ _ _ Hstep) as [HeqR | _];
-            [ subst; exact Hin
-            | admit ]
-        end.
-      + (* Both T_Region_Active. Apply IH on the inner step. *)
+    - inversion Hte'; subst.
+      + (* (b) Hte'=T_Region with ~In r R0'. Use direct hypothesis names:
+           H : In r R0 (S_Region_Step premise),
+           H8 : R0; G0 |- e : T0 -| Ga (Hte inner),
+           H3 : ~ In r R0' (Hte' T_Region's ~In),
+           H11 : r :: R0'; G0 |- e' : T' -| Gb (Hte' inner). *)
+        pose proof (step_R_change_shape _ _ _ _ _ _ Hstep)
+          as [HeqR | [[r1 [Hadd Hnotin]] | [r1 [Hrem HinR1]]]].
+        * (* R0 = R0' *) subst R0'. exfalso. apply H3. exact H.
+        * (* R0' = r1 :: R0 *) subst R0'. exfalso. apply H3. right. exact H.
+        * (* R0' = remove_first r1 R0 *)
+          subst R0'.
+          destruct (String.eqb r r1) eqn:Heqrr1.
+          -- (* r = r1: r exited from inside. To close this we need a
+                typing of e' under R0' = remove_first r R0 (the IH's
+                fixed R'), not under R0. Going from H11 (e' under
+                r :: R0') to e' under R0' requires
+                `expr_free_of_region r e'` — derivable when the inner
+                step is S_Region_Exit on the outer r (its precondition
+                gives the freedom), but extracting it requires
+                additional inversion on Hstep. Left as a small
+                follow-up. *)
+             apply String.eqb_eq in Heqrr1. subst r1.
+             admit.
+          -- (* r ≠ r1: In r R0 → In r R0' contradicts ~In r R0'. *)
+             apply String.eqb_neq in Heqrr1. exfalso. apply H3.
+             apply (region_shrink_in_preserves r1 r R0 (fun H' => Heqrr1 (eq_sym H'))).
+             exact H.
+      + (* (c) Both T_Region_Active. IH on the inner step. *)
         match goal with
         | [ Hvt : has_type ?R0 ?G ?e _ _,
             Hvt' : has_type ?R0' ?G ?e' _ _,

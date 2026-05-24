@@ -2826,6 +2826,34 @@ Proof.
   - reflexivity.
 Qed.
 
+(** Strengthened variant that exposes the specific output context
+    (instead of an existential). Used by [step_output_context_eq]
+    (Lemma B, Phase 1) to discharge the beta-reduction step cases
+    where the existential in [subst_preserves_typing] blocks the
+    output-context equality proof.
+
+    Both the witness ([G_v = G]) and the specific output context
+    ([G']) come from [subst_typing_gen]'s explicit
+    [remove_at k Gout] shape, which collapses for [k = 0] via
+    [remove_at 0 ((T, b) :: G) = G]. *)
+Lemma subst_preserves_typing_strong :
+  forall R G e T2 G' T1 v G_v,
+    R; (T1, false) :: G |- e : T2 -| (T1, true) :: G' ->
+    R; G |- v : T1 -| G_v ->
+    is_value v ->
+    G_v = G /\ R; G |- subst 0 v e : T2 -| G'.
+Proof.
+  intros R G e T2 G' T1 v G_v Htype Hv Hval.
+  assert (HGv: G_v = G) by (eapply value_context_unchanged; eassumption).
+  split; [exact HGv|].
+  subst G_v.
+  assert (Hlin: is_linear_ty T1 = true).
+  { eapply (flag_false_to_true_implies_linear _ _ _ _ _ 0 T1 Htype); simpl; reflexivity. }
+  pose proof (subst_typing_gen _ _ _ _ _ Htype 0 T1 v false eq_refl Hval Hlin Hv true eq_refl) as Hsubst.
+  simpl in Hsubst.
+  exact Hsubst.
+Qed.
+
 (** Helper: types_agree and false_preserved are reflexive *)
 Lemma ctx_types_agree_refl : forall G, ctx_types_agree G G.
 Proof.

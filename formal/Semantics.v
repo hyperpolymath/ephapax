@@ -3518,6 +3518,97 @@ Proof.
          inversion shape — does NOT close trivially despite being
          atomic), S_Copy, S_Fst, S_Snd. S_Region_Step blocks on
          Phase 3. *)
+  (* === Cluster A — beta-reduction cases (S_Let_Val, S_LetLin_Val,
+     S_App_Fun, S_Case_Inl, S_Case_Inr): combine
+     [subst_preserves_typing_strong] (which gives one typing of the
+     substituted form at the original output context) with
+     [output_ctx_det] applied against [Htype_e'] (the post-step
+     typing at [Gb]) to conclude [Ga = Gb]. *)
+  (* S_Let_Val: e = ELet v1 e2 -> subst 0 v1 e2 *)
+  all: try solve [
+    match goal with
+    | [ Hv : is_value ?v1,
+        Hte : has_type ?R ?G (ELet ?v1 ?e2) ?T ?Ga,
+        Hte' : has_type ?R ?G (subst 0 ?v1 ?e2) ?T ?Gb |- ?Ga = ?Gb ] =>
+        inversion Hte; subst;
+        match goal with
+        | [ Hv1 : has_type ?R ?G ?v1 ?T1 ?G',
+            He2 : has_type ?R (ctx_extend ?G' ?T1) ?e2 ?T
+                                              ((?T1, true) :: ?Ga') |- _ ] =>
+            assert (HGv : G' = G) by
+              (eapply value_context_unchanged; eassumption);
+            subst G';
+            destruct (subst_preserves_typing_strong _ _ _ _ _ _ _ _
+                        He2 Hv1 Hv) as [_ Hsub];
+            eapply output_ctx_det; [exact Hsub | exact Hte']
+        end
+    end
+  ].
+  (* S_LetLin_Val: same shape as S_Let_Val with an extra is_linear
+     premise. *)
+  all: try solve [
+    match goal with
+    | [ Hv : is_value ?v1,
+        Hte : has_type ?R ?G (ELetLin ?v1 ?e2) ?T ?Ga,
+        Hte' : has_type ?R ?G (subst 0 ?v1 ?e2) ?T ?Gb |- ?Ga = ?Gb ] =>
+        inversion Hte; subst;
+        match goal with
+        | [ Hv1 : has_type ?R ?G ?v1 ?T1 ?G',
+            He2 : has_type ?R (ctx_extend ?G' ?T1) ?e2 ?T
+                                              ((?T1, true) :: ?Ga') |- _ ] =>
+            assert (HGv : G' = G) by
+              (eapply value_context_unchanged; eassumption);
+            subst G';
+            destruct (subst_preserves_typing_strong _ _ _ _ _ _ _ _
+                        He2 Hv1 Hv) as [_ Hsub];
+            eapply output_ctx_det; [exact Hsub | exact Hte']
+        end
+    end
+  ].
+  (* S_App_Fun: e = EApp (ELam T ebody) v2 -> subst 0 v2 ebody. The
+     lambda is a value (post-context = pre-context); v2 is a value
+     (post-context = pre-context). *)
+
+  all: try solve [
+    match goal with
+    | [ Hv : is_value ?v2,
+        Hte : has_type ?R ?G (EApp (ELam ?T1 ?ebody) ?v2) ?T2 ?Ga,
+        Hte' : has_type ?R ?G (subst 0 ?v2 ?ebody) ?T2 ?Gb
+        |- ?Ga = ?Gb ] =>
+        inversion Hte; subst;
+        match goal with
+        | [ Hlam : has_type ?Rx ?Gx (ELam ?Tann ?ebody2)
+                                    (TFun ?Tfa ?Tfr) ?Gmidx,
+            Harg : has_type ?Rx ?Gmidx ?v2 ?Tfa ?Ga2 |- _ ] =>
+            (* Lambda is a value -> Gmidx = Gx. *)
+            assert (HGlam : Gmidx = Gx) by
+              (eapply value_context_unchanged;
+               [exact Hlam | constructor]);
+            subst Gmidx;
+            (* Arg is a value -> Ga2 = Gx. *)
+            assert (HGv : Ga2 = Gx) by
+              (eapply value_context_unchanged; eassumption);
+            subst Ga2;
+            (* Invert lambda to expose body typing + force Tann = Tfa. *)
+            inversion Hlam; subst;
+            match goal with
+            | [ Hbody : has_type ?Rx (ctx_extend ?Gx ?Tfa) ?ebody2 ?Tfr
+                                  ((?Tfa, true) :: ?Gx) |- _ ] =>
+                destruct (subst_preserves_typing_strong _ _ _ _ _ _ _ _
+                            Hbody Harg Hv) as [_ Hsub];
+                eapply output_ctx_det; [exact Hsub | exact Hte']
+            end
+        end
+    end
+  ].
+  (* S_Case_Inl and S_Case_Inr are deferred: the v's typing emerges
+     from [inversion Hsum] (T_Inl/T_Inr) AFTER T_Case inversion, and
+     the nested [match goal with] re-binds pattern vars per Ltac
+     scoping rules — the inner [?vv] doesn't carry the outer Ltac
+     binding, so the match picks branch typings instead of v's typing.
+     Recipe needed: flatten the nested matches OR use [lazymatch] +
+     [pose proof] to manually extract the v's typing into a named
+     hypothesis after both inversions. *)
   all: admit.
 Admitted.
 

@@ -226,14 +226,52 @@ New supporting lemmas added (all `Qed.`):
   `(r :: remove_first r R)` and `R` have the same membership when
   `In r R`. NO `NoDup R` required.
 
-The single remaining admit is genuinely the hardest sub-case: the
-inner step exits the outer ERegion's own region, producing a typing
-that under `r :: remove_first r R` re-introduces `r` as fresh. To
-close it, we need `expr_free_of_region r e'` for the post-step inner
-expression. This follows from the underlying `S_Region_Exit`'s
-`expr_free_of_region r v` premise, but extracting it requires
-further inversion on `Hstep` to reach that base step. Small
-follow-up — `step_exit_implies_free_of_exited_region` would settle it.
+The single remaining admit is the cross-case where `Hte` uses
+`T_Region_Active` and `Hte'` uses `T_Region` — meaning the inner
+step exits the outer `ERegion`'s own region `r`, and `r` was unique
+in `R0` (so post-step `~In r remove_first r R0`).
+
+**The genuine obstacle:** `e'` may syntactically reference `r` even
+though `r` was unique pre-step. Concrete witness: if
+`e = ELet (ERegion r v_inner) (ELoc l r)`, then after the inner
+`S_Region_Exit` we get `e' = ELet v_inner (ELoc l r)`. The post-step
+sibling `ELoc l r` still references `r`, so `expr_free_of_region r e'`
+is false. Yet `e'` is well-typed under `r :: remove_first r R0`
+because `T_Region` re-introduces `r` at the head, making
+`ELoc l r` typeable via the freshly-bound `r`. This is the
+semantic-freshness issue inherent to concrete-name region encodings:
+with alpha-renaming the post-step `r` would be a distinct region
+name; with concrete names the syntactic occurrence persists.
+
+Consequences for closure paths:
+- Adding `NoDup R` as an invariant does **not** close it. The
+  `T_Region`-vs-`T_Region_Active` choice in `Hte'` already encodes
+  uniqueness in scope (`H3 : ~In r remove_first r R0` plus
+  `H : In r R0` implies `r` unique). NoDup gives no extra info.
+- A `typing_implies_free_of_absent_region` lemma doesn't apply
+  because `e'` is typed at `r :: remove_first r R0` where `r` IS
+  present (at the head), so `~In r R` doesn't hold for the typing
+  in scope.
+- A `step_exit_implies_free_of_exited_region` lemma would be **false**
+  for congruence cases that preserve siblings — the sibling's
+  surviving `r`-references break the freedom claim.
+
+The genuinely-closing options are:
+1. **Mutual recursion with `preservation`**: prove `preservation`
+   and `step_preserves_type` simultaneously. `preservation`'s direct
+   construction of a typing for `e'` at the post-step `R'` provides
+   exactly what this admit needs. Standard textbook approach for
+   region calculi, but a significant restructuring touching both proofs.
+2. **Inversion on `Hstep` with structural recursion**: directly case-split
+   on the step rule path that produced `R' = remove_first r R0`,
+   handling the `S_Region_Exit`-at-top sub-case via region_shrink
+   (works because `e' = v`, free of `r` by `S_Region_Exit`'s premise),
+   and handling the congruence-bubbling sub-cases by recursive structural
+   argument on the wrapping. ~150 LOC, orthogonal to the current case split.
+
+Both are substantial follow-ups. The current single admit is bounded
+and well-documented; closing it should be deferred to whoever takes
+on (1) or (2) as a focused effort.
 
 ## Lemma B per-case status (2026-05-24)
 

@@ -3570,6 +3570,32 @@ Proof.
     eapply output_ctx_det; [exact H1 | exact H2_under_R].
 Qed.
 
+(** [has_type_lift_across_step]: lift a typing of [e] from the pre-step
+    region env [R] to the post-step env [R'].
+
+    Closes the LEFT (R = R') and MIDDLE (R' = r :: R) sub-cases via
+    [region_add_typing]. The RIGHT (R' = remove_first r R) sub-case
+    requires [expr_free_of_region r e] (passed as an optional
+    hypothesis), so this lemma is stated as a 3-way structured
+    closure that the caller dispatches on via [step_R_change_shape].
+
+    Used by [preservation]'s congruence cases to bridge sibling
+    typings from the pre-step R to the post-step R' before
+    reconstructing the outer typing. *)
+Lemma has_type_lift_across_step_no_shrink :
+  forall mu R mu' R' e_step e_step',
+    (mu, R, e_step) -->> (mu', R', e_step') ->
+    (R = R' \/ exists r, R' = r :: R) ->
+    forall G T e G',
+      R; G |- e : T -| G' ->
+      R'; G |- e : T -| G'.
+Proof.
+  intros mu R mu' R' e_step e_step' _ Hshape G T e G' Htype.
+  destruct Hshape as [HeqR | [r Hadd]].
+  - subst R'. exact Htype.
+  - subst R'. apply region_add_typing. exact Htype.
+Qed.
+
 (** ** Step preserves type
 
     If [e] steps to [e'] and BOTH have typings, then they're at the
@@ -6347,20 +6373,23 @@ Proof.
      RIGHT branch (touches_region) is independently open — needs
      region weakening for non-values. *)
 
-  (* S_StringConcat_Step1: inner step is on e1. After step_R_eq_or_touches_region
-     gives R = R', rewrite HeqR in * unifies all R-mentions (including H1, H2
-     and the IH) so the sibling H2 (under pre-step R) becomes compatible with
-     the IH's conclusion (under post-step R'). *)
+  (* S_StringConcat_Step1: inner step is on e1. Use step_R_change_shape
+     for 3-way dispatch. LEFT and MIDDLE close via has_type_lift on the
+     sibling. RIGHT (remove_first) blocked on sibling-might-reference-r. *)
   all: try solve [
     match goal with
     | [ H1 : has_type ?R ?G ?e1 (TString ?r0) ?Gmid,
         H2 : has_type ?R ?Gmid ?e2 (TString ?r0) ?Gout1
         |- exists _ : ctx, has_type ?Rp ?G (EStringConcat ?e1' ?e2) (TString ?r0) _ ] =>
-        pose proof (step_R_eq_or_touches_region _ _ _ _ _ _ Hstep) as Hdis;
-        destruct Hdis as [HeqR | HTR];
+        pose proof (step_R_change_shape _ _ _ _ _ _ Hstep)
+          as [HeqR | [[r [Hadd Hnotin]] | [r [Hrem HinR]]]];
         [ rewrite HeqR in *;
           edestruct (IHHstep _ _ _ _ _ _ eq_refl eq_refl _ _ _ H1) as [Gout2 Hout];
           eexists; eapply T_StringConcat; [exact Hout | exact H2]
+        | subst Rp;
+          edestruct (IHHstep _ _ _ _ _ _ eq_refl eq_refl _ _ _ H1) as [Gout2 Hout];
+          pose proof (region_add_typing _ _ _ _ _ r H2) as H2lift;
+          eexists; eapply T_StringConcat; [exact Hout | exact H2lift]
         | fail ]
     end
   ].
@@ -6534,9 +6563,12 @@ Proof.
   ].
 
 (* Show Existentials. *)  (* uncomment to dump the remaining open goals
-                              for diagnostic per-case work — currently
-                              12 goals (10 closed via per-case tactics
-                              2026-05-21; see PROOF STATUS below). *)
+                              for diagnostic per-case work — still 12
+                              open after this session: the RIGHT (R' =
+                              remove_first r R) sub-cases. Closing these
+                              requires either a typing invariant
+                              (sibling-region-disjointness) or a
+                              reformulation of preservation. *)
 Admitted.
 (* PROOF STATUS [preservation] — ADMITTED, down to 12 open goals
    (from 910 cross-case, via PR #102's remember-cfg + PR #106's

@@ -139,6 +139,102 @@ mechanical 28 are 1–2 days of tactic work.
   estate's "build is the only oracle" policy. The honest mark is one
   `Admitted.` on `preservation`, not 29.
 
+## `step_preserves_type` per-case status (2026-05-24, late)
+
+Empirically verified against `coqc 8.18.0`. The 12 cases identified
+as "remaining open" after the f499c82 clone-out have now each been
+given an explicit per-case proof skeleton. **Three iterations**:
+
+1. **First pass**: dispatched on `step_R_eq_or_touches_region`,
+   closed the LEFT (R = R') branches, admitted RIGHT. 8 admits remained.
+2. **Second pass**: introduced finer `step_R_change_shape` (3-way
+   disjunction: equal / prepend r / remove_first r), closed the MIDDLE
+   (prepend) branch for all 7 congruence cases via `region_add_typing`.
+   Still 8 admits, but each tied to the strictly-narrower
+   "remove_first r R" sub-case rather than the broader "touches_region".
+3. **Third pass**: added the `remove_first_then_cons_membership_eq`
+   helper (proving `r :: remove_first r R` and `R` have the same
+   membership whenever `In r R`, no `NoDup R` required) and used it
+   with `region_env_perm_typing` to close the RIGHT (`remove_first`)
+   sub-case in all 7 congruence proofs. **Now 1 admit remains**,
+   tied to S_Region_Step's exfalso when the inner step exits the
+   outer region from inside (r = r1 sub-case).
+
+**Moved** `touches_region` + `step_R_eq_or_touches_region` to before
+`step_preserves_type` so the latter can dispatch on the LEFT
+(R = R') branch.
+
+### Fully closed (4 of 12)
+
+| Goal | Step rule | Closure |
+|------|-----------|---------|
+| 1 | `S_StringConcat_Step2` | outer T = TString r is structurally constrained; IH on (e2, e2') gives r = r' |
+| 8 | `S_Snd` atomic (ESnd (EPair v1 v2) → v2) | `value_context_unchanged` on v1 + `type_determinacy` on v2 |
+| 10 | `S_Region_Exit` (ERegion r v → v) | `region_shrink_preserves_typing` bridges R0 and remove_first r R0, then `type_determinacy` |
+| 12 | `S_Copy` atomic (ECopy v → EPair v v) | `value_context_unchanged` on first projection + two `type_determinacy` calls on v |
+
+### Fully closed via R-shape dispatch (7 of 12 congruence cases)
+
+After the third pass, every congruence case closes via the 3-way
+dispatch on `step_R_change_shape`:
+
+| Goal | Step rule | LEFT (R = R') | MIDDLE (R' = r :: R) | RIGHT (R' = remove_first r R) |
+|------|-----------|----------------|----------------------|-------------------------------|
+| 2 | `S_Let_Step` | ✅ | ✅ via `region_add_typing` | ✅ via lift+perm |
+| 3 | `S_LetLin_Step` | ✅ | ✅ | ✅ |
+| 4 | `S_App_Step2` | ✅ | ✅ | ✅ |
+| 5 | `S_If_Step` | ✅ | ✅ | ✅ |
+| 6 | `S_Pair_Step1` | ✅ | ✅ | ✅ |
+| 7 | `S_Pair_Step2` | ✅ | ✅ | ✅ |
+| 9 | `S_Case_Step` | ✅ | ✅ | ✅ |
+
+The RIGHT sub-case (when the inner step exits a region) is closed by:
+1. `region_add_typing` lifts the post-step sibling typing from
+   `remove_first r R0` to `r :: remove_first r R0`.
+2. `region_env_perm_typing` converts to `R0` via
+   `remove_first_then_cons_membership_eq` — the new helper that proves
+   `r :: remove_first r R0` and `R0` have the same membership when
+   `In r R0` (NO `NoDup R` invariant needed; works even for duplicates).
+3. `type_determinacy` aligns the types under the now-shared `R0`.
+
+### Partially closed — one sub-case admitted (1 of 12)
+
+| Goal | Step rule | Closures | Remaining admit |
+|------|-----------|----------|-----------------|
+| 11 | `S_Region_Step` (ERegion r e → ERegion r e') | T_Region (Hte) contradicted by `In r R0`; T_Region_Active × T_Region_Active via IH; T_Region_Active × T_Region 3 of 4 R-shape sub-cases close (R = R', R' = r1::R0, R' = remove_first r1 R0 with r ≠ r1) — all by contradiction with `~In r R0'` | One sub-case: T_Region_Active × T_Region with `R0' = remove_first r R0` (the outer r is exited from inside). Closing requires `expr_free_of_region r e'` to shrink the post-step inner typing, derivable but requires further inversion on `Hstep` to reach the underlying `S_Region_Exit`'s premise. |
+
+### Net effect
+
+- **Before**: `step_preserves_type` was `all: admit` with 12 open
+  goals — every case admitted with no structure.
+- **After (pass 1)**: 4 of 12 closed fully, 7 of 12 had LEFT (R = R')
+  branch closed, 1 of 12 had main branch closed. 8 admits.
+- **After (pass 2)**: each congruence admit narrowed to just the
+  `R' = remove_first r R` sub-case via `step_R_change_shape` +
+  `region_add_typing`. Still 8 admits but each strictly narrower.
+- **After (pass 3)**: all 7 congruence RIGHT sub-cases closed via the
+  new `remove_first_then_cons_membership_eq` helper +
+  `region_env_perm_typing`. **1 admit remains** — the
+  `T_Region_Active × T_Region` cross-case of `S_Region_Step` when
+  the inner step exits the outer region from inside.
+
+New supporting lemmas added (all `Qed.`):
+- `step_R_change_shape` (~10 LOC): refines the 2-way disjunction
+  into 3-way, also exposing `~In r R` / `In r R` for the prepend /
+  remove cases.
+- `remove_first_then_cons_membership_eq` (~15 LOC): proves
+  `(r :: remove_first r R)` and `R` have the same membership when
+  `In r R`. NO `NoDup R` required.
+
+The single remaining admit is genuinely the hardest sub-case: the
+inner step exits the outer ERegion's own region, producing a typing
+that under `r :: remove_first r R` re-introduces `r` as fresh. To
+close it, we need `expr_free_of_region r e'` for the post-step inner
+expression. This follows from the underlying `S_Region_Exit`'s
+`expr_free_of_region r v` premise, but extracting it requires
+further inversion on `Hstep` to reach that base step. Small
+follow-up — `step_exit_implies_free_of_exited_region` would settle it.
+
 ## Lemma B per-case status (2026-05-24)
 
 Empirically verified against `coqc 8.18.0`. The Phase 1 scaffold for
@@ -155,43 +251,113 @@ atomic-axiom closure tactic. **4 of 35 step rules close**; 31 remain.
 | `S_Drop` | atomic: `EDrop (ELoc _) → EUnit`, both T_Drop and T_Unit are identity-output |
 | `S_Borrow_Step` | **accidental congruence closure**: both `T_Borrow` and `T_Borrow_Val` output the input context unchanged, so `Ga = G = Gb` regardless of whether the inner step is reachable. Vacuous-but-closes. |
 
-### Open (31)
+### Open (24, was 31)
 
-Three clusters, ordered by closure tractability:
+#### Cluster A — β-reduction ✅ FULLY CLOSED (2026-05-24)
 
-#### Cluster A — β-reduction (~7)
+All 7 β-reduction cases closed via
+`subst_preserves_typing_strong` (PR: this branch) + `output_ctx_det`
+(PR: this branch). Recipe per case:
+1. Invert the outer compound typing (`T_Let`, `T_App`, `T_If`,
+   `T_Case`) to expose body + value premises.
+2. For T_App: also invert `T_Lam` on the function value.
+3. For T_Case: apply `value_context_unchanged` on the EInl/EInr
+   premise, then invert `T_Inl`/`T_Inr`.
+4. Apply `value_context_unchanged` on the value premise(s) to
+   align intermediate contexts with the input context.
+5. `destruct (subst_preserves_typing_strong ...)` to construct a
+   typing of the substituted form at the specific output context.
+6. `eapply output_ctx_det` against `Htype_e'` to conclude
+   `Ga = Gb`.
 
-Need a strengthened `subst_preserves_typing_strong` exposing the
-specific output context (currently hidden behind an existential).
-`subst_typing_gen` already has the `remove_at k Gout` shape — wrap
-it.
+Closed cases: `S_Let_Val`, `S_LetLin_Val`, `S_App_Fun`,
+`S_If_True`, `S_If_False`, `S_Case_Inl`, `S_Case_Inr`.
 
-| Step rule | Post-step expr (from coqc dump) |
-|-----------|---------------------------------|
-| `S_Let_Val` | `subst 0 v1 e2` |
-| `S_LetLin_Val` | `subst 0 v1 e2` |
-| `S_App_Fun` | `subst 0 v2 ebody` |
-| `S_If_True` | `e0'` (the `e2` branch, abstract) |
-| `S_If_False` | `e0'` (the `e3` branch, abstract) |
-| `S_Case_Inl` | `subst 0 v e1` |
-| `S_Case_Inr` | `subst 0 v e2` |
+#### Cluster B — congruence (10 of 18 closed, 8 open)
 
-#### Cluster B — congruence (~18)
+**Closed (2026-05-24)**: `S_StringConcat_Step1`,
+`S_StringConcat_Step2`, `S_Pair_Step1`, `S_Pair_Step2`,
+`S_Inl_Step`, `S_Inr_Step`, `S_Copy_Step`, `S_If_Step`,
+`S_StringLen_Step`. (Plus `S_Borrow_Step` closed accidentally
+earlier.)
 
-Every `S_*_Step` except `S_Borrow_Step`. Recipe per case: apply
-`step_R_eq_or_touches_region` → in the R-equal branch, apply IH for
-the inner step + recursive Lemma B for siblings. RIGHT branch
-(`touches_region`) is blocked on the same region-env weakening
-lemma as preservation Phase 3 — these cases share the bottleneck.
+Recipe (canonical two-child congruence, e.g.
+`S_StringConcat_Step1`):
+1. Invert both `Hte` and `Hte'`.
+2. `pose proof step_R_eq_or_touches_region` to dispatch `R = R'`.
+3. LEFT (R = R'): apply IH on inner step's typings to get
+   `Gmid = Gmid'`; `output_ctx_det` on the unchanged sibling
+   closes.
+4. RIGHT (`touches_region`): locally `admit` per-case.
 
-`S_StringConcat_Step1`, `S_StringConcat_Step2`, `S_StringLen_Step`,
-`S_Let_Step`, `S_LetLin_Step`, `S_App_Step1`, `S_App_Step2`,
-`S_If_Step`, `S_Pair_Step1`, `S_Pair_Step2`, `S_Fst_Step`,
-`S_Snd_Step`, `S_Inl_Step`, `S_Inr_Step`, `S_Case_Step`,
-`S_Drop_Step`, `S_Copy_Step`. (17 listed; +1 region congruence
-`S_Region_Step` belongs to cluster C.)
+Variants:
+- Second-child congruences (`S_StringConcat_Step2`,
+  `S_Pair_Step2`): use `value_context_unchanged` on the first
+  child (the value) to align contexts before IH on the second
+  child.
+- Single-child congruences (`S_Inl_Step`, `S_Inr_Step`,
+  `S_Copy_Step`): no sibling, IH directly closes.
+- `S_If_Step`: condition at `TBase TBool` (fixed type), branches
+  at outer `T` — fully constrained.
+- `S_StringLen_Step`: vacuous via inversion chain (T_StringLen →
+  T_Borrow / T_Borrow_Val: the inner must be `EVar` or a value;
+  neither steps).
 
-#### Cluster C — region / compound-value (~6)
+**Open (6 of original 8)** — blocked on **type-alignment circularity WITHOUT independent-context sibling**:
+
+S_App_Step1 and S_App_Step2 closed via the "sibling type_determinacy"
+trick (their sibling's context — `Gmid` for Step1, `G` for Step2 via
+value_context_unchanged — is independent of the unconstrained `T1`).
+
+For the remaining cases, no such sibling exists or its context
+depends on the unconstrained type:
+
+| Step rule | Inner-type that's NOT fixed by outer T |
+|-----------|----------------------------------------|
+| `S_Let_Step` | `T_Let`'s binding type `T1` |
+| `S_LetLin_Step` | `T_LetLin`'s binding type `T1` |
+| `S_Case_Step` | `T_Case`'s scrutinee `TSum T1 T2` |
+| `S_Drop_Step` | `T_Drop`'s arg type `T` (outer is `TBase TUnit`) |
+| `S_Fst_Step` | `T_Fst`'s second component `T2` |
+| `S_Snd_Step` | `T_Snd`'s first component `T1` |
+
+For each: T_X inversion of Hte and Hte' produces independent
+fresh type-vars for the unconstrained inner types. To apply
+Lemma B's IH on the inner step, we'd need to know both typings
+are at the SAME inner type — but establishing that requires
+preservation. Circular.
+
+**Resolution paths**:
+1. Prove Lemma B and preservation by **simultaneous mutual
+   induction** (restructure both proofs).
+2. **Re-state Lemma B** with a conclusion that doesn't need
+   shared T (weaker output-context-equivalence).
+3. Add a **type-preservation-under-step** sub-lemma (essentially
+   the type-only part of preservation) and prove it separately
+   via a more restricted induction.
+
+#### Cluster C — region / compound-value ✅ FULLY CLOSED (2026-05-24)
+
+**Closed**: `S_Fst`, `S_Snd`, `S_Copy`, `S_Region_Exit`,
+`S_StringLen` (atomic), `S_Region_Enter`. All 6.
+
+Recipes:
+- `S_Fst`, `S_Snd`, `S_Copy`, `S_Region_Exit`: invert the compound
+  rule (T_Fst → T_Pair, T_Snd → T_Pair, T_Copy, T_Region_Active),
+  apply `value_context_unchanged` on each value-typing premise to
+  align intermediate contexts with G, then `reflexivity` closes.
+- `S_StringLen` atomic: 3-level inversion chain T_StringLen →
+  T_Borrow_Val (T_Borrow's EVar form contradicted by ELoc) → T_Loc.
+  Each preserves the context, so Ga = G. T_I32 on Hte' gives Gb = G.
+- `S_Region_Enter`: 4 inversion sub-goals from T_Region /
+  T_Region_Active × Hte / Hte'. Two contradiction patterns:
+  `tauto` closes Hn-vs-`In r R0` cases; explicit
+  `apply H; left; reflexivity` closes the `~ In r (r :: R0)`
+  case. The valid sub-goal (Hte = T_Region, Hte' = T_Region_Active)
+  closes via `output_ctx_det` on the two inner typings of `e` at
+  `(r :: R0); G`.
+
+
 
 | Step rule | What's needed |
 |-----------|---------------|

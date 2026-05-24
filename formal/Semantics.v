@@ -2826,6 +2826,34 @@ Proof.
   - reflexivity.
 Qed.
 
+(** Strengthened variant that exposes the specific output context
+    (instead of an existential). Used by [step_output_context_eq]
+    (Lemma B, Phase 1) to discharge the beta-reduction step cases
+    where the existential in [subst_preserves_typing] blocks the
+    output-context equality proof.
+
+    Both the witness ([G_v = G]) and the specific output context
+    ([G']) come from [subst_typing_gen]'s explicit
+    [remove_at k Gout] shape, which collapses for [k = 0] via
+    [remove_at 0 ((T, b) :: G) = G]. *)
+Lemma subst_preserves_typing_strong :
+  forall R G e T2 G' T1 v G_v,
+    R; (T1, false) :: G |- e : T2 -| (T1, true) :: G' ->
+    R; G |- v : T1 -| G_v ->
+    is_value v ->
+    G_v = G /\ R; G |- subst 0 v e : T2 -| G'.
+Proof.
+  intros R G e T2 G' T1 v G_v Htype Hv Hval.
+  assert (HGv: G_v = G) by (eapply value_context_unchanged; eassumption).
+  split; [exact HGv|].
+  subst G_v.
+  assert (Hlin: is_linear_ty T1 = true).
+  { eapply (flag_false_to_true_implies_linear _ _ _ _ _ 0 T1 Htype); simpl; reflexivity. }
+  pose proof (subst_typing_gen _ _ _ _ _ Htype 0 T1 v false eq_refl Hval Hlin Hv true eq_refl) as Hsubst.
+  simpl in Hsubst.
+  exact Hsubst.
+Qed.
+
 (** Helper: types_agree and false_preserved are reflexive *)
 Lemma ctx_types_agree_refl : forall G, ctx_types_agree G G.
 Proof.
@@ -3318,13 +3346,68 @@ Lemma step_output_context_eq :
       R'; G |- e' : T -| G_b ->
       G_a = G_b.
 Proof.
+  (* Phase 1 scaffold (PR #121) + cfg-remember pattern + atomic-axiom
+     closure. cfg-remember mirrors [step_R_eq_or_touches_region] and
+     [preservation] (PRs #102 / #106): substitutes the outer
+     expression slots into each induction case so per-case inversion
+     sees concrete syntax. *)
   intros mu R e mu' R' e' Hstep.
-  induction Hstep; intros G0 T0 Ga Gb Htype_e Htype_e'.
-  (* Attempt: aggressive inversion + auto on each case. The hope is
-     that for the syntax-directed typing relation, inversion of both
-     typings extracts component typings with matching output
-     contexts, which `eauto` then unifies. *)
-  all: try (inversion Htype_e; inversion Htype_e'; subst; auto).
+  remember (mu, R, e) as cfg eqn:Hcfg.
+  remember (mu', R', e') as cfg' eqn:Hcfg'.
+  revert mu R e mu' R' e' Hcfg Hcfg'.
+  induction Hstep;
+    intros mu0 R0 e0 mu0' R0' e0' Hcfg Hcfg';
+    inversion Hcfg; subst;
+    inversion Hcfg'; subst;
+    intros G0 T0 Ga Gb Htype_e Htype_e'.
+  (* Atomic-axiom + accidental-congruence cases that close by full
+     inversion of both typings + leaf-value re-inversion +
+     reflexivity. Empirically (coqc 8.18.0) closes 4 of 35 step
+     rules:
+       S_StringNew    ([EStringNew r s]   -> [ELoc l r])
+       S_StringConcat ([EStringConcat (ELoc _ _) (ELoc _ _)]
+                                           -> [ELoc l' r])
+       S_Drop         ([EDrop (ELoc _ _)] -> [EUnit])
+       S_Borrow_Step  ([EBorrow e]        -> [EBorrow e'])
+         (closes accidentally: both T_Borrow and T_Borrow_Val output
+         the input context unchanged, so Ga = G = Gb regardless of
+         the inner step's IH.)
+     The leaf re-inversion forces inner [has_type _ _ (ELoc _ _) _ _]
+     and friends to pin their output to the input (T_Loc /
+     T_StringNew / T_I32 / T_Unit all preserve the linearity
+     context). *)
+  all: try (
+    inversion Htype_e; subst;
+    inversion Htype_e'; subst;
+    repeat match goal with
+    | [ H : has_type _ _ (ELoc _ _) _ _ |- _ ] =>
+        inversion H; subst; clear H
+    | [ H : has_type _ _ (EI32 _) _ _ |- _ ] =>
+        inversion H; subst; clear H
+    | [ H : has_type _ _ EUnit _ _ |- _ ] =>
+        inversion H; subst; clear H
+    | [ H : has_type _ _ (EBool _) _ _ |- _ ] =>
+        inversion H; subst; clear H
+    end;
+    reflexivity).
+  (* 31 cases remain. Per-case map: PRESERVATION-HANDOFF.md
+     section "Lemma B per-case status". Three clusters:
+       - beta-reduction (~7): S_Let_Val, S_LetLin_Val, S_App_Fun,
+         S_If_True/False, S_Case_Inl/Inr. Need a strengthened
+         subst-output-context lemma (subst_typing_gen already has
+         the [remove_at k Gout] shape; subst_preserves_typing hides
+         it behind an existential).
+       - congruence (~18, every S_*_Step except S_Borrow_Step):
+         apply [step_R_eq_or_touches_region] to dispatch [R = R'];
+         in the R-eq branch, apply IH for the inner step + recursive
+         Lemma B for siblings. RIGHT branch (touches_region) is
+         blocked on the same region-env weakening lemma as
+         preservation Phase 3.
+       - region / compound-value (~6): S_Region_Enter/Exit/Step,
+         S_StringLen (atomic, blocked on TBorrow/EStringLen
+         inversion shape — does NOT close trivially despite being
+         atomic), S_Copy, S_Fst, S_Snd. S_Region_Step blocks on
+         Phase 3. *)
   all: admit.
 Admitted.
 

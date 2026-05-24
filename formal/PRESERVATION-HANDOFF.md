@@ -139,6 +139,98 @@ mechanical 28 are 1–2 days of tactic work.
   estate's "build is the only oracle" policy. The honest mark is one
   `Admitted.` on `preservation`, not 29.
 
+## Lemma B per-case status (2026-05-24)
+
+Empirically verified against `coqc 8.18.0`. The Phase 1 scaffold for
+`step_output_context_eq` now uses the `cfg`-remember pattern that
+mirrors `step_R_eq_or_touches_region` and `preservation`, plus an
+atomic-axiom closure tactic. **4 of 35 step rules close**; 31 remain.
+
+### Closed (4)
+
+| Step rule | Why it closes |
+|-----------|---------------|
+| `S_StringNew` | atomic: `EStringNew → ELoc`, both type to identity-output |
+| `S_StringConcat` | atomic: `EStringConcat (ELoc _) (ELoc _) → ELoc`, all premises invert to identity-output T_Loc |
+| `S_Drop` | atomic: `EDrop (ELoc _) → EUnit`, both T_Drop and T_Unit are identity-output |
+| `S_Borrow_Step` | **accidental congruence closure**: both `T_Borrow` and `T_Borrow_Val` output the input context unchanged, so `Ga = G = Gb` regardless of whether the inner step is reachable. Vacuous-but-closes. |
+
+### Open (31)
+
+Three clusters, ordered by closure tractability:
+
+#### Cluster A — β-reduction (~7)
+
+Need a strengthened `subst_preserves_typing_strong` exposing the
+specific output context (currently hidden behind an existential).
+`subst_typing_gen` already has the `remove_at k Gout` shape — wrap
+it.
+
+| Step rule | Post-step expr (from coqc dump) |
+|-----------|---------------------------------|
+| `S_Let_Val` | `subst 0 v1 e2` |
+| `S_LetLin_Val` | `subst 0 v1 e2` |
+| `S_App_Fun` | `subst 0 v2 ebody` |
+| `S_If_True` | `e0'` (the `e2` branch, abstract) |
+| `S_If_False` | `e0'` (the `e3` branch, abstract) |
+| `S_Case_Inl` | `subst 0 v e1` |
+| `S_Case_Inr` | `subst 0 v e2` |
+
+#### Cluster B — congruence (~18)
+
+Every `S_*_Step` except `S_Borrow_Step`. Recipe per case: apply
+`step_R_eq_or_touches_region` → in the R-equal branch, apply IH for
+the inner step + recursive Lemma B for siblings. RIGHT branch
+(`touches_region`) is blocked on the same region-env weakening
+lemma as preservation Phase 3 — these cases share the bottleneck.
+
+`S_StringConcat_Step1`, `S_StringConcat_Step2`, `S_StringLen_Step`,
+`S_Let_Step`, `S_LetLin_Step`, `S_App_Step1`, `S_App_Step2`,
+`S_If_Step`, `S_Pair_Step1`, `S_Pair_Step2`, `S_Fst_Step`,
+`S_Snd_Step`, `S_Inl_Step`, `S_Inr_Step`, `S_Case_Step`,
+`S_Drop_Step`, `S_Copy_Step`. (17 listed; +1 region congruence
+`S_Region_Step` belongs to cluster C.)
+
+#### Cluster C — region / compound-value (~6)
+
+| Step rule | What's needed |
+|-----------|---------------|
+| `S_Region_Enter` | `T_Region` ↔ `T_Region_Active` dispatch via `In r R`; needs `output_ctx_det` sub-lemma on `e_inner` |
+| `S_Region_Exit` | needs `region_shrink_preserves_typing` (already Qed) + value-output-context invariance |
+| `S_Region_Step` | **blocked on Phase 3** — region-env weakening for non-values |
+| `S_StringLen` (atomic!) | inversion of `T_StringLen` → `T_Borrow_Val` → `T_Loc` chain needs explicit nested invocation; my repeat-match doesn't cover the `EBorrow (ELoc _ _)` shape |
+| `S_Copy` | atomic but compound: `T_Copy` outputs `G'` where `G'` is value-input; needs `value_context_unchanged` invocation |
+| `S_Fst` / `S_Snd` | atomic but inversion of `T_Pair` premise needs `value_context_unchanged` to align inner v1/v2 typings |
+
+### Effort revision
+
+The ROADMAP's "3-4 hours focused session" estimate for Phase 1 was
+optimistic. Empirical evidence:
+
+- 4 trivial cases closed by a uniform tactic in ~30 minutes.
+- Each of the remaining 31 needs a hand-rolled per-case tactic block.
+- Cluster A (7) needs one shared sub-lemma first
+  (`subst_preserves_typing_strong`).
+- Cluster B (17–18) shares the same recipe but each case names
+  different premises and constructor arguments — call it ~10 minutes
+  per case once the recipe is debugged on the first one.
+- Cluster C (6) is a mixed bag; `S_Region_Step` carries Phase 3 risk.
+
+**Revised estimate**: **8–15 focused hours** for Lemma B alone,
+assuming no circularity surprises with `type_determinacy` across
+stepped pairs. Phase 2 (apply Lemma B to preservation's congruence
+cases) remains ~2 hours of mechanical wiring once Lemma B is closed.
+
+### Watch for: circularity risk
+
+Some Cluster B cases require knowing that `e` and `e'` have the
+same type before applying the IH. `type_determinacy` operates on
+same-expression pairs, not stepped pairs. The natural lemma —
+"step preserves type" — is part of what preservation itself
+proves. If the inductive structure of Lemma B turns out to need
+preservation as a sub-lemma, the closure path needs revision.
+Watch for this when attacking the first Cluster B case.
+
 ## Unwind checklist (when finally closed)
 
 1. Replace `Admitted.` with `Qed.`

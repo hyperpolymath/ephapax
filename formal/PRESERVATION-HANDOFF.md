@@ -139,6 +139,62 @@ mechanical 28 are 1–2 days of tactic work.
   estate's "build is the only oracle" policy. The honest mark is one
   `Admitted.` on `preservation`, not 29.
 
+## `step_preserves_type` per-case status (2026-05-24, late)
+
+Empirically verified against `coqc 8.18.0`. The 12 cases identified
+as "remaining open" after the f499c82 clone-out have now each been
+given an explicit per-case proof skeleton. The lemma is still
+`Admitted.`, but the residual admits are now exactly the
+**region-env weakening sub-cases** — each tied to the
+`step_R_eq_or_touches_region` RIGHT branch (i.e., the inner step
+genuinely changes `R`).
+
+**Moved** `touches_region` + `step_R_eq_or_touches_region` to before
+`step_preserves_type` so the latter can dispatch on the LEFT
+(R = R') branch.
+
+### Fully closed (4 of 12)
+
+| Goal | Step rule | Closure |
+|------|-----------|---------|
+| 1 | `S_StringConcat_Step2` | outer T = TString r is structurally constrained; IH on (e2, e2') gives r = r' |
+| 8 | `S_Snd` atomic (ESnd (EPair v1 v2) → v2) | `value_context_unchanged` on v1 + `type_determinacy` on v2 |
+| 10 | `S_Region_Exit` (ERegion r v → v) | `region_shrink_preserves_typing` bridges R0 and remove_first r R0, then `type_determinacy` |
+| 12 | `S_Copy` atomic (ECopy v → EPair v v) | `value_context_unchanged` on first projection + two `type_determinacy` calls on v |
+
+### Partially closed — LEFT branch only (7 of 12)
+
+| Goal | Step rule | LEFT (R = R') closure | RIGHT admit |
+|------|-----------|------------------------|-------------|
+| 2 | `S_Let_Step` | IH + `ctx_types_agree_trans` on midpoint + `ctx_extend_types_agree` + `type_determinacy` on body | region weakening for body e2 |
+| 3 | `S_LetLin_Step` | same as Goal 2 | same |
+| 4 | `S_App_Step2` | `value_context_unchanged` + `type_determinacy` on v1's TFun typings | region weakening for v1's body |
+| 5 | `S_If_Step` | `ctx_types_agree_trans` on post-cond + `type_determinacy` on branch | region weakening for branches |
+| 6 | `S_Pair_Step1` | IH on e1 step + `type_determinacy` on e2 | region weakening for e2 |
+| 7 | `S_Pair_Step2` | `value_context_unchanged` + `type_determinacy` on v1 + IH on (e2, e2') | region weakening for v1 |
+| 9 | `S_Case_Step` | IH on scrutinee + `ctx_extend_types_agree` + `type_determinacy` on branch | region weakening for branches |
+
+### Partially closed — one sub-case admitted (1 of 12)
+
+| Goal | Step rule | Closure | Admit |
+|------|-----------|---------|-------|
+| 11 | `S_Region_Step` (ERegion r e → ERegion r e') | T_Region_Active × T_Region_Active sub-case closes via IH on inner step; T_Region × T_Region contradicted | T_Region_Active × T_Region sub-case (inner step exits the outer region r, breaking T_Region_Active in Hte') needs region weakening |
+
+### Net effect
+
+- **Before**: `step_preserves_type` was `all: admit` with 12 open
+  goals — every case admitted with no structure.
+- **After**: 4 of 12 closed fully, 7 of 12 have LEFT (R = R')
+  branch closed, 1 of 12 has main branch closed.
+- **Residual admits**: 8 — all tied to `step_R_eq_or_touches_region`'s
+  RIGHT branch, i.e., Phase 3 region-env weakening for non-values.
+
+The remaining work is exactly the Phase 3 lemma (region-env
+weakening for non-values) that was already documented as the genuinely
+hard remaining piece. Once Phase 3 is available, all 8 admits close
+mechanically via `region_add_typing` / `region_shrink_preserves_typing`
++ `type_determinacy`.
+
 ## Lemma B per-case status (2026-05-24)
 
 Empirically verified against `coqc 8.18.0`. The Phase 1 scaffold for

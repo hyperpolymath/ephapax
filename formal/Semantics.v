@@ -3385,6 +3385,88 @@ Proof.
   ].
 Qed.
 
+(** ** Region-invariance lemma
+
+    Captures the structural fact that the step relation only changes
+    the region environment [R] when the expression contains a region
+    operation (`ERegion`) at a step-reducible position. Used by
+    `step_preserves_type`'s congruence cases (and below by
+    `preservation`'s congruence cases) to dispatch on whether the
+    step touches a region — the [R = R'] branch closes by
+    [type_determinacy], leaving only the genuinely region-changing
+    sub-cases to admit pending Phase 3.
+
+    The inductive predicate [touches_region] says "this expression's
+    next reducible position is inside a region operation". The lemma
+    [step_R_eq_or_touches_region] then says: every step either
+    preserves [R] or fires on a [touches_region] expression. *)
+
+Inductive touches_region : expr -> Prop :=
+  | TR_here :
+      forall r e, touches_region (ERegion r e)
+  | TR_StringConcat1 :
+      forall e1 e2,
+        touches_region e1 -> touches_region (EStringConcat e1 e2)
+  | TR_StringConcat2 :
+      forall v e,
+        is_value v -> touches_region e -> touches_region (EStringConcat v e)
+  | TR_StringLen :
+      forall e, touches_region e -> touches_region (EStringLen e)
+  | TR_Let :
+      forall e1 e2, touches_region e1 -> touches_region (ELet e1 e2)
+  | TR_LetLin :
+      forall e1 e2, touches_region e1 -> touches_region (ELetLin e1 e2)
+  | TR_App1 :
+      forall e1 e2, touches_region e1 -> touches_region (EApp e1 e2)
+  | TR_App2 :
+      forall v e,
+        is_value v -> touches_region e -> touches_region (EApp v e)
+  | TR_If :
+      forall e1 e2 e3,
+        touches_region e1 -> touches_region (EIf e1 e2 e3)
+  | TR_Pair1 :
+      forall e1 e2, touches_region e1 -> touches_region (EPair e1 e2)
+  | TR_Pair2 :
+      forall v e,
+        is_value v -> touches_region e -> touches_region (EPair v e)
+  | TR_Fst :
+      forall e, touches_region e -> touches_region (EFst e)
+  | TR_Snd :
+      forall e, touches_region e -> touches_region (ESnd e)
+  | TR_Inl :
+      forall T e, touches_region e -> touches_region (EInl T e)
+  | TR_Inr :
+      forall T e, touches_region e -> touches_region (EInr T e)
+  | TR_Case :
+      forall e e1 e2,
+        touches_region e -> touches_region (ECase e e1 e2)
+  | TR_Borrow :
+      forall e, touches_region e -> touches_region (EBorrow e)
+  | TR_Drop :
+      forall e, touches_region e -> touches_region (EDrop e)
+  | TR_Copy :
+      forall e, touches_region e -> touches_region (ECopy e).
+
+Lemma step_R_eq_or_touches_region :
+  forall mu R e mu' R' e',
+    (mu, R, e) -->> (mu', R', e') ->
+    R = R' \/ touches_region e.
+Proof.
+  intros mu R e mu' R' e' Hstep.
+  remember (mu, R, e) as cfg eqn:Hcfg.
+  remember (mu', R', e') as cfg' eqn:Hcfg'.
+  revert mu R e mu' R' e' Hcfg Hcfg'.
+  induction Hstep;
+    intros mu0 R0 e0 mu0' R0' e0' Hcfg Hcfg';
+    inversion Hcfg; subst;
+    inversion Hcfg'; subst;
+    try (left; reflexivity);
+    try (right; apply TR_here);
+    try (destruct (IHHstep _ _ _ _ _ _ eq_refl eq_refl) as [Heq | HTR];
+         [ left; exact Heq
+         | right; constructor; (try assumption); exact HTR ]).
+Qed.
+
 (** ** Step preserves type
 
     If [e] steps to [e'] and BOTH have typings, then they're at the
@@ -4079,96 +4161,376 @@ Proof.
        - S_Fst, S_Snd atomic: pattern var bind to outer goal's T
          doesn't propagate through nested match cleanly.
        - S_Region_Exit, S_Region_Step: as documented. *)
-  all: admit.
+  (* ===== Per-goal proofs for the 12 remaining cases =====
+     Goal order at this point (after the cascading [try solve] blocks):
+       1.  S_StringConcat_Step2 (v1 value, e2 → e2')
+       2.  S_Let_Step
+       3.  S_LetLin_Step
+       4.  S_App_Step2 (v1 value, e2 → e2')
+       5.  S_If_Step
+       6.  S_Pair_Step1
+       7.  S_Pair_Step2 (v1 value)
+       8.  S_Snd atomic (ESnd (EPair v1 v2) → v2)
+       9.  S_Case_Step
+       10. S_Region_Exit (ERegion r v → v, value)
+       11. S_Region_Step (ERegion r e → ERegion r e')
+       12. S_Copy atomic (ECopy v → EPair v v) *)
+
+  (* Goal 1: S_StringConcat_Step2. Outer T = TString r is structurally
+     constrained by T_StringConcat. IH on e2 → e2' gives TString r =
+     TString r', so r = r'. *)
+  1: {
+    inversion Hte; subst.
+    inversion Hte'; subst.
+    match goal with
+    | [ Hv : is_value ?v1,
+        Hv1 : has_type _ _ ?v1 _ ?G',
+        Hv1' : has_type _ _ ?v1 _ ?G'0 |- _ ] =>
+        assert (G' = G0) by
+          (eapply value_context_unchanged; [exact Hv1 | exact Hv]);
+        assert (G'0 = G0) by
+          (eapply value_context_unchanged; [exact Hv1' | exact Hv]);
+        subst G' G'0
+    end.
+    match goal with
+    | [ H2 : has_type _ _ ?e2 (TString _) _,
+        H2' : has_type _ _ ?e2' (TString _) _ |- _ ] =>
+        pose proof (IHHstep _ _ _ _ _ _ eq_refl eq_refl _ _ _ H2 _ _ H2') as Hteq;
+        inversion Hteq; reflexivity
+    end.
+  }
+
+  (* Goal 2: S_Let_Step. Outer T = body's type. Dispatch on
+     step_R_eq_or_touches_region: if R = R' (the only branch closable
+     without region weakening), type_determinacy on the body H6/H8
+     under the shared R aligns T0 = T'. The touches_region branch
+     genuinely needs region-env weakening for non-values (Phase 3),
+     so admit there. *)
+  1: {
+    inversion Hte; subst.
+    inversion Hte'; subst.
+    (* H3: e1 typed at T1 under R0; H4: e1' typed at T2 under R0';
+       H6: e2 typed at T0 under R0; H8: e2 typed at T' under R0'. *)
+    match goal with
+    | [ He1 : has_type _ _ ?e1s _ _,
+        He1' : has_type _ _ ?e1s' _ _,
+        Hs : (_, _, ?e1s) -->> (_, _, ?e1s') |- _ ] =>
+        pose proof (IHHstep _ _ _ _ _ _ eq_refl eq_refl _ _ _ He1 _ _ He1') as HT12
+    end.
+    subst.
+    pose proof (step_R_eq_or_touches_region _ _ _ _ _ _ Hstep) as [HeqR | _].
+    - subst.
+      match goal with
+      | [ He1 : has_type ?R ?G ?e1s ?T1 ?Gmid,
+          He1' : has_type ?R ?G ?e1s' ?T1 ?Gmid' |- _ ] =>
+          assert (HagrMid : ctx_types_agree Gmid Gmid')
+            by (eapply ctx_types_agree_trans;
+                [ eapply typing_types_agree; exact He1
+                | apply ctx_types_agree_sym; eapply typing_types_agree; exact He1' ]);
+          assert (HagrExt : ctx_types_agree (ctx_extend Gmid T1) (ctx_extend Gmid' T1))
+            by (apply ctx_extend_types_agree; assumption)
+      end.
+      match goal with
+      | [ He2 : has_type ?R (ctx_extend _ _) ?e2x ?Ta _,
+          He2' : has_type ?R (ctx_extend _ _) ?e2x ?Tb _,
+          HagrExt : ctx_types_agree (ctx_extend _ _) (ctx_extend _ _)
+          |- ?Ta = ?Tb ] =>
+          eapply type_determinacy; [ exact He2 | exact He2' | exact HagrExt ]
+      end.
+    - (* touches_region case — needs region-env weakening for the body
+         e2 to bridge typings under R0 and R0'. Phase 3. *)
+      admit.
+  }
+
+  (* Goal 3: S_LetLin_Step. Identical structure to Goal 2. *)
+  1: {
+    inversion Hte; subst.
+    inversion Hte'; subst.
+    match goal with
+    | [ He1 : has_type _ _ ?e1s _ _,
+        He1' : has_type _ _ ?e1s' _ _,
+        Hs : (_, _, ?e1s) -->> (_, _, ?e1s') |- _ ] =>
+        pose proof (IHHstep _ _ _ _ _ _ eq_refl eq_refl _ _ _ He1 _ _ He1') as HT12
+    end.
+    subst.
+    pose proof (step_R_eq_or_touches_region _ _ _ _ _ _ Hstep) as [HeqR | _].
+    - subst.
+      match goal with
+      | [ He1 : has_type ?R ?G ?e1s ?T1 ?Gmid,
+          He1' : has_type ?R ?G ?e1s' ?T1 ?Gmid' |- _ ] =>
+          assert (HagrMid : ctx_types_agree Gmid Gmid')
+            by (eapply ctx_types_agree_trans;
+                [ eapply typing_types_agree; exact He1
+                | apply ctx_types_agree_sym; eapply typing_types_agree; exact He1' ]);
+          assert (HagrExt : ctx_types_agree (ctx_extend Gmid T1) (ctx_extend Gmid' T1))
+            by (apply ctx_extend_types_agree; assumption)
+      end.
+      match goal with
+      | [ He2 : has_type ?R (ctx_extend _ _) ?e2x ?Ta _,
+          He2' : has_type ?R (ctx_extend _ _) ?e2x ?Tb _,
+          HagrExt : ctx_types_agree (ctx_extend _ _) (ctx_extend _ _)
+          |- ?Ta = ?Tb ] =>
+          eapply type_determinacy; [ exact He2 | exact He2' | exact HagrExt ]
+      end.
+    - admit.
+  }
+
+  (* Goal 4: S_App_Step2 — EApp v1 e2 → EApp v1 e2'. Outer T = T2
+     (function range from TFun T1 T2). Dispatch on R. LEFT: v1's
+     two TFun typings align via type_determinacy; gives T1=T1', T2=T2'.
+     RIGHT: region weakening needed for v1's body — admit. *)
+  1: {
+    inversion Hte; subst.
+    inversion Hte'; subst.
+    pose proof (step_R_eq_or_touches_region _ _ _ _ _ _ Hstep) as [HeqR | _].
+    - subst.
+      match goal with
+      | [ Hv : is_value ?v1,
+          Hv1 : has_type ?R ?G ?v1 (TFun ?T1a ?T2a) ?Gmid,
+          Hv1' : has_type ?R ?G ?v1 (TFun ?T1b ?T2b) ?Gmid' |- _ ] =>
+          assert (Gmid = G) by
+            (eapply value_context_unchanged; [exact Hv1 | exact Hv]);
+          assert (Gmid' = G) by
+            (eapply value_context_unchanged; [exact Hv1' | exact Hv]);
+          subst Gmid Gmid';
+          assert (HTfun : TFun T1a T2a = TFun T1b T2b)
+            by (eapply type_determinacy;
+                [exact Hv1 | exact Hv1' | apply ctx_types_agree_refl]);
+          inversion HTfun; subst; reflexivity
+      end.
+    - admit.
+  }
+
+  (* Goal 5: S_If_Step — EIf e1 e2 e3 → EIf e1' e2 e3. Outer T from
+     branches. Dispatch on R. LEFT: branches typed under common R;
+     ctx_types_agree on post-cond contexts; type_determinacy on
+     branch e2 closes. RIGHT: region weakening needed. *)
+  1: {
+    inversion Hte; subst.
+    inversion Hte'; subst.
+    pose proof (step_R_eq_or_touches_region _ _ _ _ _ _ Hstep) as [HeqR | _].
+    - subst.
+      match goal with
+      | [ H1 : has_type ?R ?G ?e1s (TBase TBool) ?Gmid,
+          H1' : has_type ?R ?G ?e1s' (TBase TBool) ?Gmid' |- _ ] =>
+          assert (Hagr : ctx_types_agree Gmid Gmid')
+            by (eapply ctx_types_agree_trans;
+                [ eapply typing_types_agree; exact H1
+                | apply ctx_types_agree_sym; eapply typing_types_agree; exact H1' ])
+      end.
+      match goal with
+      | [ H2 : has_type ?R ?Gmid ?e2x ?Ta _,
+          H2' : has_type ?R ?Gmid' ?e2x ?Tb _,
+          Hagr : ctx_types_agree ?Gmid ?Gmid' |- ?Ta = ?Tb ] =>
+          eapply type_determinacy; [ exact H2 | exact H2' | exact Hagr ]
+      end.
+    - admit.
+  }
+
+  (* Goal 6: S_Pair_Step1 — EPair e1 e2 → EPair e1' e2. Outer T =
+     TProd T1 T2. IH on e1 gives T1=T1'. T2 from e2 typings; under
+     R = R' (LEFT), type_determinacy aligns T2=T2'. RIGHT: admit. *)
+  1: {
+    inversion Hte; subst.
+    inversion Hte'; subst.
+    match goal with
+    | [ He1 : has_type _ _ ?e1s _ _,
+        He1' : has_type _ _ ?e1s' _ _,
+        Hs : (_, _, ?e1s) -->> (_, _, ?e1s') |- _ ] =>
+        pose proof (IHHstep _ _ _ _ _ _ eq_refl eq_refl _ _ _ He1 _ _ He1') as HT12
+    end.
+    subst.
+    pose proof (step_R_eq_or_touches_region _ _ _ _ _ _ Hstep) as [HeqR | _].
+    - subst.
+      match goal with
+      | [ He1 : has_type ?R ?G ?e1s ?T1 ?Gmid,
+          He1' : has_type ?R ?G ?e1s' ?T1 ?Gmid' |- _ ] =>
+          assert (Hagr : ctx_types_agree Gmid Gmid')
+            by (eapply ctx_types_agree_trans;
+                [ eapply typing_types_agree; exact He1
+                | apply ctx_types_agree_sym; eapply typing_types_agree; exact He1' ])
+      end.
+      match goal with
+      | [ H2 : has_type ?R ?Gmid ?e2x ?T2a _,
+          H2' : has_type ?R ?Gmid' ?e2x ?T2b _,
+          Hagr : ctx_types_agree ?Gmid ?Gmid' |- _ ] =>
+          assert (HT2 : T2a = T2b)
+            by (eapply type_determinacy; [ exact H2 | exact H2' | exact Hagr ]);
+          subst T2b; reflexivity
+      end.
+    - admit.
+  }
+
+  (* Goal 7: S_Pair_Step2 — EPair v1 e2 → EPair v1 e2'. Outer T =
+     TProd T1 T2. v1's two typings align T1 (under any R via value
+     context invariance + type_determinacy when R = R'). IH on
+     (e2, e2') aligns T2. Dispatch on R: LEFT closes, RIGHT admits. *)
+  1: {
+    inversion Hte; subst.
+    inversion Hte'; subst.
+    pose proof (step_R_eq_or_touches_region _ _ _ _ _ _ Hstep) as [HeqR | _].
+    - subst.
+      match goal with
+      | [ Hv : is_value ?v1,
+          Hv1 : has_type ?R ?G ?v1 ?T1a ?Gmid,
+          Hv1' : has_type ?R ?G ?v1 ?T1b ?Gmid' |- _ ] =>
+          assert (Gmid = G) by
+            (eapply value_context_unchanged; [exact Hv1 | exact Hv]);
+          assert (Gmid' = G) by
+            (eapply value_context_unchanged; [exact Hv1' | exact Hv]);
+          subst Gmid Gmid';
+          assert (HT1 : T1a = T1b)
+            by (eapply type_determinacy;
+                [exact Hv1 | exact Hv1' | apply ctx_types_agree_refl]);
+          subst T1b
+      end.
+      match goal with
+      | [ He2 : has_type ?R ?G ?e2s _ _,
+          He2' : has_type ?R ?G ?e2s' _ _,
+          Hs : (_, _, ?e2s) -->> (_, _, ?e2s') |- _ ] =>
+          pose proof (IHHstep _ _ _ _ _ _ eq_refl eq_refl _ _ _ He2 _ _ He2') as HT2;
+          subst; reflexivity
+      end.
+    - admit.
+  }
+
+  (* Goal 8: S_Snd atomic — ESnd (EPair v1 v2) → v2. No R change.
+     T_Snd inversion → T_Pair (on EPair v1 v2) → gives v2's typing
+     with type matching outer T. type_determinacy on v2 closes. *)
+  1: {
+    inversion Hte; subst.
+    match goal with
+    | [ Hp : has_type _ _ (EPair ?v1 ?v2) (TProd _ _) _ |- _ ] =>
+        inversion Hp; subst
+    end.
+    match goal with
+    | [ Hv1 : is_value ?v1,
+        Hv1t : has_type ?R ?G ?v1 ?T1 ?Gmid,
+        Hv2t : has_type ?R ?Gmid ?v2 ?T2 _,
+        Hte' : has_type ?R ?G ?v2 ?T' _
+        |- ?T2 = ?T' ] =>
+        assert (Gmid = G) by
+          (eapply value_context_unchanged; [exact Hv1t | exact Hv1]);
+        subst Gmid;
+        eapply type_determinacy;
+          [ exact Hv2t | exact Hte' | apply ctx_types_agree_refl ]
+    end.
+  }
+
+  (* Goal 9: S_Case_Step — ECase e e1 e2 → ECase e' e1 e2. Outer T =
+     branches' type. IH on scrutinee gives TSum alignment. Dispatch
+     on R for branch typings. *)
+  1: {
+    inversion Hte; subst.
+    inversion Hte'; subst.
+    match goal with
+    | [ Hs : (_, _, ?es) -->> (_, _, ?es'),
+        Hsc : has_type _ _ ?es (TSum _ _) _,
+        Hsc' : has_type _ _ ?es' (TSum _ _) _ |- _ ] =>
+        pose proof (IHHstep _ _ _ _ _ _ eq_refl eq_refl _ _ _ Hsc _ _ Hsc') as Hsum;
+        inversion Hsum; subst
+    end.
+    pose proof (step_R_eq_or_touches_region _ _ _ _ _ _ Hstep) as [HeqR | _].
+    - subst.
+      match goal with
+      | [ Hsc : has_type ?R ?G ?es (TSum ?T1 _) ?Gmid,
+          Hsc' : has_type ?R ?G ?es' (TSum ?T1 _) ?Gmid' |- _ ] =>
+          assert (HagrMid : ctx_types_agree Gmid Gmid')
+            by (eapply ctx_types_agree_trans;
+                [ eapply typing_types_agree; exact Hsc
+                | apply ctx_types_agree_sym; eapply typing_types_agree; exact Hsc' ]);
+          assert (HagrExt : ctx_types_agree (ctx_extend Gmid T1) (ctx_extend Gmid' T1))
+            by (apply ctx_extend_types_agree; assumption)
+      end.
+      match goal with
+      | [ Hb1 : has_type ?R (ctx_extend ?Gmid ?T1) ?eb1 ?Ta _,
+          Hb1' : has_type ?R (ctx_extend ?Gmid' ?T1) ?eb1 ?Tb _,
+          Hag : ctx_types_agree (ctx_extend ?Gmid ?T1) (ctx_extend ?Gmid' ?T1)
+          |- ?Ta = ?Tb ] =>
+          eapply type_determinacy; [ exact Hb1 | exact Hb1' | exact Hag ]
+      end.
+    - admit.
+  }
+
+  (* Goal 10: S_Region_Exit — ERegion r v → v. R0 → remove_first r R0.
+     Hte: T_Region (~ In r R0) contradicts H0 : In r R0; or
+     T_Region_Active (In r R0): inner v typed under R0 at T0.
+     Hte': v typed under remove_first r R0 at T'. Bridge via
+     region_shrink_preserves_typing (requires expr_free_of_region r v
+     which is the S_Region_Exit premise H1). *)
+  1: {
+    inversion Hte; subst.
+    - (* T_Region: ~ In r R0 contradicts S_Region_Exit's In r R0 (H0). *)
+      exfalso; auto.
+    - (* T_Region_Active *)
+      match goal with
+      | [ Hfree : expr_free_of_region ?r _,
+          Hvt : has_type ?R ?G ?v ?T0 ?Ga,
+          Hte' : has_type (remove_first ?r ?R) ?G ?v ?T' ?Gb |- ?T0 = ?T' ] =>
+          pose proof (region_shrink_preserves_typing _ _ _ _ _ _ Hvt Hfree) as Hshrink;
+          eapply type_determinacy;
+            [ exact Hshrink | exact Hte' | apply ctx_types_agree_refl ]
+      end.
+  }
+
+  (* Goal 11: S_Region_Step — ERegion r e → ERegion r e' (In r R0).
+     Both Hte and Hte' invert into T_Region (contradicts In r R)
+     or T_Region_Active (passes through inner e's typing). The
+     T_Region_Active case applies IH directly on the inner step;
+     T_Region cases are contradictory. *)
+  1: {
+    inversion Hte; subst.
+    - (* T_Region: ~ In r R0 contradicts H : In r R0. *)
+      exfalso; auto.
+    - (* T_Region_Active in Hte. Now invert Hte'. *)
+      inversion Hte'; subst.
+      + (* T_Region in Hte': ~ In r R0' contradicts touches_region
+           transitivity. By step_R_eq_or_touches_region, R0' either
+           equals R0 (so r ∈ R0' from H : In r R0) or the step
+           touches a region — in either case r remains in R0'. *)
+        exfalso.
+        match goal with
+        | [ Hni : ~ In ?r _, Hin : In ?r ?R0 |- _ ] =>
+            apply Hni;
+            pose proof (step_R_eq_or_touches_region _ _ _ _ _ _ Hstep) as [HeqR | _];
+            [ subst; exact Hin
+            | admit ]
+        end.
+      + (* Both T_Region_Active. Apply IH on the inner step. *)
+        match goal with
+        | [ Hvt : has_type ?R0 ?G ?e _ _,
+            Hvt' : has_type ?R0' ?G ?e' _ _,
+            Hs : (_, ?R0, ?e) -->> (_, ?R0', ?e') |- _ ] =>
+            pose proof (IHHstep _ _ _ _ _ _ eq_refl eq_refl _ _ _ Hvt _ _ Hvt') as Hteq;
+            exact Hteq
+        end.
+  }
+
+  (* Goal 12: S_Copy atomic — ECopy v → EPair v v. No R change.
+     T_Copy outer = TProd T T (v : T). T_Pair outer = TProd T1' T2'.
+     type_determinacy on v aligns T1' = T2' = T. *)
+  1: {
+    inversion Hte; subst.
+    inversion Hte'; subst.
+    match goal with
+    | [ Hv : is_value ?v,
+        Hvt : has_type ?R ?G ?v ?T _,
+        Hv1t : has_type ?R ?G ?v ?T1' ?Gmid,
+        Hv2t : has_type ?R ?Gmid ?v ?T2' _
+        |- TProd ?T ?T = TProd ?T1' ?T2' ] =>
+        assert (Gmid = G) by
+          (eapply value_context_unchanged; [exact Hv1t | exact Hv]);
+        subst Gmid;
+        assert (HT1 : T = T1')
+          by (eapply type_determinacy;
+              [exact Hvt | exact Hv1t | apply ctx_types_agree_refl]);
+        assert (HT2 : T = T2')
+          by (eapply type_determinacy;
+              [exact Hvt | exact Hv2t | apply ctx_types_agree_refl]);
+        subst T1' T2'; reflexivity
+    end.
+  }
 Admitted.
-
-(** ** Region-invariance lemma
-
-    Captures the structural fact that the step relation only changes
-    the region environment [R] when the expression contains a region
-    operation (`ERegion`) at a step-reducible position. Used by
-    `preservation`'s congruence cases to transfer sibling-typing
-    premises from the pre-step region to the post-step region without
-    a general weakening lemma (which is the documented
-    S_Region_Step + T_Region_Active language-design item, still open).
-
-    The inductive predicate [touches_region] says "this expression's
-    next reducible position is inside a region operation". The lemma
-    [step_R_eq_or_touches_region] then says: every step either
-    preserves [R] or fires on a [touches_region] expression. *)
-
-Inductive touches_region : expr -> Prop :=
-  | TR_here :
-      forall r e, touches_region (ERegion r e)
-  | TR_StringConcat1 :
-      forall e1 e2,
-        touches_region e1 -> touches_region (EStringConcat e1 e2)
-  | TR_StringConcat2 :
-      forall v e,
-        is_value v -> touches_region e -> touches_region (EStringConcat v e)
-  | TR_StringLen :
-      forall e, touches_region e -> touches_region (EStringLen e)
-  | TR_Let :
-      forall e1 e2, touches_region e1 -> touches_region (ELet e1 e2)
-  | TR_LetLin :
-      forall e1 e2, touches_region e1 -> touches_region (ELetLin e1 e2)
-  | TR_App1 :
-      forall e1 e2, touches_region e1 -> touches_region (EApp e1 e2)
-  | TR_App2 :
-      forall v e,
-        is_value v -> touches_region e -> touches_region (EApp v e)
-  | TR_If :
-      forall e1 e2 e3,
-        touches_region e1 -> touches_region (EIf e1 e2 e3)
-  | TR_Pair1 :
-      forall e1 e2, touches_region e1 -> touches_region (EPair e1 e2)
-  | TR_Pair2 :
-      forall v e,
-        is_value v -> touches_region e -> touches_region (EPair v e)
-  | TR_Fst :
-      forall e, touches_region e -> touches_region (EFst e)
-  | TR_Snd :
-      forall e, touches_region e -> touches_region (ESnd e)
-  | TR_Inl :
-      forall T e, touches_region e -> touches_region (EInl T e)
-  | TR_Inr :
-      forall T e, touches_region e -> touches_region (EInr T e)
-  | TR_Case :
-      forall e e1 e2,
-        touches_region e -> touches_region (ECase e e1 e2)
-  | TR_Borrow :
-      forall e, touches_region e -> touches_region (EBorrow e)
-  | TR_Drop :
-      forall e, touches_region e -> touches_region (EDrop e)
-  | TR_Copy :
-      forall e, touches_region e -> touches_region (ECopy e).
-
-Lemma step_R_eq_or_touches_region :
-  forall mu R e mu' R' e',
-    (mu, R, e) -->> (mu', R', e') ->
-    R = R' \/ touches_region e.
-Proof.
-  intros mu R e mu' R' e' Hstep.
-  (* remember + revert so `induction Hstep` substitutes the outer
-     (mu, R, e) and (mu', R', e') slots cleanly into each
-     constructor's args, and IHs get clean universal quantification
-     for congruence cases (same pattern as `preservation`). *)
-  remember (mu, R, e) as cfg eqn:Hcfg.
-  remember (mu', R', e') as cfg' eqn:Hcfg'.
-  revert mu R e mu' R' e' Hcfg Hcfg'.
-  induction Hstep;
-    intros mu0 R0 e0 mu0' R0' e0' Hcfg Hcfg';
-    inversion Hcfg; subst;
-    inversion Hcfg'; subst;
-    (* Atom steps (R kept literally in the constructor's conclusion). *)
-    try (left; reflexivity);
-    (* Region steps (outer expression is ERegion). *)
-    try (right; apply TR_here);
-    (* Congruence steps: IH on the inner step gives the disjunction. *)
-    try (destruct (IHHstep _ _ _ _ _ _ eq_refl eq_refl) as [Heq | HTR];
-         [ left; exact Heq
-         | right; constructor; (try assumption); exact HTR ]).
-Qed.
 
 (** ** Lemma B — Linearity-context invariance for siblings under step.
 

@@ -143,11 +143,15 @@ mechanical 28 are 1–2 days of tactic work.
 
 Empirically verified against `coqc 8.18.0`. The 12 cases identified
 as "remaining open" after the f499c82 clone-out have now each been
-given an explicit per-case proof skeleton. The lemma is still
-`Admitted.`, but the residual admits are now exactly the
-**region-env weakening sub-cases** — each tied to the
-`step_R_eq_or_touches_region` RIGHT branch (i.e., the inner step
-genuinely changes `R`).
+given an explicit per-case proof skeleton. **Two iterations**:
+
+1. **First pass**: dispatched on `step_R_eq_or_touches_region`,
+   closed the LEFT (R = R') branches, admitted RIGHT. 8 admits remained.
+2. **Second pass**: introduced finer `step_R_change_shape` (3-way
+   disjunction: equal / prepend r / remove_first r), closed the MIDDLE
+   (prepend) branch for all 7 congruence cases via `region_add_typing`.
+   **Still 8 admits**, but each now tied to the strictly-narrower
+   "remove_first r R" sub-case rather than the broader "touches_region".
 
 **Moved** `touches_region` + `step_R_eq_or_touches_region` to before
 `step_preserves_type` so the latter can dispatch on the LEFT
@@ -162,17 +166,30 @@ genuinely changes `R`).
 | 10 | `S_Region_Exit` (ERegion r v → v) | `region_shrink_preserves_typing` bridges R0 and remove_first r R0, then `type_determinacy` |
 | 12 | `S_Copy` atomic (ECopy v → EPair v v) | `value_context_unchanged` on first projection + two `type_determinacy` calls on v |
 
-### Partially closed — LEFT branch only (7 of 12)
+### Partially closed — LEFT + MIDDLE closed, RIGHT admitted (7 of 12)
 
-| Goal | Step rule | LEFT (R = R') closure | RIGHT admit |
-|------|-----------|------------------------|-------------|
-| 2 | `S_Let_Step` | IH + `ctx_types_agree_trans` on midpoint + `ctx_extend_types_agree` + `type_determinacy` on body | region weakening for body e2 |
-| 3 | `S_LetLin_Step` | same as Goal 2 | same |
-| 4 | `S_App_Step2` | `value_context_unchanged` + `type_determinacy` on v1's TFun typings | region weakening for v1's body |
-| 5 | `S_If_Step` | `ctx_types_agree_trans` on post-cond + `type_determinacy` on branch | region weakening for branches |
-| 6 | `S_Pair_Step1` | IH on e1 step + `type_determinacy` on e2 | region weakening for e2 |
-| 7 | `S_Pair_Step2` | `value_context_unchanged` + `type_determinacy` on v1 + IH on (e2, e2') | region weakening for v1 |
-| 9 | `S_Case_Step` | IH on scrutinee + `ctx_extend_types_agree` + `type_determinacy` on branch | region weakening for branches |
+After the second pass with `step_R_change_shape`, each of these has
+2 of 3 sub-cases closed mechanically. Residual admit is the
+removal sub-case only:
+
+| Goal | Step rule | LEFT (R = R') | MIDDLE (R' = r :: R) | RIGHT (R' = remove_first r R) |
+|------|-----------|----------------|----------------------|-------------------------------|
+| 2 | `S_Let_Step` | ✅ type_determinacy on body | ✅ `region_add_typing` on body + type_determinacy | ❌ Phase 3 |
+| 3 | `S_LetLin_Step` | ✅ same as Goal 2 | ✅ same as Goal 2 | ❌ Phase 3 |
+| 4 | `S_App_Step2` | ✅ type_determinacy on v1's TFun | ✅ `region_add_typing` on v1 + type_determinacy | ❌ Phase 3 |
+| 5 | `S_If_Step` | ✅ type_determinacy on branch | ✅ `region_add_typing` on branch + type_determinacy | ❌ Phase 3 |
+| 6 | `S_Pair_Step1` | ✅ type_determinacy on e2 | ✅ `region_add_typing` on e2 + type_determinacy | ❌ Phase 3 |
+| 7 | `S_Pair_Step2` | ✅ type_determinacy on v1 + IH on e2 | ✅ `region_add_typing` on v1 + IH on e2 | ❌ Phase 3 |
+| 9 | `S_Case_Step` | ✅ type_determinacy on branch | ✅ `region_add_typing` on branch + type_determinacy | ❌ Phase 3 |
+
+The 7 RIGHT admits all share a single root cause: with `R0' = remove_first r R0`,
+bridging a sibling typing requires `expr_free_of_region r e_sibling`, which
+would follow from `~In r R0'` (the sibling typed under shrunk R wouldn't
+reference r). But without a region-uniqueness invariant on `R`, `~In r R0'`
+isn't derivable — `remove_first` only kills the head occurrence; if `r`
+appeared twice in `R0`, it survives in `R0'`. So the proper resolution is
+either to add `NoDup R` as an invariant (and thread it through preservation)
+or to formulate region-shrinking more permissively (Phase 3 work).
 
 ### Partially closed — one sub-case admitted (1 of 12)
 
@@ -184,16 +201,23 @@ genuinely changes `R`).
 
 - **Before**: `step_preserves_type` was `all: admit` with 12 open
   goals — every case admitted with no structure.
-- **After**: 4 of 12 closed fully, 7 of 12 have LEFT (R = R')
-  branch closed, 1 of 12 has main branch closed.
-- **Residual admits**: 8 — all tied to `step_R_eq_or_touches_region`'s
-  RIGHT branch, i.e., Phase 3 region-env weakening for non-values.
+- **After (pass 1)**: 4 of 12 closed fully, 7 of 12 had LEFT (R = R')
+  branch closed, 1 of 12 had main branch closed. 8 admits.
+- **After (pass 2)**: same goal count, but each congruence admit
+  narrowed to just the `R' = remove_first r R` sub-case via the new
+  `step_R_change_shape` lemma + `region_add_typing` for the MIDDLE
+  branch. Still 8 admits but each strictly narrower.
 
-The remaining work is exactly the Phase 3 lemma (region-env
-weakening for non-values) that was already documented as the genuinely
-hard remaining piece. Once Phase 3 is available, all 8 admits close
-mechanically via `region_add_typing` / `region_shrink_preserves_typing`
-+ `type_determinacy`.
+New supporting lemmas added (both Qed):
+- `step_R_change_shape`: refines `step_R_eq_or_touches_region` into a
+  3-way disjunction (`R = R'` ∨ `R' = r :: R` ∨ `R' = remove_first r R`).
+  Provable by direct induction on `step`. ~10 LOC.
+
+The remaining 8 admits all concentrate on the same root cause:
+**need either a `NoDup R` invariant or a more permissive
+region-shrinking lemma** so that a sibling typing under
+`remove_first r R0` can be re-lifted to `R0` (or via permutation).
+Once that lands, all 8 admits close mechanically.
 
 ## Lemma B per-case status (2026-05-24)
 

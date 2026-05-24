@@ -3467,6 +3467,41 @@ Proof.
          | right; constructor; (try assumption); exact HTR ]).
 Qed.
 
+(** ** Finer-grained R-change shape
+
+    [step_R_change_shape] refines [step_R_eq_or_touches_region]'s
+    disjunction into the three concrete ways [R] can change under a
+    step: unchanged, prepended with a new region (S_Region_Enter
+    descent), or shrunk by removing a region (S_Region_Exit descent).
+    Used by [step_preserves_type]'s touches_region sub-cases to
+    bridge sibling typings via [region_add_typing] (for the prepend
+    case) or [region_shrink_preserves_typing] (for the shrink case
+    when the sibling is free of the removed region). *)
+Lemma step_R_change_shape :
+  forall mu R e mu' R' e',
+    (mu, R, e) -->> (mu', R', e') ->
+    R = R' \/
+    (exists r, R' = r :: R) \/
+    (exists r, R' = remove_first r R).
+Proof.
+  intros mu R e mu' R' e' Hstep.
+  remember (mu, R, e) as cfg eqn:Hcfg.
+  remember (mu', R', e') as cfg' eqn:Hcfg'.
+  revert mu R e mu' R' e' Hcfg Hcfg'.
+  induction Hstep;
+    intros mu0 R0 e0 mu0' R0' e0' Hcfg Hcfg';
+    inversion Hcfg; subst;
+    inversion Hcfg'; subst;
+    (* Most atomic non-region step rules leave R unchanged. *)
+    try (left; reflexivity);
+    (* Congruence rules: inherit from inner step. *)
+    try (apply (IHHstep _ _ _ _ _ _ eq_refl eq_refl)).
+  - (* S_Region_Enter: R0' = r :: R0 *)
+    right; left; exists r; reflexivity.
+  - (* S_Region_Exit: R0' = remove_first r R0 *)
+    right; right; exists r; reflexivity.
+Qed.
+
 (** ** Step preserves type
 
     If [e] steps to [e'] and BOTH have typings, then they're at the
@@ -4218,8 +4253,9 @@ Proof.
         pose proof (IHHstep _ _ _ _ _ _ eq_refl eq_refl _ _ _ He1 _ _ He1') as HT12
     end.
     subst.
-    pose proof (step_R_eq_or_touches_region _ _ _ _ _ _ Hstep) as [HeqR | _].
-    - subst.
+    pose proof (step_R_change_shape _ _ _ _ _ _ Hstep) as [HeqR | [[r Hadd] | [r Hrem]]].
+    - (* LEFT: R = R'. *)
+      subst.
       match goal with
       | [ He1 : has_type ?R ?G ?e1s ?T1 ?Gmid,
           He1' : has_type ?R ?G ?e1s' ?T1 ?Gmid' |- _ ] =>
@@ -4237,12 +4273,30 @@ Proof.
           |- ?Ta = ?Tb ] =>
           eapply type_determinacy; [ exact He2 | exact He2' | exact HagrExt ]
       end.
-    - (* touches_region case — needs region-env weakening for the body
-         e2 to bridge typings under R0 and R0'. Phase 3. *)
+    - (* MIDDLE: R0' = r :: R0. Lift the body's R0 typing to r :: R0
+         via region_add_typing; align contexts via typing_types_agree
+         composition; close via type_determinacy under shared r :: R0. *)
+      subst R0'.
+      (* Identify the four typings by the position-pattern of their R:
+         body-pre under R0 (H6 by current naming) and body-post under
+         r :: R0 (H8 by current naming). Use multimatch for backtracking. *)
+      pose proof (region_add_typing _ _ _ _ _ r H6) as He2lifted.
+      assert (HagrMid : ctx_types_agree G' G'0)
+        by (eapply ctx_types_agree_trans;
+            [ eapply typing_types_agree; exact H3
+            | apply ctx_types_agree_sym; eapply typing_types_agree; exact H4 ]).
+      assert (HagrExt : ctx_types_agree (ctx_extend G' T2) (ctx_extend G'0 T2))
+        by (apply ctx_extend_types_agree; assumption).
+      eapply type_determinacy; [ exact He2lifted | exact H8 | exact HagrExt ].
+    - (* RIGHT: R0' = remove_first r R0. Needs expr_free_of_region r e2
+         (derivable from H8 typing e2 under shrunk R0' IF r is unique
+         in R0 — currently no uniqueness invariant in scope). Phase 3. *)
       admit.
   }
 
-  (* Goal 3: S_LetLin_Step. Identical structure to Goal 2. *)
+  (* Goal 3: S_LetLin_Step. Identical structure to Goal 2 (T_LetLin
+     differs from T_Let only in an extra is_linear_ty premise, which
+     doesn't affect type-equality reasoning). *)
   1: {
     inversion Hte; subst.
     inversion Hte'; subst.
@@ -4253,8 +4307,9 @@ Proof.
         pose proof (IHHstep _ _ _ _ _ _ eq_refl eq_refl _ _ _ He1 _ _ He1') as HT12
     end.
     subst.
-    pose proof (step_R_eq_or_touches_region _ _ _ _ _ _ Hstep) as [HeqR | _].
-    - subst.
+    pose proof (step_R_change_shape _ _ _ _ _ _ Hstep) as [HeqR | [[r Hadd] | [r Hrem]]].
+    - (* LEFT *)
+      subst.
       match goal with
       | [ He1 : has_type ?R ?G ?e1s ?T1 ?Gmid,
           He1' : has_type ?R ?G ?e1s' ?T1 ?Gmid' |- _ ] =>
@@ -4272,18 +4327,30 @@ Proof.
           |- ?Ta = ?Tb ] =>
           eapply type_determinacy; [ exact He2 | exact He2' | exact HagrExt ]
       end.
-    - admit.
+    - (* MIDDLE: R0' = r :: R0; lift body via region_add_typing. *)
+      subst R0'.
+      pose proof (region_add_typing _ _ _ _ _ r H7) as Hlift.
+      assert (HagrMid : ctx_types_agree G' G'0)
+        by (eapply ctx_types_agree_trans;
+            [ eapply typing_types_agree; exact H4
+            | apply ctx_types_agree_sym; eapply typing_types_agree; exact H6 ]).
+      assert (HagrExt : ctx_types_agree (ctx_extend G' T2) (ctx_extend G'0 T2))
+        by (apply ctx_extend_types_agree; assumption).
+      eapply type_determinacy; [ exact Hlift | exact H10 | exact HagrExt ].
+    - (* RIGHT: R0' = remove_first r R0. Phase 3. *)
+      admit.
   }
 
-  (* Goal 4: S_App_Step2 — EApp v1 e2 → EApp v1 e2'. Outer T = T2
-     (function range from TFun T1 T2). Dispatch on R. LEFT: v1's
-     two TFun typings align via type_determinacy; gives T1=T1', T2=T2'.
-     RIGHT: region weakening needed for v1's body — admit. *)
+  (* Goal 4: S_App_Step2 — EApp v1 e2 → EApp v1 e2'. Outer T = T2.
+     Dispatch on R via step_R_change_shape. LEFT: v1's two TFun
+     typings align via type_determinacy. MIDDLE: lift the R0 typing
+     to r :: R0 via region_add_typing, then align. RIGHT: Phase 3. *)
   1: {
     inversion Hte; subst.
     inversion Hte'; subst.
-    pose proof (step_R_eq_or_touches_region _ _ _ _ _ _ Hstep) as [HeqR | _].
-    - subst.
+    pose proof (step_R_change_shape _ _ _ _ _ _ Hstep) as [HeqR | [[r Hadd] | [r Hrem]]].
+    - (* LEFT *)
+      subst.
       match goal with
       | [ Hv : is_value ?v1,
           Hv1 : has_type ?R ?G ?v1 (TFun ?T1a ?T2a) ?Gmid,
@@ -4298,18 +4365,38 @@ Proof.
                 [exact Hv1 | exact Hv1' | apply ctx_types_agree_refl]);
           inversion HTfun; subst; reflexivity
       end.
-    - admit.
+    - (* MIDDLE: R0' = r :: R0. Lift v1's R0 typing to r :: R0,
+         then type_determinacy on the two TFun typings. *)
+      subst R0'.
+      match goal with
+      | [ Hv : is_value ?v1,
+          Hv1 : has_type R0 ?G ?v1 (TFun ?T1a ?T2a) ?Gmid,
+          Hv1' : has_type (r :: R0) ?G ?v1 (TFun ?T1b ?T2b) ?Gmid' |- _ ] =>
+          assert (Gmid = G) by
+            (eapply value_context_unchanged; [exact Hv1 | exact Hv]);
+          assert (Gmid' = G) by
+            (eapply value_context_unchanged; [exact Hv1' | exact Hv]);
+          subst Gmid Gmid';
+          pose proof (region_add_typing _ _ _ _ _ r Hv1) as Hv1lifted;
+          assert (HTfun : TFun T1a T2a = TFun T1b T2b)
+            by (eapply type_determinacy;
+                [exact Hv1lifted | exact Hv1' | apply ctx_types_agree_refl]);
+          inversion HTfun; subst; reflexivity
+      end.
+    - (* RIGHT: Phase 3. *)
+      admit.
   }
 
-  (* Goal 5: S_If_Step — EIf e1 e2 e3 → EIf e1' e2 e3. Outer T from
-     branches. Dispatch on R. LEFT: branches typed under common R;
-     ctx_types_agree on post-cond contexts; type_determinacy on
-     branch e2 closes. RIGHT: region weakening needed. *)
+  (* Goal 5: S_If_Step — EIf e1 e2 e3 → EIf e1' e2 e3. Dispatch on R:
+     LEFT: type_determinacy on branch e2 under shared R after
+     ctx_types_agree on post-cond contexts. MIDDLE: region_add_typing
+     on H_e2 (branch under R0) lifts to r :: R0. RIGHT: Phase 3. *)
   1: {
     inversion Hte; subst.
     inversion Hte'; subst.
-    pose proof (step_R_eq_or_touches_region _ _ _ _ _ _ Hstep) as [HeqR | _].
-    - subst.
+    pose proof (step_R_change_shape _ _ _ _ _ _ Hstep) as [HeqR | [[r Hadd] | [r Hrem]]].
+    - (* LEFT *)
+      subst.
       match goal with
       | [ H1 : has_type ?R ?G ?e1s (TBase TBool) ?Gmid,
           H1' : has_type ?R ?G ?e1s' (TBase TBool) ?Gmid' |- _ ] =>
@@ -4324,12 +4411,32 @@ Proof.
           Hagr : ctx_types_agree ?Gmid ?Gmid' |- ?Ta = ?Tb ] =>
           eapply type_determinacy; [ exact H2 | exact H2' | exact Hagr ]
       end.
-    - admit.
+    - (* MIDDLE: R0' = r :: R0. Lift a branch typing from R0 to r :: R0. *)
+      subst R0'.
+      match goal with
+      | [ H1 : has_type R0 ?G ?e1s (TBase TBool) ?Gmid,
+          H1' : has_type (r :: R0) ?G ?e1s' (TBase TBool) ?Gmid' |- _ ] =>
+          assert (HagrMid : ctx_types_agree Gmid Gmid')
+            by (eapply ctx_types_agree_trans;
+                [ eapply typing_types_agree; exact H1
+                | apply ctx_types_agree_sym; eapply typing_types_agree; exact H1' ])
+      end.
+      match goal with
+      | [ H2 : has_type R0 ?Gmid ?e2x _ _ |- _ ] =>
+          pose proof (region_add_typing _ _ _ _ _ r H2) as H2lift
+      end.
+      match goal with
+      | [ Hlift : has_type (r :: R0) ?Gmid ?e2x ?Ta _,
+          H2'   : has_type (r :: R0) ?Gmid' ?e2x ?Tb _,
+          HagrMid : ctx_types_agree ?Gmid ?Gmid' |- ?Ta = ?Tb ] =>
+          eapply type_determinacy; [ exact Hlift | exact H2' | exact HagrMid ]
+      end.
+    - (* RIGHT: Phase 3. *)
+      admit.
   }
 
   (* Goal 6: S_Pair_Step1 — EPair e1 e2 → EPair e1' e2. Outer T =
-     TProd T1 T2. IH on e1 gives T1=T1'. T2 from e2 typings; under
-     R = R' (LEFT), type_determinacy aligns T2=T2'. RIGHT: admit. *)
+     TProd T1 T2. IH on e1 gives T1=T1'. T2 from e2 typings. *)
   1: {
     inversion Hte; subst.
     inversion Hte'; subst.
@@ -4340,8 +4447,9 @@ Proof.
         pose proof (IHHstep _ _ _ _ _ _ eq_refl eq_refl _ _ _ He1 _ _ He1') as HT12
     end.
     subst.
-    pose proof (step_R_eq_or_touches_region _ _ _ _ _ _ Hstep) as [HeqR | _].
-    - subst.
+    pose proof (step_R_change_shape _ _ _ _ _ _ Hstep) as [HeqR | [[r Hadd] | [r Hrem]]].
+    - (* LEFT *)
+      subst.
       match goal with
       | [ He1 : has_type ?R ?G ?e1s ?T1 ?Gmid,
           He1' : has_type ?R ?G ?e1s' ?T1 ?Gmid' |- _ ] =>
@@ -4358,18 +4466,41 @@ Proof.
             by (eapply type_determinacy; [ exact H2 | exact H2' | exact Hagr ]);
           subst T2b; reflexivity
       end.
-    - admit.
+    - (* MIDDLE: R0' = r :: R0; lift e2 typing from R0 to r :: R0. *)
+      subst R0'.
+      match goal with
+      | [ He1 : has_type R0 ?G ?e1s ?T1 ?Gmid,
+          He1' : has_type (r :: R0) ?G ?e1s' ?T1 ?Gmid' |- _ ] =>
+          assert (Hagr : ctx_types_agree Gmid Gmid')
+            by (eapply ctx_types_agree_trans;
+                [ eapply typing_types_agree; exact He1
+                | apply ctx_types_agree_sym; eapply typing_types_agree; exact He1' ])
+      end.
+      match goal with
+      | [ H2 : has_type R0 ?Gmid ?e2x _ _ |- _ ] =>
+          pose proof (region_add_typing _ _ _ _ _ r H2) as H2lift
+      end.
+      match goal with
+      | [ Hlift : has_type (r :: R0) ?Gmid ?e2x ?T2a _,
+          H2'   : has_type (r :: R0) ?Gmid' ?e2x ?T2b _,
+          Hagr  : ctx_types_agree ?Gmid ?Gmid' |- _ ] =>
+          assert (HT2 : T2a = T2b)
+            by (eapply type_determinacy; [ exact Hlift | exact H2' | exact Hagr ]);
+          subst T2b; reflexivity
+      end.
+    - (* RIGHT: Phase 3. *)
+      admit.
   }
 
-  (* Goal 7: S_Pair_Step2 — EPair v1 e2 → EPair v1 e2'. Outer T =
-     TProd T1 T2. v1's two typings align T1 (under any R via value
-     context invariance + type_determinacy when R = R'). IH on
-     (e2, e2') aligns T2. Dispatch on R: LEFT closes, RIGHT admits. *)
+  (* Goal 7: S_Pair_Step2 — EPair v1 e2 → EPair v1 e2'. v1 value;
+     T1 (first component) aligns via type_determinacy on v1; T2 via
+     IH on (e2, e2'). *)
   1: {
     inversion Hte; subst.
     inversion Hte'; subst.
-    pose proof (step_R_eq_or_touches_region _ _ _ _ _ _ Hstep) as [HeqR | _].
-    - subst.
+    pose proof (step_R_change_shape _ _ _ _ _ _ Hstep) as [HeqR | [[r Hadd] | [r Hrem]]].
+    - (* LEFT *)
+      subst.
       match goal with
       | [ Hv : is_value ?v1,
           Hv1 : has_type ?R ?G ?v1 ?T1a ?Gmid,
@@ -4391,7 +4522,33 @@ Proof.
           pose proof (IHHstep _ _ _ _ _ _ eq_refl eq_refl _ _ _ He2 _ _ He2') as HT2;
           subst; reflexivity
       end.
-    - admit.
+    - (* MIDDLE: R0' = r :: R0. v1's T1 aligned via region_add_typing
+         on v1's R0 typing; e2-side via IH (universal in R). *)
+      subst R0'.
+      match goal with
+      | [ Hv : is_value ?v1,
+          Hv1 : has_type R0 ?G ?v1 ?T1a ?Gmid,
+          Hv1' : has_type (r :: R0) ?G ?v1 ?T1b ?Gmid' |- _ ] =>
+          assert (Gmid = G) by
+            (eapply value_context_unchanged; [exact Hv1 | exact Hv]);
+          assert (Gmid' = G) by
+            (eapply value_context_unchanged; [exact Hv1' | exact Hv]);
+          subst Gmid Gmid';
+          pose proof (region_add_typing _ _ _ _ _ r Hv1) as Hv1lift;
+          assert (HT1 : T1a = T1b)
+            by (eapply type_determinacy;
+                [exact Hv1lift | exact Hv1' | apply ctx_types_agree_refl]);
+          subst T1b
+      end.
+      match goal with
+      | [ He2 : has_type R0 ?G ?e2s _ _,
+          He2' : has_type (r :: R0) ?G ?e2s' _ _,
+          Hs : (_, R0, ?e2s) -->> (_, r :: R0, ?e2s') |- _ ] =>
+          pose proof (IHHstep _ _ _ _ _ _ eq_refl eq_refl _ _ _ He2 _ _ He2') as HT2;
+          subst; reflexivity
+      end.
+    - (* RIGHT: Phase 3. *)
+      admit.
   }
 
   (* Goal 8: S_Snd atomic — ESnd (EPair v1 v2) → v2. No R change.
@@ -4419,7 +4576,9 @@ Proof.
 
   (* Goal 9: S_Case_Step — ECase e e1 e2 → ECase e' e1 e2. Outer T =
      branches' type. IH on scrutinee gives TSum alignment. Dispatch
-     on R for branch typings. *)
+     on R for branch typings via step_R_change_shape; LEFT closes via
+     type_determinacy on branch, MIDDLE via region_add_typing on
+     branch + type_determinacy. *)
   1: {
     inversion Hte; subst.
     inversion Hte'; subst.
@@ -4430,8 +4589,9 @@ Proof.
         pose proof (IHHstep _ _ _ _ _ _ eq_refl eq_refl _ _ _ Hsc _ _ Hsc') as Hsum;
         inversion Hsum; subst
     end.
-    pose proof (step_R_eq_or_touches_region _ _ _ _ _ _ Hstep) as [HeqR | _].
-    - subst.
+    pose proof (step_R_change_shape _ _ _ _ _ _ Hstep) as [HeqR | [[r Hadd] | [r Hrem]]].
+    - (* LEFT *)
+      subst.
       match goal with
       | [ Hsc : has_type ?R ?G ?es (TSum ?T1 _) ?Gmid,
           Hsc' : has_type ?R ?G ?es' (TSum ?T1 _) ?Gmid' |- _ ] =>
@@ -4449,7 +4609,20 @@ Proof.
           |- ?Ta = ?Tb ] =>
           eapply type_determinacy; [ exact Hb1 | exact Hb1' | exact Hag ]
       end.
-    - admit.
+    - (* MIDDLE: R0' = r :: R0. Use H4/H5 (scrutinee typings) to align
+         branch contexts, lift H7 (first branch under R0) to r :: R0,
+         then type_determinacy with H10 under shared r :: R0. *)
+      subst R0'.
+      pose proof (region_add_typing _ _ _ _ _ r H7) as Hb1lift.
+      assert (HagrMid : ctx_types_agree G' G'0)
+        by (eapply ctx_types_agree_trans;
+            [ eapply typing_types_agree; exact H4
+            | apply ctx_types_agree_sym; eapply typing_types_agree; exact H5 ]).
+      assert (HagrExt : ctx_types_agree (ctx_extend G' T3) (ctx_extend G'0 T3))
+        by (apply ctx_extend_types_agree; assumption).
+      eapply type_determinacy; [ exact Hb1lift | exact H10 | exact HagrExt ].
+    - (* RIGHT: Phase 3. *)
+      admit.
   }
 
   (* Goal 10: S_Region_Exit — ERegion r v → v. R0 → remove_first r R0.

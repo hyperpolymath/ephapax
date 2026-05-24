@@ -3695,18 +3695,147 @@ Proof.
         eapply output_ctx_det; [exact Hsub | exact Hte']
     end
   ].
-  (* 24 cases remain (Cluster A fully closed). Three clusters:
+  (* === Cluster C — atomic compound-value rules ===
+     S_Fst, S_Snd: extract first/second of a pair value.
+     Recipe: invert T_Fst/T_Snd to get the pair typing, invert
+     T_Pair to get both component typings, apply
+     value_context_unchanged twice to align all contexts, then
+     value_context_unchanged on Hte' to align Gb. *)
+  (* S_Fst: e = EFst (EPair v1 v2) -> v1. *)
+  all: try solve [
+    match goal with
+    | [ Hv1 : is_value ?v1, Hv2 : is_value ?v2,
+        Hte : has_type ?R ?G (EFst (EPair ?v1 ?v2)) ?T ?Ga,
+        Hte' : has_type ?R ?G ?v1 ?T ?Gb |- ?Ga = ?Gb ] =>
+        inversion Hte; subst;
+        match goal with
+        | [ Hpair : has_type ?R ?G (EPair ?v1 ?v2) (TProd ?T ?T2) ?Gpost
+            |- _ ] =>
+            assert (HGp : Gpost = G) by
+              (eapply value_context_unchanged;
+               [exact Hpair | apply VPair; assumption]);
+            subst Gpost;
+            assert (HGb : Gb = G) by
+              (eapply value_context_unchanged; eassumption);
+            subst Gb;
+            reflexivity
+        end
+    end
+  ].
+  (* S_Snd: e = ESnd (EPair v1 v2) -> v2. *)
+  all: try solve [
+    match goal with
+    | [ Hv1 : is_value ?v1, Hv2 : is_value ?v2,
+        Hte : has_type ?R ?G (ESnd (EPair ?v1 ?v2)) ?T ?Ga,
+        Hte' : has_type ?R ?G ?v2 ?T ?Gb |- ?Ga = ?Gb ] =>
+        inversion Hte; subst;
+        match goal with
+        | [ Hpair : has_type ?R ?G (EPair ?v1 ?v2) (TProd ?T1 ?T) ?Gpost
+            |- _ ] =>
+            assert (HGp : Gpost = G) by
+              (eapply value_context_unchanged;
+               [exact Hpair | apply VPair; assumption]);
+            subst Gpost;
+            assert (HGb : Gb = G) by
+              (eapply value_context_unchanged; eassumption);
+            subst Gb;
+            reflexivity
+        end
+    end
+  ].
+  (* S_Copy: e = ECopy v -> EPair v v. T_Copy on Hte gives v's
+     typing; T_Pair inversion on Hte' gives two v-typings. All have
+     identical inputs (G) so value_context_unchanged aligns
+     everything to G. *)
+  all: try solve [
+    match goal with
+    | [ Hv : is_value ?v,
+        Hte : has_type ?R ?G (ECopy ?v) ?T ?Ga,
+        Hte' : has_type ?R ?G (EPair ?v ?v) ?T ?Gb |- ?Ga = ?Gb ] =>
+        inversion Hte; subst;
+        match goal with
+        | [ Hvt : has_type ?R ?G ?v ?Tv ?Ga |- _ ] =>
+            assert (HGa : Ga = G) by
+              (eapply value_context_unchanged; eassumption);
+            subst Ga
+        end;
+        inversion Hte'; subst;
+        match goal with
+        | [ Hv1t : has_type ?R ?G ?v ?Tv ?Gmid,
+            Hv2t : has_type ?R ?Gmid ?v ?Tv ?Gb' |- _ ] =>
+            assert (HGmid : Gmid = G) by
+              (eapply value_context_unchanged; eassumption);
+            subst Gmid;
+            assert (HGb' : Gb' = G) by
+              (eapply value_context_unchanged; eassumption);
+            subst Gb';
+            reflexivity
+        end
+    end
+  ].
+  (* S_StringLen: EStringLen (EBorrow (ELoc l r)) -> EI32 n.
+     Original was missed by the atomic-axiom tactic because the
+     EBorrow (ELoc _ _) inversion needs two passes (T_StringLen
+     wraps T_Borrow_Val wraps T_Loc). Explicit chain here. *)
+  all: try solve [
+    match goal with
+    | [ Hte : has_type ?R ?G (EStringLen (EBorrow (ELoc ?l ?r))) ?T ?Ga,
+        Hte' : has_type ?R ?G (EI32 _) ?T ?Gb |- ?Ga = ?Gb ] =>
+        inversion Hte; subst;
+        match goal with
+        | [ Hbor : has_type ?R ?G (EBorrow (ELoc ?l ?r))
+                                  (TBorrow (TString _)) ?Ga |- _ ] =>
+            inversion Hbor; subst;
+            inversion Hte'; subst;
+            try reflexivity;
+            match goal with
+            | [ Hloc : has_type ?R ?G (ELoc ?l ?r) _ ?Gloc |- _ ] =>
+                inversion Hloc; subst; reflexivity
+            end
+        end
+    end
+  ].
+  (* S_Region_Enter and S_StringLen remain open. Both are tractable
+     but blocked on Ltac pattern-matching mechanics that ate too much
+     budget this session. Deferred to follow-up:
+       - S_Region_Enter: T_Region/T_Region_Active inversions expose
+         the inner expression's typings under (r :: R); G with outputs
+         Ga and Gb. Goal-conclusion-binding match should pick them but
+         Coq's hypothesis backtracking interacts oddly with the
+         post-inversion duplicate-shape state. Workaround: invert
+         manually with [destruct Hte; destruct Hte'] and use explicit
+         hypothesis names.
+       - S_StringLen: EBorrow-of-ELoc chain needs THREE nested
+         inversions (T_StringLen -> T_Borrow_Val -> T_Loc) and the
+         current repeat-inversion tactic doesn't follow the chain. *)
+  (* S_Region_Exit: ERegion r v -> v (R becomes remove_first r R).
+     T_Region_Active inversion + value_context_unchanged twice. *)
+  all: try solve [
+    match goal with
+    | [ Hv : is_value ?v,
+        Hte : has_type ?R ?G (ERegion ?r ?v) ?T ?Ga,
+        Hte' : has_type _ ?G ?v ?T ?Gb |- ?Ga = ?Gb ] =>
+        inversion Hte; subst;
+        match goal with
+        | [ Hvt : has_type ?R ?G ?v ?T ?Ga |- _ ] =>
+            assert (HGa : Ga = G) by
+              (eapply value_context_unchanged; eassumption);
+            subst Ga;
+            assert (HGb : Gb = G) by
+              (eapply value_context_unchanged; eassumption);
+            subst Gb;
+            reflexivity
+        end
+    end
+  ].
+  (* 20 cases remain.
        - Cluster B congruence (~18): every S_*_Step except S_Borrow_Step.
-         Recipe: step_R_eq_or_touches_region for the R = R' branch,
-         IH on the inner step, recursive Lemma B for siblings.
-         RIGHT branch (touches_region) shares preservation's Phase 3
-         region-env weakening bottleneck.
-       - Cluster C compound-value (~5): S_StringLen (atomic),
-         S_Copy, S_Fst, S_Snd. Each needs careful inversion of
-         compound-value typings (T_StringLen / T_Borrow_Val,
-         T_Pair, T_Copy).
-       - Region atomic (~3): S_Region_Enter, S_Region_Exit,
-         S_Region_Step. Last blocks on Phase 3. *)
+       - Cluster C remainder (~2): S_StringLen (atomic, blocked on
+         the EBorrow-of-ELoc chain), S_Region_Enter (atomic, blocked
+         on Hte/Hte' region-env pattern alignment). Both are
+         tractable; deferred for the next session.
+       - Phase 3 blocker (~1): S_Region_Step needs region-env
+         weakening for non-values. *)
   all: admit.
 Admitted.
 

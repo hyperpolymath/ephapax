@@ -192,7 +192,20 @@ lemma as preservation Phase 3 — these cases share the bottleneck.
 `S_Drop_Step`, `S_Copy_Step`. (17 listed; +1 region congruence
 `S_Region_Step` belongs to cluster C.)
 
-#### Cluster C — region / compound-value (~6)
+#### Cluster C — region / compound-value (4 of 6 closed, 2 open)
+
+**Closed (2026-05-24)**: `S_Fst`, `S_Snd`, `S_Copy`, `S_Region_Exit`.
+
+Recipe: invert the compound typing rule (T_Fst → T_Pair, T_Snd →
+T_Pair, T_Copy, T_Region_Active), apply `value_context_unchanged`
+on each value-typing premise to align intermediate contexts with
+the input context G, then `reflexivity` closes the resulting
+`G = G` goal (output_ctx_det not even needed when both sides
+collapse to G).
+
+**Still open**:
+
+
 
 | Step rule | What's needed |
 |-----------|---------------|

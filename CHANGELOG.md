@@ -5,6 +5,30 @@ All notable changes to Ephapax are documented here.
 
 ## [Unreleased]
 
+### Repository tidy (2026-05-25)
+- **Cache purge**: removed 340 wrongly-tracked `.zig-cache-global/` files
+  + stale `formal/.aux` references to deleted experimental files;
+  added `.zig-cache-global/` to `.gitignore` to prevent regression.
+- **Document consolidation**: deleted duplicate `CONTRIBUTING.adoc`
+  (kept `.md`); deleted root-level OCaml test cruft.
+- **Document taxonomy** — moved to `docs/` with date-stamped naming:
+  - `formal/PRESERVATION-HANDOFF.md` → `docs/sessions/SESSION-2026-05-24-preservation-handoff.md`
+  - `formal/INTERACTIVE-PROOF-SESSION.md` → `docs/sessions/SESSION-2026-03-28-interactive-proof.md`
+  - `formal/DESIGN-NOTE-2026-03-28*.md` → `docs/specs/`
+  - `PROOF-NEEDS.md` / `TEST-NEEDS.md` / `TOPOLOGY.md` (root) → `docs/specs/`
+  - `arcvix-*.tex` (root) → `docs/papers/`
+  - `llm-warmup-{dev,user}.md` (root) → `docs/ai/`
+  - `aqueduct.eph` (root) → `examples/advanced/`
+- **Path refs updated** in `README.adoc`, `ROADMAP.adoc`,
+  `EXPLAINME.adoc`, `RUST-SPARK-STANCE.adoc`.
+- `formal/` now contains only the canonical Coq sources +
+  build glue.
+- **Hypatia scan triage**: added `docs/specs/KNOWN-PROOF-DEBT.md`
+  cataloguing every flagged item with closure path or acceptance
+  rationale (including 4 false positives where the scanner matches
+  the words `axiom` / `believe_me` / `assert_total` inside comments).
+  `SECURITY.md` links to it.
+
 ### Proof state (2026-05-20 → 2026-05-21)
 - **Coq `preservation` reduction campaign**: 910 open goals → 12 (98.7% reduction). PR chain:
   - **#92** — honest framing: replaced unsubstantiated "Qed 2026-04-27" claim with `Admitted.`

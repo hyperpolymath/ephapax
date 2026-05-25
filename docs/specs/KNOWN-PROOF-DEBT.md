@@ -52,27 +52,44 @@ These are sub-case admits inside structured proofs — each closes a
 specific R-shape sub-case of the parent lemma's `S_Region_Step`. They
 are the per-case granularity of the 5 `Admitted` lemmas above.
 
-### Axioms (2 occurrences)
+### Axioms (2 occurrences) — **FALSE POSITIVES**
 
-[TODO: enumerate the two — likely classical reasoning or string
-decidability — and confirm they are kernel-acceptable vs imported
-from `Coq.Logic.*` / `Coq.Strings.*`.]
+Hypatia's `coq_axiom` rule matches the word `axiom` anywhere in the
+source. The 2 hits in `formal/Semantics.v` are inside comments that
+use "axiom" colloquially to describe a class of step-rule cases
+(`"Atomic axiom cases"`, `"axiom step rule"`) — these are tactic-level
+proof patterns, not Coq `Axiom` declarations. Verified with:
+
+    grep -nE '^Axiom\b|^Parameter\b|^Hypothesis\b' formal/*.v
+    # (no matches — repo has zero user-defined Coq axioms)
+
+No action; the only `Axiom`-like things imported into the proof are
+Coq stdlib axioms (functional extensionality is not used; `String`
+decidable equality is built into `Coq.Strings.String`).
 
 ## Idris2 — `src/formal/Ephapax/Formal/RegionLinear.idr`
 
-### `believe_me` (1 occurrence)
+### `believe_me` (1 occurrence) — **FALSE POSITIVE**
+### `assert_total` (1 occurrence) — **FALSE POSITIVE**
 
-[TODO: locate and document — this is the standard Idris2 escape hatch
-for "I know better than the totality checker." Common usages are for
-witness construction where the proof would be straightforward but
-mechanically expensive. Should either be eliminated or annotated
-inline with the reason.]
+Both flagged occurrences are in a **single comment line** explicitly
+asserting the opposite — i.e. that the proof below does NOT use
+either escape hatch. From `RegionLinear.idr:127`:
 
-### `assert_total` (1 occurrence)
+    ||| This is a REAL proof — not (), not believe_me, not assert_total.
+    public export
+    0 noEscapeTheorem : (r : RegionId) -> NoRegionInType r (Scoped r a) -> Void
+    noEscapeTheorem r (PlainType ns) = absurd ns
+    noEscapeTheorem r (DifferentRegion notSame) = notSame Refl
 
-[TODO: locate. Usually marks recursive functions whose termination
-the totality checker can't prove. Should be either eliminated or
-annotated.]
+Verified with:
+
+    grep -rEn '\bbelieve_me\b|\bassert_total\b' src/ \
+      | grep -v 'comment\|//\|--\|^Binary\||||'
+    # (no actual uses — the regex hits only the negative-assertion comment)
+
+No action; the comment stays because it's a useful negative
+assertion for human reviewers.
 
 ## Rust — known acceptable patterns
 

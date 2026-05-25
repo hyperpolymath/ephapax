@@ -6820,14 +6820,54 @@ Proof.
                               requires either a typing invariant
                               (sibling-region-disjointness) or a
                               reformulation of preservation. *)
-  (* S_Region_Step remains — projection of safe_for_step through
-     ERegion r0 doesn't cleanly give the inner safe_for_step due to
-     the asymmetry between outer-shadowing and inner-actual-usage.
-     For r ≠ r0 in the removed-region set, projection works trivially.
-     For r = r0, outer shadowing returns True at the OUTER level but
-     inner sub-expressions may still reference r0 (deeply-nested
-     structures). Documented and admitted. *)
-  all: admit.
+  (* S_Region_Step: ERegion r0 e steps to ERegion r0 e' via inner
+     (e, e') step. Dispatch on step_R_change_shape:
+     - LEFT (R0 = R0'): inner Hsafe via safe_for_step_R_eq.
+     - MIDDLE (R0' = r1 :: R0): inner Hsafe via safe_for_step_R_add.
+     - RIGHT (R0' = remove_first r1 R0) with r1 ≠ r: outer Hsafe
+       restricted to r2 ≠ r0 gives the inner directly.
+     - RIGHT with r1 = r (inner exits outer's own region): admitted —
+       needs additional invariant on nested-region usage. *)
+  1: {
+    pose proof (step_R_change_shape _ _ _ _ _ _ Hstep) as Hshape.
+    destruct Hshape as [HeqR | [[r1 [Hadd Hnotin]] | [r1 [Hrem HinR1]]]].
+    - (* LEFT: R0' = R0 *)
+      subst R0'.
+      edestruct (IHHstep _ _ _ _ _ _ eq_refl eq_refl _ _ _ H8
+                   (safe_for_step_R_eq e _))
+        as [Gout Hout].
+      eexists. eapply T_Region_Active; [exact H2 | exact H5 | exact Hout].
+    - (* MIDDLE: R0' = r1 :: R0 *)
+      subst R0'.
+      edestruct (IHHstep _ _ _ _ _ _ eq_refl eq_refl _ _ _ H8
+                   (safe_for_step_R_add e _ _))
+        as [Gout Hout].
+      eexists. eapply T_Region_Active; [right; exact H2 | exact H5 | exact Hout].
+    - (* RIGHT: R0' = remove_first r1 R0, In r1 R0 *)
+      subst R0'.
+      destruct (String.eqb r1 r) eqn:Heqr1r.
+      + (* r1 = r: admit (the deeply-nested case) *)
+        admit.
+      + (* r1 ≠ r: derive inner Hsafe *)
+        apply String.eqb_neq in Heqr1r.
+        assert (Hinner_safe : safe_for_step e R0 (remove_first r1 R0)).
+        { unfold safe_for_step. intros r2 Hr2in Hr2nin.
+          pose proof (Hsafe r2 Hr2in Hr2nin) as Houter.
+          simpl in Houter.
+          destruct (String.eqb r2 r) eqn:Heqr2r.
+          - apply String.eqb_eq in Heqr2r. subst r2.
+            exfalso. apply Hr2nin.
+            apply (region_shrink_in_preserves r1 r R0 Heqr1r). exact Hr2in.
+          - destruct (String.eqb r r2) eqn:Heqrr2.
+            + apply String.eqb_eq in Heqrr2. subst r2.
+              apply String.eqb_neq in Heqr2r. contradiction.
+            + exact Houter. }
+        edestruct (IHHstep _ _ _ _ _ _ eq_refl eq_refl _ _ _ H8 Hinner_safe)
+          as [Gout Hout].
+        assert (Hin_r' : In r (remove_first r1 R0))
+          by (apply (region_shrink_in_preserves r1 r R0 Heqr1r); exact H2).
+        eexists. eapply T_Region_Active; [exact Hin_r' | exact H5 | exact Hout].
+  }
 Admitted.
 (* PROOF STATUS [preservation] — ADMITTED, down to 12 open goals
    (from 910 cross-case, via PR #102's remember-cfg + PR #106's

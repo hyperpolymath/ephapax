@@ -186,12 +186,20 @@ pub unsafe extern "C" fn __ephapax_list_clear(handle: ListHandle) {
 // ============================================================================
 
 /// Create new empty string list
+///
+/// # Safety
+///
+/// Requires bump allocator to be initialized
 #[no_mangle]
 pub unsafe extern "C" fn __ephapax_string_list_new(initial_capacity: u32) -> ListHandle {
     __ephapax_list_new(initial_capacity)
 }
 
 /// Append string to string list
+///
+/// # Safety
+///
+/// handle must be valid list handle
 #[no_mangle]
 pub unsafe extern "C" fn __ephapax_string_list_append(
     handle: ListHandle,
@@ -201,6 +209,10 @@ pub unsafe extern "C" fn __ephapax_string_list_append(
 }
 
 /// Get string from string list
+///
+/// # Safety
+///
+/// handle must be valid list handle
 #[no_mangle]
 pub unsafe extern "C" fn __ephapax_string_list_get(handle: ListHandle, idx: i32) -> u32 {
     __ephapax_list_get(handle, idx) as u32

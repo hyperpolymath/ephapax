@@ -7,7 +7,6 @@
 //! This provides the memory management primitives used by generated code.
 
 #![cfg_attr(not(feature = "std"), no_std)]
-#![allow(clippy::missing_safety_doc)]
 
 // Additional modules for self-hosting compiler
 pub mod list;

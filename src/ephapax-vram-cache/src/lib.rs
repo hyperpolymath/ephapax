@@ -145,6 +145,7 @@ impl VramCache {
 
         // Calculate max entries based on average entry size (estimate 1KB per IR for safety)
         // Use generous limit so we evict based on bytes, not entry count
+        // Safe: (max_size_bytes / 1024).max(1000) is always >= 1000, so try_into::<usize> will succeed
         let max_entries = ((max_size_bytes / 1024).max(1000) as u64)
             .try_into()
             .unwrap_or(10000);

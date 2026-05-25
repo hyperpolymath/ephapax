@@ -1,6 +1,9 @@
 # SPDX-License-Identifier: PMPL-1.0-or-later
 # RSR-compliant .gitignore
 
+# Claude Code agent worktrees
+.claude/
+
 # OS & Editor
 .DS_Store
 Thumbs.db

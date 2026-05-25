@@ -176,7 +176,7 @@ calculus over the Tofte-Talpin region-linear type system.
 
 | **`preservation`**
 | 🟡 Admitted
-| `formal/Semantics.v` (Theorem at line 3207). **12 open goals** as of 2026-05-21 (was 910). See ROADMAP §"Preservation closure plan" + `formal/PRESERVATION-HANDOFF.md`.
+| `formal/Semantics.v` (Theorem at line 3207). **12 open goals** as of 2026-05-21 (was 910). See ROADMAP §"Preservation closure plan" + `docs/sessions/SESSION-2026-05-24-preservation-handoff.md`.
 |===
 
 The `preservation` reduction story is recent and load-bearing:
@@ -301,9 +301,9 @@ total`.
 * `docs/specs/LANGUAGE-COMPARISON.adoc` — comparison against 10 languages
 * `docs/vision/EPHAPAX-VISION.adoc` — design rationale, why dyadic +
   regions + WASM
-* `formal/PRESERVATION-HANDOFF.md` — per-case checklist for the 22
+* `docs/sessions/SESSION-2026-05-24-preservation-handoff.md` — per-case checklist for the 22
   remaining preservation goals
-* `PROOF-NEEDS.md` — outstanding proof obligations + leverage
+* `docs/specs/PROOF-NEEDS.md` — outstanding proof obligations + leverage
 
 == Questions?
 

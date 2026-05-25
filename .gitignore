@@ -25,6 +25,7 @@ build/
 # Zig
 **/zig-out/
 **/.zig-cache/
+.zig-cache-global/
 
 # Coq / Rocq
 *.vo

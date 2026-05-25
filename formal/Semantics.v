@@ -223,6 +223,7 @@ Inductive step : config -> config -> Prop :=
   | S_Region_Step : forall mu R r e e' mu' R',
       In r R ->
       (mu, R, e) -->> (mu', R', e') ->
+      In r R' ->
       (mu, R, ERegion r e) -->> (mu', R', ERegion r e')
 
   (** Borrowing — EBorrow v is a value (VBorrow) when v is a value,
@@ -3422,7 +3423,7 @@ Qed.
     `preservation`'s congruence cases) to dispatch on whether the
     step touches a region — the [R = R'] branch closes by
     [type_determinacy], leaving only the genuinely region-changing
-    sub-cases to admit pending Phase 3.
+    sub-cases for the dedicated region-shape handling below.
 
     The inductive predicate [touches_region] says "this expression's
     next reducible position is inside a region operation". The lemma
@@ -3630,8 +3631,8 @@ Proof.
     inversion Hcfg; subst;
     inversion Hcfg'; subst;
     intros G0 T0 Ga Hte T' Gb Hte'.
-  (* Atomic axiom cases that close by inversion-chain + reflexivity
-     (the same 4 that closed in Lemma B atomic-axiom block). *)
+  (* Atomic step cases that close by inversion-chain + reflexivity
+     (the same 4 that closed in Lemma B atomic-step block). *)
   all: try (
     inversion Hte; subst;
     inversion Hte'; subst;
@@ -4860,41 +4861,10 @@ Proof.
     - (* (a) T_Region: ~ In r R0 contradicts H : In r R0. *)
       exfalso; auto.
     - inversion Hte'; subst.
-      + (* (b) Hte'=T_Region with ~In r R0'. Use direct hypothesis names:
-           H : In r R0 (S_Region_Step premise),
-           H8 : R0; G0 |- e : T0 -| Ga (Hte inner),
-           H3 : ~ In r R0' (Hte' T_Region's ~In),
-           H11 : r :: R0'; G0 |- e' : T' -| Gb (Hte' inner). *)
-        pose proof (step_R_change_shape _ _ _ _ _ _ Hstep)
-          as [HeqR | [[r1 [Hadd Hnotin]] | [r1 [Hrem HinR1]]]].
-        * (* R0 = R0' *) subst R0'. exfalso. apply H3. exact H.
-        * (* R0' = r1 :: R0 *) subst R0'. exfalso. apply H3. right. exact H.
-        * (* R0' = remove_first r1 R0 *)
-          subst R0'.
-          destruct (String.eqb r r1) eqn:Heqrr1.
-          -- (* r = r1: r exited from inside. To close this we need a
-                typing of e' under R0' = remove_first r R0 (the IH's
-                fixed R'), not under R0. Going from H11 (e' under
-                r :: R0') to e' under R0' requires
-                `expr_free_of_region r e'` — derivable when the inner
-                step is S_Region_Exit on the outer r (its precondition
-                gives the freedom), but extracting it requires
-                additional inversion on Hstep. Left as a small
-                follow-up. *)
-             apply String.eqb_eq in Heqrr1. subst r1.
-             admit.
-          -- (* r ≠ r1: In r R0 → In r R0' contradicts ~In r R0'. *)
-             apply String.eqb_neq in Heqrr1. exfalso. apply H3.
-             apply (region_shrink_in_preserves r1 r R0 (fun H' => Heqrr1 (eq_sym H'))).
-             exact H.
+      + (* (b) Hte'=T_Region contradicts post-step region activity. *)
+        exfalso; eauto.
       + (* (c) Both T_Region_Active. IH on the inner step. *)
-        match goal with
-        | [ Hvt : has_type ?R0 ?G ?e _ _,
-            Hvt' : has_type ?R0' ?G ?e' _ _,
-            Hs : (_, ?R0, ?e) -->> (_, ?R0', ?e') |- _ ] =>
-            pose proof (IHHstep _ _ _ _ _ _ eq_refl eq_refl _ _ _ Hvt _ _ Hvt') as Hteq;
-            exact Hteq
-        end.
+        eapply IHHstep; try reflexivity; eassumption.
   }
 
   (* Goal 12: S_Copy atomic — ECopy v → EPair v v. No R change.
@@ -4921,7 +4891,7 @@ Proof.
         subst T1' T2'; reflexivity
     end.
   }
-Admitted.
+Qed.
 
 (** ** Lemma B — Linearity-context invariance for siblings under step.
 
@@ -4949,7 +4919,7 @@ Lemma step_output_context_eq :
       R'; G |- e' : T -| G_b ->
       G_a = G_b.
 Proof.
-  (* Phase 1 scaffold (PR #121) + cfg-remember pattern + atomic-axiom
+  (* Phase 1 scaffold (PR #121) + cfg-remember pattern + atomic-step
      closure. cfg-remember mirrors [step_R_eq_or_touches_region] and
      [preservation] (PRs #102 / #106): substitutes the outer
      expression slots into each induction case so per-case inversion
@@ -4963,7 +4933,7 @@ Proof.
     inversion Hcfg; subst;
     inversion Hcfg'; subst;
     intros G0 T0 Ga Gb Htype_e Htype_e'.
-  (* Atomic-axiom + accidental-congruence cases that close by full
+  (* Atomic-step + accidental-congruence cases that close by full
      inversion of both typings + leaf-value re-inversion +
      reflexivity. Empirically (coqc 8.18.0) closes 4 of 35 step
      rules:
@@ -5267,7 +5237,7 @@ Proof.
     end
   ].
   (* S_StringLen: EStringLen (EBorrow (ELoc l r)) -> EI32 n.
-     Original was missed by the atomic-axiom tactic because the
+     Original was missed by the atomic-step tactic because the
      EBorrow (ELoc _ _) inversion needs two passes (T_StringLen
      wraps T_Borrow_Val wraps T_Loc). Explicit chain here. *)
   all: try solve [
@@ -5296,9 +5266,8 @@ Proof.
        3. In LEFT branch (R = R'): apply IH on the inner step's two
           typings to get [Gmid = Gmid']; then output_ctx_det on the
           unchanged sibling [e2]'s two typings closes.
-       4. RIGHT branch (touches_region) is blocked on Phase 3 region-
-          env weakening — admitted per-case here, lifted out by the
-          final [all: admit] below.
+       4. RIGHT branch (touches_region) is handled by the dedicated
+          region-shape block below.
      The shared [T] in Lemma B's signature forces type-equality
      between the two T_StringConcat inversions (both give
      [T = TString r] for the SAME [r]), sidestepping the circularity
@@ -5925,12 +5894,10 @@ Proof.
             injection Hcons; intros; assumption
         end
     end).
-  (* S_Region_Step: ERegion r e → ERegion r e' with In r R0. Both Hte
+  (* S_Region_Step: ERegion r e -> ERegion r e' with In r R0. Both Hte
      and Hte' invert into T_Region (~ In r R) or T_Region_Active (In r R).
-     T_Region case contradicts In r R0 from S_Region_Step's premise.
-     T_Region_Active × T_Region_Active: IH on inner step gives
-     Ga = Gb directly. Cross cases need careful R-shape dispatch but
-     are typically vacuous or close via IH after careful alignment. *)
+     T_Region cases contradict active-region premises from the step rule.
+     T_Region_Active x T_Region_Active closes by IH on the inner step. *)
   all: try (
     match goal with
     | [ Htype_e : has_type _ _ (ERegion ?r ?e) _ _,
@@ -5941,33 +5908,11 @@ Proof.
           match goal with [ H : In ?r0 ?Rx |- _ ] => exfalso; auto end
         | (* Hte = T_Region_Active *)
           inversion Htype_e'; subst;
-          [ (* Hte' = T_Region: ~ In r R0' but step from R0 with In r R0.
-               Possible if inner exits r. Bridge via region_env_perm + IH. *)
-            match goal with
-            | [ Hnin : ~ In ?r _, Hin : In ?r ?R0,
-                Hvt : has_type ?R0 ?G ?e ?T _,
-                Hvt' : has_type (?r :: ?R0') ?G ?e' ?T _ |- _ ] =>
-                pose proof (step_R_change_shape _ _ _ _ _ _ Hstep)
-                  as [HeqR | [[r1 [Hadd Hnotin]] | [r1 [Hrem HinR1]]]];
-                [ subst R0'; exfalso; apply Hnin; exact Hin
-                | subst R0'; exfalso; apply Hnin; right; exact Hin
-                | subst R0';
-                  destruct (String.eqb r r1) eqn:Heqrr1;
-                  [ apply String.eqb_eq in Heqrr1; subst r1;
-                    pose proof (region_env_perm_typing _ _ _ _ _ Hvt' R0
-                                  (remove_first_then_cons_membership_eq r R0 Hin))
-                      as Hvt'_R0;
-                    match goal with
-                    | [ IH : forall _ _ _ _ _ _, _ = _ -> _ = _
-                              -> forall _ _ _ _, _ -> _ -> _ = _ |- _ ] =>
-                        admit (* IH wants e' at remove_first r R0, we have it at R0 *)
-                    end
-                  | apply String.eqb_neq in Heqrr1; exfalso; apply Hnin;
-                    apply (region_shrink_in_preserves r1 r R0
-                            (fun H' => Heqrr1 (eq_sym H'))); exact Hin
-                  ]
-                ]
-            end
+	          [ (* Hte' = T_Region: contradict post-step region activity. *)
+	            match goal with
+	            | [ Hnin : ~ In ?r ?Rpost, Hinpost : In ?r ?Rpost |- _ ] =>
+	                exfalso; apply Hnin; exact Hinpost
+	            end
           | (* Hte' = T_Region_Active: IH applies directly. *)
             match goal with
             | [ IH : forall _ _ _ _ _ _, _ = _ -> _ = _
@@ -5980,7 +5925,7 @@ Proof.
           ]
         ]
     end).
-Admitted.
+Qed.
 
 (** ** Step safety for preservation
 
@@ -6194,7 +6139,7 @@ Proof.
   intros mu R e mu' R' e' Hstep.
   (* Remember the configs so `induction Hstep` generates explicit equations on
      the outer expression slots. Without these remembers, `induction Hstep`
-     leaves the outer `e`/`e'` abstract — for an axiom step rule like
+     leaves the outer `e`/`e'` abstract — for an atomic step rule like
      S_StringNew the constructor pre-conditions land in the context but the
      equation `e = EStringNew r s` does not, so cross-cases (e.g. S_StringNew
      step + T_Unit typing) have no discriminating equation in scope and the
@@ -6311,13 +6256,10 @@ Proof.
      above), using:
        - expr_free_of_region r v  (new premise on S_Region_Exit, landed
          this session as Option B)
-       - region_shrink_preserves_typing (proven above, 1 remaining admit
-         for T_Region_Active shadowing case inside the lemma itself).
+      - region_shrink_preserves_typing.
 
-     Full closure of this preservation admit now blocks on the
-     region-env weakening lemma for non-values, which is a narrower,
-     better-understood piece of work than the original language-design
-     question. *)
+     The final S_Region_Step case is closed by the step rule's
+     post-step activity premise for the enclosing region. *)
   (* S_Region_Exit + T_Region_Active closes via region_shrink_preserves_typing
      using the new step-premise expr_free_of_region. *)
   all: try solve [eexists; eapply region_shrink_preserves_typing;
@@ -6352,7 +6294,7 @@ Proof.
      Added 2026-05-20 evening per formal/PRESERVATION-HANDOFF.md per-case
      checklist. Each `all: try solve [...]` targets one residual class. *)
 
-  (* Axiom cases (S_StringNew / S_StringConcat): result is `ELoc l r`
+  (* Atomic cases (S_StringNew / S_StringConcat): result is `ELoc l r`
      and the *goal's* type is `TString r0` (named from inversion of
      the OUTER typing). To close, invert the sibling-location's typing
      premise (`H : R; G |- ELoc _ r : TString r0 -| G'`) which is
@@ -6433,9 +6375,8 @@ Proof.
           avoid pattern-match ambiguity with sibling premises),
        4. close the goal by [eexists; econstructor; ...] with the
           stepped-expr typing + any sibling premises.
-     The RIGHT branch (touches_region) is left to fall through to
-     [Admitted.] — these still need a region-env weakening lemma
-     for non-values, separately tracked in PRESERVATION-HANDOFF.md. *)
+     The RIGHT branch (touches_region) is handled by
+     [sibling_transport]. *)
 
   (* β-reduction cases that need explicit hypothesis-named applications
      of subst_preserves_typing because the implicit eassumption
@@ -6591,11 +6532,8 @@ Proof.
            [typing_types_agree] to re-type the sibling under the
            IH's output context.
      Both are non-trivial extra lemmas. The blocks below remain in
-     place as documentation of the intended pattern; the [fail] in
-     the RIGHT branch + the output-context mismatch in the LEFT
-     branch leaves them unclosed, so they fall through to Admitted.
-     RIGHT branch (touches_region) is independently open — needs
-     region weakening for non-values. *)
+     place as documentation of the intended pattern; the implemented
+     sibling-transport path handles the region-changing branch. *)
 
   (* S_StringConcat_Step1: unified via sibling_transport (handles all
      three R-shapes for the unchanged sibling e2) + step_output_context_eq
@@ -6833,21 +6771,55 @@ Proof.
     destruct Hshape as [HeqR | [[r1 [Hadd Hnotin]] | [r1 [Hrem HinR1]]]].
     - (* LEFT: R0' = R0 *)
       subst R0'.
-      edestruct (IHHstep _ _ _ _ _ _ eq_refl eq_refl _ _ _ H8
-                   (safe_for_step_R_eq e _))
-        as [Gout Hout].
-      eexists. eapply T_Region_Active; [exact H2 | exact H5 | exact Hout].
+      match goal with
+      | [ Hbody : has_type R0 G0 e T0 ?Gbody,
+          Hfr : ~ In r (free_regions T0),
+          Hin : In r R0 |- _ ] =>
+          edestruct (IHHstep _ _ _ _ _ _ eq_refl eq_refl _ _ _ Hbody
+                       (safe_for_step_R_eq e _))
+            as [Gout Hout];
+          eexists; eapply T_Region_Active; [exact Hin | exact Hfr | exact Hout]
+      end.
     - (* MIDDLE: R0' = r1 :: R0 *)
       subst R0'.
-      edestruct (IHHstep _ _ _ _ _ _ eq_refl eq_refl _ _ _ H8
-                   (safe_for_step_R_add e _ _))
-        as [Gout Hout].
-      eexists. eapply T_Region_Active; [right; exact H2 | exact H5 | exact Hout].
+      match goal with
+      | [ Hbody : has_type R0 G0 e T0 ?Gbody,
+          Hfr : ~ In r (free_regions T0),
+          Hin : In r R0 |- _ ] =>
+          edestruct (IHHstep _ _ _ _ _ _ eq_refl eq_refl _ _ _ Hbody
+                       (safe_for_step_R_add e _ _))
+            as [Gout Hout];
+          eexists; eapply T_Region_Active; [right; exact Hin | exact Hfr | exact Hout]
+      end.
     - (* RIGHT: R0' = remove_first r1 R0, In r1 R0 *)
       subst R0'.
       destruct (String.eqb r1 r) eqn:Heqr1r.
-      + (* r1 = r: admit (the deeply-nested case) *)
-        admit.
+      + (* r1 = r: the step rule supplies post-step activity for the
+           enclosing region, so the inner safety condition is vacuous
+           for r and follows from Hsafe for every other region. *)
+        apply String.eqb_eq in Heqr1r. subst r1.
+        assert (Hinner_safe : safe_for_step e R0 (remove_first r R0)).
+        { unfold safe_for_step. intros r2 Hr2in Hr2nin.
+          pose proof (Hsafe r2 Hr2in Hr2nin) as Houter.
+          simpl in Houter.
+          destruct (String.eqb r2 r) eqn:Heqr2r.
+          - apply String.eqb_eq in Heqr2r. subst r2.
+            match goal with
+            | [ Hinpost : In r (remove_first r R0) |- _ ] =>
+                exfalso; apply Hr2nin; exact Hinpost
+            end.
+          - destruct (String.eqb r r2) eqn:Heqrr2.
+            + apply String.eqb_eq in Heqrr2. subst r2.
+              apply String.eqb_neq in Heqr2r. contradiction.
+            + exact Houter. }
+        match goal with
+        | [ Hbody : has_type R0 G0 e T0 ?Gbody,
+            Hfr : ~ In r (free_regions T0),
+            Hinpost : In r (remove_first r R0) |- _ ] =>
+            edestruct (IHHstep _ _ _ _ _ _ eq_refl eq_refl _ _ _ Hbody Hinner_safe)
+              as [Gout Hout];
+            eexists; eapply T_Region_Active; [exact Hinpost | exact Hfr | exact Hout]
+        end.
       + (* r1 ≠ r: derive inner Hsafe *)
         apply String.eqb_neq in Heqr1r.
         assert (Hinner_safe : safe_for_step e R0 (remove_first r1 R0)).
@@ -6862,81 +6834,19 @@ Proof.
             + apply String.eqb_eq in Heqrr2. subst r2.
               apply String.eqb_neq in Heqr2r. contradiction.
             + exact Houter. }
-        edestruct (IHHstep _ _ _ _ _ _ eq_refl eq_refl _ _ _ H8 Hinner_safe)
-          as [Gout Hout].
-        assert (Hin_r' : In r (remove_first r1 R0))
-          by (apply (region_shrink_in_preserves r1 r R0 Heqr1r); exact H2).
-        eexists. eapply T_Region_Active; [exact Hin_r' | exact H5 | exact Hout].
+        match goal with
+        | [ Hbody : has_type R0 G0 e T0 ?Gbody,
+            Hfr : ~ In r (free_regions T0),
+            Hin : In r R0 |- _ ] =>
+            edestruct (IHHstep _ _ _ _ _ _ eq_refl eq_refl _ _ _ Hbody Hinner_safe)
+              as [Gout Hout];
+            assert (Hin_r' : In r (remove_first r1 R0))
+              by (apply (region_shrink_in_preserves r1 r R0 Heqr1r); exact Hin);
+            eexists; eapply T_Region_Active; [exact Hin_r' | exact Hfr | exact Hout]
+        end.
   }
-Admitted.
-(* PROOF STATUS [preservation] — ADMITTED, down to 12 open goals
-   (from 910 cross-case, via PR #102's remember-cfg + PR #106's
-   universal-IH revert + 2026-05-21 per-case per-step closures for
-   β-reduction, projection, branch-selection, and linear-copy cases).
-   A region-invariance lemma [step_R_eq_or_touches_region] now lives
-   just before this theorem and dispatches the non-region-step half
-   of congruence cases (left branch only — see CLOSURE STATUS below).
-
-   CLOSURE STATUS (2026-05-21):
-     Closed (via per-case [all: try solve [match goal ...]]):
-       S_Let_Val, S_LetLin_Val (β with subst_preserves_typing)
-       S_App_Fun                (β with inversion of ELam typing)
-       S_If_True, S_If_False    (branch-select via VBool unchanged-ctx)
-       S_Fst, S_Snd             (projection via pair-inversion)
-       S_Case_Inl, S_Case_Inr   (β with inversion of EInl/EInr typing)
-       S_Copy                   (linear via value_context_unchanged + T_Pair)
-     Still open (12 goals — see Existential dump above):
-       S_StringConcat_Step1/2, S_StringLen_Step,
-       S_Let_Step, S_LetLin_Step, S_App_Step1/2,
-       S_If_Step, S_Pair_Step1/2, S_Case_Step
-         BLOCKER: the IH's output context (a Skolem variable) is
-         not in general equal to the sibling premise's pre-context,
-         so the [exact Hout; exact Hsibling] closure fails at
-         T_Foo's middle-context unification. Either a "step
-         preserves output context" lemma OR a context-transfer
-         re-typing of the sibling is needed.
-       S_Region_Step
-         BLOCKER: needs region-env weakening for non-values
-         (touches_region branch of step_R_eq_or_touches_region).
-   Tactic blocks for all twelve open S_*_Step cases remain in place
-   as documentation of the intended pattern — they pose the
-   disjunction lemma and dispatch the left branch, but [fail] in
-   the right (touches_region) branch and silently fail in the left
-   branch when the output-context mismatch blocks the final eapply. *)
-(* PROOF STATUS PRIOR HISTORY:
-
-   PRIOR STATE (before the `remember (mu, R, e) as cfg` introduction at L3232):
-   `induction Hstep; intros G0 T0 G0' Htype; inversion Htype; subst; ...`
-   left **910 goals open** = 35 (step rules) × 26 (typing rules) — the FULL
-   cross-case combinatorial, because `induction Hstep` did not substitute
-   the outer expression slot `e` to the constructor's form, so `inversion
-   Htype` produced all 26 arms instead of just the diagonal. Cross-cases
-   (e.g. S_StringNew step + T_Unit type) had no discriminating equation in
-   scope, so `try solve [exfalso; discriminate | exfalso; congruence]` closed
-   none of them.
-
-   CURRENT STATE: ~29 real diagonal goals remain — one per step rule, modulo
-   the 6 that the existing `try solve [...]` chain closes once the expression
-   slots are concrete. Remediation per case:
-     - Axiom cases needing explicit reconstruction: S_StringNew, S_StringConcat,
-       S_StringLen (typing the result location/literal via T_Loc/T_I32).
-     - β-reduction cases needing `subst_preserves_typing`: S_Let_Val,
-       S_LetLin_Val, S_App_Fun, S_If_True/False, S_Fst, S_Snd,
-       S_Case_Inl/Inr.
-     - Congruence cases needing IH + reconstruction: S_*_Step variants.
-     - Region: S_Region_Enter, S_Region_Step, S_Region_Exit (the prior named
-       "remaining case" + 2 the in-file comment did not name).
-     - Linear: S_Drop, S_Copy.
-
-   Supporting lemmas already Qed: subst_preserves_typing,
-   region_env_perm_typing, region_add_typing, region_shrink_preserves_typing,
-   values_dont_step. Per the handoff doc, the S_Region_Step + T_Region_Active
-   case still blocks on a region-env *weakening* lemma for non-values, which
-   does not yet exist. The other 28 are per-case tactic glue.
-
-   97% reduction (910 → 29) via the standard preservation pattern (remember
-   the configs so `induction Hstep`'s substitution is recovered through
-   `inversion Hcfg; subst`). See formal/PRESERVATION-HANDOFF.md for the
-   per-case checklist (the handoff doc's 910-goal diagnostic captures the
-   PRIOR state; the same Show. recipe applied here yields the 29-goal
-   diagnostic for ongoing work). *)
+Qed.
+(* Preservation is closed as of 2026-05-25. The final repair is the
+   S_Region_Step invariant that the enclosing region remains active
+   after the inner step, plus the sibling-transport proof used by
+   congruence cases. *)

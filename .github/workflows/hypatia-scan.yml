@@ -139,6 +139,15 @@ jobs:
             findings = [];
           }
 
+          // Do not upload Hypatia's GitHub code-scanning inventory
+          // findings back into GitHub code scanning. Those findings
+          // describe existing alerts; re-uploading them as SARIF creates
+          // recursive CSA001 alerts that remain open after the underlying
+          // source finding has been fixed.
+          const sarifFindings = findings.filter(
+            (f) => String(f.rule_module || '') !== 'code_scanning_alerts'
+          );
+
           // Mirrors Hypatia's own "github" annotation mapping
           // (lib/hypatia/cli.ex output/2): critical|high -> error,
           // medium -> warning, everything else -> note.
@@ -166,7 +175,7 @@ jobs:
           };
 
           const rules = new Map();
-          const results = findings.map((f) => {
+          const results = sarifFindings.map((f) => {
             const mod = String(f.rule_module || 'hypatia');
             const type = String(f.type || 'finding');
             const ruleId = `hypatia/${mod}/${type}`;
@@ -223,7 +232,10 @@ jobs:
           };
 
           fs.writeFileSync('hypatia.sarif', JSON.stringify(sarif, null, 2));
-          console.log(`hypatia.sarif written: ${results.length} result(s).`);
+          console.log(
+            `hypatia.sarif written: ${results.length} result(s) ` +
+            `(${findings.length - sarifFindings.length} code-scanning inventory finding(s) excluded).`
+          );
           CJS
           node "$RUNNER_TEMP/hypatia-sarif.cjs"
 

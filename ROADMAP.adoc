@@ -195,7 +195,7 @@ up the proof should follow.
 
 | Phase 1 empirical baseline (2026-05-24)
 | 12 (preservation) / **31 of 35** (Lemma B itself)
-| `cfg`-remember pattern + atomic-axiom tactic on Lemma B closes 4 of its 35 step-rule cases (`S_StringNew`, `S_StringConcat`, `S_Drop`, `S_Borrow_Step`); the remaining 31 cluster across β-reduction / congruence / region-and-compound-value branches. Per-case map in `formal/PRESERVATION-HANDOFF.md`.
+| `cfg`-remember pattern + atomic-axiom tactic on Lemma B closes 4 of its 35 step-rule cases (`S_StringNew`, `S_StringConcat`, `S_Drop`, `S_Borrow_Step`); the remaining 31 cluster across β-reduction / congruence / region-and-compound-value branches. Per-case map in `docs/sessions/SESSION-2026-05-24-preservation-handoff.md`.
 |===
 
 98.7% reduction across one day. Remaining 12 = 11 congruence cases
@@ -231,7 +231,7 @@ Same pattern as `step_R_eq_or_touches_region`.
 `cfg`-remember + atomic-axiom tactic closes 4 of 35 step rules
 (`S_StringNew`, `S_StringConcat`, `S_Drop`, `S_Borrow_Step`); the
 remaining 31 split across 3 clusters needing distinct recipes. Full
-per-case map in `formal/PRESERVATION-HANDOFF.md` §"Lemma B per-case
+per-case map in `docs/sessions/SESSION-2026-05-24-preservation-handoff.md` §"Lemma B per-case
 status".
 
 **Risk**:
@@ -327,9 +327,9 @@ check if it passes the S_Region_Step case. Refine only if it fails.
 . **`formal/Semantics.v`** — replace `Admitted.` at the end of
   `Theorem preservation` with `Qed.` Remove the PROOF STATUS
   comment block.
-. **`formal/PRESERVATION-HANDOFF.md`** — collapse to a one-line
+. **`docs/sessions/SESSION-2026-05-24-preservation-handoff.md`** — collapse to a one-line
   "preservation is Qed as of YYYY-MM-DD" tombstone.
-. **`PROOF-NEEDS.md`** — flip "Coq admitted proofs remaining: 1" to
+. **`docs/specs/PROOF-NEEDS.md`** — flip "Coq admitted proofs remaining: 1" to
   "0". Drop the "what needs proving" entry for `preservation`.
 . **`ROADMAP.adoc`** — flip the v0.1 checkbox; update the Coq table
   row; remove this entire "Preservation closure plan" section
@@ -447,9 +447,9 @@ audio buffer management:
 
 * link:README.adoc[README] — project overview + quickstart
 * link:EXPLAINME.adoc[EXPLAINME] — "show me the receipts" for the README's claims
-* link:PROOF-NEEDS.md[PROOF-NEEDS] — outstanding proof obligations + leverage
+* link:docs/specs/PROOF-NEEDS.md[PROOF-NEEDS] — outstanding proof obligations + leverage
 * link:RUST-SPARK-STANCE.adoc[RUST-SPARK-STANCE] — comparison + interop notes
-* link:formal/PRESERVATION-HANDOFF.md[PRESERVATION-HANDOFF] — per-case Coq
+* link:docs/sessions/SESSION-2026-05-24-preservation-handoff.md[PRESERVATION-HANDOFF] — per-case Coq
   preservation checklist (the 22 remaining goals)
 * link:docs/vision/EPHAPAX-VISION.adoc[Vision document] — design rationale
 * link:docs/specs/DESIGN-DECISIONS.adoc[Design decisions] — 17 ADRs

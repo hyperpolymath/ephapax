@@ -18,3 +18,13 @@ If you discover a security vulnerability, please report it responsibly.
 - Fix or mitigation within 90 days
 
 **Safe harbour:** We will not pursue legal action against security researchers who follow responsible disclosure.
+
+## Known proof debt
+
+The Hypatia neurosymbolic CI scan flags formal-verification escape
+hatches (`Admitted`, `admit`, `believe_me`, `assert_total`, axioms)
+as critical findings. The complete acknowledged set with closure
+paths is documented in
+[`docs/specs/KNOWN-PROOF-DEBT.md`](docs/specs/KNOWN-PROOF-DEBT.md).
+If you see a new finding not listed there, please flag it in an issue
+or PR before merging.

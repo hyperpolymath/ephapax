@@ -23,7 +23,7 @@ a `src/formal/` Idris2 region/linearity metatheory + a `src/abi/`
 directory that did not exist — no named seam, no SPARK admission path,
 no stance doc. The `src/abi/` package below brings the project into
 structural compliance; the remaining proof work is tracked in
-`PROOF-NEEDS.md` and standards#134.
+`docs/specs/PROOF-NEEDS.md` and standards#134.
 
 == What is correctness-critical here
 
@@ -93,7 +93,7 @@ backend (lowering to a different operational model), and the Zig FFI
   E2 control-flow generalisation, E3 operational form, E4
   (no-runtime-GC), E5 (WASM compilation), E6 (IR lowering) are stated
   as erased postulates so the obligations are explicit and discoverable.
-  Authoritative per-ID status: `PROOF-NEEDS.md` § Invariant register.
+  Authoritative per-ID status: `docs/specs/PROOF-NEEDS.md` § Invariant register.
 
 | `src/abi/Ephapax/ABI/Foreign.idr`
 | Zig/WASM-FFI boundary: u32/i32 range obligations for marshalling
@@ -171,7 +171,7 @@ Rust project.
 
 * `standards/rhodium-standard-repositories/spec/LANGUAGE-POLICY.adoc`
   §Terminology, §"Rust is never the ABI"
-* `PROOF-NEEDS.md` (this repo) — invariant ledger and priorities
+* `docs/specs/PROOF-NEEDS.md` (this repo) — invariant ledger and priorities
 * `ROADMAP.adoc` (this repo) — Coq/Idris2 dual formalisation status
 * Estate exemplar seam: `proof-of-work/src/abi/{Types,Foreign,Invariants}.idr`
   + `RUST-SPARK-STANCE.adoc`

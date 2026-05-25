@@ -161,8 +161,7 @@ ephapax/
 ├── formal/                       # Coq operational semantics + soundness
 │   ├── Syntax.v                  # AST and types
 │   ├── Typing.v                  # Region-linear typing rules
-│   ├── Semantics.v               # Small-step substitution semantics
-│   └── PRESERVATION-HANDOFF.md   # Per-case checklist for preservation
+│   └── Semantics.v               # Small-step substitution semantics
 ├── idris2/                       # Idris2 frontend (parser + typechecker)
 │   ├── src/Ephapax/IR/           # AST, decode/encode, S-expression IR
 │   ├── src/Ephapax/Parse/        # Lexer, parser, stream, ZigBuffer FFI
@@ -219,7 +218,7 @@ on Lemma B's per-case proofs — linearity-context drift between IH
 and sibling) + 1 `S_Region_Step + T_Region_Active` case (blocked on
 region-env weakening for non-values). Canonical closure path:
 **`ROADMAP.adoc` §"Preservation closure plan"** (5 phases, ~3
-sessions of focused work). See also `formal/PRESERVATION-HANDOFF.md`
+sessions of focused work). See also `docs/sessions/SESSION-2026-05-24-preservation-handoff.md`
 for the per-case diagnostic record.
 
 [source,bash]
@@ -389,21 +388,21 @@ generics, effects, traits, comptime, contracts) lives on
 | Quantitative milestones (v0.1.0 → v1.0.0), per-version checklists,
   current open work.
 
-| link:PROOF-NEEDS.md[PROOF-NEEDS.md]
+| link:docs/specs/PROOF-NEEDS.md[docs/specs/PROOF-NEEDS.md]
 | Outstanding proof obligations: what's `Admitted` / `covering` /
   `partial` and why.
 
-| link:formal/PRESERVATION-HANDOFF.md[formal/PRESERVATION-HANDOFF.md]
+| link:docs/sessions/SESSION-2026-05-24-preservation-handoff.md[docs/sessions/SESSION-2026-05-24-preservation-handoff.md]
 | Per-case checklist for the 22 remaining preservation goals. Read
   this if you're picking up the Coq proof work.
 
 | link:RUST-SPARK-STANCE.adoc[RUST-SPARK-STANCE.adoc]
 | Stance on Rust + SPARK interop and where Ephapax fits.
 
-| link:TOPOLOGY.md[TOPOLOGY.md]
+| link:docs/specs/TOPOLOGY.md[docs/specs/TOPOLOGY.md]
 | Module dependency graph + crate layering.
 
-| link:TEST-NEEDS.md[TEST-NEEDS.md]
+| link:docs/specs/TEST-NEEDS.md[docs/specs/TEST-NEEDS.md]
 | Outstanding test coverage gaps.
 
 | link:CHANGELOG.md[CHANGELOG.md]
@@ -421,7 +420,7 @@ generics, effects, traits, comptime, contracts) lives on
 | link:spec/[spec/]
 | Language specification + grammar EBNF.
 
-| link:CONTRIBUTING.adoc[CONTRIBUTING.adoc]
+| link:CONTRIBUTING.md[CONTRIBUTING.md]
 | Contribution guide.
 
 | link:CODE_OF_CONDUCT.md[CODE_OF_CONDUCT.md]
@@ -478,12 +477,12 @@ comparison against ten of these.
 
 Contributions welcome. Please see:
 
-* link:CONTRIBUTING.adoc[CONTRIBUTING.adoc] — getting started
+* link:CONTRIBUTING.md[CONTRIBUTING.md] — getting started
 * link:CODE_OF_CONDUCT.md[CODE_OF_CONDUCT.md] — community standards
 
 The highest-leverage open work, in priority order:
 
-1. **Close `preservation` to Qed** (`formal/PRESERVATION-HANDOFF.md`)
+1. **Close `preservation` to Qed** (`docs/sessions/SESSION-2026-05-24-preservation-handoff.md`)
    — multi-day proof engineering, 22 goals remaining.
 2. **Fuel-refactor `Parse/Parser.idr`** from `%default covering` to
    `%default total`. Substantial — ~30 mutually-recursive combinators

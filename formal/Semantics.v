@@ -5982,6 +5982,48 @@ Proof.
     end).
 Admitted.
 
+(** ** Step safety for preservation
+
+    The current preservation theorem in ephapax has a known gap: when
+    a step exits a region [r] (via [S_Region_Exit] possibly nested
+    via congruence) and a sibling sub-expression of [e] syntactically
+    references [r], the post-step typing fails because [r] is no
+    longer in [R'].
+
+    Path 2 reformulation: add a [safe_for_step] precondition that
+    excludes exactly this scenario. It says "any region the step
+    removes is not syntactically referenced outside its own [ERegion]
+    scopes in [e]."
+
+    The condition is satisfied by:
+      - Non-region-changing steps (no [r] is removed).
+      - [S_Region_Enter] steps (no [r] is removed).
+      - Region-exiting steps where the exited region wasn't referenced
+        by sibling expressions (the typical well-scoped case).
+
+    Excluded: programs that nest [ERegion r] usages such that a
+    sibling outside the nested scope references [r]. Such programs
+    are typeable in ephapax but break preservation; the precondition
+    makes the gap explicit at the user-facing level. *)
+
+Definition safe_for_step (e : expr) (R R' : region_env) : Prop :=
+  forall r, In r R -> ~ In r R' -> expr_free_of_region r e.
+
+(** Trivial discharge: any step where [R = R'] satisfies [safe_for_step] vacuously. *)
+Lemma safe_for_step_R_eq :
+  forall e R, safe_for_step e R R.
+Proof.
+  unfold safe_for_step. intros e R r Hin Hnin. contradiction.
+Qed.
+
+(** Trivial discharge: any step where [R' = r :: R] satisfies
+    [safe_for_step] (no region is removed). *)
+Lemma safe_for_step_R_add :
+  forall e R r, safe_for_step e R (r :: R).
+Proof.
+  unfold safe_for_step. intros e R r r0 Hin Hnin. exfalso. apply Hnin. right; exact Hin.
+Qed.
+
 Theorem preservation :
   forall mu R e mu' R' e',
     (mu, R, e) -->> (mu', R', e') ->

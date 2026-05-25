@@ -6024,11 +6024,171 @@ Proof.
   unfold safe_for_step. intros e R r r0 Hin Hnin. exfalso. apply Hnin. right; exact Hin.
 Qed.
 
+(** Projection helpers: for each compound-expression shape, deriving
+    [safe_for_step] on a sub-expression from [safe_for_step] on the
+    whole. Used in [preservation]'s congruence cases to thread Hsafe
+    to the IH application. *)
+
+Lemma safe_for_step_StringConcat_l : forall e1 e2 R R',
+  safe_for_step (EStringConcat e1 e2) R R' -> safe_for_step e1 R R'.
+Proof. unfold safe_for_step. intros e1 e2 R R' H r Hin Hnin.
+  destruct (H r Hin Hnin) as [Hf _]. exact Hf. Qed.
+
+Lemma safe_for_step_StringConcat_r : forall e1 e2 R R',
+  safe_for_step (EStringConcat e1 e2) R R' -> safe_for_step e2 R R'.
+Proof. unfold safe_for_step. intros e1 e2 R R' H r Hin Hnin.
+  destruct (H r Hin Hnin) as [_ Hf]. exact Hf. Qed.
+
+Lemma safe_for_step_StringLen : forall e R R',
+  safe_for_step (EStringLen e) R R' -> safe_for_step e R R'.
+Proof. unfold safe_for_step. intros e R R' H r Hin Hnin. exact (H r Hin Hnin). Qed.
+
+Lemma safe_for_step_Let_l : forall e1 e2 R R',
+  safe_for_step (ELet e1 e2) R R' -> safe_for_step e1 R R'.
+Proof. unfold safe_for_step. intros e1 e2 R R' H r Hin Hnin.
+  destruct (H r Hin Hnin) as [Hf _]. exact Hf. Qed.
+
+Lemma safe_for_step_Let_r_body : forall e1 e2 R R',
+  safe_for_step (ELet e1 e2) R R' -> safe_for_step e2 R R'.
+Proof. unfold safe_for_step. intros e1 e2 R R' H r Hin Hnin.
+  destruct (H r Hin Hnin) as [_ Hf]. exact Hf. Qed.
+
+Lemma safe_for_step_LetLin_l : forall e1 e2 R R',
+  safe_for_step (ELetLin e1 e2) R R' -> safe_for_step e1 R R'.
+Proof. unfold safe_for_step. intros e1 e2 R R' H r Hin Hnin.
+  destruct (H r Hin Hnin) as [Hf _]. exact Hf. Qed.
+
+Lemma safe_for_step_LetLin_r_body : forall e1 e2 R R',
+  safe_for_step (ELetLin e1 e2) R R' -> safe_for_step e2 R R'.
+Proof. unfold safe_for_step. intros e1 e2 R R' H r Hin Hnin.
+  destruct (H r Hin Hnin) as [_ Hf]. exact Hf. Qed.
+
+Lemma safe_for_step_App_l : forall e1 e2 R R',
+  safe_for_step (EApp e1 e2) R R' -> safe_for_step e1 R R'.
+Proof. unfold safe_for_step. intros e1 e2 R R' H r Hin Hnin.
+  destruct (H r Hin Hnin) as [Hf _]. exact Hf. Qed.
+
+Lemma safe_for_step_App_r : forall e1 e2 R R',
+  safe_for_step (EApp e1 e2) R R' -> safe_for_step e2 R R'.
+Proof. unfold safe_for_step. intros e1 e2 R R' H r Hin Hnin.
+  destruct (H r Hin Hnin) as [_ Hf]. exact Hf. Qed.
+
+Lemma safe_for_step_Pair_l : forall e1 e2 R R',
+  safe_for_step (EPair e1 e2) R R' -> safe_for_step e1 R R'.
+Proof. unfold safe_for_step. intros e1 e2 R R' H r Hin Hnin.
+  destruct (H r Hin Hnin) as [Hf _]. exact Hf. Qed.
+
+Lemma safe_for_step_Pair_r : forall e1 e2 R R',
+  safe_for_step (EPair e1 e2) R R' -> safe_for_step e2 R R'.
+Proof. unfold safe_for_step. intros e1 e2 R R' H r Hin Hnin.
+  destruct (H r Hin Hnin) as [_ Hf]. exact Hf. Qed.
+
+Lemma safe_for_step_If_cond : forall e1 e2 e3 R R',
+  safe_for_step (EIf e1 e2 e3) R R' -> safe_for_step e1 R R'.
+Proof. unfold safe_for_step. intros e1 e2 e3 R R' H r Hin Hnin.
+  destruct (H r Hin Hnin) as [Hf _]. exact Hf. Qed.
+
+Lemma safe_for_step_If_branch_2 : forall e1 e2 e3 R R',
+  safe_for_step (EIf e1 e2 e3) R R' -> safe_for_step e2 R R'.
+Proof. unfold safe_for_step. intros e1 e2 e3 R R' H r Hin Hnin.
+  destruct (H r Hin Hnin) as [_ [Hf _]]. exact Hf. Qed.
+
+Lemma safe_for_step_If_branch_3 : forall e1 e2 e3 R R',
+  safe_for_step (EIf e1 e2 e3) R R' -> safe_for_step e3 R R'.
+Proof. unfold safe_for_step. intros e1 e2 e3 R R' H r Hin Hnin.
+  destruct (H r Hin Hnin) as [_ [_ Hf]]. exact Hf. Qed.
+
+Lemma safe_for_step_Case_scrut : forall e e1 e2 R R',
+  safe_for_step (ECase e e1 e2) R R' -> safe_for_step e R R'.
+Proof. unfold safe_for_step. intros e e1 e2 R R' H r Hin Hnin.
+  destruct (H r Hin Hnin) as [Hf _]. exact Hf. Qed.
+
+Lemma safe_for_step_Case_branch_l : forall e e1 e2 R R',
+  safe_for_step (ECase e e1 e2) R R' -> safe_for_step e1 R R'.
+Proof. unfold safe_for_step. intros e e1 e2 R R' H r Hin Hnin.
+  destruct (H r Hin Hnin) as [_ [Hf _]]. exact Hf. Qed.
+
+Lemma safe_for_step_Case_branch_r : forall e e1 e2 R R',
+  safe_for_step (ECase e e1 e2) R R' -> safe_for_step e2 R R'.
+Proof. unfold safe_for_step. intros e e1 e2 R R' H r Hin Hnin.
+  destruct (H r Hin Hnin) as [_ [_ Hf]]. exact Hf. Qed.
+
+Lemma safe_for_step_Fst : forall e R R',
+  safe_for_step (EFst e) R R' -> safe_for_step e R R'.
+Proof. unfold safe_for_step. intros e R R' H r Hin Hnin. exact (H r Hin Hnin). Qed.
+
+Lemma safe_for_step_Snd : forall e R R',
+  safe_for_step (ESnd e) R R' -> safe_for_step e R R'.
+Proof. unfold safe_for_step. intros e R R' H r Hin Hnin. exact (H r Hin Hnin). Qed.
+
+Lemma safe_for_step_Inl : forall T e R R',
+  safe_for_step (EInl T e) R R' -> safe_for_step e R R'.
+Proof. unfold safe_for_step. intros T e R R' H r Hin Hnin. exact (H r Hin Hnin). Qed.
+
+Lemma safe_for_step_Inr : forall T e R R',
+  safe_for_step (EInr T e) R R' -> safe_for_step e R R'.
+Proof. unfold safe_for_step. intros T e R R' H r Hin Hnin. exact (H r Hin Hnin). Qed.
+
+Lemma safe_for_step_Borrow : forall e R R',
+  safe_for_step (EBorrow e) R R' -> safe_for_step e R R'.
+Proof. unfold safe_for_step. intros e R R' H r Hin Hnin. exact (H r Hin Hnin). Qed.
+
+Lemma safe_for_step_Drop : forall e R R',
+  safe_for_step (EDrop e) R R' -> safe_for_step e R R'.
+Proof. unfold safe_for_step. intros e R R' H r Hin Hnin. exact (H r Hin Hnin). Qed.
+
+Lemma safe_for_step_Copy : forall e R R',
+  safe_for_step (ECopy e) R R' -> safe_for_step e R R'.
+Proof. unfold safe_for_step. intros e R R' H r Hin Hnin. exact (H r Hin Hnin). Qed.
+
+(** [sibling_transport]: under [safe_for_step], a sibling typing at
+    [R] can be lifted to a typing at [R'] post-step, regardless of
+    which of the three R-shapes (equal / prepend / shrink) applies.
+
+    Proof dispatches on [step_R_change_shape]:
+    - LEFT (R = R'): identity.
+    - MIDDLE (R' = r :: R): [region_add_typing].
+    - RIGHT (R' = remove_first r R, In r R) splits further:
+      * If [In r R'] (the removed region was duplicated): membership
+        of R and R' agree, use [region_env_perm_typing].
+      * If [~In r R'] (the removed region was unique): use
+        [safe_for_step]'s hypothesis to derive
+        [expr_free_of_region r e], then [region_shrink_preserves_typing]. *)
+Lemma sibling_transport :
+  forall mu R mu' R' e_step e_step',
+    (mu, R, e_step) -->> (mu', R', e_step') ->
+    forall e_sib G T G',
+      R; G |- e_sib : T -| G' ->
+      safe_for_step e_sib R R' ->
+      R'; G |- e_sib : T -| G'.
+Proof.
+  intros mu R mu' R' e_step e_step' Hstep e_sib G T G' Htype Hsafe.
+  pose proof (step_R_change_shape _ _ _ _ _ _ Hstep)
+    as [HeqR | [[r [Hadd Hnotin]] | [r [Hrem HinR]]]].
+  - subst R'. exact Htype.
+  - subst R'. apply region_add_typing. exact Htype.
+  - subst R'.
+    destruct (in_dec String.string_dec r (remove_first r R)) as [HinRem | HninRem].
+    + (* r duplicated: membership equal, perm *)
+      eapply region_env_perm_typing.
+      * exact Htype.
+      * intro r0.
+        destruct (String.eqb r r0) eqn:Heqrr0.
+        -- apply String.eqb_eq in Heqrr0. subst r0.
+           split; intros; [exact HinRem | exact HinR].
+        -- apply String.eqb_neq in Heqrr0.
+           apply (region_shrink_in_preserves r r0 R). exact Heqrr0.
+    + (* r unique: use safe_for_step *)
+      pose proof (Hsafe r HinR HninRem) as Hfree.
+      apply region_shrink_preserves_typing; assumption.
+Qed.
+
 Theorem preservation :
   forall mu R e mu' R' e',
     (mu, R, e) -->> (mu', R', e') ->
     forall G T G',
     R; G |- e : T -| G' ->
+    safe_for_step e R R' ->
     exists G_out, R'; G |- e' : T -| G_out.
 Proof.
   intros mu R e mu' R' e' Hstep.
@@ -6063,7 +6223,7 @@ Proof.
      pass have unusable IHs. *)
   revert mu R e mu' R' e' Hcfg Hcfg'.
   induction Hstep; intros mu0 R0 e0 mu0' R0' e0' Hcfg Hcfg';
-    intros G0 T0 G0' Htype;
+    intros G0 T0 G0' Htype Hsafe;
     inversion Hcfg; subst;
     inversion Hcfg'; subst;
     inversion Htype; subst;
@@ -6078,11 +6238,33 @@ Proof.
        as the inner expression, the inner step hypothesis is immediately impossible). *)
     try solve [exfalso;
                match goal with [ H : (_, _, EVar _) -->> _ |- _ ] => inversion H end].
-  (* Congruence: IH + reconstruct *)
-  all: try solve [match goal with [ IH : forall _ _ _, _ -> exists _, _ |- _ ] =>
+  (* Congruence: IH + reconstruct. The IH now requires safe_for_step
+     for the inner expression — derive it from outer Hsafe via the
+     per-shape projection lemmas. For single-child compounds with
+     a single typed sub-expression, the IH + Hsafe-projection +
+     econstructor closes. *)
+  all: try solve [
     match goal with [ H : has_type _ _ _ _ _ |- _ ] =>
-      destruct (IH _ _ _ H) as [? ?];
-      eexists; econstructor; try eassumption end end].
+      first
+        [ destruct (IHHstep _ _ _ _ _ _ eq_refl eq_refl _ _ _ H
+                     (safe_for_step_Fst _ _ _ Hsafe)) as [? ?]
+        | destruct (IHHstep _ _ _ _ _ _ eq_refl eq_refl _ _ _ H
+                     (safe_for_step_Snd _ _ _ Hsafe)) as [? ?]
+        | destruct (IHHstep _ _ _ _ _ _ eq_refl eq_refl _ _ _ H
+                     (safe_for_step_Inl _ _ _ _ Hsafe)) as [? ?]
+        | destruct (IHHstep _ _ _ _ _ _ eq_refl eq_refl _ _ _ H
+                     (safe_for_step_Inr _ _ _ _ Hsafe)) as [? ?]
+        | destruct (IHHstep _ _ _ _ _ _ eq_refl eq_refl _ _ _ H
+                     (safe_for_step_Borrow _ _ _ Hsafe)) as [? ?]
+        | destruct (IHHstep _ _ _ _ _ _ eq_refl eq_refl _ _ _ H
+                     (safe_for_step_Drop _ _ _ Hsafe)) as [? ?]
+        | destruct (IHHstep _ _ _ _ _ _ eq_refl eq_refl _ _ _ H
+                     (safe_for_step_Copy _ _ _ Hsafe)) as [? ?]
+        | destruct (IHHstep _ _ _ _ _ _ eq_refl eq_refl _ _ _ H
+                     (safe_for_step_StringLen _ _ _ Hsafe)) as [? ?]
+        ];
+      eexists; econstructor; try eassumption
+    end].
   all: try solve [eexists; econstructor; try eassumption].
   all: try solve [eexists; eassumption].
   all: try solve [exfalso; congruence].
@@ -6415,192 +6597,219 @@ Proof.
      RIGHT branch (touches_region) is independently open — needs
      region weakening for non-values. *)
 
-  (* S_StringConcat_Step1: inner step is on e1. Use step_R_change_shape
-     for 3-way dispatch. LEFT and MIDDLE close via has_type_lift on the
-     sibling. RIGHT (remove_first) blocked on sibling-might-reference-r. *)
+  (* S_StringConcat_Step1: unified via sibling_transport (handles all
+     three R-shapes for the unchanged sibling e2) + step_output_context_eq
+     (bridges the post-step e1's output context to e2's input context). *)
   all: try solve [
     match goal with
     | [ H1 : has_type ?R ?G ?e1 (TString ?r0) ?Gmid,
         H2 : has_type ?R ?Gmid ?e2 (TString ?r0) ?Gout1
         |- exists _ : ctx, has_type ?Rp ?G (EStringConcat ?e1' ?e2) (TString ?r0) _ ] =>
-        pose proof (step_R_change_shape _ _ _ _ _ _ Hstep)
-          as [HeqR | [[r [Hadd Hnotin]] | [r [Hrem HinR]]]];
-        [ rewrite HeqR in *;
-          edestruct (IHHstep _ _ _ _ _ _ eq_refl eq_refl _ _ _ H1) as [Gout2 Hout];
-          eexists; eapply T_StringConcat; [exact Hout | exact H2]
-        | subst Rp;
-          edestruct (IHHstep _ _ _ _ _ _ eq_refl eq_refl _ _ _ H1) as [Gout2 Hout];
-          pose proof (region_add_typing _ _ _ _ _ r H2) as H2lift;
-          eexists; eapply T_StringConcat; [exact Hout | exact H2lift]
-        | fail ]
+        edestruct (IHHstep _ _ _ _ _ _ eq_refl eq_refl _ _ _ H1
+                     (safe_for_step_StringConcat_l _ _ _ _ Hsafe))
+          as [Gout2 Hout];
+        pose proof (sibling_transport _ _ _ _ _ _ Hstep _ _ _ _ H2
+                     (safe_for_step_StringConcat_r _ _ _ _ Hsafe))
+          as H2lift;
+        pose proof (step_output_context_eq _ _ _ _ _ _ Hstep _ _ _ _ H1 Hout) as HGeq;
+        subst Gout2;
+        eexists; eapply T_StringConcat; [exact Hout | exact H2lift]
     end
   ].
 
-  (* S_StringConcat_Step2: inner step is on e2; v1 is a value so
-     value_context_unchanged ⇒ v1's post-context equals its pre-context. *)
+  (* S_StringConcat_Step2: v1 is a value, e2 steps. Unified via
+     value_context_unchanged (aligns Gmid) + sibling_transport on v1
+     (lifts v1's typing to R') + IH on e2. *)
   all: try solve [
     match goal with
     | [ Hv : is_value ?v1,
         H1 : has_type ?R ?G ?v1 (TString ?r0) ?Gmid,
         H2 : has_type ?R ?Gmid ?e2 (TString ?r0) ?G'
         |- exists _ : ctx, has_type ?R' ?G (EStringConcat ?v1 ?e2') (TString ?r0) _ ] =>
-        pose proof (step_R_eq_or_touches_region _ _ _ _ _ _ Hstep) as Hdis;
-        destruct Hdis as [HeqR | HTR];
-        [ rewrite <- HeqR;
-          assert (Hgeq: Gmid = G) by (eapply value_context_unchanged; eassumption);
-          subst Gmid;
-          edestruct (IHHstep _ _ _ _ _ _ eq_refl eq_refl _ _ _ H2) as [Gout Hout];
-          eexists; eapply T_StringConcat; [exact H1 | exact Hout]
-        | fail ]
+        assert (Hgeq: Gmid = G) by (eapply value_context_unchanged; eassumption);
+        subst Gmid;
+        edestruct (IHHstep _ _ _ _ _ _ eq_refl eq_refl _ _ _ H2
+                     (safe_for_step_StringConcat_r _ _ _ _ Hsafe))
+          as [Gout Hout];
+        pose proof (sibling_transport _ _ _ _ _ _ Hstep _ _ _ _ H1
+                     (safe_for_step_StringConcat_l _ _ _ _ Hsafe))
+          as H1lift;
+        eexists; eapply T_StringConcat; [exact H1lift | exact Hout]
     end
   ].
 
-  (* S_StringLen_Step: Hb: EBorrow e : TBorrow (TString r). IH is on
-     the inner step on e; invert Hb to get e's typing, feed to IH,
-     reconstruct EStringLen e' via T_StringLen ∘ T_Borrow. *)
+  (* S_StringLen_Step: EStringLen e → EStringLen e'. T_StringLen's
+     body is typed at TBorrow (TString r), meaning body = EBorrow (...).
+     Inverting Hb (T_Borrow / T_Borrow_Val) forces the body's inner
+     to be EVar or value — neither of which steps. So this case is
+     vacuous: contradicts Hstep via values_dont_step or EVar-can't-step. *)
   all: try solve [
     match goal with
-    | [ Hb : has_type ?R ?G (EBorrow ?e) (TBorrow (TString ?r0)) ?G'
-        |- exists _ : ctx, has_type ?R' ?G (EStringLen ?e') (TBase TI32) _ ] =>
-        pose proof (step_R_eq_or_touches_region _ _ _ _ _ _ Hstep) as Hdis;
-        destruct Hdis as [HeqR | HTR];
-        [ rewrite <- HeqR;
-          inversion Hb; subst;
-          match goal with
-          | [ Het : has_type ?R ?G ?e (TString ?r0) ?Ge |- _ ] =>
-              edestruct (IHHstep _ _ _ _ _ _ eq_refl eq_refl _ _ _ Het) as [Gout Hout];
-              eexists; eapply T_StringLen; eapply T_Borrow; exact Hout
-          end
-        | fail ]
+    | [ Hb : has_type ?R ?G (EBorrow ?e_inner) (TBorrow (TString ?r0)) ?G'
+        |- _ ] =>
+        inversion Hb; subst;
+        first
+          [ exfalso;
+            match goal with
+            | [ H : (_, _, EVar _) -->> _ |- _ ] => inversion H
+            end
+          | exfalso; eapply values_dont_step; eassumption ]
     end
   ].
 
-  (* S_Let_Step *)
+  (* S_Let_Step: e1 steps, e2 (body) unchanged. *)
   all: try solve [
     match goal with
     | [ H1 : has_type ?R ?G ?e1 ?T1 ?Gmid,
         H2 : has_type ?R (ctx_extend ?Gmid ?T1) ?e2 ?T0 ((?T1, true) :: ?G')
         |- exists _ : ctx, has_type ?R' ?G (ELet ?e1' ?e2) ?T0 _ ] =>
-        pose proof (step_R_eq_or_touches_region _ _ _ _ _ _ Hstep) as Hdis;
-        destruct Hdis as [HeqR | HTR];
-        [ rewrite <- HeqR;
-          edestruct (IHHstep _ _ _ _ _ _ eq_refl eq_refl _ _ _ H1) as [Gout Hout];
-          eexists; eapply T_Let; [exact Hout | exact H2]
-        | fail ]
+        edestruct (IHHstep _ _ _ _ _ _ eq_refl eq_refl _ _ _ H1
+                     (safe_for_step_Let_l _ _ _ _ Hsafe))
+          as [Gout Hout];
+        pose proof (sibling_transport _ _ _ _ _ _ Hstep _ _ _ _ H2
+                     (safe_for_step_Let_r_body _ _ _ _ Hsafe))
+          as H2lift;
+        pose proof (step_output_context_eq _ _ _ _ _ _ Hstep _ _ _ _ H1 Hout) as HGeq;
+        subst Gout;
+        eexists; eapply T_Let; [exact Hout | exact H2lift]
     end
   ].
 
-  (* S_LetLin_Step *)
+  (* S_LetLin_Step: same structure as S_Let_Step. *)
   all: try solve [
     match goal with
     | [ Hlin : is_linear_ty ?T1 = true,
         H1 : has_type ?R ?G ?e1 ?T1 ?Gmid,
         H2 : has_type ?R (ctx_extend ?Gmid ?T1) ?e2 ?T0 ((?T1, true) :: ?G')
         |- exists _ : ctx, has_type ?R' ?G (ELetLin ?e1' ?e2) ?T0 _ ] =>
-        pose proof (step_R_eq_or_touches_region _ _ _ _ _ _ Hstep) as Hdis;
-        destruct Hdis as [HeqR | HTR];
-        [ rewrite <- HeqR;
-          edestruct (IHHstep _ _ _ _ _ _ eq_refl eq_refl _ _ _ H1) as [Gout Hout];
-          eexists; eapply T_LetLin; [exact Hlin | exact Hout | exact H2]
-        | fail ]
+        edestruct (IHHstep _ _ _ _ _ _ eq_refl eq_refl _ _ _ H1
+                     (safe_for_step_LetLin_l _ _ _ _ Hsafe))
+          as [Gout Hout];
+        pose proof (sibling_transport _ _ _ _ _ _ Hstep _ _ _ _ H2
+                     (safe_for_step_LetLin_r_body _ _ _ _ Hsafe))
+          as H2lift;
+        pose proof (step_output_context_eq _ _ _ _ _ _ Hstep _ _ _ _ H1 Hout) as HGeq;
+        subst Gout;
+        eexists; eapply T_LetLin; [exact Hlin | exact Hout | exact H2lift]
     end
   ].
 
-  (* S_App_Step1 *)
+  (* S_App_Step1: e1 steps, e2 unchanged. *)
   all: try solve [
     match goal with
     | [ H1 : has_type ?R ?G ?e1 (TFun ?T1 ?T0) ?Gmid,
         H2 : has_type ?R ?Gmid ?e2 ?T1 ?G'
         |- exists _ : ctx, has_type ?R' ?G (EApp ?e1' ?e2) ?T0 _ ] =>
-        pose proof (step_R_eq_or_touches_region _ _ _ _ _ _ Hstep) as Hdis;
-        destruct Hdis as [HeqR | HTR];
-        [ rewrite <- HeqR;
-          edestruct (IHHstep _ _ _ _ _ _ eq_refl eq_refl _ _ _ H1) as [Gout Hout];
-          eexists; eapply T_App; [exact Hout | exact H2]
-        | fail ]
+        edestruct (IHHstep _ _ _ _ _ _ eq_refl eq_refl _ _ _ H1
+                     (safe_for_step_App_l _ _ _ _ Hsafe))
+          as [Gout Hout];
+        pose proof (sibling_transport _ _ _ _ _ _ Hstep _ _ _ _ H2
+                     (safe_for_step_App_r _ _ _ _ Hsafe))
+          as H2lift;
+        pose proof (step_output_context_eq _ _ _ _ _ _ Hstep _ _ _ _ H1 Hout) as HGeq;
+        subst Gout;
+        eexists; eapply T_App; [exact Hout | exact H2lift]
     end
   ].
 
-  (* S_App_Step2: v1 is a value so its post-context equals pre-context. *)
+  (* S_App_Step2: v1 is a value, e2 steps. *)
   all: try solve [
     match goal with
     | [ Hv : is_value ?v1,
         H1 : has_type ?R ?G ?v1 (TFun ?T1 ?T0) ?Gmid,
         H2 : has_type ?R ?Gmid ?e2 ?T1 ?G'
         |- exists _ : ctx, has_type ?R' ?G (EApp ?v1 ?e2') ?T0 _ ] =>
-        pose proof (step_R_eq_or_touches_region _ _ _ _ _ _ Hstep) as Hdis;
-        destruct Hdis as [HeqR | HTR];
-        [ rewrite <- HeqR;
-          assert (Hgeq: Gmid = G) by (eapply value_context_unchanged; eassumption);
-          subst Gmid;
-          edestruct (IHHstep _ _ _ _ _ _ eq_refl eq_refl _ _ _ H2) as [Gout Hout];
-          eexists; eapply T_App; [exact H1 | exact Hout]
-        | fail ]
+        assert (Hgeq: Gmid = G) by (eapply value_context_unchanged; eassumption);
+        subst Gmid;
+        edestruct (IHHstep _ _ _ _ _ _ eq_refl eq_refl _ _ _ H2
+                     (safe_for_step_App_r _ _ _ _ Hsafe))
+          as [Gout Hout];
+        pose proof (sibling_transport _ _ _ _ _ _ Hstep _ _ _ _ H1
+                     (safe_for_step_App_l _ _ _ _ Hsafe))
+          as H1lift;
+        eexists; eapply T_App; [exact H1lift | exact Hout]
     end
   ].
 
-  (* S_If_Step *)
+  (* S_If_Step: cond steps, branches unchanged. *)
   all: try solve [
     match goal with
     | [ H1 : has_type ?R ?G ?e1 (TBase TBool) ?Gmid,
         H2 : has_type ?R ?Gmid ?e2 ?T0 ?G',
         H3 : has_type ?R ?Gmid ?e3 ?T0 ?G'
         |- exists _ : ctx, has_type ?R' ?G (EIf ?e1' ?e2 ?e3) ?T0 _ ] =>
-        pose proof (step_R_eq_or_touches_region _ _ _ _ _ _ Hstep) as Hdis;
-        destruct Hdis as [HeqR | HTR];
-        [ rewrite <- HeqR;
-          edestruct (IHHstep _ _ _ _ _ _ eq_refl eq_refl _ _ _ H1) as [Gout Hout];
-          eexists; eapply T_If; [exact Hout | exact H2 | exact H3]
-        | fail ]
+        edestruct (IHHstep _ _ _ _ _ _ eq_refl eq_refl _ _ _ H1
+                     (safe_for_step_If_cond _ _ _ _ _ Hsafe))
+          as [Gout Hout];
+        pose proof (sibling_transport _ _ _ _ _ _ Hstep _ _ _ _ H2
+                     (safe_for_step_If_branch_2 _ _ _ _ _ Hsafe))
+          as H2lift;
+        pose proof (sibling_transport _ _ _ _ _ _ Hstep _ _ _ _ H3
+                     (safe_for_step_If_branch_3 _ _ _ _ _ Hsafe))
+          as H3lift;
+        pose proof (step_output_context_eq _ _ _ _ _ _ Hstep _ _ _ _ H1 Hout) as HGeq;
+        subst Gout;
+        eexists; eapply T_If; [exact Hout | exact H2lift | exact H3lift]
     end
   ].
 
-  (* S_Pair_Step1 *)
+  (* S_Pair_Step1: e1 steps. *)
   all: try solve [
     match goal with
     | [ H1 : has_type ?R ?G ?e1 ?T1 ?Gmid,
         H2 : has_type ?R ?Gmid ?e2 ?T2 ?G'
         |- exists _ : ctx, has_type ?R' ?G (EPair ?e1' ?e2) (TProd ?T1 ?T2) _ ] =>
-        pose proof (step_R_eq_or_touches_region _ _ _ _ _ _ Hstep) as Hdis;
-        destruct Hdis as [HeqR | HTR];
-        [ rewrite <- HeqR;
-          edestruct (IHHstep _ _ _ _ _ _ eq_refl eq_refl _ _ _ H1) as [Gout Hout];
-          eexists; eapply T_Pair; [exact Hout | exact H2]
-        | fail ]
+        edestruct (IHHstep _ _ _ _ _ _ eq_refl eq_refl _ _ _ H1
+                     (safe_for_step_Pair_l _ _ _ _ Hsafe))
+          as [Gout Hout];
+        pose proof (sibling_transport _ _ _ _ _ _ Hstep _ _ _ _ H2
+                     (safe_for_step_Pair_r _ _ _ _ Hsafe))
+          as H2lift;
+        pose proof (step_output_context_eq _ _ _ _ _ _ Hstep _ _ _ _ H1 Hout) as HGeq;
+        subst Gout;
+        eexists; eapply T_Pair; [exact Hout | exact H2lift]
     end
   ].
 
-  (* S_Pair_Step2: v1 is a value. *)
+  (* S_Pair_Step2: v1 value, e2 steps. Unified via value_context_unchanged
+     + sibling_transport on v1 + IH on e2. *)
   all: try solve [
     match goal with
     | [ Hv : is_value ?v1,
         H1 : has_type ?R ?G ?v1 ?T1 ?Gmid,
         H2 : has_type ?R ?Gmid ?e2 ?T2 ?G'
         |- exists _ : ctx, has_type ?R' ?G (EPair ?v1 ?e2') (TProd ?T1 ?T2) _ ] =>
-        pose proof (step_R_eq_or_touches_region _ _ _ _ _ _ Hstep) as Hdis;
-        destruct Hdis as [HeqR | HTR];
-        [ rewrite <- HeqR;
-          assert (Hgeq: Gmid = G) by (eapply value_context_unchanged; eassumption);
-          subst Gmid;
-          edestruct (IHHstep _ _ _ _ _ _ eq_refl eq_refl _ _ _ H2) as [Gout Hout];
-          eexists; eapply T_Pair; [exact H1 | exact Hout]
-        | fail ]
+        assert (Hgeq: Gmid = G) by (eapply value_context_unchanged; eassumption);
+        subst Gmid;
+        edestruct (IHHstep _ _ _ _ _ _ eq_refl eq_refl _ _ _ H2
+                     (safe_for_step_Pair_r _ _ _ _ Hsafe))
+          as [Gout Hout];
+        pose proof (sibling_transport _ _ _ _ _ _ Hstep _ _ _ _ H1
+                     (safe_for_step_Pair_l _ _ _ _ Hsafe))
+          as H1lift;
+        eexists; eapply T_Pair; [exact H1lift | exact Hout]
     end
   ].
 
-  (* S_Case_Step *)
+  (* S_Case_Step: scrutinee steps, branches unchanged. *)
   all: try solve [
     match goal with
     | [ H1 : has_type ?R ?G ?e (TSum ?T1 ?T2) ?Gmid,
         H2 : has_type ?R (ctx_extend ?Gmid ?T1) ?e1 ?T0 ((?T1, true) :: ?G'),
         H3 : has_type ?R (ctx_extend ?Gmid ?T2) ?e2 ?T0 ((?T2, true) :: ?G')
         |- exists _ : ctx, has_type ?R' ?G (ECase ?e' ?e1 ?e2) ?T0 _ ] =>
-        pose proof (step_R_eq_or_touches_region _ _ _ _ _ _ Hstep) as Hdis;
-        destruct Hdis as [HeqR | HTR];
-        [ rewrite <- HeqR;
-          edestruct (IHHstep _ _ _ _ _ _ eq_refl eq_refl _ _ _ H1) as [Gout Hout];
-          eexists; eapply T_Case; [exact Hout | exact H2 | exact H3]
-        | fail ]
+        edestruct (IHHstep _ _ _ _ _ _ eq_refl eq_refl _ _ _ H1
+                     (safe_for_step_Case_scrut _ _ _ _ _ Hsafe))
+          as [Gout Hout];
+        pose proof (sibling_transport _ _ _ _ _ _ Hstep _ _ _ _ H2
+                     (safe_for_step_Case_branch_l _ _ _ _ _ Hsafe))
+          as H2lift;
+        pose proof (sibling_transport _ _ _ _ _ _ Hstep _ _ _ _ H3
+                     (safe_for_step_Case_branch_r _ _ _ _ _ Hsafe))
+          as H3lift;
+        pose proof (step_output_context_eq _ _ _ _ _ _ Hstep _ _ _ _ H1 Hout) as HGeq;
+        subst Gout;
+        eexists; eapply T_Case; [exact Hout | exact H2lift | exact H3lift]
     end
   ].
 
@@ -6611,6 +6820,14 @@ Proof.
                               requires either a typing invariant
                               (sibling-region-disjointness) or a
                               reformulation of preservation. *)
+  (* S_Region_Step remains — projection of safe_for_step through
+     ERegion r0 doesn't cleanly give the inner safe_for_step due to
+     the asymmetry between outer-shadowing and inner-actual-usage.
+     For r ≠ r0 in the removed-region set, projection works trivially.
+     For r = r0, outer shadowing returns True at the OUTER level but
+     inner sub-expressions may still reference r0 (deeply-nested
+     structures). Documented and admitted. *)
+  all: admit.
 Admitted.
 (* PROOF STATUS [preservation] — ADMITTED, down to 12 open goals
    (from 910 cross-case, via PR #102's remember-cfg + PR #106's

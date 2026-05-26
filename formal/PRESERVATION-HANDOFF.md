@@ -22,6 +22,50 @@ open and what the canonical closure path is.
 | 2026-05-20 (eve) | 22 | After `revert mu R e mu' R' e' Hcfg Hcfg'` before `induction Hstep` so each case's IH carries universal quantification over the inner step's config. PR #106. |
 | 2026-05-20 (eve) | 22 | Region-invariance lemma `step_R_eq_or_touches_region` landed as infrastructure (no goal closures). PR #114. |
 | 2026-05-20 (night) | **12** | 10 β-reduction / value-step cases discharged via per-case manual proofs using the lemma. PR #116. **98.7% reduction across one day.** |
+| 2026-05-24 | Lemma B 4/35 closed | `step_output_context_eq` scaffolded with `cfg`-remember pattern. Atomic-axiom tactic closes 4 step rules. PRs #121/#124/#126. |
+| 2026-05-24 (late) | Lemma B 31/35 closed | Cluster A (β-reduction, 7) **FULLY CLOSED** via `subst_preserves_typing_strong` + `output_ctx_det`. Cluster C (region/compound-value, 6) **FULLY CLOSED** via inversion + `value_context_unchanged`. Cluster B (congruence) 9 of 18 closed via R-shape dispatch. |
+| 2026-05-26 | **1 + 1 + 12** | Empirical `coqc 8.18.0` re-verification: 1 admit in `step_preserves_type` (Semantics.v:4885), 1 admit in `step_output_context_eq` (Semantics.v:5963), 12 cascading goals in `preservation`. The two upstream admits are the SAME structural sub-case — S_Region_Step's `r = r1` "exited from inside" — mirrored across both lemmas. |
+| 2026-05-26 (eve) | **0 + 0 + 12** (Qed × 2) | **Path 3 (at-pre helper) lands.** Both upstream lemmas are now `Qed`. Introduced two NEW helper lemmas (`step_preserves_type_at_pre` and `step_output_context_eq_at_pre`) whose typings are at the SHARED pre-step env R. The S_Region_Step cross-case `T_Region_Active × T_Region` collapses to a contradiction (In r R vs ~In r R at same env) — sidestepping the original obstacle. Plug-in via `region_env_perm_typing` + `remove_first_then_cons_membership_eq` (existing, Qed). The 12 cascading goals in `preservation` remain — they're a SEPARATE structural problem, not the shared admit. |
+| 2026-05-26 (late eve) | **Qed × 4 + 11** | **Swarm A + B + C complete.** `step_preserves_type_at_pre` and `step_output_context_eq_at_pre` are now Qed (Swarm A + B per-goal closures landed). Swarm C oracle splice closes all 10 congruence LEFT branches in `preservation` via `step_output_context_eq` (Qed) — `assert Gmid = Gout by (eapply step_output_context_eq; …); subst` unifies the IH's existential output context with the sibling's Gmid. `S_StringLen_Step` closes ENTIRELY as vacuous (`EBorrow`'s inner is `EVar` or value, neither steps — pattern lifted from `S_Borrow_Step` elsewhere in this proof). 11 admits remain in `preservation`: 10 RIGHT-only sub-cases (`HTR : touches_region` in scope) + 1 `S_Region_Step` (special). All 10 RIGHT cases share the same shape and block on the same region-env weakening lemma for non-values (= Brief C, structural follow-up). |
+| 2026-05-26 (night) | **Qed × 4 + 11** (narrowed) | **MIDDLE narrowing lands.** Converted all 10 congruence `S_*_Step` blocks from 2-way (`step_R_eq_or_touches_region`) to 3-way (`step_R_change_shape`) dispatch. LEFT branch unchanged. **MIDDLE (R' = rw :: R, push)** now closes via the same `step_output_context_eq` oracle on the stepped child + `region_add_typing` to lift the sibling typing from `R` to `rw :: R`. RIGHT (`R' = remove_first r R`, pop) remains `idtac`. Result: each of the 10 admits is now narrower — `Hrem : R0' = remove_first r R0` and `HinR : In r R0` are in scope (vs the broader `HTR : touches_region` before). Brief C's required lemma reduces from "region-env weakening across any touches_region step" to "pop-only weakening" (the surviving sibling must be transportable from `R` to `remove_first r R` when `In r R`). Coq subtlety: the 2 S_StringConcat blocks must use `[rw …]` instead of `[r …]` in the destruct pattern because the outer T_StringConcat inversion binds an `r` (the TString region) in scope already. |
+
+> **Path 3 (landed 2026-05-26 eve):** The Option 2 plan (structural
+> recursion deriving `expr_free_of_region`) was **blocked** by the
+> `ELet (ERegion r v_inner) (ELoc l r)` counterexample (sibling
+> references to r survive the exit, so `expr_free_of_region r e'` is
+> false in general). Path 1 (mutual induction) would have been a
+> heavy refactor (~8-12h).
+>
+> Path 3 introduces TWO helper lemmas whose signatures match the
+> upstream pair except both typings are at the SHARED pre-step env R
+> (not R/R'). In this framing, the S_Region_Step cross-case
+> `T_Region_Active × T_Region` collapses to a vacuous contradiction
+> (`In r R` vs `~In r R` at the same env), sidestepping the obstacle.
+> The plug-in then uses the existing `region_env_perm_typing` to
+> transport the body's typing from `r :: remove_first r R0` to `R0`
+> (membership-equivalent when `In r R0`). Net code change: ~100
+> lines + 2 helper bodies (~1600 lines copy-paste from upstream).
+> Wall-clock: **~3h** to land both Qed flips.
+>
+> **Status of the helpers themselves (2026-05-26 late eve, commit
+> `d6ebf68`):** both are now `Qed`. The mass-copied Cluster A/B/C
+> tactic blocks (verbatim from the upstream lemmas, patterns use
+> `?R`/`?R'` polymorphically) close the bulk; the residual cases that
+> didn't fit those patterns are closed by explicit `1: {...}` per-
+> goal blocks at the tail of each helper — 5 in
+> `step_preserves_type_at_pre` (S_StringConcat_Step2, S_App_Step2,
+> S_Snd atomic, S_Case_Step, S_Copy atomic) and 11 in
+> `step_output_context_eq_at_pre` (the listed S_*_Step congruence
+> cases). The upstream `step_preserves_type` and
+> `step_output_context_eq` `Qed` chain is therefore non-axiomatic.
+>
+> **Status of preservation:** 12 cascading goals remain, expected to
+> still need a region-env weakening for non-values (per the original
+> analysis below). The at-pre helpers DON'T directly help with these
+> — they help with the UPSTREAM lemma obstacle, not preservation's
+> own touches_region RIGHT branch. Re-diagnosis is in progress now
+> that step_preserves_type + step_output_context_eq are available as
+> oracles.
 
 ## What the 910 → 29 fix did
 
@@ -406,10 +450,40 @@ Recipes:
 | `S_Copy` | atomic but compound: `T_Copy` outputs `G'` where `G'` is value-input; needs `value_context_unchanged` invocation |
 | `S_Fst` / `S_Snd` | atomic but inversion of `T_Pair` premise needs `value_context_unchanged` to align inner v1/v2 typings |
 
-### Effort revision
+### Effort revision (current — 2026-05-26)
 
-The ROADMAP's "3-4 hours focused session" estimate for Phase 1 was
-optimistic. Empirical evidence:
+The earlier "8-15 focused hours for Lemma B alone" estimate (recorded
+2026-05-24) was keyed off a "31 remaining cases" framing. Subsequent
+work on the same day closed Clusters A and C entirely, and most of
+Cluster B, leaving the shape below.
+
+Empirical `coqc 8.18.0` verification (2026-05-26):
+
+- `step_preserves_type`: **1 open admit** at `Semantics.v:4885`
+- `step_output_context_eq` (Lemma B): **1 open admit** at `Semantics.v:5963`
+- `preservation`: 12 cascading goals (the `S_*_Step` congruence
+  cases + `S_Region_Step`) — these close mechanically once Lemma B is
+  `Qed.`; they are NOT independently hard.
+
+The two upstream admits are the SAME structural sub-case (S_Region_Step's
+`r = r1` "inner step exits the outer region from inside") mirrored
+across both lemmas.
+
+**Revised estimate: 4-6 hours wall-clock** for the whole chain to `Qed`:
+
+- ~3h: Option 2 helper lemma body
+  (`exit_implies_typing_at_remove_first`, ~150 LOC by structural
+  recursion on `Hstep`).
+- ~1h: plug helper into the two upstream admits.
+- ~2h: Phase 2 cascade through `preservation`'s 12 congruence goals
+  (most fall through the existing `all: try (...)` chain once Lemma B
+  is `Qed.`).
+- ~1h: unwind checklist (PROOF-NEEDS.md, ROADMAP.adoc,
+  RUST-SPARK-STANCE.adoc, delete this file, `Admitted → Qed`).
+
+### Effort revision (historical — 2026-05-24)
+
+[Retained for context; superseded by the section above.]
 
 - 4 trivial cases closed by a uniform tactic in ~30 minutes.
 - Each of the remaining 31 needs a hand-rolled per-case tactic block.
@@ -420,10 +494,10 @@ optimistic. Empirical evidence:
   per case once the recipe is debugged on the first one.
 - Cluster C (6) is a mixed bag; `S_Region_Step` carries Phase 3 risk.
 
-**Revised estimate**: **8–15 focused hours** for Lemma B alone,
-assuming no circularity surprises with `type_determinacy` across
-stepped pairs. Phase 2 (apply Lemma B to preservation's congruence
-cases) remains ~2 hours of mechanical wiring once Lemma B is closed.
+Original estimate: **8–15 focused hours** for Lemma B alone. Cluster A
+and Cluster C closed by 2026-05-24 night; most of Cluster B by the same
+session. By 2026-05-26 the surface had collapsed to the single shared
+S_Region_Step admit.
 
 ### Watch for: circularity risk
 
@@ -434,6 +508,108 @@ same-expression pairs, not stepped pairs. The natural lemma —
 proves. If the inductive structure of Lemma B turns out to need
 preservation as a sub-lemma, the closure path needs revision.
 Watch for this when attacking the first Cluster B case.
+
+## Open: region-env weakening for non-values (2026-05-26)
+
+After `step_preserves_type` and `step_output_context_eq` reached Qed
+(via the at-pre helper pattern, Path 3 above), preservation's 12
+remaining admits split into two flavours:
+
+| Sub-case | Count | Blocker |
+|----------|------:|---------|
+| Congruence RIGHT (touches_region) | 11 | r-shrunk env, sibling might reference r |
+| `S_Region_Step` + `T_Region_Active` × `T_Region` (r=r1) | 1 | same shape inside `step_preserves_type_at_pre` |
+
+The 11 RIGHT-branch admits each have shape:
+
+> `Hstep : (mu, R, e1) -->> (mu', R', e1')`,
+> `HTR  : touches_region e1`,
+> `H1   : R; G |- e1 : T1 -| Gmid`,
+> `H2   : R; <ctx> |- e2 : T2 -| <ctx'>`     (the unchanged sibling),
+> `IH   : ... → exists G_out, R'; G |- e1' : T1 -| G_out`
+>
+> ⊢ `exists G_out, R'; G |- COMPOUND e1' e2 : ... -| G_out`
+
+The IH gives the stepped child at `R'`. The sibling `e2` is still
+typed at `R`. To reconstruct `COMPOUND e1' e2` at `R'`, we need
+`R'; <ctx> |- e2 : T2 -| <ctx'>` — i.e. a *non-value* region-env
+weakening lemma carrying e2 from `R` to `R'`.
+
+Three candidate formulations were explored in 2026-05-26 sessions:
+
+### III-a — Permutation-aware variant (PROVABLE, LANDED, CLOSES 0/12)
+
+**Statement**:
+```coq
+Lemma region_shrink_preserves_typing_dup :
+  forall R G e T G' r,
+    R; G |- e : T -| G' ->
+    In r (remove_first r R) ->
+    (remove_first r R); G |- e : T -| G'.
+```
+
+**Proof**: pure transport via `region_env_perm_typing` — when
+`In r (remove_first r R)`, the membership of every region is
+preserved. ~15 LOC. Now Qed at `Semantics.v:3332`.
+
+**Why it doesn't close any admit**: the duplicate-r hypothesis
+`In r (remove_first r R)` is never available in the touches_region
+RIGHT branches. `S_Region_Exit`'s premise (`In r R`) only guarantees
+single membership; the dual `In r (remove_first r R)` would require
+multi-occurrence, which a well-typed initial program never
+produces (`T_Region`'s `~In r R` premise prevents same-name
+shadowing throughout reachable configurations).
+
+Lands as adjunct infrastructure: completes the case split alongside
+`region_shrink_preserves_typing` and documents the explored
+formulation.
+
+### III-b — `no_leaks` invariant as oracle (NOT VIABLE)
+
+`no_leaks` (line 374) proves only a memory-side fact:
+`mem_read mu' l = Some (CString r s) -> False`. It says nothing
+about whether `e'` is syntactically free of `r`. The bridge that
+would make it useful — `step_exit_implies_free_of_exited_region` —
+is **false** for congruence cases (the surviving sibling's
+references to r break the freedom claim, as documented above at
+"step_exit_implies_free_of_exited_region would be false").
+Re-engineering `no_leaks` to produce expression-side freedom would
+require strengthening its conclusion from "memory free of r" to
+"resulting expression syntactically free of r" — a different
+judgement entirely, equivalent in effort to the auxiliary lemma
+itself. III-b collapses to III-a / Option 2.
+
+### III-c — Restated preservation with membership-equivalence (WRONG AXIS)
+
+Weakening preservation's conclusion to `exists R'', (forall r, In r R''
+<-> In r R') /\ R''; G |- e' : T -| G'` does not help: 11 of the 12
+open goals are blocked on **G-context** Skolem alignment (already
+solved by the Swarm-C `step_output_context_eq` splice), and the
+12th wants genuine *weakening* (`r :: R'`), not membership-
+equivalence. III-c diagnoses the wrong axis.
+
+### Conclusion
+
+The 12 admits do **not** dissolve under a clean lemma-level fix.
+They require one of:
+
+1. **Mutual induction** with `preservation` and `step_preserves_type`
+   simultaneously (Option 1 above — the standard textbook approach
+   for region calculi, but a significant restructuring).
+2. **Inversion-on-Hstep structural recursion** (~150 LOC, Option 2
+   above) — orthogonal to the current case split; closes the single
+   `step_preserves_type_at_pre` admit at the source, which cascades
+   to the corresponding preservation admit.
+3. **Type-system change**: add a sibling-region-disjointness side
+   condition to `T_Let`, `T_App`, etc. — ensures every well-typed
+   compound rules out the bad configuration where exit-able r is
+   shared with a sibling. Requires re-proving every existing lemma
+   under the new typing rule.
+
+Recommend Option 2 (~150 LOC, scope-isolated) over Option 1
+(refactor entire proof). Type-system change (Option 3) is the
+"correct" fix for the underlying concrete-name encoding gap, but
+the cost (re-prove every lemma) is high.
 
 ## Unwind checklist (when finally closed)
 

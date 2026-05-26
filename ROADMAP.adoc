@@ -55,7 +55,7 @@ substitution semantics:
 
 | **`preservation`**
 | 🟡 Admitted
-| **12 open goals** after the reduction chain (PRs #92 / #102 / #104 / #106 / #114 / #116 / #117 / #121). Started at 910; 98.7% reduced. Phase 1 scaffold (Lemma B `step_output_context_eq`) landed; per-case discharges next. Remaining 12 = 11 congruence cases (blocked on Lemma B per-case closure) + 1 region case (`S_Region_Step + T_Region_Active`, blocked on region-env weakening). Canonical closure path: ROADMAP §"Preservation closure plan" below.
+| **11 open goals** after the reduction chain (PRs #92 / #102 / #104 / #106 / #114 / #116 / #117 / #121 / #146). Started at 910; 98.8% reduced. Lemma B (`step_output_context_eq`) + its `step_preserves_type_at_pre` / `step_output_context_eq_at_pre` plug-ins are all `Qed` (commit `d6ebf68`, 2026-05-26). Remaining 11 = 10 RIGHT-only congruence sub-cases (`HTR : touches_region` in scope, blocked on region-env weakening for non-values — see Phase 3 below) + 1 region case (`S_Region_Step + T_Region_Active`, same blocker). Canonical closure path: ROADMAP §"Preservation closure plan" below.
 |===
 
 **Historical note**: an earlier in-file comment claimed `preservation`
@@ -196,10 +196,19 @@ up the proof should follow.
 | Phase 1 empirical baseline (2026-05-24)
 | 12 (preservation) / **31 of 35** (Lemma B itself)
 | `cfg`-remember pattern + atomic-axiom tactic on Lemma B closes 4 of its 35 step-rule cases (`S_StringNew`, `S_StringConcat`, `S_Drop`, `S_Borrow_Step`); the remaining 31 cluster across β-reduction / congruence / region-and-compound-value branches. Per-case map in `formal/PRESERVATION-HANDOFF.md`.
+
+| Phase 1 cluster closures (2026-05-24 night)
+| 12 (preservation) / **1 of 35** (Lemma B itself)
+| Cluster A (β-reduction, 7) FULLY CLOSED via `subst_preserves_typing_strong` + `output_ctx_det`. Cluster C (region/compound-value, 6) FULLY CLOSED via inversion + `value_context_unchanged`. Cluster B (congruence) 9 of 18 closed via R-shape dispatch + 2 more via sibling type_determinacy trick. **1 admit remains** in Lemma B and step_preserves_type — the same S_Region_Step `r=r1` "inner step exits outer region from inside" sub-case mirrored.
+
+| 2026-05-26 re-verification
+| **1 + 1 + 12** (step_preserves_type + Lemma B + preservation)
+| Empirical coqc 8.18 re-grep. The 14 total = 1 independent (shared S_Region_Step admit) + 12 cascading (close on Lemma B Qed). **PRESERVATION-HANDOFF's recommended Option 2 (structural recursion on `Hstep`) is BLOCKED** by the counterexample `ELet (ERegion r v_inner) e2` with e2 referencing r (T_Let has no sibling-freedom premise). Pivot to Path 1 (mutual induction over `step_preserves_type` + `step_output_context_eq` + `preservation`). See `docs/reports/audit/audit-2026-05-26-lemma-b-option-2-obstacle.md` + `docs/sessions/SESSION-2026-05-26-lemma-b-pivot.adoc`.
 |===
 
-98.7% reduction across one day. Remaining 12 = 11 congruence cases
-(`S_*_Step` variants) + 1 region case (`S_Region_Step + T_Region_Active`).
+98.7% reduction across one day; further refined 2026-05-24 and 2026-05-26.
+Final shape: 1 independent admit (S_Region_Step `r=r1` sub-case) + 12
+cascading preservation goals that close on Lemma B `Qed.`.
 
 === Phase 1 — Lemma B: linearity-context invariance for siblings
 
@@ -226,13 +235,18 @@ via `G' = G_out`.
 **Approach**: induction on `step` with `type_determinacy` per case.
 Same pattern as `step_R_eq_or_touches_region`.
 
-**Effort**: ~~3–4 hours focused session~~ → **8–15 focused hours**
-(revised 2026-05-24). Empirical baseline from `coqc 8.18.0`: the
-`cfg`-remember + atomic-axiom tactic closes 4 of 35 step rules
-(`S_StringNew`, `S_StringConcat`, `S_Drop`, `S_Borrow_Step`); the
-remaining 31 split across 3 clusters needing distinct recipes. Full
-per-case map in `formal/PRESERVATION-HANDOFF.md` §"Lemma B per-case
-status".
+**Effort**: ~~3–4 hours focused session~~ → ~~8–15 focused hours
+(revised 2026-05-24)~~ → **8–12 focused hours via Path 1**
+(re-revised 2026-05-26). The 2026-05-24 baseline assumed 31 cases
+to close independently; the 2026-05-24-night session closed Clusters
+A + C entirely + most of B, leaving 1 admit. PRESERVATION-HANDOFF's
+"Option 2 (structural recursion, ~150 LOC, orthogonal)" was found
+BLOCKED on 2026-05-26 by a sibling-typing counterexample (`ELet
+(ERegion r v_inner) e2` with `e2` referencing `r` — `T_Let` has no
+sibling-freedom premise). The actual route is **Path 1: simultaneous
+mutual induction over `step_preserves_type` + `step_output_context_eq`
++ `preservation`**. See
+`docs/reports/audit/audit-2026-05-26-lemma-b-option-2-obstacle.md`.
 
 **Risk**:
 

@@ -136,3 +136,90 @@ Section Counterexample.
       (Option 3 in PRESERVATION-HANDOFF.md) is required. *)
 
 End Counterexample.
+
+(** * L1 regression: the redesigned typing blocks the bad input
+
+    With the [has_type_l1] judgement from [TypingL1.v], the bad input
+    [e_bad] no longer has a derivation — the L1 fix replaces the
+    post-step untypability of the original counterexample with **input
+    untypability**.
+
+    Proof structure:
+    - Invert [T_Pair_L1] on the assumed derivation: forces the
+      second child to be typed at the first child's R-output.
+    - Invert [T_Loc_L1] on the second child ([ELoc l1 r1]): gives
+      [In r1 R1] as a premise.
+    - Invert the typing of the first child ([ERegion r1 (ELoc l0 r0)]):
+      [T_Region_L1] fails because [~ In r1 [r0; r1]] does not hold;
+      [T_Region_Active_L1] forces [R1 = remove_first_L1 r1 R_body]
+      where [R_body] is the body's R-output. The body is a value
+      ([ELoc l0 r0]) typed under [T_Loc_L1], so [R_body = [r0; r1]]
+      and hence [R1 = [r0]].
+    - [In r1 [r0]] is false; contradiction. *)
+
+From Ephapax Require Import TypingL1.
+
+Section L1Fix.
+
+  (** Helper: T_Loc_L1 has [R_out = R_in], [G_out = G_in]. By inversion. *)
+
+  Lemma t_loc_l1_R_preserving :
+    forall R G l r R' G' T,
+      has_type_l1 R G (ELoc l r) T R' G' ->
+      R' = R /\ G' = G.
+  Proof.
+    intros R G l r R' G' T H.
+    inversion H; subst; split; reflexivity.
+  Qed.
+
+  (** The L1 regression theorem. *)
+  Lemma bad_input_untypable_l1 :
+    forall R_out G_out,
+      ~ has_type_l1 (r0 :: r1 :: nil) nil e_bad T_bad R_out G_out.
+  Proof.
+    intros R_out G_out Htype.
+    unfold e_bad, T_bad in Htype.
+    (* Invert T_Pair_L1; only rule matching EPair. *)
+    inversion Htype; subst.
+    (* Hte1 = typing of (ERegion r1 (ELoc l0 r0)); Hte2 = typing of (ELoc l1 r1). *)
+    match goal with
+    | [ H : has_type_l1 _ _ (ERegion r1 (ELoc l0 r0)) _ ?R1 _ |- _ ] =>
+        rename H into Hte1; rename R1 into R1_e1
+    end.
+    match goal with
+    | [ H : has_type_l1 _ _ (ELoc l1 r1) _ _ _ |- _ ] =>
+        rename H into Hte2
+    end.
+    (* From Hte2 = T_Loc_L1: In r1 R1_e1. *)
+    inversion Hte2; subst.
+    match goal with
+    | [ Hin : In r1 ?R |- _ ] => rename Hin into Hin_r1
+    end.
+    (* From Hte1 = T_Region_L1 or T_Region_Active_L1. *)
+    inversion Hte1; subst.
+    - (* T_Region_L1: requires ~ In r1 (r0 :: r1 :: nil), contradicted by r1 being there. *)
+      match goal with
+      | [ H : ~ In r1 _ |- _ ] => exfalso; apply H; right; left; reflexivity
+      end.
+    - (* T_Region_Active_L1: body ([ELoc l0 r0]) is a value; t_loc_l1_R_preserving
+         gives body's R_out = R_in = [r0; r1].  Hence R1_e1 = remove_first_L1 r1 [r0; r1]. *)
+      match goal with
+      | [ Hbody : has_type_l1 _ _ (ELoc _ _) _ ?Rbody _ |- _ ] =>
+          assert (HRb : Rbody = r0 :: r1 :: nil)
+            by (eapply t_loc_l1_R_preserving; eassumption)
+      end.
+      subst.
+      (* Compute remove_first_L1 r1 (r0::r1::nil):
+         r0 ≠ r1, so skip; r1 = r1, so remove; result = [r0]. *)
+      unfold r0, r1, remove_first_L1 in Hin_r1.
+      simpl in Hin_r1.
+      destruct (String.eqb "r1" "r0") eqn:Heq1;
+        [ apply String.eqb_eq in Heq1; discriminate | ].
+      destruct (String.eqb "r1" "r1") eqn:Heq2;
+        [ | apply String.eqb_neq in Heq2; exfalso; apply Heq2; reflexivity ].
+      simpl in Hin_r1.
+      destruct Hin_r1 as [Heq_r | []].
+      discriminate.
+  Qed.
+
+End L1Fix.

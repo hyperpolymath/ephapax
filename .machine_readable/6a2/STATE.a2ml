@@ -6,28 +6,48 @@
 
 @state(version="2.0"):
 phase: "implementation"
-next_action: "Close residual ~29 open goals in formal/Semantics.v preservation theorem (see formal/PRESERVATION-HANDOFF.md for per-case checklist)"
-last_action: "Rust/SPARK ABI seam landed (PR#95); preservation proof now Admitted with honest open-goal count after 910 -> 29 reduction (PR#102)"
-updated: 2026-05-20T19:00:00Z
+next_action: "Close preservation via Path 1 (simultaneous mutual induction over step_preserves_type + step_output_context_eq + preservation). See docs/sessions/SESSION-2026-05-26-lemma-b-pivot.adoc + docs/reports/audit/audit-2026-05-26-lemma-b-option-2-obstacle.md for why PRESERVATION-HANDOFF's Path 2 is blocked. ~8-12h focused session."
+last_action: "Case-count truthing + Option 2 obstacle audit + Path 1 pivot (ephapax#146 docs-only PR). Empirical coqc 8.18 verification: 1 admit in step_preserves_type + 1 in Lemma B (same structural sub-case mirrored) + 12 cascading goals in preservation. No proof code changes."
+updated: 2026-05-26T15:30:00Z
 
 @blockers:
-# Formal proofs NOT fully closed (earlier "FULLY CLOSED (67 Qed, 0 Admitted)"
-# claim was wrong — `coqc` 8.18.0 rejects `Qed.` on preservation).
-#   - formal/Semantics.v `preservation`: Admitted (down from 910 to ~29 open
-#     goals via remember-cfg pattern, PR#102). The prior in-file `Qed.` was
-#     rejected with "Attempt to save an incomplete proof"; the build-oracle
-#     is now source of truth. PR#92 marked it Admitted and reverted PR#87's
-#     propagated "Qed, closed 2026-04-27" claim from ROADMAP+PROOF-NEEDS.
-#   - src/formal/Ephapax/Formal/RegionLinear.idr `regionSafetyExtract` /
-#     `noGCExtract`: vacuous wrappers (body is the input unchanged); ROADMAP
-#     citing them as "regionSafetyTheorem"/"noGCTheorem" complete is
-#     overstated. Honest E3/E4 obligations stated in src/abi/Ephapax/ABI/
-#     Invariants.idr (PR#95-MERGED).
+# Formal proofs NOT fully closed; current shape (verified by coqc 8.18 on
+# 2026-05-26) is more closed than the 2026-05-20 baseline implied:
+#   - formal/Semantics.v `step_preserves_type` (line 3615): 1 explicit
+#     admit at line 4885 (S_Region_Step r=r1 sub-case).
+#   - formal/Semantics.v `step_output_context_eq` aka Lemma B (line 4944):
+#     1 explicit admit at line 5963 (same structural sub-case mirrored).
+#   - formal/Semantics.v `preservation` (line 5985): 12 cascading goals
+#     at line 6572 (11 S_*_Step congruence + S_Region_Step). These close
+#     mechanically once Lemma B is Qed; not independently hard.
+# 14 total open obligations; 1 independent variable (the shared S_Region_Step
+# r=r1 admit). 2026-05-24 cluster closures (PRs #121/#124/#126) closed
+# Clusters A and C of Lemma B entirely plus most of Cluster B.
+#
+# Path 2 from PRESERVATION-HANDOFF.md ("structural recursion on Hstep,
+# ~150 LOC, orthogonal") is BLOCKED — counterexample
+# `ELet (ERegion r v_inner) e2` with e2 referencing r breaks the
+# congruence-case rebuild because T_Let has no sibling-freedom premise.
+# See docs/reports/audit/audit-2026-05-26-lemma-b-option-2-obstacle.md.
+# Path 1 (mutual induction) is the recommended pivot.
+#
+# Other proof-debt items (out of standards#134 scope):
 #   - src/abi/Ephapax/ABI/Invariants.idr E1-E6: E1 (preservation) OWED;
 #     E2 (linear consumption) PARTIAL (head form discharged via
 #     splitLinearCoverage PR#85); E3 (region no-escape) PARTIAL (narrow
 #     form discharged via noEscapeTheorem); E4 (no-runtime-GC) OWED;
 #     E5 (WASM compilation) OWED; E6 (IR lowering) OWED.
-# Estate proof-debt arm: standards#134 (OPEN).
+#   - 30 unsafe Rust blocks (was 49); concentrated in
+#     src/ephapax-runtime/src/{lib,list}.rs and src/ephapax-interp/src/lib.rs.
+#     Per-block contract audit out of scope for standards#134.
+# Estate proof-debt arm: standards#134 (OPEN; 4/5 sub-tasks DONE pre-2026-05-26).
+@end
+
+@artifacts:
+# Doc-only commits parked on `lemma-b-phase2` (PR ephapax#146):
+#   032e8ea - audit reconciliation (docs/reports/audit/audit-2026-05-26-standards-134-reconciliation.md)
+#   83e1e31 - handoff case-count correction (formal/PRESERVATION-HANDOFF.md)
+#   36ff88e - Option 2 obstacle + Path 1 pivot (docs/reports/audit/audit-2026-05-26-lemma-b-option-2-obstacle.md)
+# Plus this STATE update + session note (docs/sessions/SESSION-2026-05-26-lemma-b-pivot.adoc).
 @end
 @end

@@ -32,5 +32,26 @@ banned = ["typescript", "go", "python", "makefile"]
 # NEVER modify formal proofs (Coq/Idris2) without verifying them.
 # Always run `just golden` before committing to ensure proof closure.
 # Respect the dyadic boundary: affine vs linear must be explicitly handled.
-last-modified-at = "2026-04-23T13:00:00Z"
-modification-summary = "Initial creation from 1.0.0 template"
+last-modified-at = "2026-05-26T20:00:00Z"
+modification-summary = "Added @disambiguation block — Ephapax vs AffineScript canonical pointer"
+
+# ── Disambiguation ────────────────────────────────────────────────────────
+# AI agents have repeatedly conflated this repo (Ephapax) with the unrelated
+# language AffineScript (hyperpolymath/affinescript). The two share exactly
+# one thing — both target hyperpolymath/typed-wasm — and otherwise have
+# different ASTs, type checkers, compilers, and proof stories. The shared
+# `affine` syllable names a substructural-logic property in BOTH cases (it's
+# a logic-family name), not a project relationship.
+[agentic-config.disambiguation]
+this = "hyperpolymath/ephapax"
+canonical-name = "Ephapax"
+distinct-from = ["hyperpolymath/affinescript"]
+shared-with-distinct = ["hyperpolymath/typed-wasm"]
+internal-sublanguages = ["ephapax-linear", "ephapax-affine"]
+# `ephapax-affine` is an internal sublanguage of THIS repo (dyadic with
+# ephapax-linear, one AST, one Rust crate). It is NOT the AffineScript
+# language at hyperpolymath/affinescript.
+ephapax-affine-is-not-affinescript = true
+canonical-doc = "https://github.com/hyperpolymath/nextgen-languages/blob/main/docs/disambiguation/ephapax-vs-affinescript.md"
+canonical-memory-entry = "feedback_affinescript_ephapax_siblings_not_impl_proof.md"
+do-not-apply-cross-repo-lessons-without-explicit-check = true

@@ -32,5 +32,20 @@ banned = ["typescript", "go", "python", "makefile"]
 # NEVER modify formal proofs (Coq/Idris2) without verifying them.
 # Always run `just golden` before committing to ensure proof closure.
 # Respect the dyadic boundary: affine vs linear must be explicitly handled.
-last-modified-at = "2026-04-23T13:00:00Z"
-modification-summary = "Initial creation from 1.0.0 template"
+last-modified-at = "2026-05-26T00:00:00Z"
+modification-summary = "Added four-layer-typing-redesign disambiguation block (PR#153)"
+
+# ── Four-Layer Naming Disambiguation ──────────────────────────────────────
+# The names "L1/L2/L3/L4", "ephapax-linear/ephapax-affine", and
+# "Linear/Affine" (as it appears in echo-types) deliberately overlap because
+# the underlying poset is the same. Agents MUST disambiguate by context.
+[agentic-config.disambiguation.four-layer-names]
+L1 = "Layer 1 — region capabilities (explicit live-region threading)"
+L2 = "Layer 2 — structural modality (Linear / Affine as admissible-derivation regimes)"
+L3 = "Layer 3 — echo residue (irreversibility-residue decoration; planned; recipe from echo-types)"
+L4 = "Layer 4 — dyadic mode (project-level mode declaration; planned)"
+ephapax-linear = "the Rust crate name (historical); implements BOTH L2 modalities, not just Linear"
+ephapax-affine = "informal label for the L2-Affine modality; NOT a separate crate"
+echo-types-Linear-Affine = "the L3 modes in echo-types; same names, different layer — these are the irreversibility-residue regimes, not L2 structural modalities"
+note = "When in doubt, ask which layer the question touches: L1 (regions), L2 (consumption/weakening), L3 (residue), or L4 (project-level mode). The names overlap because the underlying thin-poset construction is shared; the layers themselves are orthogonal."
+reference = "formal/PRESERVATION-DESIGN.md §12.8 (four-layer table)"

@@ -4,7 +4,22 @@
 
 [metadata]
 version = "1.0.0"
-last-updated = "2026-04-23"
+last-updated = "2026-05-26"
+
+# ── Proof-State Vector ────────────────────────────────────────────────────
+# Status field for the preservation theorem. Updated 2026-05-26 after the
+# four-layer typing redesign (PR#153). The redesign was forced by a verified
+# counterexample (formal/Counterexample.v, three Qed lemmas) which exhibits a
+# well-typed input that single-steps to an untypable output at the same outer
+# type. The counterexample is preservation *failing*, not preservation
+# *unproven* — the missing invariant is sibling-safe region exit (L1).
+[proof-state]
+preservation = "closed-with-redesign-planned"
+preservation_prior = "open-12-admits"
+preservation_counterexample = "formal/Counterexample.v"
+preservation_design = "formal/PRESERVATION-DESIGN.md"
+redesign_pr = "#153"
+notes = "Preservation closes once L1 (region capabilities) is mechanised. L3 + L4 remain planned. See STATE.a2ml @architecture(four-layer-typing-redesign) for per-layer status."
 
 [hypatia-config]
 scan-enabled = true

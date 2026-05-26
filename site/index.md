@@ -5,11 +5,20 @@ date: 2026-03-31
 
 # Ephapax
 
-The public web home for this project is [ephapax.org](https://ephapax.org).
+> Four-layer dyadic type system for WebAssembly memory safety.
 
-A dyadic language - one part affine, the other linear - as a type system with safe memory management targeting WebAssembly.
+Four orthogonal disciplines compose to guarantee compile-time memory safety without a garbage collector:
 
-Ephapax uses a compact, statement-delimited block syntax. Newlines act as statement separators (equivalent to ;).
+- **Regions** (L1) — capabilities threaded through every expression.
+- **Linear ↔ Affine** (L2) — the dyad, mother and child.
+- **Echo** (L3, planned) — irreversibility leaves typed residue.
+- **Dyadic mode** (L4) — declare which side you speak from.
+
+Mechanically formalised in Coq and Idris2. See
+[design](formal/PRESERVATION-DESIGN.md) ·
+[vision](docs/vision/EPHAPAX-VISION.adoc) ·
+[spec](spec/SPEC.md) ·
+[roadmap](ROADMAP.adoc).
 
 ## Project Links
 

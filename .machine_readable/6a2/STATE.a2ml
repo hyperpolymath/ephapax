@@ -30,4 +30,21 @@ updated: 2026-05-20T19:00:00Z
 #     E5 (WASM compilation) OWED; E6 (IR lowering) OWED.
 # Estate proof-debt arm: standards#134 (OPEN).
 @end
+
+@architecture(name="four-layer-typing-redesign"):
+# Four-layer typing redesign (formal/PRESERVATION-DESIGN.md, PR#153).
+# Forced by a verified counterexample to preservation (formal/Counterexample.v,
+# three Qed lemmas). The four layers are orthogonal thin-poset decorations
+# composing without coherence obligations.
+status: "in-flight"
+forcing_evidence: "formal/Counterexample.v (Qed) — verified counterexample to preservation"
+design_doc: "formal/PRESERVATION-DESIGN.md"
+layers:
+  L1: { name: "region-capabilities",  status: "in-flight",         note: "explicit live-region threading; sibling-safe region exit" }
+  L2: { name: "structural-modality",  status: "partial-existing",  note: "Linear / Affine as admissible-derivation regimes; Linear ⊆ Affine" }
+  L3: { name: "echo-residue",         status: "planned",           note: "irreversibility leaves typed residue; recipe borrowed from echo-types" }
+  L4: { name: "dyadic-mode",          status: "planned",           note: "project-level mode declaration selecting L2/L3 defaults" }
+upstream_theory: "echo-types (L3 decoration-commuting recipe)"
+updated: 2026-05-26T00:00:00Z
+@end
 @end

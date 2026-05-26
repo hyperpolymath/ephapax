@@ -68,3 +68,20 @@ This file is maintained by both humans and AI agents. When updating:
 
 Progress bars use: `█` (filled) and `░` (empty), 10 characters wide.
 Percentages: 0%, 10%, 20%, ... 100% (in 10% increments).
+
+## Layer mapping
+
+Each top-level directory maps to one or more layers of the four-layer
+dyadic design (L1 regions / L2 linear↔affine dyad / L3 echo residue /
+L4 dyadic mode). See [`formal/PRESERVATION-DESIGN.md`](formal/PRESERVATION-DESIGN.md).
+
+| Path | Purpose | Layer(s) |
+|---|---|---|
+| `src/ephapax-typing/` | type checker | L1, L2 |
+| `src/ephapax-syntax/`, `src/ephapax-surface/` | AST | L1, L2 (same syntax) |
+| `ephapax-linear/` | dual grammars + checkers | L2 |
+| `formal/` | Coq mechanisation | L1 (L2 + L3 planned) |
+| `idris2/`, `src/abi/Ephapax/` | Idris2 mechanisation | L1 |
+| `docs/vision/`, `EPHAPAX-VISION.adoc` | dyad framing | L4 |
+| `spec/` | normative spec | L1, L2 |
+| (future) `formal/Echo.v` | residue mechanisation | L3 |

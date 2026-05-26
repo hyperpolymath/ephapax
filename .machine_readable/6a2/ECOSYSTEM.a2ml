@@ -10,6 +10,18 @@ ecosystem = "hyperpolymath"
 type = "foundation-language"
 purpose = "A dyadic linear/affine language targeting WebAssembly with dual formalisation (Coq + Idris2). Ensures resource safety for the entire neurosymbolic stack."
 
+[guarantees]
+# L1 + L2 invariants named by the four-layer typing redesign
+# (formal/PRESERVATION-DESIGN.md, PR#153). L3 + L4 guarantees are planned.
+L1_region_capability_sibling_safety = "sibling region exits cannot reference a region another sibling has exited; enforced by explicit live-region threading"
+L2_linear_subset_affine = "Linear ⊆ Affine — every linear derivation is an admissible affine derivation over the same syntax and semantics"
+notes = "L3 (echo-residue) and L4 (dyadic-mode) guarantees are planned, not in-flight. See formal/PRESERVATION-DESIGN.md for the full statement."
+
+[theory-dependencies]
+# Theory imports (orthogonal to code dependencies tracked in [related-projects])
+relates_to = "echo-types"
+relates_to_rationale = "L3 echo-residue layer borrows the decoration-commuting recipe from the echo-types mechanisation; thin-poset decoration construction adopted verbatim."
+
 [pipeline]
 position = "foundation"
 chain = "katagoria → ephapax → typed-wasm → PanLL"
@@ -21,4 +33,5 @@ projects = [
   { name = "007-lang", relationship = "sibling-language", notes = "Shares linear logic concepts for agent handles and session types." },
   { name = "typed-wasm", relationship = "code-dependency", notes = "ephapax-wasm + ephapax-cli depend on `crates/typed-wasm-verify` (Cargo git dep, pinned by rev) for L7 (aliasing) + L10 (linearity) post-codegen verification. ephapax emits the `affinescript.ownership` custom section on every compile (C6); `ephapax compile --verify-ownership` runs the verifier on the emitted module (C7). Shared binary layout conventions for cross-language calls remain a longer-term concern." },
   { name = "standards", relationship = "parent", notes = "Enforces the RSR 2026 standards that ephapax implements." },
+  { name = "echo-types", relationship = "upstream-theory", notes = "L3 echo-residue layer of the four-layer typing redesign (formal/PRESERVATION-DESIGN.md §6) borrows the decoration-commuting recipe verbatim from the echo-types mechanisation." },
 ]

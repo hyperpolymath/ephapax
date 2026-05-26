@@ -6,6 +6,16 @@
 [project-meta]
 version = "1.0.0"
 name = "ephapax"
+upstream_theory = "echo-types"  # L3 echo-residue decoration-commuting recipe is borrowed from echo-types
+
+# ── Four-Layer Typing Architecture ─────────────────────────────────────────
+# See formal/PRESERVATION-DESIGN.md (PR#153). Four orthogonal thin-poset
+# decorations composing without coherence obligations.
+[project-meta.layers]
+L1 = { name = "region-capabilities", status = "in-flight",        description = "explicit live-region threading; sibling-safe region exit" }
+L2 = { name = "structural-modality", status = "partial-existing", description = "Linear / Affine as admissible-derivation regimes over the same syntax; Linear ⊆ Affine" }
+L3 = { name = "echo-residue",        status = "planned",          description = "irreversibility leaves typed, proof-relevant residue (recipe from echo-types)" }
+L4 = { name = "dyadic-mode",         status = "planned",          description = "project-level mode declaration selecting which side of the dyad the program speaks from" }
 
 # ── Architecture Decisions ─────────────────────────────────────────────────
 [project-meta.architecture-decisions]
@@ -23,6 +33,13 @@ date = "2026-04-11"
 context = "Formal verification of the type system is required for high-assurance use."
 decision = "Dual formalization in Coq (operational semantics) and Idris2 (type structure)."
 consequences = "Fully closed proofs (67 Qed) ensuring the correctness of the linear logic engine."
+
+[project-meta.architecture-decisions.adr-003]
+status = "in-flight"
+date = "2026-05-26"
+context = "A verified counterexample to preservation (formal/Counterexample.v, three Qed lemmas) showed that the linear+affine+regions framing admitted a well-typed input that single-steps to an untypable output. The missing invariant is sibling-safe region exit."
+decision = "Four-layer typing redesign — L1 region capabilities, L2 structural modality, L3 echo residue, L4 dyadic mode — each a thin-poset decoration composing without coherence obligations. L3 borrows the decoration-commuting recipe from the echo-types mechanisation."
+consequences = "Preservation closes once L1 threading is mechanised; L2 is promoted from per-type to per-judgment with Linear ⊆ Affine; L3 + L4 remain planned. Design doc: formal/PRESERVATION-DESIGN.md (PR#153)."
 
 # ── Development Practices ──────────────────────────────────────────────────
 [project-meta.development-practices]

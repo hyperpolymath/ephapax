@@ -4,7 +4,15 @@
 
 [metadata]
 version = "1.0.0"
-last-updated = "2026-04-23"
+last-updated = "2026-05-26"
+
+# ── Operational Rules ─────────────────────────────────────────────────────
+# Rules that gate proof-attempt decisions. Added 2026-05-26 with the
+# four-layer typing redesign (formal/PRESERVATION-DESIGN.md, PR#153).
+[operational-rules]
+rules = [
+  { name = "escalate-on-sibling-disjointness", trigger = "a proof attempt requires sibling region disjointness as a side condition on a compound typing rule", action = "escalate to L1 redesign rather than patching", rationale = "Sibling-region disjointness should be a *theorem* about L1 capability threading, not a *premise* on every rule. Side conditions on compound rules are the symptom that motivated the four-layer redesign in the first place — see formal/Counterexample.v and PRESERVATION-DESIGN.md §12.8 (standing rule)." },
+]
 
 [deployment]
 method = "ci-triggered"

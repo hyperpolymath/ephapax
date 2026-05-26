@@ -7,6 +7,14 @@
 
 ---
 
+## 0. Preamble — The Four Disciplines
+
+Ephapax's type system has four orthogonal disciplines: **L1** region capabilities, **L2** structural modality (linear/affine), **L3** irreversibility residue (Echo Types — planned), and **L4** dyadic interaction mode (project-level declaration). This specification is normative for L1 and L2 and forward-looking for L3 and L4.
+
+See `docs/vision/EPHAPAX-VISION.adoc` for the dyad framing (L4) and `formal/PRESERVATION-DESIGN.md` for the full layered design rationale.
+
+---
+
 ## 1. Introduction
 
 ### 1.1 Overview
@@ -267,16 +275,45 @@ copy(e)
 
 ### 5.1 Judgement Form
 
+The Ephapax typing judgment threads **both** the typing context `Γ`
+and the region capability environment `R` left-to-right through
+sub-expressions. The normative shape is:
+
 ```
-R; Γ ⊢ e : T ⊣ Γ'
+R_in; Γ ⊢ e : T ⊣ R_out; Γ'
 ```
 
 Where:
-- `R` is the set of active regions
+- `R_in` is the region capability environment **before** `e` reduces
 - `Γ` is the input typing context
 - `e` is the expression
 - `T` is the type
-- `Γ'` is the output context (tracking consumption)
+- `R_out` is the region capability environment **after** `e` reduces
+  to a value (syntax-directed from `e`; see L1 rules below)
+- `Γ'` is the output context (tracking linear / affine consumption)
+
+The older single-output shape `R; Γ ⊢ e : T ⊣ Γ'` (which does not
+thread `R_out`) is **subsumed** by this form: it is recovered as the
+special case where `R_out = R_in` (values and pure non-region-exiting
+sub-expressions). Existing rules below that use the single-output
+shape are read as the new shape with `R_out` determined by the rule.
+
+**L1 theorem — Sibling-safe region capability monotonicity.** For
+any compound expression `C(e₁, …, eₙ)`, the region environment
+`R_{i+1}` for sub-expression `e_{i+1}` is exactly the `R`-output of
+sub-expression `e_i`. A sub-expression cannot reference a region a
+previous sibling has exited.
+
+This theorem is the L1 (region capability) invariant. It rules out
+the dangling-region-reference counterexample that prompted the
+four-layer redesign. The full typing-judgment redesign with
+`R_in` / `R_out` threading is in `formal/PRESERVATION-DESIGN.md §4`.
+
+> **Note on L3 (Echo Types).** The `TEcho` type former and the
+> irreversibility-residue discipline are **planned future
+> extensions** and are not normative in this version of the
+> specification. Implementations conforming to this spec need not
+> implement L3.
 
 ### 5.2 Context Operations
 
@@ -371,7 +408,15 @@ If `R; Γ ⊢ e : T ⊣ Γ'` and `e` is not a value, then `e` can take a step.
 
 ### 7.2 Preservation
 
-If `R; Γ ⊢ e : T ⊣ Γ'` and `e ──→ e'`, then `R; Γ'' ⊢ e' : T ⊣ Γ'` for some `Γ''`.
+Under the L1 redesign with `R_in / R_out` threading (§5.1):
+
+If `R_in; Γ ⊢ e : T ⊣ R_final; Γ'` and `(μ, R_in, e) ──→ (μ', R'_in, e')`,
+then there exists `R'_final` and `Γ''` such that
+`R'_in; Γ'' ⊢ e' : T ⊣ R'_final; Γ'`, with `R'_final` consistent with
+`R_final` (specifically: `R_final` is reachable from `R'_final` by zero
+or more applications of the remaining region exits in `e'`).
+
+See `formal/PRESERVATION-DESIGN.md §4.5` for the mechanised statement.
 
 ### 7.3 Linearity
 

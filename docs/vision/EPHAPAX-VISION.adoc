@@ -58,6 +58,47 @@ linear" or "linear in training." It has intrinsic value. There are programs
 that belong in affine permanently. As Ephapax matures, the affine form must
 mature *into itself* — not toward becoming linear.
 
+== The Dyad and the Layers
+
+The dyad — linear mother, affine child — is one of *four orthogonal
+disciplines* that together define Ephapax. The other three are
+silent partners in the dyad: each is enforced independently, but
+each takes its **defaults** from which side of the dyad you are on.
+
+[cols="1,3", options="header"]
+|===
+| Layer | What the dyad says about it
+
+| L1 — Region capabilities
+| Same in both. The mother and the child both forbid use-after-exit;
+  the dyadic mode does not relax this. (This is the layer whose
+  *absence* admitted the verified counterexample to preservation.)
+
+| L2 — Structural discipline
+| The dyad *is* this layer. Linear is the mother; Affine is the
+  child. Linear derivations are a subset of Affine derivations.
+
+| L3 — Irreversibility residue
+| The mother demands the residue be *observed*. The child permits
+  it to be *lowered* — present but trivial. The same residue value,
+  two observation disciplines.
+
+| L4 — Dyadic interaction
+| The declaration of which side you speak from. The mother answers
+  to the linear discipline; the child to the affine. Every closed
+  program has one.
+|===
+
+The four layers compose without coherence obligations because each
+is a *thin poset* — propositional ordering kills the categorical
+overhead that would otherwise demand pentagon laws and the like. The
+construction is taken verbatim from
+https://github.com/hyperpolymath/echo-types[echo-types]'
+decoration-commuting recipe.
+
+The dyad remains primary. The layers are how the dyad's promises
+are *enforced*.
+
 == One Language, One Feel
 
 Writing in Ephapax Linear and Ephapax Affine feels *identical*. There are no

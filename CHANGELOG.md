@@ -5,6 +5,29 @@ All notable changes to Ephapax are documented here.
 
 ## [Unreleased]
 
+### Architecture
+
+- **Four-layer typing redesign** (`formal/PRESERVATION-DESIGN.md`).
+  The original "linear+affine + regions" framing admitted a verified
+  counterexample to preservation (`formal/Counterexample.v`). The
+  redesign separates four orthogonal disciplines: region capabilities
+  (L1), structural modality (L2), irreversibility residue (L3,
+  planned), and dyadic interaction mode (L4). Each is a thin-poset
+  decoration, composing without coherence obligations.
+
+### Proof / theory
+
+- Verified counterexample to preservation in the current rules
+  (`formal/Counterexample.v` — three lemmas `Qed`). The
+  counterexample is the canonical regression test for the L1 fix.
+
+### Docs
+
+- New design document: `formal/PRESERVATION-DESIGN.md`.
+- README, EXPLAINME, EPHAPAX-VISION, ROADMAP, CLAUDE updated to
+  reflect the four-layer story.
+- Repo description and tagline updated.
+
 ### Proof state (2026-05-20 → 2026-05-21)
 - **Coq `preservation` reduction campaign**: 910 open goals → 12 (98.7% reduction). PR chain:
   - **#92** — honest framing: replaced unsubstantiated "Qed 2026-04-27" claim with `Admitted.`

@@ -1,8 +1,15 @@
 # ephapax-linear
 
+> **Naming note.** This crate is called `ephapax-linear` for
+> historical reasons; it implements **both** L2 modalities
+> (Linear and Affine). The two are not different languages — they
+> are two admissible-derivation regimes over the same syntax and
+> semantics. See `docs/vision/EPHAPAX-VISION.adoc` for the dyad,
+> and `formal/PRESERVATION-DESIGN.md §5` for the L2 layer.
+
 Standalone linear/affine discipline checker for the Ephapax language.
 
-## Dual Grammars
+## Two L2 Modalities
 
 This crate implements two **focused substructural grammars** — two views of the same ephapax syntax, each enforcing a different structural discipline:
 

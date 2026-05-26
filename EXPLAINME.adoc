@@ -77,6 +77,38 @@ demonstrate where they diverge on identical programs (e.g.
 Test `test_region_non_escaping` verifies escape detection.
 Test `test_region_string_allocation` verifies in-region allocation.
 
+== Claim: Sibling-safe region capabilities (L1)
+
+*Evidence*: Region capabilities are threaded as input/output
+environments through every compound typing rule. A sibling cannot
+reference a region a previous sibling has exited.
+
+* Counterexample at `formal/Counterexample.v` (all three lemmas
+  `Qed`) demonstrates the soundness gap the threading fixes.
+* Design rationale at `formal/PRESERVATION-DESIGN.md §3-§4`.
+* Reference implementation: forthcoming — see `ROADMAP.adoc` for
+  the order in which L1 lands in `formal/` and in
+  `src/ephapax-typing/`.
+
+Status: **planned** — the design lands ahead of the Coq/Rust
+implementation; the evidence today is the design doc plus the
+mechanised counterexample, not a passing preservation proof.
+
+== Claim: Irreversibility residue is first-class (L3, planned)
+
+*Evidence (planned)*: Operations that erase information will produce
+typed residue witnesses, following the
+https://github.com/hyperpolymath/echo-types[echo-types]
+formulation. Linear mode requires the residue to be observed;
+Affine mode permits silent lowering.
+
+* Upstream theory at
+  `~/developer/repos/echo-types/proofs/agda/EchoLinear.agda` (lines
+  30–101), already mechanised.
+* Forward-looking design at `formal/PRESERVATION-DESIGN.md §6`.
+* Status: **planned** — no ephapax rule yet introduces `TEcho`. The
+  L3 extension follows L1.
+
 == Technology Choices
 
 [cols="1,2"]

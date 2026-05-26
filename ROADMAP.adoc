@@ -55,7 +55,7 @@ substitution semantics:
 
 | **`preservation`**
 | 🟡 Admitted
-| **12 open goals** after the reduction chain (PRs #92 / #102 / #104 / #106 / #114 / #116 / #117 / #121). Started at 910; 98.7% reduced. Phase 1 scaffold (Lemma B `step_output_context_eq`) landed; per-case discharges next. Remaining 12 = 11 congruence cases (blocked on Lemma B per-case closure) + 1 region case (`S_Region_Step + T_Region_Active`, blocked on region-env weakening). Canonical closure path: ROADMAP §"Preservation closure plan" below.
+| **12 open goals** after the reduction chain (PRs #92 / #102 / #104 / #106 / #114 / #116 / #117 / #121). Started at 910; 98.7% reduced. The original closure plan was superseded 2026-05-26 by a verified counterexample (`formal/Counterexample.v`); the canonical path forward is now the <<four-layer-redesign,Four-layer redesign>> above. Historical reduction notes preserved in `formal/PRESERVATION-HANDOFF.md`.
 |===
 
 **Historical note**: an earlier in-file comment claimed `preservation`
@@ -150,248 +150,43 @@ All four headline theorems complete with **zero `believe_me` /
 * [ ] Type checker completion (`ephapax-typing`)
 * [ ] WASM code generation: lambda/app compilation (closure conversion)
 * [x] Coq: `subst_preserves_typing` (Qed)
-* [ ] **Coq: close `preservation` to Qed** — the v0.1 blocker. **12
-      open goals remain** as of 2026-05-21 (down from 910 at session
-      start). Full closure plan in
-      <<preservation-closure-plan,Preservation closure plan>> below.
+* [ ] **Coq: close `preservation` to Qed** — the v0.1 blocker. The
+      original 12-open-goal closure plan was superseded 2026-05-26 by
+      a verified counterexample; the new canonical path is the
+      <<four-layer-redesign,Four-layer redesign>> above.
 
-[#preservation-closure-plan]
-== Preservation closure plan (current canonical path)
+[#four-layer-redesign]
+== Four-layer redesign (2026-05-26 → )
 
-The 5-phase plan to close `formal/Semantics.v` `preservation` to
-`Qed.` Each phase has a concrete deliverable, time estimate, and
-dependency chain. This is the **rightful path** any session picking
-up the proof should follow.
+The verified preservation counterexample
+(`formal/Counterexample.v`) closed the original closure plan as
+unreachable in the current rules. The new plan separates four
+orthogonal layers; each is implemented in sequence.
 
-=== Reduction story so far
+. **L1 — Region capability threading**
+  - Restate `has_type` to thread `R_in / R_out`.
+  - Update every typing rule + every supporting lemma in
+    `Semantics.v`, `Typing.v`.
+  - Reprove preservation against `Counterexample.v` as a regression.
+  - Land as one PR per cluster (typing-rule changes, semantics
+    re-statement, lemma migration, preservation reproof).
+. **L2 — Modality parameter**
+  - Promote `is_linear_ty` from a per-type predicate to a judgment
+    parameter `ℓ ∈ {Linear, Affine}`.
+  - Implement `weaken_modality : Linear → Affine` as a single
+    induction.
+  - Restate the existing dual-grammar story (in `ephapax-linear/`)
+    in terms of the modality.
+. **L3 — Echo residue**
+  - Add `formal/Echo.v` mirroring `echo-types/proofs/agda/Echo.agda`.
+  - Introduce `TEcho ⟨op⟩` and the `T_Observe` rule.
+  - Modify `S_Region_Exit` and `S_Drop` to produce residue values.
+. **L4 — Mode declaration**
+  - Project-level metadata (`Cargo.toml` or `ephapax.toml`).
+  - Type checker reads the declaration and selects the L2 modality.
+  - No proof obligations.
 
-[cols="3,1,2"]
-|===
-| Stage | Open goals | Mechanism
-
-| Pre-campaign (in-file "Qed 2026-04-27" claim was unsubstantiated)
-| 910
-| Documented honestly by PR #92.
-
-| After `remember (mu, R, e) as cfg`
-| 29
-| Standard preservation pattern. PR #102.
-
-| After `revert mu R e mu' R' e' Hcfg Hcfg'` (universal-IH)
-| 22
-| Clean IH quantification across congruence cases. PR #106.
-
-| After region-invariance lemma `step_R_eq_or_touches_region`
-| 22
-| Infrastructure landed; no goals closed alone. PR #114.
-
-| After per-case manual closures
-| **12**
-| 10 β-reduction / value-step cases discharged. PR #116.
-
-| Phase 1 scaffold (Lemma B stated, body `Admitted`)
-| 12
-| `step_output_context_eq` introduced. PR #121.
-
-| Phase 1 empirical baseline (2026-05-24)
-| 12 (preservation) / **31 of 35** (Lemma B itself)
-| `cfg`-remember pattern + atomic-axiom tactic on Lemma B closes 4 of its 35 step-rule cases (`S_StringNew`, `S_StringConcat`, `S_Drop`, `S_Borrow_Step`); the remaining 31 cluster across β-reduction / congruence / region-and-compound-value branches. Per-case map in `formal/PRESERVATION-HANDOFF.md`.
-|===
-
-98.7% reduction across one day. Remaining 12 = 11 congruence cases
-(`S_*_Step` variants) + 1 region case (`S_Region_Step + T_Region_Active`).
-
-=== Phase 1 — Lemma B: linearity-context invariance for siblings
-
-**Goal**: a Coq lemma that lets `T_StringConcat`-style reconstruction
-succeed in congruence cases.
-
-**Statement (sketch)**:
-
-[source,coq]
-----
-Lemma sibling_typing_transfers_across_step :
-  forall mu R e mu' R' e' G G_end T G_out,
-    (mu, R, e) -->> (mu', R', e') ->
-    R; G |- e : T -| G_end ->            (* original typing *)
-    R'; G |- e' : T -| G_out ->          (* stepped typing from IH *)
-    G_end = G_out.                       (* linearity contexts coincide *)
-----
-
-The linearity-context evolution induced by `e` is invariant under
-step. With this, sibling typing premises like
-`H6 : R; G' |- e2 : ...` become typable at `R; G_out |- e2 : ...`
-via `G' = G_out`.
-
-**Approach**: induction on `step` with `type_determinacy` per case.
-Same pattern as `step_R_eq_or_touches_region`.
-
-**Effort**: ~~3–4 hours focused session~~ → **8–15 focused hours**
-(revised 2026-05-24). Empirical baseline from `coqc 8.18.0`: the
-`cfg`-remember + atomic-axiom tactic closes 4 of 35 step rules
-(`S_StringNew`, `S_StringConcat`, `S_Drop`, `S_Borrow_Step`); the
-remaining 31 split across 3 clusters needing distinct recipes. Full
-per-case map in `formal/PRESERVATION-HANDOFF.md` §"Lemma B per-case
-status".
-
-**Risk**:
-
-. **Type-determinacy across stepped pairs**: some Cluster B
-  congruence cases need to know `e` and `e'` have the same type
-  before applying the IH. `type_determinacy` only handles
-  same-expression pairs; the natural "step preserves type" lemma
-  is part of preservation itself. Watch for circularity when
-  attacking the first congruence case.
-. **Output-context equality may need weakening** to
-  "context-equivalent up to flag positions" via the existing
-  `types_agree` machinery. If so, the lemma is slightly harder
-  but still tractable.
-. **Strengthened subst lemma needed for Cluster A**: the existing
-  `subst_preserves_typing` hides the output context behind an
-  existential; the 7 β-reduction cases need a
-  `subst_preserves_typing_strong` variant exposing the specific
-  `remove_at k Gout` shape already present in `subst_typing_gen`.
-
-=== Phase 2 — Apply Lemma B → close 11 congruence cases
-
-**Goal**: 12 → 1 open goals.
-
-**Approach**: extend the PR #116 per-case manual proof pattern to the
-11 `S_X_Step` cases. Each:
-
-. `pose proof (step_R_eq_or_touches_region ... Hstep)` → dispatch
-  the `R = R'` branch via `subst`.
-. `edestruct (IHHstep ...)` → get `Hout : R'; G0 |- e1' : T -| Gout`.
-. `pose proof (sibling_typing_transfers_across_step ...)` → get
-  `Gout = G'` (or the context-equivalence variant).
-. `rewrite <- (sibling lemma result) in H6` or equivalent.
-. `eexists; eapply T_Foo; [exact Hout | exact H6]`.
-
-**Effort**: ~2 hours (11 near-identical bullets).
-
-**Parallelizable**: yes — one agent per typing-constructor cluster
-(string ops, let / app, conditionals, products, sums).
-
-=== Phase 3 — Region-env weakening for non-values
-
-**Goal**: discharge the language-design item documented since the
-start of the campaign.
-
-**Statement (sketch)**:
-
-[source,coq]
-----
-Lemma region_add_typing_for_non_values :
-  forall R e G G' T r,
-    R; G |- e : T -| G' ->
-    ~ In r R ->
-    safe_for_region_weakening e ->       (* new predicate *)
-    (r :: R); G |- e : T -| G'.
-----
-
-**The hard part**: defining `safe_for_region_weakening`. Naive
-weakening is unsound for `EBorrow` (borrows whose region escape the
-weakened scope), `EDrop` of a region-bound resource, `EStringNew r' s`
-where `r' = r` (shadowing). The predicate rules these out
-syntactically.
-
-**Approach**:
-
-. Define the predicate (~30 LOC).
-. Prove the lemma by induction on `has_type` (~80–150 LOC).
-. Cross-check that the step rule `S_Region_Step + T_Region_Active`
-  produces an `e'` satisfying the predicate, given the typing
-  derivation.
-
-**Effort**: 1–2 days. Genuine metatheoretic work.
-
-**Risk**: may need predicate to depend on typing derivation, not just
-expression shape. Mitigation: start with the simplest possible
-predicate (no `ERegion r` or `EStringNew r` syntactically anywhere);
-check if it passes the S_Region_Step case. Refine only if it fails.
-
-=== Phase 4 — Close S_Region_Step + T_Region_Active
-
-**Goal**: 1 → 0 open goals.
-
-**Approach**: replace `apply region_add_typing` with
-`apply region_add_typing_for_non_values` in the existing
-`T_Region_Active` `try solve` block at `formal/Semantics.v:3300`-ish.
-
-**Effort**: ~1 hour.
-
-=== Phase 5 — `Admitted.` → `Qed.` + docs sweep
-
-**Goal**: campaign closure. Mechanical (~1 hour).
-
-. **`formal/Semantics.v`** — replace `Admitted.` at the end of
-  `Theorem preservation` with `Qed.` Remove the PROOF STATUS
-  comment block.
-. **`formal/PRESERVATION-HANDOFF.md`** — collapse to a one-line
-  "preservation is Qed as of YYYY-MM-DD" tombstone.
-. **`PROOF-NEEDS.md`** — flip "Coq admitted proofs remaining: 1" to
-  "0". Drop the "what needs proving" entry for `preservation`.
-. **`ROADMAP.adoc`** — flip the v0.1 checkbox; update the Coq table
-  row; remove this entire "Preservation closure plan" section
-  (replace with a 1-line "completed" note).
-. **`README.adoc`** — flip the Component status table row; remove
-  the "22 open / 910 closed" qualifiers in Formal foundations.
-. **`EXPLAINME.adoc`** — flip Coq theorem table; remove reduction
-  story.
-. **`CHANGELOG.md`** — entry: "Coq `preservation` closed to `Qed.`
-  via the 910 → 0 reduction chain (PRs #92, #102, #104, #106,
-  #114, #116, [Phase 1 PR], [Phase 2 PR], [Phase 3 PR],
-  [Phase 4 PR])".
-. **Wiki `Proof-status.md`** + **`Home.md`** — flip preservation
-  row to ✅ Qed; replace the reduction story with a one-line
-  "fully discharged" note.
-. **Memory** —
-  `project_ephapax_preservation_closure_plan.md` → mark CAMPAIGN
-  COMPLETE.
-. **`standards#124`** — post closure comment with full PR chain.
-. **GitHub repo description** — drop "preservation 22 open"
-  qualifier.
-
-=== Effort + parallelization summary
-
-[cols="1,2,2"]
-|===
-| Phase | Solo effort | Parallelizable?
-
-| 1 (Lemma B)
-| 3–4 hours
-| Single agent task.
-
-| 2 (Apply Lemma B)
-| 2 hours
-| 4 agents × ~30 min (one per typing-constructor cluster).
-
-| 3 (Region-env weakening)
-| 1–2 days
-| Single agent (research-level).
-
-| 4 (Close S_Region_Step)
-| 1 hour
-| No.
-
-| 5 (Qed flip + docs)
-| 1 hour
-| 2 agents (repo docs + wiki).
-|===
-
-**Sequential ceiling**: ~3 days of focused work.
-**With fan-out**: ~5–7 calendar hours over 2–3 sessions.
-
-=== Risk-adjusted forecast
-
-* **80% likely**: Phases 1+2 land in one session. Phase 3 takes ~1
-  day. Total: 3 sessions, ~10 hours wall-clock.
-* **15% likely**: Lemma B needs context-equivalence (not equality);
-  phase 1 spills into a refinement session.
-* **5% likely**: Phase 3 hits a language-design issue (e.g., need to
-  add a syntactic invariant to the typing rules). If so, the rules
-  get amended and all earlier `Qed`-proofs need re-checking (~1 day
-  detour).
+The previous "Preservation closure plan" section is archived — see `formal/PRESERVATION-HANDOFF.md` for the historical record.
 
 == v0.2.0 — Backend maturity
 
@@ -426,8 +221,8 @@ audio buffer management:
 == v1.0.0 — Production ready
 
 * [ ] **All Coq `Admitted` proofs closed in `formal/Semantics.v`**
-      (currently 1: `preservation` with 12 open goals; see
-      <<preservation-closure-plan,Preservation closure plan>>)
+      (currently 1: `preservation`; closure path is the
+      <<four-layer-redesign,Four-layer redesign>>)
 * [ ] Idris2 `Parse/Parser.idr` upgraded from `%default covering` to
       `%default total` (LL(k) fuel-refactor; deferred separate campaign)
 * [ ] Stable surface syntax (already locked, but confirm no changes needed)
@@ -442,6 +237,22 @@ audio buffer management:
 * [ ] Gossamer integration for UI applications
 * [ ] IDApTIK migration to Ephapax where linear types add value
 * [ ] Self-hosting: Ephapax compiler written in Ephapax
+
+== Future research tracks
+
+=== Echo as operational foundation (v2)
+
+The four-layer redesign (`formal/PRESERVATION-DESIGN.md`) treats Echo
+as a residue layer (L3) over regions. A coherent v2 research direction
+makes Echo the *foundation* itself: `ERelease` as a primitive
+operation, regions desugared to sequenced releases, Linear-mode
+discharge as a termination invariant.
+
+**Not scheduled.** This is a months-long research effort, staged
+after the L1+L2+L3 layer-redesign lands. See
+`formal/PRESERVATION-DESIGN.md §12.16` for the seed; an
+`ECHO-AS-FOUNDATION.md` design doc will be opened when the work
+begins.
 
 == Related documents
 

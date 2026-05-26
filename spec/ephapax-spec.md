@@ -14,6 +14,14 @@ language combining:
 
 The dyadic principle: both disciplines coexist at per-binding granularity.
 
+## The Four Disciplines
+
+Ephapax's type system has four orthogonal disciplines: **L1** region capabilities, **L2** structural modality (linear/affine), **L3** irreversibility residue (Echo Types — planned), and **L4** dyadic interaction mode (project-level declaration). This specification is normative for L1 and L2 and forward-looking for L3 and L4.
+
+The L4 dyadic framing is described in `docs/vision/EPHAPAX-VISION.adoc`. The full layered design — including the L1 typing-judgment redesign and counterexample analysis — is in `formal/PRESERVATION-DESIGN.md`.
+
+L3 (Echo Types / `TEcho`) is a **future extension** and is **not normative in this version** of the specification.
+
 ---
 
 # PART 1: LEXICAL GRAMMAR
@@ -207,6 +215,38 @@ type_expr     = type_ident                  (* named type *)
 ---
 
 # PART 3: TYPE SYSTEM
+
+## 3.0 Typing Judgment Shape (L1)
+
+The Ephapax typing judgment threads **both** the typing context and
+the region capability environment left-to-right through
+sub-expressions. The normative judgment shape is:
+
+```
+R_in; Γ ⊢ e : T ⊣ R_out; Γ'
+```
+
+Where `R_in` and `R_out` are the region capability environments
+before and after `e` reduces to a value, and `Γ` / `Γ'` are the
+input and output typing contexts. `R_out` is syntax-directed from
+`e`: values and pure constructs leave `R` unchanged; region
+constructs shrink `R` by the regions they exit.
+
+**L1 theorem — Sibling-safe region capability monotonicity.** For
+any compound expression `C(e₁, …, eₙ)`, the region environment
+`R_{i+1}` for sub-expression `e_{i+1}` is exactly the `R`-output of
+sub-expression `e_i`. A sub-expression cannot reference a region a
+previous sibling has exited.
+
+This theorem is the L1 (region capability) invariant; it is what
+rules out the dangling-region-reference counterexample that
+motivated the four-layer redesign. The full typing-judgment
+redesign with `R_in` / `R_out` threading is in
+`formal/PRESERVATION-DESIGN.md §4`.
+
+The orthogonality lemma in §3.4.4 is unchanged: L1 (region
+capability threading) and L2 (qualifier modality) compose without
+interaction. The judgment-shape change is purely an L1 refinement.
 
 ## 3.1 Qualifiers
 

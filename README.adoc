@@ -16,6 +16,30 @@ image:https://api.thegreenwebfoundation.org/greencheckimage/ephapax.org[Green Ho
 
 _ἐφάπαξ — once for all._
 
+[IMPORTANT]
+.Not to be confused with AffineScript
+====
+This is **Ephapax**, a research language for WebAssembly memory safety.
+It is *not* https://github.com/hyperpolymath/affinescript[AffineScript], a
+separate language at `hyperpolymath/affinescript` that succeeds JS / TS /
+ReScript.
+
+The two share **exactly one thing**: both target
+https://github.com/hyperpolymath/typed-wasm[typed-wasm]. They have separate
+ASTs, separate type checkers, separate compilers, separate proof stories.
+The word `affine` overlaps in both names because it names a substructural-
+logic property — that's a logic-family fact, not a project relationship.
+
+Internal note: Ephapax is itself dyadic — `ephapax-linear` (strict core)
+and `ephapax-affine` (versatile prototyping companion) are *both inside this
+repo*, one Rust crate, one AST, two structural disciplines. **`ephapax-affine`
+is not AffineScript.** When ambiguous, write "ephapax-affine sublanguage"
+vs "AffineScript language".
+
+Canonical disambiguation:
+link:https://github.com/hyperpolymath/nextgen-languages/blob/main/docs/disambiguation/ephapax-vs-affinescript.md[nextgen-languages/docs/disambiguation/ephapax-vs-affinescript.md].
+====
+
 A dyadic linear+affine type system for compile-time WebAssembly
 memory safety. Resources are tracked through the type system so the
 compiler can guarantee — without a garbage collector — that no value

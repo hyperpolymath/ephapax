@@ -55,7 +55,7 @@ substitution semantics:
 
 | **`preservation`**
 | 🟡 Admitted
-| **12 open goals** after the reduction chain (PRs #92 / #102 / #104 / #106 / #114 / #116 / #117 / #121). Started at 910; 98.7% reduced. The original closure plan was superseded 2026-05-26 by a verified counterexample (`formal/Counterexample.v`); the canonical path forward is now the <<four-layer-redesign,Four-layer redesign>> above. Historical reduction notes preserved in `formal/PRESERVATION-HANDOFF.md`.
+| **11 open goals** after the reduction chain (PRs #92 / #102 / #104 / #106 / #114 / #116 / #117 / #121 / #146). Started at 910; 98.8% reduced. Lemma B (`step_output_context_eq`) and its `step_preserves_type_at_pre` / `step_output_context_eq_at_pre` plug-ins are all `Qed` (commit `d6ebf68`, 2026-05-26). The original closure plan was superseded 2026-05-26 by a verified counterexample (`formal/Counterexample.v`); the canonical path forward is now the <<four-layer-redesign,Four-layer redesign>> above. Historical reduction notes preserved in `formal/PRESERVATION-HANDOFF.md`.
 |===
 
 **Historical note**: an earlier in-file comment claimed `preservation`

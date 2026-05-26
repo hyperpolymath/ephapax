@@ -1,0 +1,196 @@
+// SPDX-License-Identifier: PMPL-1.0-or-later
+// SPDX-FileCopyrightText: 2026 Jonathan D.A. Jewell
+= Session: Lemma B Phase 2 — case-count truthing + Option 2 obstacle + Path 1 pivot (2026-05-26)
+Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk>
+:toc:
+:toclevels: 3
+
+== Summary
+
+This session re-verified the actual state of the `preservation` proof
+chain in `formal/Semantics.v` against `coqc 8.18.0`, found the
+2026-05-21-baseline case-counts in `PROOF-NEEDS.md` and
+`formal/PRESERVATION-HANDOFF.md` were stale by an order of magnitude,
+and discovered that the handoff doc's recommended Option 2 (structural
+recursion on `Hstep`, "~150 LOC, orthogonal") has a real obstacle the
+doc did not anticipate.
+
+No proof code committed this session. Three doc commits landed on the
+`lemma-b-phase2` branch reflecting the corrected case counts and the
+Path-1 pivot recommendation. PR `ephapax#146` carries them.
+
+Companion machine-readable artefact: `.machine_readable/6a2/STATE.a2ml`
+(updated this session to reflect the 1+1+12 picture).
+
+Cross-cutting: this session was driven from a multi-repo CI remediation
+thread that also touched `hyperpolymath/affinescript` (#357, #365,
+#372, #380) and `hyperpolymath/typed-wasm` (#64/#65 merged). The
+ephapax-specific work is the subject of this note; see
+memory file `session_2026_05_26_three_repo_ci_remediation.md` for the
+cross-repo context.
+
+== Ground truth at session-end
+
+Empirical `coqc 8.18.0` re-verification of `formal/Semantics.v`:
+
+[%header,cols="2,1,5"]
+|===
+| Site | Open | Form
+
+| `step_preserves_type` (Semantics.v:4885)
+| 1
+| S_Region_Step `r = r1` sub-case (inner step exits the outer region
+  from inside); explicit `admit.`
+
+| `step_output_context_eq` aka Lemma B (Semantics.v:5963)
+| 1
+| Same structural sub-case, mirrored; explicit `admit.`
+
+| `preservation` (Semantics.v:6572)
+| 12
+| 11 congruence cases (`S_*_Step`) + S_Region_Step — close mechanically
+  when Lemma B is `Qed.`
+|===
+
+**14 total open obligations, but only 1 independent variable**: the
+S_Region_Step `r = r1` "inner step exits the outer region" structural
+sub-case mirrored across the two upstream lemmas. The 12 in
+`preservation` cascade.
+
+== What changed in the docs
+
+[cols="2,3"]
+|===
+| File | Change
+
+| `docs/reports/audit/audit-2026-05-26-standards-134-reconciliation.md`
+| New. Reconciles `hyperpolymath/standards#134`'s five sub-tasks
+  against ground truth: 4/5 DONE (Idris2 totality, ABI seam,
+  RUST-SPARK-STANCE doc — all closed pre-2026-05-26), 1 remaining (Coq
+  preservation Qed). Records the wall-clock revision from "8-15h" to
+  "4-6h" once a viable path is chosen.
+
+| `formal/PRESERVATION-HANDOFF.md`
+| Added 2026-05-24 + 2026-05-26 rows to the "State at a glance"
+  table. Superseded the "8-15 focused hours for Lemma B alone" effort
+  estimate with the live shape (one helper lemma + cascade). Retained
+  the historical estimate for context.
+
+| `docs/reports/audit/audit-2026-05-26-lemma-b-option-2-obstacle.md`
+| New. Documents the counterexample that blocks Option 2 (see § below)
+  and pivots the recommendation to Path 1 (mutual induction).
+|===
+
+== The Option 2 obstacle
+
+Option 2 in PRESERVATION-HANDOFF.md is "Inversion on `Hstep` with
+structural recursion ... `~150 LOC, orthogonal to the current case
+split`". On closer inspection it has a real obstacle the doc did not
+anticipate.
+
+=== The counterexample
+
+[source,coq]
+----
+e  = ELet (ERegion r v_inner) e2     (* well-typed at R with In r R *)
+e' = ELet v_inner e2                  (* after S_Let_Step / S_Region_Exit *)
+R' = remove_first r R                 (* r exited from inside *)
+----
+
+`e2` may syntactically reference `r` (because `T_Let` at
+`formal/Typing.v:103` has no `~In r (free_regions T)` or
+`expr_free_of_region` premise on siblings). After the step, `R'` has
+no `r`, so `e2`'s `r`-references prevent retyping `e'` at `R'`.
+
+The handoff doc anticipated this for the `expr_free_of_region`
+extraction path: "a `step_exit_implies_free_of_exited_region` lemma
+would be FALSE for congruence cases that preserve siblings — the
+sibling's surviving `r`-references break the freedom claim". The
+doc's Option 2 was framed as **orthogonal** to the freedom-extraction
+path; on closer inspection the same counterexample blocks Option 2's
+congruence cases — they need to *rebuild* `e'`'s typing at `R'`, and
+the rebuild requires `e2` to typecheck at `R'`, which `e2`'s
+`r`-references prevent.
+
+=== Verification chain
+
+. `T_Let` in `formal/Typing.v` lines 103-106 has no sibling-freedom
+  premise.
+. `S_Region_Exit` in `formal/Semantics.v` lines 216-221 has
+  `expr_free_of_region r v` only on the value being lifted out — not
+  on siblings.
+. `S_Let_Step` likewise has no freedom-on-siblings premise.
+. ∴ `ELet (ERegion r v_inner) e2` with `e2` referencing `r` is
+  syntactically and semantically constructible within the language as
+  defined.
+
+== The Path 1 pivot
+
+[cols="1,3,2"]
+|===
+| Path | Description | Wall-clock
+
+| 1
+| Simultaneous mutual induction over `step_preserves_type` +
+  `step_output_context_eq` + `preservation`. The most robust;
+  carries the cost of touching all three proofs together.
+| 8-12h (revised from `n/a`)
+
+| 2
+| Inversion + structural recursion on `Hstep`. Blocked by the
+  counterexample above.
+| n/a
+
+| 3
+| Separate type-preservation-under-step sub-lemma. Already
+  implemented as `step_preserves_type`; it has the same admit.
+| n/a (same blocker)
+
+| 4
+| Add typing invariant for siblings (e.g. extend `T_Let` with
+  `~In r (free_regions e2)` whenever the bound expression is
+  region-exiting). Language change.
+| 12-20h, outside standards#134 scope
+
+| 5
+| Add `expr_free_of_region` premises to `S_*_Step` rules.
+  Language change at the step level.
+| 12-20h, outside standards#134 scope
+|===
+
+Recommended: **Path 1** on a fresh branch when a focused multi-hour
+slot opens up.
+
+== Parked state
+
+. `lemma-b-phase2` branch on origin has three doc commits:
+  * `032e8ea` — standards#134 reconciliation audit
+  * `83e1e31` — handoff case-count correction
+  * `36ff88e` — Option 2 obstacle audit + Path 1 pivot
+. PR `ephapax#146` carries them, auto-merge enabled.
+. No proof code committed. `formal/Semantics.v` is untouched — the
+  3 `Admitted.` keywords (4924 / 5983 / 6572) remain as-is.
+. `.machine_readable/6a2/STATE.a2ml` updated this session to reflect
+  the 1+1+12 case count.
+
+== What this session did NOT change
+
+* The 4/5 sub-tasks of `hyperpolymath/standards#134` that closed
+  pre-2026-05-26 (Idris2 partials, ABI seam, stance doc) remain
+  closed.
+* The 12 cascading goals in `preservation` still depend on Lemma B
+  closing.
+* The branch retains the worktree (`/tmp/eph-lemmab`) for the
+  next pickup session.
+
+== Cross-references
+
+* `formal/PRESERVATION-HANDOFF.md` — per-case map; this session's
+  case-count revision lives there.
+* `PROOF-NEEDS.md` — the lemma-level plan; needs a follow-up edit
+  to point at this session note (deferred).
+* `docs/sessions/SESSION-2026-05-20-proof-engineering-lessons.adoc`
+  — the prior session that landed PRs #88-#100 (Idris2 totality)
+  and Lemma B's scaffolding (PRs #121/#124/#126).
+* `hyperpolymath/standards#134` — the estate proof-debt epic
+  sub-issue for ephapax.

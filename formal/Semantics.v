@@ -3303,6 +3303,48 @@ Proof.
   - eapply T_Copy; [exact H|apply IHHtype; exact Hfree].
 Qed.
 
+(** [region_shrink_preserves_typing_dup]: typing transfers from [R] to
+    [remove_first r R] without a freshness side-condition on [e],
+    PROVIDED [r] still appears in [remove_first r R] (i.e. [r] was
+    duplicated in [R]).
+
+    Distinct from [region_shrink_preserves_typing] (above), which
+    handles the unique-[r] case and requires [expr_free_of_region r e].
+    The two lemmas dispatch the same membership question on opposite
+    sides: this one fires when [r] survives the removal; the other
+    fires when [r] is fully gone but the expression doesn't reference it.
+
+    Proof: pure transport via [region_env_perm_typing]. When
+    [In r (remove_first r R)], the membership predicate at [r] is
+    preserved by [remove_first], and at any [r0 <> r] it is preserved
+    by [region_shrink_in_preserves]. Hence [R] and [remove_first r R]
+    have identical membership, and typing transports unconditionally.
+
+    Provable but does NOT close any of preservation's RIGHT-branch
+    admits in isolation: the operational semantics (S_Region_Exit on
+    a region [r] with [In r R]) never produces the duplicate-[r] case
+    in a configuration reachable from a well-typed initial program, as
+    the static [T_Region] rule's [~In r R] premise prevents shadowing.
+    Lands as adjunct infrastructure: completes the case split alongside
+    [region_shrink_preserves_typing], documents the III-a candidate
+    explored in PRESERVATION-HANDOFF.md §"Open: region-env weakening
+    for non-values". *)
+Lemma region_shrink_preserves_typing_dup :
+  forall R G e T G' r,
+    R; G |- e : T -| G' ->
+    In r (remove_first r R) ->
+    (remove_first r R); G |- e : T -| G'.
+Proof.
+  intros R G e T G' r Htype HinDup.
+  assert (HinR : In r R) by
+    (eapply remove_first_subset; exact HinDup).
+  eapply region_env_perm_typing; [exact Htype |].
+  intro r0.
+  destruct (string_dec r r0) as [Heq | Hneq].
+  - subst r0. split; intros _; assumption.
+  - exact (region_shrink_in_preserves r r0 R Hneq).
+Qed.
+
 (** ** Output-context determinacy
 
     Two derivations of the same expression in the same region
@@ -4554,12 +4596,137 @@ Proof.
         end
     end
   ].
-  (* 5 cases still admitted: S_StringConcat_Step2, S_App_Step2, S_Snd_Step,
-     S_Case_Step, S_Copy. The Swarm A blocks above closed 3 of 8. The
-     remaining 5 need either pattern tweaks (multi-hypothesis match
-     reordering) or more-specific tactic shape. *)
-  all: admit.
-Admitted.
+  (* 5 cases remain after the [all: try solve [...]] chain:
+     S_StringConcat_Step2, S_App_Step2, S_Snd atomic, S_Case_Step,
+     S_Copy. Each closed via an explicit [1: { ... }] block — port
+     of the corresponding upstream [step_preserves_type] tactic.
+     Order from [Show Existentials] confirmed empirically. *)
+
+  (* Goal 1: S_StringConcat_Step2 — EStringConcat v1 e2 → EStringConcat v1 e2'.
+     Both typings give TString r; IH on (e2, e2') yields TString r =
+     TString r'; inversion + reflexivity. *)
+  1: {
+    inversion Hte; subst.
+    inversion Hte'; subst.
+    match goal with
+    | [ Hv : is_value ?v1,
+        Hv1 : has_type _ _ ?v1 _ ?G',
+        Hv1' : has_type _ _ ?v1 _ ?G'0 |- _ ] =>
+        assert (G' = G0) by
+          (eapply value_context_unchanged; [exact Hv1 | exact Hv]);
+        assert (G'0 = G0) by
+          (eapply value_context_unchanged; [exact Hv1' | exact Hv]);
+        subst G' G'0
+    end.
+    match goal with
+    | [ H2 : has_type _ _ ?e2 (TString _) _,
+        H2' : has_type _ _ ?e2' (TString _) _ |- _ ] =>
+        pose proof (IHHstep _ _ _ _ _ _ eq_refl eq_refl _ _ _ H2 _ _ H2') as Hteq;
+        inversion Hteq; reflexivity
+    end.
+  }
+
+  (* Goal 2: S_App_Step2 — EApp v1 e2 → EApp v1 e2'. Both typings at R0
+     (at-pre invariant); v1's two TFun typings align via type_determinacy. *)
+  1: {
+    inversion Hte; subst.
+    inversion Hte'; subst.
+    match goal with
+    | [ Hv : is_value ?v1,
+        Hv1 : has_type ?R ?G ?v1 (TFun ?T1a ?T2a) ?Gmid,
+        Hv1' : has_type ?R ?G ?v1 (TFun ?T1b ?T2b) ?Gmid' |- _ ] =>
+        assert (Gmid = G) by
+          (eapply value_context_unchanged; [exact Hv1 | exact Hv]);
+        assert (Gmid' = G) by
+          (eapply value_context_unchanged; [exact Hv1' | exact Hv]);
+        subst Gmid Gmid';
+        assert (HTfun : TFun T1a T2a = TFun T1b T2b)
+          by (eapply type_determinacy;
+              [exact Hv1 | exact Hv1' | apply ctx_types_agree_refl]);
+        inversion HTfun; subst; reflexivity
+    end.
+  }
+
+  (* Goal 3: S_Snd atomic — ESnd (EPair v1 v2) → v2. No R change.
+     T_Snd inversion → T_Pair on EPair v1 v2 → gives v2's typing
+     with type matching outer T. type_determinacy on v2 closes. *)
+  1: {
+    inversion Hte; subst.
+    match goal with
+    | [ Hp : has_type _ _ (EPair ?v1 ?v2) (TProd _ _) _ |- _ ] =>
+        inversion Hp; subst
+    end.
+    match goal with
+    | [ Hv1 : is_value ?v1,
+        Hv1t : has_type ?R ?G ?v1 ?T1 ?Gmid,
+        Hv2t : has_type ?R ?Gmid ?v2 ?T2 _,
+        Hte' : has_type ?R ?G ?v2 ?T' _
+        |- ?T2 = ?T' ] =>
+        assert (Gmid = G) by
+          (eapply value_context_unchanged; [exact Hv1t | exact Hv1]);
+        subst Gmid;
+        eapply type_determinacy;
+          [ exact Hv2t | exact Hte' | apply ctx_types_agree_refl ]
+    end.
+  }
+
+  (* Goal 4: S_Case_Step — ECase e e1 e2 → ECase e' e1 e2. Both typings
+     at R0 (at-pre invariant). IH on scrutinee gives TSum alignment;
+     branch e1 closes via type_determinacy under ctx_extend with shared T1. *)
+  1: {
+    inversion Hte; subst.
+    inversion Hte'; subst.
+    match goal with
+    | [ Hs : (_, _, ?es) -->> (_, _, ?es'),
+        Hsc : has_type _ _ ?es (TSum _ _) _,
+        Hsc' : has_type _ _ ?es' (TSum _ _) _ |- _ ] =>
+        pose proof (IHHstep _ _ _ _ _ _ eq_refl eq_refl _ _ _ Hsc _ _ Hsc') as Hsum;
+        inversion Hsum; subst
+    end.
+    match goal with
+    | [ Hsc : has_type ?R ?G ?es (TSum ?T1 _) ?Gmid,
+        Hsc' : has_type ?R ?G ?es' (TSum ?T1 _) ?Gmid' |- _ ] =>
+        assert (HagrMid : ctx_types_agree Gmid Gmid')
+          by (eapply ctx_types_agree_trans;
+              [ eapply typing_types_agree; exact Hsc
+              | apply ctx_types_agree_sym; eapply typing_types_agree; exact Hsc' ]);
+        assert (HagrExt : ctx_types_agree (ctx_extend Gmid T1) (ctx_extend Gmid' T1))
+          by (apply ctx_extend_types_agree; assumption)
+    end.
+    match goal with
+    | [ Hb1 : has_type ?R (ctx_extend ?Gmid ?T1) ?eb1 ?Ta _,
+        Hb1' : has_type ?R (ctx_extend ?Gmid' ?T1) ?eb1 ?Tb _,
+        Hag : ctx_types_agree (ctx_extend ?Gmid ?T1) (ctx_extend ?Gmid' ?T1)
+        |- ?Ta = ?Tb ] =>
+        eapply type_determinacy; [ exact Hb1 | exact Hb1' | exact Hag ]
+    end.
+  }
+
+  (* Goal 5: S_Copy atomic — ECopy v → EPair v v. No R change.
+     T_Copy outer = TProd T T (v : T). T_Pair outer = TProd T1' T2'.
+     type_determinacy on v aligns T1' = T2' = T. *)
+  1: {
+    inversion Hte; subst.
+    inversion Hte'; subst.
+    match goal with
+    | [ Hv : is_value ?v,
+        Hvt : has_type ?R ?G ?v ?T _,
+        Hv1t : has_type ?R ?G ?v ?T1' ?Gmid,
+        Hv2t : has_type ?R ?Gmid ?v ?T2' _
+        |- TProd ?T ?T = TProd ?T1' ?T2' ] =>
+        assert (Gmid = G) by
+          (eapply value_context_unchanged; [exact Hv1t | exact Hv]);
+        subst Gmid;
+        assert (HT1 : T = T1')
+          by (eapply type_determinacy;
+              [exact Hvt | exact Hv1t | apply ctx_types_agree_refl]);
+        assert (HT2 : T = T2')
+          by (eapply type_determinacy;
+              [exact Hvt | exact Hv2t | apply ctx_types_agree_refl]);
+        subst T1' T2'; reflexivity
+    end.
+  }
+Qed.
 
 (** ** Step preserves type
 
@@ -6909,10 +7076,284 @@ Proof.
         end
     end
   ].
-  (* ~11 cases remaining (Cluster B touches_region RIGHT branches + a few
-     others). Swarm B's S_Region_Step block closed 1 of 12 above. *)
-  all: admit.
-Admitted.
+  (* 11 cases remaining are all congruence rules (S_*_Step). Each closes
+     by: (1) invert both typings; (2) align inner free types via
+     [step_preserves_type_at_pre] (now Qed); (3) IHHstep on inner step
+     gives inner output contexts equal; (4) [output_ctx_det] or
+     [value_context_unchanged] on siblings. Order from [Show Existentials]
+     empirically:
+       1.  S_StringConcat_Step1  (EStringConcat e1 e2, e1 → e1')
+       2.  S_Let_Step            (ELet e1 e2,         e1 → e1')
+       3.  S_LetLin_Step         (ELetLin e1 e2,      e1 → e1')
+       4.  S_App_Step1           (EApp e1 e2,         e1 → e1')
+       5.  S_App_Step2           (EApp v1 e2,         e2 → e2', v1 value)
+       6.  S_If_Step             (EIf e1 e2 e3,       e1 → e1')
+       7.  S_Pair_Step1          (EPair e1 e2,        e1 → e1')
+       8.  S_Fst_Step            (EFst e,             e  → e')
+       9.  S_Snd_Step            (ESnd e,             e  → e')
+       10. S_Case_Step           (ECase e e1 e2,      e  → e')
+       11. S_Drop_Step           (EDrop e,            e  → e') *)
+
+  (* Goal 1: S_StringConcat_Step1. Outer T = TString r pins inner type;
+     IHHstep on the stepping child gives Gmid = Gmid'; output_ctx_det on
+     the unchanged sibling e2 gives Ga = Gb. *)
+  1: {
+    inversion Htype_e; subst.
+    inversion Htype_e'; subst.
+    match goal with
+    | [ Hs : (_, _, ?es) -->> (_, _, ?es'),
+        H1  : has_type ?R ?G ?es  (TString ?r) ?Gmid,
+        H1' : has_type ?R ?G ?es' (TString ?r) ?Gmid' |- _ ] =>
+        assert (HGmid : Gmid = Gmid')
+          by (eapply IHHstep; [reflexivity | reflexivity | exact H1 | exact H1']);
+        subst Gmid'
+    end.
+    match goal with
+    | [ H2  : has_type ?R ?Gmid ?e2 (TString ?r) ?Ga,
+        H2' : has_type ?R ?Gmid ?e2 (TString ?r) ?Gb |- ?Ga = ?Gb ] =>
+        eapply output_ctx_det; [exact H2 | exact H2']
+    end.
+  }
+
+  (* Goal 2: S_Let_Step. Inner type T1 is free; align via
+     step_preserves_type_at_pre, then IHHstep aligns G' (post-e1).
+     Body e2 unchanged, output_ctx_det yields cons-eq, injection. *)
+  1: {
+    inversion Htype_e; subst.
+    inversion Htype_e'; subst.
+    match goal with
+    | [ Hs : (_, _, ?es) -->> (_, _, ?es'),
+        H1  : has_type ?R ?G ?es  ?T1  ?Gmid,
+        H1' : has_type ?R ?G ?es' ?T1' ?Gmid' |- _ ] =>
+        assert (HT1 : T1 = T1') by
+          (eapply step_preserves_type_at_pre;
+           [exact Hs | exact H1 | exact H1']);
+        subst T1';
+        assert (HGmid : Gmid = Gmid')
+          by (eapply IHHstep;
+              [reflexivity | reflexivity | exact H1 | exact H1']);
+        subst Gmid'
+    end.
+    match goal with
+    | [ H2  : has_type ?R (ctx_extend ?Gm ?T1) ?e2 ?T0 ?Gext,
+        H2' : has_type ?R (ctx_extend ?Gm ?T1) ?e2 ?T0 ?Gext'
+        |- _ ] =>
+        assert (Hexteq : Gext = Gext') by
+          (eapply output_ctx_det; [exact H2 | exact H2']);
+        injection Hexteq; intros HGab; exact HGab
+    end.
+  }
+
+  (* Goal 3: S_LetLin_Step. Same shape as S_Let_Step. *)
+  1: {
+    inversion Htype_e; subst.
+    inversion Htype_e'; subst.
+    match goal with
+    | [ Hs : (_, _, ?es) -->> (_, _, ?es'),
+        H1  : has_type ?R ?G ?es  ?T1  ?Gmid,
+        H1' : has_type ?R ?G ?es' ?T1' ?Gmid' |- _ ] =>
+        assert (HT1 : T1 = T1') by
+          (eapply step_preserves_type_at_pre;
+           [exact Hs | exact H1 | exact H1']);
+        subst T1';
+        assert (HGmid : Gmid = Gmid')
+          by (eapply IHHstep;
+              [reflexivity | reflexivity | exact H1 | exact H1']);
+        subst Gmid'
+    end.
+    match goal with
+    | [ H2  : has_type ?R (ctx_extend ?Gm ?T1) ?e2 ?T0 ?Gext,
+        H2' : has_type ?R (ctx_extend ?Gm ?T1) ?e2 ?T0 ?Gext'
+        |- _ ] =>
+        assert (Hexteq : Gext = Gext') by
+          (eapply output_ctx_det; [exact H2 | exact H2']);
+        injection Hexteq; intros HGab; exact HGab
+    end.
+  }
+
+  (* Goal 4: S_App_Step1. Outer T = T2 (function return); T1 (arg type)
+     free. Align via step_preserves_type_at_pre on (e1, e1')'s TFun
+     typings; inversion gives T1 = T1'; IHHstep aligns Gmid;
+     output_ctx_det on sibling e2 closes. *)
+  1: {
+    inversion Htype_e; subst.
+    inversion Htype_e'; subst.
+    match goal with
+    | [ Hs : (_, _, ?es) -->> (_, _, ?es'),
+        H1  : has_type ?R ?G ?es  (TFun ?T1a ?T2a) ?Gmid,
+        H1' : has_type ?R ?G ?es' (TFun ?T1b ?T2b) ?Gmid' |- _ ] =>
+        assert (HT : TFun T1a T2a = TFun T1b T2b) by
+          (eapply step_preserves_type_at_pre;
+           [exact Hs | exact H1 | exact H1']);
+        inversion HT; subst;
+        assert (HGmid : Gmid = Gmid')
+          by (eapply IHHstep;
+              [reflexivity | reflexivity | exact H1 | exact H1']);
+        subst Gmid'
+    end.
+    match goal with
+    | [ H2  : has_type ?R ?Gm ?e2 ?T1 ?Ga,
+        H2' : has_type ?R ?Gm ?e2 ?T1 ?Gb |- ?Ga = ?Gb ] =>
+        eapply output_ctx_det; [exact H2 | exact H2']
+    end.
+  }
+
+  (* Goal 5: S_App_Step2. v1 is value; e2 → e2'. Both v1 typings at
+     R, G, v1; value_context_unchanged aligns Gmid = G = Gmid';
+     type_determinacy aligns TFun T1a = TFun T1b → T1 unique;
+     IHHstep on (e2, e2') gives Ga = Gb. *)
+  1: {
+    inversion Htype_e; subst.
+    inversion Htype_e'; subst.
+    match goal with
+    | [ Hv : is_value ?v1,
+        Hv1 : has_type ?R ?G ?v1 (TFun ?T1a ?T2a) ?Gmid,
+        Hv1' : has_type ?R ?G ?v1 (TFun ?T1b ?T2b) ?Gmid' |- _ ] =>
+        assert (Gmid = G) by
+          (eapply value_context_unchanged; [exact Hv1 | exact Hv]);
+        assert (Gmid' = G) by
+          (eapply value_context_unchanged; [exact Hv1' | exact Hv]);
+        subst Gmid Gmid';
+        assert (HTfun : TFun T1a T2a = TFun T1b T2b)
+          by (eapply type_determinacy;
+              [exact Hv1 | exact Hv1' | apply ctx_types_agree_refl]);
+        inversion HTfun; subst
+    end.
+    match goal with
+    | [ Hs : (_, _, ?es) -->> (_, _, ?es'),
+        H2  : has_type ?R ?G ?es  ?T1 ?Ga,
+        H2' : has_type ?R ?G ?es' ?T1 ?Gb |- ?Ga = ?Gb ] =>
+        eapply IHHstep;
+          [reflexivity | reflexivity | exact H2 | exact H2']
+    end.
+  }
+
+  (* Goal 6: S_If_Step. Inner type fixed at TBase TBool; IHHstep aligns
+     Gmid; both branches at same (Gmid, T0); output_ctx_det on either
+     branch closes. *)
+  1: {
+    inversion Htype_e; subst.
+    inversion Htype_e'; subst.
+    match goal with
+    | [ Hs : (_, _, ?es) -->> (_, _, ?es'),
+        H1  : has_type ?R ?G ?es  (TBase TBool) ?Gmid,
+        H1' : has_type ?R ?G ?es' (TBase TBool) ?Gmid' |- _ ] =>
+        assert (HGmid : Gmid = Gmid')
+          by (eapply IHHstep;
+              [reflexivity | reflexivity | exact H1 | exact H1']);
+        subst Gmid'
+    end.
+    match goal with
+    | [ H2  : has_type ?R ?Gm ?e2 ?T0 ?Ga,
+        H2' : has_type ?R ?Gm ?e2 ?T0 ?Gb |- ?Ga = ?Gb ] =>
+        eapply output_ctx_det; [exact H2 | exact H2']
+    end.
+  }
+
+  (* Goal 7: S_Pair_Step1. Outer T = TProd T1 T2 pins both inner types.
+     IHHstep on (e1, e1') gives Gmid = Gmid'; output_ctx_det on e2 closes. *)
+  1: {
+    inversion Htype_e; subst.
+    inversion Htype_e'; subst.
+    match goal with
+    | [ Hs : (_, _, ?es) -->> (_, _, ?es'),
+        H1  : has_type ?R ?G ?es  ?T1 ?Gmid,
+        H1' : has_type ?R ?G ?es' ?T1 ?Gmid' |- _ ] =>
+        assert (HGmid : Gmid = Gmid')
+          by (eapply IHHstep;
+              [reflexivity | reflexivity | exact H1 | exact H1']);
+        subst Gmid'
+    end.
+    match goal with
+    | [ H2  : has_type ?R ?Gm ?e2 ?T2 ?Ga,
+        H2' : has_type ?R ?Gm ?e2 ?T2 ?Gb |- ?Ga = ?Gb ] =>
+        eapply output_ctx_det; [exact H2 | exact H2']
+    end.
+  }
+
+  (* Goal 8: S_Fst_Step. e → e'. Outer T = T1 (first component); T2 free.
+     Align inner TProd via step_preserves_type_at_pre; inversion gives
+     T2 = T2'; IHHstep gives Ga = Gb. *)
+  1: {
+    inversion Htype_e; subst.
+    inversion Htype_e'; subst.
+    match goal with
+    | [ Hs : (_, _, ?es) -->> (_, _, ?es'),
+        H1  : has_type ?R ?G ?es  (TProd ?T1a ?T2a) ?Ga,
+        H1' : has_type ?R ?G ?es' (TProd ?T1b ?T2b) ?Gb |- _ ] =>
+        assert (HT : TProd T1a T2a = TProd T1b T2b) by
+          (eapply step_preserves_type_at_pre;
+           [exact Hs | exact H1 | exact H1']);
+        inversion HT; subst;
+        eapply IHHstep;
+          [reflexivity | reflexivity | exact H1 | exact H1']
+    end.
+  }
+
+  (* Goal 9: S_Snd_Step. Symmetric to Fst. *)
+  1: {
+    inversion Htype_e; subst.
+    inversion Htype_e'; subst.
+    match goal with
+    | [ Hs : (_, _, ?es) -->> (_, _, ?es'),
+        H1  : has_type ?R ?G ?es  (TProd ?T1a ?T2a) ?Ga,
+        H1' : has_type ?R ?G ?es' (TProd ?T1b ?T2b) ?Gb |- _ ] =>
+        assert (HT : TProd T1a T2a = TProd T1b T2b) by
+          (eapply step_preserves_type_at_pre;
+           [exact Hs | exact H1 | exact H1']);
+        inversion HT; subst;
+        eapply IHHstep;
+          [reflexivity | reflexivity | exact H1 | exact H1']
+    end.
+  }
+
+  (* Goal 10: S_Case_Step. Scrutinee TSum T1 T2 free; align via
+     step_preserves_type_at_pre; IHHstep aligns Gmid; both branches
+     unchanged at (ctx_extend Gmid T1, T0) → output_ctx_det on cons-eq. *)
+  1: {
+    inversion Htype_e; subst.
+    inversion Htype_e'; subst.
+    match goal with
+    | [ Hs : (_, _, ?es) -->> (_, _, ?es'),
+        H1  : has_type ?R ?G ?es  (TSum ?T1a ?T2a) ?Gmid,
+        H1' : has_type ?R ?G ?es' (TSum ?T1b ?T2b) ?Gmid' |- _ ] =>
+        assert (HT : TSum T1a T2a = TSum T1b T2b) by
+          (eapply step_preserves_type_at_pre;
+           [exact Hs | exact H1 | exact H1']);
+        inversion HT; subst;
+        assert (HGmid : Gmid = Gmid')
+          by (eapply IHHstep;
+              [reflexivity | reflexivity | exact H1 | exact H1']);
+        subst Gmid'
+    end.
+    match goal with
+    | [ H2  : has_type ?R (ctx_extend ?Gm ?T1) ?eb ?T0 ?Gext,
+        H2' : has_type ?R (ctx_extend ?Gm ?T1) ?eb ?T0 ?Gext'
+        |- _ ] =>
+        assert (Hexteq : Gext = Gext') by
+          (eapply output_ctx_det; [exact H2 | exact H2']);
+        injection Hexteq; intros HGab; exact HGab
+    end.
+  }
+
+  (* Goal 11: S_Drop_Step. Outer T = TBase TUnit; inner T_inner free.
+     Align via step_preserves_type_at_pre; IHHstep gives Ga = Gb. *)
+  1: {
+    inversion Htype_e; subst.
+    inversion Htype_e'; subst.
+    match goal with
+    | [ Hs : (_, _, ?es) -->> (_, _, ?es'),
+        H1  : has_type ?R ?G ?es  ?Ti  ?Ga,
+        H1' : has_type ?R ?G ?es' ?Ti' ?Gb |- _ ] =>
+        assert (HT : Ti = Ti') by
+          (eapply step_preserves_type_at_pre;
+           [exact Hs | exact H1 | exact H1']);
+        subst Ti';
+        eapply IHHstep;
+          [reflexivity | reflexivity | exact H1 | exact H1']
+    end.
+  }
+Qed.
 
 Lemma step_output_context_eq :
   forall mu R e mu' R' e',
@@ -8343,30 +8784,36 @@ Proof.
      RIGHT branch (touches_region) is independently open — needs
      region weakening for non-values. *)
 
-  (* S_StringConcat_Step1: inner step is on e1. Use step_R_change_shape
-     for 3-way dispatch. LEFT and MIDDLE close via has_type_lift on the
-     sibling. RIGHT (remove_first) blocked on sibling-might-reference-r. *)
-  all: try solve [
+  (* S_StringConcat_Step1: inner step on e1. LEFT (R = R') closes via
+     [step_output_context_eq] (Qed) to unify the sibling's [Gmid] with
+     the IH's existential [Gout]. RIGHT (touches_region) blocked on
+     region-env weakening for non-values (separate structural lemma).
+     Note: was 3-way via [step_R_change_shape]; collapsed to 2-way
+     here for consistency with the other S_*_Step blocks — the MIDDLE
+     (push) sub-case is folded into the touches_region RIGHT and will
+     be re-distinguished by the C-lemma's structural recursion. *)
+  all: try (
     match goal with
     | [ H1 : has_type ?R ?G ?e1 (TString ?r0) ?Gmid,
         H2 : has_type ?R ?Gmid ?e2 (TString ?r0) ?Gout1
-        |- exists _ : ctx, has_type ?Rp ?G (EStringConcat ?e1' ?e2) (TString ?r0) _ ] =>
-        pose proof (step_R_change_shape _ _ _ _ _ _ Hstep)
-          as [HeqR | [[r [Hadd Hnotin]] | [r [Hrem HinR]]]];
-        [ rewrite HeqR in *;
-          edestruct (IHHstep _ _ _ _ _ _ eq_refl eq_refl _ _ _ H1) as [Gout2 Hout];
+        |- exists _ : ctx, has_type ?R' ?G (EStringConcat ?e1' ?e2) (TString ?r0) _ ] =>
+        pose proof (step_R_eq_or_touches_region _ _ _ _ _ _ Hstep) as Hdis;
+        destruct Hdis as [HeqR | HTR];
+        [ rewrite <- HeqR in *;
+          edestruct (IHHstep _ _ _ _ _ _ eq_refl eq_refl _ _ _ H1) as [Gout Hout];
+          assert (Heq_out : Gmid = Gout) by
+            (eapply step_output_context_eq;
+              [ exact Hstep | exact H1 | exact Hout ]);
+          subst Gmid;
           eexists; eapply T_StringConcat; [exact Hout | exact H2]
-        | subst Rp;
-          edestruct (IHHstep _ _ _ _ _ _ eq_refl eq_refl _ _ _ H1) as [Gout2 Hout];
-          pose proof (region_add_typing _ _ _ _ _ r H2) as H2lift;
-          eexists; eapply T_StringConcat; [exact Hout | exact H2lift]
-        | fail ]
-    end
-  ].
+        | idtac ]
+    end).
 
   (* S_StringConcat_Step2: inner step is on e2; v1 is a value so
-     value_context_unchanged ⇒ v1's post-context equals its pre-context. *)
-  all: try solve [
+     value_context_unchanged ⇒ v1's post-context equals its pre-context.
+     With Gmid = G after subst, IH on H2 gives Hout at input G, matching
+     the second eapply slot directly — no oracle needed. *)
+  all: try (
     match goal with
     | [ Hv : is_value ?v1,
         H1 : has_type ?R ?G ?v1 (TString ?r0) ?Gmid,
@@ -8374,32 +8821,32 @@ Proof.
         |- exists _ : ctx, has_type ?R' ?G (EStringConcat ?v1 ?e2') (TString ?r0) _ ] =>
         pose proof (step_R_eq_or_touches_region _ _ _ _ _ _ Hstep) as Hdis;
         destruct Hdis as [HeqR | HTR];
-        [ rewrite <- HeqR;
+        [ rewrite <- HeqR in *;
           assert (Hgeq: Gmid = G) by (eapply value_context_unchanged; eassumption);
           subst Gmid;
           edestruct (IHHstep _ _ _ _ _ _ eq_refl eq_refl _ _ _ H2) as [Gout Hout];
           eexists; eapply T_StringConcat; [exact H1 | exact Hout]
-        | fail ]
-    end
-  ].
+        | idtac ]
+    end).
 
-  (* S_StringLen_Step: Hb: EBorrow e : TBorrow (TString r). IH is on
-     the inner step on e; invert Hb to get e's typing, feed to IH,
-     reconstruct EStringLen e' via T_StringLen ∘ T_Borrow. *)
+  (* S_StringLen_Step is VACUOUS: T_StringLen wraps e at type
+     [TBorrow (TString r)], and T_Borrow forces the inner of [EBorrow]
+     to be [EVar i] (no step rule fires on EVar) while T_Borrow_Val
+     forces it to be a value (values don't step). So the inner Hstep
+     premise of S_StringLen_Step has no model — close vacuously like
+     S_Borrow_Step elsewhere in this proof. *)
   all: try solve [
     match goal with
-    | [ Hb : has_type ?R ?G (EBorrow ?e) (TBorrow (TString ?r0)) ?G'
-        |- exists _ : ctx, has_type ?R' ?G (EStringLen ?e') (TBase TI32) _ ] =>
-        pose proof (step_R_eq_or_touches_region _ _ _ _ _ _ Hstep) as Hdis;
-        destruct Hdis as [HeqR | HTR];
-        [ rewrite <- HeqR;
-          inversion Hb; subst;
+    | [ Hin : (_, _, _) -->> (_, _, _),
+        Hte : has_type _ _ (EBorrow _) _ _ |- _ ] =>
+        inversion Hte; subst;
+        [ inversion Hin
+        | exfalso;
           match goal with
-          | [ Het : has_type ?R ?G ?e (TString ?r0) ?Ge |- _ ] =>
-              edestruct (IHHstep _ _ _ _ _ _ eq_refl eq_refl _ _ _ Het) as [Gout Hout];
-              eexists; eapply T_StringLen; eapply T_Borrow; exact Hout
+          | [ Hv : is_value ?v |- _ ] =>
+              eapply values_dont_step; [exact Hv | exact Hin]
           end
-        | fail ]
+        ]
     end
   ].
 
@@ -8424,8 +8871,10 @@ Proof.
         | idtac ]
     end).
 
-  (* S_LetLin_Step *)
-  all: try solve [
+  (* S_LetLin_Step — LEFT closes via step_output_context_eq oracle
+     (parallel to S_Let_Step). RIGHT (touches_region) blocked on region
+     weakening for non-values. *)
+  all: try (
     match goal with
     | [ Hlin : is_linear_ty ?T1 = true,
         H1 : has_type ?R ?G ?e1 ?T1 ?Gmid,
@@ -8433,30 +8882,39 @@ Proof.
         |- exists _ : ctx, has_type ?R' ?G (ELetLin ?e1' ?e2) ?T0 _ ] =>
         pose proof (step_R_eq_or_touches_region _ _ _ _ _ _ Hstep) as Hdis;
         destruct Hdis as [HeqR | HTR];
-        [ rewrite <- HeqR;
+        [ rewrite <- HeqR in *;
           edestruct (IHHstep _ _ _ _ _ _ eq_refl eq_refl _ _ _ H1) as [Gout Hout];
+          assert (Heq_out : Gmid = Gout) by
+            (eapply step_output_context_eq;
+              [ exact Hstep | exact H1 | exact Hout ]);
+          subst Gmid;
           eexists; eapply T_LetLin; [exact Hlin | exact Hout | exact H2]
-        | fail ]
-    end
-  ].
+        | idtac ]
+    end).
 
-  (* S_App_Step1 *)
-  all: try solve [
+  (* S_App_Step1 — LEFT closes via step_output_context_eq oracle. RIGHT
+     (touches_region) blocked on region weakening for non-values. *)
+  all: try (
     match goal with
     | [ H1 : has_type ?R ?G ?e1 (TFun ?T1 ?T0) ?Gmid,
         H2 : has_type ?R ?Gmid ?e2 ?T1 ?G'
         |- exists _ : ctx, has_type ?R' ?G (EApp ?e1' ?e2) ?T0 _ ] =>
         pose proof (step_R_eq_or_touches_region _ _ _ _ _ _ Hstep) as Hdis;
         destruct Hdis as [HeqR | HTR];
-        [ rewrite <- HeqR;
+        [ rewrite <- HeqR in *;
           edestruct (IHHstep _ _ _ _ _ _ eq_refl eq_refl _ _ _ H1) as [Gout Hout];
+          assert (Heq_out : Gmid = Gout) by
+            (eapply step_output_context_eq;
+              [ exact Hstep | exact H1 | exact Hout ]);
+          subst Gmid;
           eexists; eapply T_App; [exact Hout | exact H2]
-        | fail ]
-    end
-  ].
+        | idtac ]
+    end).
 
-  (* S_App_Step2: v1 is a value so its post-context equals pre-context. *)
-  all: try solve [
+  (* S_App_Step2: v1 is a value so value_context_unchanged ⇒ Gmid = G.
+     IH on H2 gives Hout at input G, matching the second eapply slot
+     directly. RIGHT (touches_region) blocked on region weakening. *)
+  all: try (
     match goal with
     | [ Hv : is_value ?v1,
         H1 : has_type ?R ?G ?v1 (TFun ?T1 ?T0) ?Gmid,
@@ -8464,17 +8922,18 @@ Proof.
         |- exists _ : ctx, has_type ?R' ?G (EApp ?v1 ?e2') ?T0 _ ] =>
         pose proof (step_R_eq_or_touches_region _ _ _ _ _ _ Hstep) as Hdis;
         destruct Hdis as [HeqR | HTR];
-        [ rewrite <- HeqR;
+        [ rewrite <- HeqR in *;
           assert (Hgeq: Gmid = G) by (eapply value_context_unchanged; eassumption);
           subst Gmid;
           edestruct (IHHstep _ _ _ _ _ _ eq_refl eq_refl _ _ _ H2) as [Gout Hout];
           eexists; eapply T_App; [exact H1 | exact Hout]
-        | fail ]
-    end
-  ].
+        | idtac ]
+    end).
 
-  (* S_If_Step *)
-  all: try solve [
+  (* S_If_Step — LEFT closes via step_output_context_eq oracle on the
+     condition's typing. RIGHT (touches_region) blocked on region
+     weakening for non-values. *)
+  all: try (
     match goal with
     | [ H1 : has_type ?R ?G ?e1 (TBase TBool) ?Gmid,
         H2 : has_type ?R ?Gmid ?e2 ?T0 ?G',
@@ -8482,30 +8941,40 @@ Proof.
         |- exists _ : ctx, has_type ?R' ?G (EIf ?e1' ?e2 ?e3) ?T0 _ ] =>
         pose proof (step_R_eq_or_touches_region _ _ _ _ _ _ Hstep) as Hdis;
         destruct Hdis as [HeqR | HTR];
-        [ rewrite <- HeqR;
+        [ rewrite <- HeqR in *;
           edestruct (IHHstep _ _ _ _ _ _ eq_refl eq_refl _ _ _ H1) as [Gout Hout];
+          assert (Heq_out : Gmid = Gout) by
+            (eapply step_output_context_eq;
+              [ exact Hstep | exact H1 | exact Hout ]);
+          subst Gmid;
           eexists; eapply T_If; [exact Hout | exact H2 | exact H3]
-        | fail ]
-    end
-  ].
+        | idtac ]
+    end).
 
-  (* S_Pair_Step1 *)
-  all: try solve [
+  (* S_Pair_Step1 — LEFT closes via step_output_context_eq oracle on the
+     first child's typing. RIGHT (touches_region) blocked on region
+     weakening for non-values. *)
+  all: try (
     match goal with
     | [ H1 : has_type ?R ?G ?e1 ?T1 ?Gmid,
         H2 : has_type ?R ?Gmid ?e2 ?T2 ?G'
         |- exists _ : ctx, has_type ?R' ?G (EPair ?e1' ?e2) (TProd ?T1 ?T2) _ ] =>
         pose proof (step_R_eq_or_touches_region _ _ _ _ _ _ Hstep) as Hdis;
         destruct Hdis as [HeqR | HTR];
-        [ rewrite <- HeqR;
+        [ rewrite <- HeqR in *;
           edestruct (IHHstep _ _ _ _ _ _ eq_refl eq_refl _ _ _ H1) as [Gout Hout];
+          assert (Heq_out : Gmid = Gout) by
+            (eapply step_output_context_eq;
+              [ exact Hstep | exact H1 | exact Hout ]);
+          subst Gmid;
           eexists; eapply T_Pair; [exact Hout | exact H2]
-        | fail ]
-    end
-  ].
+        | idtac ]
+    end).
 
-  (* S_Pair_Step2: v1 is a value. *)
-  all: try solve [
+  (* S_Pair_Step2: v1 is a value so value_context_unchanged ⇒ Gmid = G.
+     IH on H2 gives Hout at input G. RIGHT (touches_region) blocked on
+     region weakening. *)
+  all: try (
     match goal with
     | [ Hv : is_value ?v1,
         H1 : has_type ?R ?G ?v1 ?T1 ?Gmid,
@@ -8513,17 +8982,18 @@ Proof.
         |- exists _ : ctx, has_type ?R' ?G (EPair ?v1 ?e2') (TProd ?T1 ?T2) _ ] =>
         pose proof (step_R_eq_or_touches_region _ _ _ _ _ _ Hstep) as Hdis;
         destruct Hdis as [HeqR | HTR];
-        [ rewrite <- HeqR;
+        [ rewrite <- HeqR in *;
           assert (Hgeq: Gmid = G) by (eapply value_context_unchanged; eassumption);
           subst Gmid;
           edestruct (IHHstep _ _ _ _ _ _ eq_refl eq_refl _ _ _ H2) as [Gout Hout];
           eexists; eapply T_Pair; [exact H1 | exact Hout]
-        | fail ]
-    end
-  ].
+        | idtac ]
+    end).
 
-  (* S_Case_Step *)
-  all: try solve [
+  (* S_Case_Step — LEFT closes via step_output_context_eq oracle on the
+     scrutinee's typing; subst aligns the branches' ctx_extend inputs.
+     RIGHT (touches_region) blocked on region weakening for non-values. *)
+  all: try (
     match goal with
     | [ H1 : has_type ?R ?G ?e (TSum ?T1 ?T2) ?Gmid,
         H2 : has_type ?R (ctx_extend ?Gmid ?T1) ?e1 ?T0 ((?T1, true) :: ?G'),
@@ -8531,20 +9001,23 @@ Proof.
         |- exists _ : ctx, has_type ?R' ?G (ECase ?e' ?e1 ?e2) ?T0 _ ] =>
         pose proof (step_R_eq_or_touches_region _ _ _ _ _ _ Hstep) as Hdis;
         destruct Hdis as [HeqR | HTR];
-        [ rewrite <- HeqR;
+        [ rewrite <- HeqR in *;
           edestruct (IHHstep _ _ _ _ _ _ eq_refl eq_refl _ _ _ H1) as [Gout Hout];
+          assert (Heq_out : Gmid = Gout) by
+            (eapply step_output_context_eq;
+              [ exact Hstep | exact H1 | exact Hout ]);
+          subst Gmid;
           eexists; eapply T_Case; [exact Hout | exact H2 | exact H3]
-        | fail ]
-    end
-  ].
+        | idtac ]
+    end).
 
-(* Show Existentials. *)  (* uncomment to dump the remaining open goals
-                              for diagnostic per-case work — still 12
-                              open after this session: the RIGHT (R' =
-                              remove_first r R) sub-cases. Closing these
-                              requires either a typing invariant
-                              (sibling-region-disjointness) or a
-                              reformulation of preservation. *)
+(* Show Existentials. *)  (* uncomment to dump the remaining open goals.
+                            Post-Swarm-C splice (2026-05-26 eve):
+                            10 RIGHT-only sub-cases (HTR : touches_region
+                            in context) + 1 S_Region_Step = 11 admits.
+                            Closing the 10 touches_region cases needs
+                            region-env weakening for non-values (the "C"
+                            structural problem, handed off separately). *)
 Admitted.
 (* PROOF STATUS [preservation] — ADMITTED, down to 12 open goals
    (from 910 cross-case, via PR #102's remember-cfg + PR #106's

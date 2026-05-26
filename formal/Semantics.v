@@ -8403,20 +8403,26 @@ Proof.
     end
   ].
 
-  (* S_Let_Step *)
-  all: try solve [
+  (* S_Let_Step — LEFT branch closed via step_output_context_eq oracle
+     (Swarm C splice, 2026-05-26 eve). Output-context skolem Gout from
+     IH unifies with H2's Gmid via the new Qed lemma. RIGHT branch
+     (touches_region) left as idtac fallthrough to final Admitted. *)
+  all: try (
     match goal with
     | [ H1 : has_type ?R ?G ?e1 ?T1 ?Gmid,
         H2 : has_type ?R (ctx_extend ?Gmid ?T1) ?e2 ?T0 ((?T1, true) :: ?G')
         |- exists _ : ctx, has_type ?R' ?G (ELet ?e1' ?e2) ?T0 _ ] =>
         pose proof (step_R_eq_or_touches_region _ _ _ _ _ _ Hstep) as Hdis;
         destruct Hdis as [HeqR | HTR];
-        [ rewrite <- HeqR;
+        [ rewrite <- HeqR in *;
           edestruct (IHHstep _ _ _ _ _ _ eq_refl eq_refl _ _ _ H1) as [Gout Hout];
+          assert (Heq_out : Gmid = Gout) by
+            (eapply step_output_context_eq;
+              [ exact Hstep | exact H1 | exact Hout ]);
+          subst Gmid;
           eexists; eapply T_Let; [exact Hout | exact H2]
-        | fail ]
-    end
-  ].
+        | idtac ]
+    end).
 
   (* S_LetLin_Step *)
   all: try solve [

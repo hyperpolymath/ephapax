@@ -949,7 +949,6 @@ dependencies = [
  "serde",
  "serde_json",
  "smol_str",
- "typed-wasm-verify",
  "wasm-encoder 0.221.3",
  "wasmparser 0.221.3",
 ]

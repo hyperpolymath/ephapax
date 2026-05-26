@@ -93,7 +93,44 @@ Lemma value_R_G_preserving_l1 :
     is_value v ->
     has_type_l1 R G v T R' G' ->
     R' = R /\ G' = G.
-Admitted.
+Proof.
+  intros R G v T R' G' Hv. revert R G T R' G'.
+  induction Hv; intros R0 G0 T0 R0' G0' Ht.
+  - (* VUnit *) inversion Ht; subst; split; reflexivity.
+  - (* VBool *) inversion Ht; subst; split; reflexivity.
+  - (* VI32 *) inversion Ht; subst; split; reflexivity.
+  - (* VLam *) inversion Ht; subst; split; reflexivity.
+  - (* VPair v1 v2 *)
+    inversion Ht; subst.
+    match goal with
+    | [ H1 : has_type_l1 _ _ v1 _ _ _,
+        H2 : has_type_l1 _ _ v2 _ _ _ |- _ ] =>
+        specialize (IHHv1 _ _ _ _ _ H1) as [HR1 HG1]; subst;
+        specialize (IHHv2 _ _ _ _ _ H2) as [HR2 HG2]; subst
+    end.
+    split; reflexivity.
+  - (* VInl T v *)
+    inversion Ht; subst.
+    match goal with
+    | [ H : has_type_l1 _ _ v _ _ _ |- _ ] =>
+        specialize (IHHv _ _ _ _ _ H) as [HR HG]; subst
+    end.
+    split; reflexivity.
+  - (* VInr T v *)
+    inversion Ht; subst.
+    match goal with
+    | [ H : has_type_l1 _ _ v _ _ _ |- _ ] =>
+        specialize (IHHv _ _ _ _ _ H) as [HR HG]; subst
+    end.
+    split; reflexivity.
+  - (* VLoc *) inversion Ht; subst; split; reflexivity.
+  - (* VBorrow v *)
+    inversion Ht; subst.
+    + (* T_Borrow_L1: EBorrow (EVar i) — impossible since v is a value, not EVar *)
+      inversion Hv.
+    + (* T_Borrow_Val_L1 *)
+      split; reflexivity.
+Qed.
 
 (** ** Helper: region-environment shrinkage for value typings.
 

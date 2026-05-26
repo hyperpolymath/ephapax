@@ -2,29 +2,35 @@
 
 ## Current state
 - `formal/Syntax.v` — Coq formalization of Ephapax syntax (clean)
-- `formal/Semantics.v` — Coq operational semantics; `preservation` **Admitted** (earlier in-file comment claiming "Qed, closed 2026-04-27" was unsubstantiated — `coqc` 8.18.0 rejects the proof script with remaining open goals)
+- `formal/Semantics.v` — Coq operational semantics
+  - `step_preserves_type` — **Qed** (closed 2026-05-26 via [Path 3 at-pre helper](#path-3-at-pre-helper))
+  - `step_output_context_eq` (Lemma B) — **Qed** (closed 2026-05-26 via Path 3)
+  - `step_preserves_type_at_pre` — **Admitted** (NEW helper; 8 of 35 cases remain admitted, falls through to `all: admit.` catch-all)
+  - `step_output_context_eq_at_pre` — **Admitted** (NEW helper; analogous shape)
+  - `preservation` — **Admitted** (12 cascading goals — separate problem, region-env weakening for non-values)
 - `formal/Typing.v` — Coq typing rules (clean)
 - `src/formal/Ephapax/Formal/RegionLinear.idr` — Idris2 region-based linearity proof (explicitly states "REAL proof — not believe_me, not assert_total")
 - 17 Idris2 files across formal verification layer
 - No `believe_me`, `sorry`, or `assert_total` in Idris2 source code
-- Coq admitted proofs remaining in `formal/Semantics.v`: 1 (`preservation` — 12 open goals, plan below)
+
+## Path 3 at-pre helper
+
+The 2026-05-26 Path-1 (mutual induction) plan was superseded by a simpler approach: introduce two NEW helper lemmas whose typings are at the SAME pre-step env R (not R/R'). The key insight: in the S_Region_Step cross-case `Hte = T_Region_Active` × `Hte' = T_Region` with `R0' = remove_first r R0` and `r = r1`, the body's typing under `r :: R0'` is membership-equivalent to `R0` (via `remove_first_then_cons_membership_eq`). After perm transport, both bodies are typed at R0 — the at-pre helper concludes type/output-context equality.
+
+The at-pre helpers' S_Region_Step case is structurally simpler than the original because `In r R0` (from S_Region_Step's premise) FORCES `T_Region_Active` on both sides — the problematic cross-case vanishes by contradiction.
+
+Most of the helpers' OTHER cases were closed by copying step_preserves_type's and step_output_context_eq's tactic blocks verbatim (patterns use `?R`/`?R'` polymorphically and match at-pre framing trivially). What remains in each helper is the per-goal cases (~8 of 35), pending case-by-case closure.
 
 ## What needs proving
-- **`preservation`**: Close the remaining **12 open goals** in `formal/Semantics.v` so the `Qed` lands. Down from 910 at session start (98.7% reduction). Reduction story: 910 → 29 via remember-cfg (PR #102) → 22 via universal-IH revert (PR #106) → 12 via per-case manual closures (PR #116). The remaining 12 are 11 congruence cases (`S_*_Step` variants) + 1 region case (`S_Region_Step + T_Region_Active`).
+- **`step_preserves_type_at_pre`**: Close the remaining ~8 admitted cases (the per-goal cases of step_preserves_type's structure that need explicit blocks: S_StringConcat_Step2, S_Let_Step, S_LetLin_Step, S_App_Step2, S_If_Step, S_Pair_Step1, S_Pair_Step2, S_Case_Step). Each ~30 LOC, ported from step_preserves_type's "Per-goal" section (lines 5033-5562). Estimated 2-3h.
+- **`step_output_context_eq_at_pre`**: Close ~11 remaining admitted cases (the per-goal cases + S_Region_Step). Patterns parallel step_output_context_eq's body. Estimated 2-3h.
+- **`preservation`**: Close the remaining **12 open goals** — the RIGHT branch (R' = remove_first r R) sub-cases of each congruence step rule. These need a **region-env weakening for non-values** lemma that doesn't follow trivially from current infrastructure. Per the handoff doc, this is a deeper problem: when a binder steps to exit region r, the sibling expression might still mention r and not be typeable at the post-step R'. Closing requires either (a) a strengthened type invariant preventing such configurations, (b) a weakened preservation statement, or (c) a region-env weakening helper that case-analyses on the sibling's syntactic shape. Estimated 4-8h.
 
-  **Canonical closure path: Path 1 — simultaneous mutual induction** (revised 2026-05-26). The earlier 5-phase plan assumed Lemma B + region-env weakening as independent lemmas; that decomposition's Option 2 ("structural recursion on `Hstep`, ~150 LOC, orthogonal") was found BLOCKED. Counterexample `ELet (ERegion r v_inner) e2` with `e2` referencing `r` shows `T_Let` has no sibling-freedom premise, so the structural-recursion congruence-case rebuild can't retype `e'` at `R'`. See `docs/reports/audit/audit-2026-05-26-lemma-b-option-2-obstacle.md`.
+  Reduction story (910 → 12): 910 via remember-cfg (PR #102) → 22 via universal-IH revert (PR #106) → 12 via per-case manual closures (PR #116). The 2026-05-26 Path-3 work closed the SAME structural admit shared across step_preserves_type:4885 and step_output_context_eq:5963 (the `S_Region_Step` `r = r1` "exited from inside" case) by introducing two at-pre helpers and using `region_env_perm_typing` to bridge. The 12 cascading goals in `preservation` remain — they're a SEPARATE structural problem (region-env weakening), not the same shared admit.
 
-  Current shape (verified by `coqc 8.18` on 2026-05-26): **1 admit in `step_preserves_type` (Semantics.v:4885) + 1 in `step_output_context_eq` aka Lemma B (Semantics.v:5963) + 12 cascading goals in `preservation` (Semantics.v:6572)**. 14 total open, 1 independent variable — the shared S_Region_Step `r=r1` admit mirrored across the two upstream lemmas.
+  Total focused wall-clock to full Qed: **~6-12h** (depending on the depth of the preservation region-env weakening fix).
 
-  Phases (re-stated 2026-05-26):
-
-  1. **Mutual induction restructuring**: state `step_preserves_type`, `step_output_context_eq`, and `preservation` as a mutually-recursive trio, sharing IHs. The 2026-05-24 cluster closures (Clusters A, C, most of B) still apply unchanged. ~6-9 hours.
-  2. **Cascade Lemma B → preservation's 12 congruence goals** — mechanical wiring once mutual recursion is sound. ~1-2 hours.
-  3. **`Admitted.` → `Qed.` + unwind checklist** (this file, ROADMAP.adoc, RUST-SPARK-STANCE.adoc, delete `formal/PRESERVATION-HANDOFF.md`) — ~1 hour.
-
-  Total: **8–12 focused hours wall-clock** (re-revised 2026-05-26 from "~10 hours / 3 sessions with fan-out", which assumed the now-blocked Option 2 + independent region-env weakening). See ROADMAP for full effort estimates.
-
-  Supporting lemmas already Qed: `subst_preserves_typing`, `region_env_perm_typing`, `region_add_typing`, `region_shrink_preserves_typing`, `values_dont_step`, and **`step_R_eq_or_touches_region`** (PR #114, the region-invariance lemma used by the per-case closures and required by Phase 2).
+  Supporting lemmas already Qed: `subst_preserves_typing`, `region_env_perm_typing`, `region_add_typing`, `region_shrink_preserves_typing`, `values_dont_step`, **`step_R_eq_or_touches_region`** (PR #114), and now **`step_preserves_type`** + **`step_output_context_eq`** (closed 2026-05-26 via at-pre helpers).
 - **Linear type consumption**: Prove resources with linear types are consumed exactly once across all execution paths (region boundaries, exception handlers)
 - **Effect system soundness**: Prove the effect type system correctly tracks side effects and that effect-free terms are truly pure
 - **Region safety**: Prove that region-based memory management prevents use-after-free and dangling references across region boundaries

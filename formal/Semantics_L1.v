@@ -895,19 +895,29 @@ Qed.
 
 (** ** Preservation under the L1 judgment.
 
-    The full case-by-case proof depends on the three Admitted helpers
-    above. Sequenced for incremental closure across follow-up PRs (per
-    task #19 in the project's task list).
+    Case-by-case inversion + reconstruction over [step]. The proof
+    closes 29 of 33 residual subgoals (post-automation chain); the
+    4 explicit [admit.]s all surface the same gap class — **region-env
+    weakening for non-values**:
 
-    The simple cases (S_StringNew, S_StringConcat, S_StringLen,
-    S_If_True, S_If_False, S_Region_Enter, S_Drop) were verified
-    experimentally during this file's first-pass authoring; they close
-    using only the lemmas already Qed in TypingL1.v + this file. They
-    are not currently inlined into the proof body because the bullet
-    structure picks up the per-step typing-rule cross-cases (e.g.
-    ERegion's T_Region_L1 vs T_Region_Active_L1) which doubles the
-    subgoal count over the step rule count. The clean-bullet structure
-    is sequenced together with the three helpers landing. *)
+      - S_StringConcat_Step2 / S_App_Step2 / S_Pair_Step2: value v1
+        sits to the left of a stepping subexpression. After the inner
+        step changes R0 → R0', v1's typing needs to be lifted from R0
+        to R0'.
+
+      - S_Region_Step (negative branch of [In r R0']): the outer
+        [ERegion r e'] must re-type as T_Region_L1, requiring the
+        inner body to be lifted from R0' to (r :: R0').
+
+    All four reduce to: given a typing under [R0], lift it to [R0']
+    where R0' may add or drop regions that the operational step has
+    determined. This is the same structural gap as the residual admits
+    in [region_shrink_preserves_typing_l1_gen] (tasks #25/#26 in the
+    project's task list).
+
+    Until the weakening lemma lands, [preservation_l1] is closed with
+    [Admitted.] but the proof body documents exactly which sub-cases
+    remain — no other obligations are buried. *)
 
 Theorem preservation_l1 :
   forall mu R e mu' R' e',
@@ -915,4 +925,236 @@ Theorem preservation_l1 :
     forall G T R_final G',
       has_type_l1 R G e T R_final G' ->
       has_type_l1 R' G e' T R_final G'.
+Proof.
+  intros mu R e mu' R' e' Hstep.
+  remember (mu, R, e) as cfg eqn:Hcfg.
+  remember (mu', R', e') as cfg' eqn:Hcfg'.
+  revert mu R e mu' R' e' Hcfg Hcfg'.
+  induction Hstep; intros mu0 R0 e0 mu0' R0' e0' Hcfg Hcfg';
+    inversion Hcfg; clear Hcfg; subst;
+    inversion Hcfg'; clear Hcfg'; subst;
+    intros G0 T0 R_final G0' Ht;
+    inversion Ht; subst;
+    (* Light closure pass — handles ~atomic cases and discharges
+       value-step impossibilities. *)
+    try solve [econstructor; eassumption];
+    try solve [econstructor; econstructor; eassumption];
+    try solve [exfalso; eapply values_dont_step; eassumption];
+    try solve [exfalso; congruence];
+    try solve [exfalso; discriminate];
+    try solve [match goal with
+               | [ H : (_, _, EVar _) -->> _ |- _ ] => inversion H
+               end].
+  (* 33 residual goals — dispatched explicitly. *)
+  - (* 1. S_StringConcat (β): EStringConcat (ELoc l1 r) (ELoc l2 r) → ELoc l' r *)
+    match goal with
+    | [ H : _; _ |=L1 ELoc _ _ : _ -| _; _ |- _ ] => inversion H; subst
+    end.
+    match goal with
+    | [ H : _; _ |=L1 ELoc _ _ : _ -| _; _ |- _ ] => inversion H; subst
+    end.
+    econstructor; assumption.
+  - (* 2. S_StringConcat_Step1 *)
+    eapply T_StringConcat_L1;
+      [ eapply (IHHstep _ _ _ _ _ _ eq_refl eq_refl); eassumption
+      | eassumption ].
+  - (* 3. S_StringConcat_Step2: value v1 left, e2 steps right.
+       Needs region-env weakening on the value v1 (lift its typing
+       from R to R'). Same gap class as the residual admits in
+       [region_shrink_preserves_typing_l1_gen] (tasks #25/#26).
+       Admit for L1.D scaffold. *)
+    admit.
+  - (* 4. S_StringLen (β): EStringLen (ELoc l r) → EI32 (length s) *)
+    match goal with
+    | [ H : _; _ |=L1 EBorrow (ELoc _ _) : _ -| _; _ |- _ ] =>
+        let Hv := fresh in
+        assert (Hv : is_value (EBorrow (ELoc l r))) by repeat constructor;
+        pose proof (value_R_G_preserving_l1 _ _ _ _ _ _ Hv H) as [HR HG];
+        subst
+    end.
+    constructor.
+  - (* 5. S_StringLen_Step: inner e steps but EBorrow e typed by either
+       T_Borrow_L1 (e=EVar, can't step) or T_Borrow_Val_L1 (e is value,
+       can't step). Both are vacuous. *)
+    match goal with
+    | [ H : _; _ |=L1 EBorrow _ : _ -| _; _ |- _ ] => inversion H; subst
+    end.
+    + (* T_Borrow_L1: e = EVar i — no step rule fires on EVar *)
+      inversion Hstep.
+    + (* T_Borrow_Val_L1: e is a value — values don't step *)
+      exfalso; eapply values_dont_step; eassumption.
+  - (* 6. S_Let_Val (β): ELet v1 e2 → subst 0 v1 e2 *)
+    match goal with
+    | [ Hv : is_value ?v1, Ht1 : ?R; ?G |=L1 ?v1 : _ -| _; _ |- _ ] =>
+        pose proof (value_R_G_preserving_l1 _ _ _ _ _ _ Hv Ht1) as [HR HG];
+        subst
+    end.
+    eapply subst_preserves_typing_l1; try eassumption.
+  - (* 7. S_Let_Step *)
+    eapply T_Let_L1;
+      [ eapply (IHHstep _ _ _ _ _ _ eq_refl eq_refl); eassumption
+      | eassumption ].
+  - (* 8. S_LetLin_Val (β) *)
+    match goal with
+    | [ Hv : is_value ?v1, Ht1 : ?R; ?G |=L1 ?v1 : _ -| _; _ |- _ ] =>
+        pose proof (value_R_G_preserving_l1 _ _ _ _ _ _ Hv Ht1) as [HR HG];
+        subst
+    end.
+    eapply subst_preserves_typing_l1; try eassumption.
+  - (* 9. S_LetLin_Step *)
+    eapply T_LetLin_L1;
+      [ eassumption
+      | eapply (IHHstep _ _ _ _ _ _ eq_refl eq_refl); eassumption
+      | eassumption ].
+  - (* 10. S_App_Fun (β): EApp (ELam T ebody) v2 → subst 0 v2 ebody *)
+    match goal with
+    | [ H : _; _ |=L1 ELam _ _ : _ -| _; _ |- _ ] => inversion H; subst
+    end.
+    match goal with
+    | [ Hv : is_value ?v2, Ht2 : ?R; ?G |=L1 ?v2 : _ -| _; _ |- _ ] =>
+        pose proof (value_R_G_preserving_l1 _ _ _ _ _ _ Hv Ht2) as [HR HG];
+        subst
+    end.
+    eapply subst_preserves_typing_l1; try eassumption.
+  - (* 11. S_App_Step1 *)
+    eapply T_App_L1;
+      [ eapply (IHHstep _ _ _ _ _ _ eq_refl eq_refl); eassumption
+      | eassumption ].
+  - (* 12. S_App_Step2: value v1 left (function), e2 steps right.
+       Same region-env weakening gap as goal 3. Admit. *)
+    admit.
+  - (* 13. S_If_True *)
+    match goal with
+    | [ H : _; _ |=L1 EBool _ : _ -| _; _ |- _ ] => inversion H; subst
+    end.
+    eassumption.
+  - (* 14. S_If_False *)
+    match goal with
+    | [ H : _; _ |=L1 EBool _ : _ -| _; _ |- _ ] => inversion H; subst
+    end.
+    eassumption.
+  - (* 15. S_If_Step *)
+    eapply T_If_L1;
+      [ eapply (IHHstep _ _ _ _ _ _ eq_refl eq_refl); eassumption
+      | eassumption
+      | eassumption ].
+  - (* 16. S_Pair_Step1 *)
+    eapply T_Pair_L1;
+      [ eapply (IHHstep _ _ _ _ _ _ eq_refl eq_refl); eassumption
+      | eassumption ].
+  - (* 17. S_Pair_Step2: value v1 left, e2 steps right.
+       Same region-env weakening gap as goal 3. Admit. *)
+    admit.
+  - (* 18. S_Fst *)
+    match goal with
+    | [ H : _; _ |=L1 EPair _ _ : _ -| _; _ |- _ ] => inversion H; subst
+    end.
+    repeat match goal with
+    | [ Hv : is_value ?v, Ht : ?R; ?G |=L1 ?v : _ -| _; _ |- _ ] =>
+        pose proof (value_R_G_preserving_l1 _ _ _ _ _ _ Hv Ht) as [?HR ?HG];
+        subst; clear Hv
+    end.
+    eassumption.
+  - (* 19. S_Fst_Step *)
+    eapply T_Fst_L1;
+      [ eapply (IHHstep _ _ _ _ _ _ eq_refl eq_refl); eassumption
+      | eassumption ].
+  - (* 20. S_Snd *)
+    match goal with
+    | [ H : _; _ |=L1 EPair _ _ : _ -| _; _ |- _ ] => inversion H; subst
+    end.
+    repeat match goal with
+    | [ Hv : is_value ?v, Ht : ?R; ?G |=L1 ?v : _ -| _; _ |- _ ] =>
+        pose proof (value_R_G_preserving_l1 _ _ _ _ _ _ Hv Ht) as [?HR ?HG];
+        subst; clear Hv
+    end.
+    eassumption.
+  - (* 21. S_Snd_Step *)
+    eapply T_Snd_L1;
+      [ eapply (IHHstep _ _ _ _ _ _ eq_refl eq_refl); eassumption
+      | eassumption ].
+  - (* 22. S_Inl_Step *)
+    eapply T_Inl_L1.
+    eapply (IHHstep _ _ _ _ _ _ eq_refl eq_refl); eassumption.
+  - (* 23. S_Inr_Step *)
+    eapply T_Inr_L1.
+    eapply (IHHstep _ _ _ _ _ _ eq_refl eq_refl); eassumption.
+  - (* 24. S_Case_Inl (β): ECase (EInl T v) e1 e2 → subst 0 v e1 *)
+    match goal with
+    | [ H : _; _ |=L1 EInl _ _ : _ -| _; _ |- _ ] => inversion H; subst
+    end.
+    match goal with
+    | [ Hv : is_value ?v, Ht : ?R; ?G |=L1 ?v : _ -| _; _ |- _ ] =>
+        pose proof (value_R_G_preserving_l1 _ _ _ _ _ _ Hv Ht) as [HR HG];
+        subst
+    end.
+    eapply subst_preserves_typing_l1; try eassumption.
+  - (* 25. S_Case_Inr (β): ECase (EInr T v) e1 e2 → subst 0 v e2 *)
+    match goal with
+    | [ H : _; _ |=L1 EInr _ _ : _ -| _; _ |- _ ] => inversion H; subst
+    end.
+    match goal with
+    | [ Hv : is_value ?v, Ht : ?R; ?G |=L1 ?v : _ -| _; _ |- _ ] =>
+        pose proof (value_R_G_preserving_l1 _ _ _ _ _ _ Hv Ht) as [HR HG];
+        subst
+    end.
+    eapply subst_preserves_typing_l1; try eassumption.
+  - (* 26. S_Case_Step *)
+    eapply T_Case_L1;
+      [ eapply (IHHstep _ _ _ _ _ _ eq_refl eq_refl); eassumption
+      | eassumption
+      | eassumption ].
+  - (* 27. S_Region_Enter: (mu, R, ERegion r e) → (mu, r::R, ERegion r e).
+       Typing came in as T_Region_L1 (since ~ In r R from the step
+       contradicts T_Region_Active's In r R). After the step, r IS in
+       r :: R, so re-type as T_Region_Active_L1. *)
+    eapply T_Region_Active_L1.
+    + left; reflexivity.
+    + assumption.
+    + assumption.
+    + assumption.
+  - (* 28. S_Region_Exit: needs region_shrink_preserves_typing_l1.
+       The goal's R_final = remove_first_L1 r R_body; the helper produces
+       remove_first r R_body. Use [remove_first_eq_l1] to convert. *)
+    match goal with
+    | [ |- _; _ |=L1 _ : _ -| remove_first_L1 ?r ?R; _ ] =>
+        replace (remove_first_L1 r R) with (remove_first r R)
+          by (symmetry; apply remove_first_eq_l1)
+    end.
+    eapply region_shrink_preserves_typing_l1; eassumption.
+  - (* 29. S_Region_Step: IH gives R'; G |=L1 e' : T -| R_body; G'.
+       Need: R'; G |=L1 ERegion r e' : T -| remove_first_L1 r R_body; G'.
+       Case-split on [In r R0']. The positive case applies
+       T_Region_Active_L1 directly. The negative case requires region-
+       env weakening (lifting body typing from R0' to r :: R0'); same
+       gap class as [region_shrink_preserves_typing_l1_gen]'s residual
+       admits (tasks #25/#26). *)
+    destruct (in_dec string_dec r R0') as [HInR' | HNotInR'].
+    + (* In r R0': use T_Region_Active_L1 *)
+      eapply T_Region_Active_L1; try eassumption.
+      eapply (IHHstep _ _ _ _ _ _ eq_refl eq_refl); eassumption.
+    + (* ~ In r R0': would need (r :: R0'); G |- e' : T -| R_body; G'
+         from IH which only gives R0'; G |- e' : T -| R_body; G'.
+         Region-env weakening for non-values. Deferred. *)
+      admit.
+  - (* 30. S_Drop *)
+    match goal with
+    | [ H : _; _ |=L1 ELoc _ _ : _ -| _; _ |- _ ] => inversion H; subst
+    end.
+    econstructor.
+  - (* 31. S_Drop_Step *)
+    eapply T_Drop_L1;
+      [ eassumption
+      | eapply (IHHstep _ _ _ _ _ _ eq_refl eq_refl); eassumption ].
+  - (* 32. S_Copy *)
+    match goal with
+    | [ Hv : is_value ?v, Ht : ?R; ?G |=L1 ?v : _ -| _; _ |- _ ] =>
+        pose proof (value_R_G_preserving_l1 _ _ _ _ _ _ Hv Ht) as [HR HG];
+        subst
+    end.
+    econstructor; eassumption.
+  - (* 33. S_Copy_Step *)
+    eapply T_Copy_L1;
+      [ eassumption
+      | eapply (IHHstep _ _ _ _ _ _ eq_refl eq_refl); eassumption ].
 Admitted.

@@ -8784,21 +8784,19 @@ Proof.
      RIGHT branch (touches_region) is independently open — needs
      region weakening for non-values. *)
 
-  (* S_StringConcat_Step1: inner step on e1. LEFT (R = R') closes via
-     [step_output_context_eq] (Qed) to unify the sibling's [Gmid] with
-     the IH's existential [Gout]. RIGHT (touches_region) blocked on
-     region-env weakening for non-values (separate structural lemma).
-     Note: was 3-way via [step_R_change_shape]; collapsed to 2-way
-     here for consistency with the other S_*_Step blocks — the MIDDLE
-     (push) sub-case is folded into the touches_region RIGHT and will
-     be re-distinguished by the C-lemma's structural recursion. *)
+  (* S_StringConcat_Step1: inner step on e1. 3-way via [step_R_change_shape]:
+     - LEFT (R = R'): close via [step_output_context_eq] oracle.
+     - MIDDLE (R' = rw :: R): same oracle + [region_add_typing] lifts sibling.
+     - RIGHT (R' = remove_first rw R, pop): idtac — needs Brief C.
+     Uses [rw] (not [r]) to avoid collision with the existing TString
+     region [r] already bound by outer inversion. *)
   all: try (
     match goal with
     | [ H1 : has_type ?R ?G ?e1 (TString ?r0) ?Gmid,
         H2 : has_type ?R ?Gmid ?e2 (TString ?r0) ?Gout1
         |- exists _ : ctx, has_type ?R' ?G (EStringConcat ?e1' ?e2) (TString ?r0) _ ] =>
-        pose proof (step_R_eq_or_touches_region _ _ _ _ _ _ Hstep) as Hdis;
-        destruct Hdis as [HeqR | HTR];
+        pose proof (step_R_change_shape _ _ _ _ _ _ Hstep)
+          as [HeqR | [[rw [Hadd Hnotin]] | [rw [Hrem HinR]]]];
         [ rewrite <- HeqR in *;
           edestruct (IHHstep _ _ _ _ _ _ eq_refl eq_refl _ _ _ H1) as [Gout Hout];
           assert (Heq_out : Gmid = Gout) by
@@ -8806,26 +8804,42 @@ Proof.
               [ exact Hstep | exact H1 | exact Hout ]);
           subst Gmid;
           eexists; eapply T_StringConcat; [exact Hout | exact H2]
+        | subst R';
+          edestruct (IHHstep _ _ _ _ _ _ eq_refl eq_refl _ _ _ H1) as [Gout Hout];
+          assert (Heq_out : Gmid = Gout) by
+            (eapply step_output_context_eq;
+              [ exact Hstep | exact H1 | exact Hout ]);
+          subst Gmid;
+          pose proof (region_add_typing _ _ _ _ _ rw H2) as H2lift;
+          eexists; eapply T_StringConcat; [exact Hout | exact H2lift]
         | idtac ]
     end).
 
-  (* S_StringConcat_Step2: inner step is on e2; v1 is a value so
-     value_context_unchanged ⇒ v1's post-context equals its pre-context.
-     With Gmid = G after subst, IH on H2 gives Hout at input G, matching
-     the second eapply slot directly — no oracle needed. *)
+  (* S_StringConcat_Step2: inner on e2; v1 value ⇒ Gmid = G via
+     value_context_unchanged. 3-way (uses [rw] to avoid name clash with
+     the outer TString region [r]):
+     - LEFT (R = R'): IH on H2 gives Hout at input G; direct.
+     - MIDDLE (R' = rw :: R): lift the value-sibling H1 via region_add_typing.
+     - RIGHT (pop): idtac — needs Brief C. *)
   all: try (
     match goal with
     | [ Hv : is_value ?v1,
         H1 : has_type ?R ?G ?v1 (TString ?r0) ?Gmid,
         H2 : has_type ?R ?Gmid ?e2 (TString ?r0) ?G'
         |- exists _ : ctx, has_type ?R' ?G (EStringConcat ?v1 ?e2') (TString ?r0) _ ] =>
-        pose proof (step_R_eq_or_touches_region _ _ _ _ _ _ Hstep) as Hdis;
-        destruct Hdis as [HeqR | HTR];
+        pose proof (step_R_change_shape _ _ _ _ _ _ Hstep)
+          as [HeqR | [[rw [Hadd Hnotin]] | [rw [Hrem HinR]]]];
         [ rewrite <- HeqR in *;
           assert (Hgeq: Gmid = G) by (eapply value_context_unchanged; eassumption);
           subst Gmid;
           edestruct (IHHstep _ _ _ _ _ _ eq_refl eq_refl _ _ _ H2) as [Gout Hout];
           eexists; eapply T_StringConcat; [exact H1 | exact Hout]
+        | subst R';
+          assert (Hgeq: Gmid = G) by (eapply value_context_unchanged; eassumption);
+          subst Gmid;
+          edestruct (IHHstep _ _ _ _ _ _ eq_refl eq_refl _ _ _ H2) as [Gout Hout];
+          pose proof (region_add_typing _ _ _ _ _ rw H1) as H1lift;
+          eexists; eapply T_StringConcat; [exact H1lift | exact Hout]
         | idtac ]
     end).
 
@@ -8850,17 +8864,18 @@ Proof.
     end
   ].
 
-  (* S_Let_Step — LEFT branch closed via step_output_context_eq oracle
-     (Swarm C splice, 2026-05-26 eve). Output-context skolem Gout from
-     IH unifies with H2's Gmid via the new Qed lemma. RIGHT branch
-     (touches_region) left as idtac fallthrough to final Admitted. *)
+  (* S_Let_Step — 3-way via [step_R_change_shape]:
+     - LEFT (R = R'): close via [step_output_context_eq] oracle.
+     - MIDDLE (R' = r :: R, push): same oracle + lift sibling H2 via
+       [region_add_typing] (preserves both ctx_extend and output).
+     - RIGHT (R' = remove_first r R, pop): idtac — needs Brief C. *)
   all: try (
     match goal with
     | [ H1 : has_type ?R ?G ?e1 ?T1 ?Gmid,
         H2 : has_type ?R (ctx_extend ?Gmid ?T1) ?e2 ?T0 ((?T1, true) :: ?G')
         |- exists _ : ctx, has_type ?R' ?G (ELet ?e1' ?e2) ?T0 _ ] =>
-        pose proof (step_R_eq_or_touches_region _ _ _ _ _ _ Hstep) as Hdis;
-        destruct Hdis as [HeqR | HTR];
+        pose proof (step_R_change_shape _ _ _ _ _ _ Hstep)
+          as [HeqR | [[r [Hadd Hnotin]] | [r [Hrem HinR]]]];
         [ rewrite <- HeqR in *;
           edestruct (IHHstep _ _ _ _ _ _ eq_refl eq_refl _ _ _ H1) as [Gout Hout];
           assert (Heq_out : Gmid = Gout) by
@@ -8868,20 +8883,27 @@ Proof.
               [ exact Hstep | exact H1 | exact Hout ]);
           subst Gmid;
           eexists; eapply T_Let; [exact Hout | exact H2]
+        | subst R';
+          edestruct (IHHstep _ _ _ _ _ _ eq_refl eq_refl _ _ _ H1) as [Gout Hout];
+          assert (Heq_out : Gmid = Gout) by
+            (eapply step_output_context_eq;
+              [ exact Hstep | exact H1 | exact Hout ]);
+          subst Gmid;
+          pose proof (region_add_typing _ _ _ _ _ r H2) as H2lift;
+          eexists; eapply T_Let; [exact Hout | exact H2lift]
         | idtac ]
     end).
 
-  (* S_LetLin_Step — LEFT closes via step_output_context_eq oracle
-     (parallel to S_Let_Step). RIGHT (touches_region) blocked on region
-     weakening for non-values. *)
+  (* S_LetLin_Step — 3-way (parallel to S_Let_Step). LEFT + MIDDLE close;
+     RIGHT (pop) idtac — needs Brief C. *)
   all: try (
     match goal with
     | [ Hlin : is_linear_ty ?T1 = true,
         H1 : has_type ?R ?G ?e1 ?T1 ?Gmid,
         H2 : has_type ?R (ctx_extend ?Gmid ?T1) ?e2 ?T0 ((?T1, true) :: ?G')
         |- exists _ : ctx, has_type ?R' ?G (ELetLin ?e1' ?e2) ?T0 _ ] =>
-        pose proof (step_R_eq_or_touches_region _ _ _ _ _ _ Hstep) as Hdis;
-        destruct Hdis as [HeqR | HTR];
+        pose proof (step_R_change_shape _ _ _ _ _ _ Hstep)
+          as [HeqR | [[r [Hadd Hnotin]] | [r [Hrem HinR]]]];
         [ rewrite <- HeqR in *;
           edestruct (IHHstep _ _ _ _ _ _ eq_refl eq_refl _ _ _ H1) as [Gout Hout];
           assert (Heq_out : Gmid = Gout) by
@@ -8889,18 +8911,26 @@ Proof.
               [ exact Hstep | exact H1 | exact Hout ]);
           subst Gmid;
           eexists; eapply T_LetLin; [exact Hlin | exact Hout | exact H2]
+        | subst R';
+          edestruct (IHHstep _ _ _ _ _ _ eq_refl eq_refl _ _ _ H1) as [Gout Hout];
+          assert (Heq_out : Gmid = Gout) by
+            (eapply step_output_context_eq;
+              [ exact Hstep | exact H1 | exact Hout ]);
+          subst Gmid;
+          pose proof (region_add_typing _ _ _ _ _ r H2) as H2lift;
+          eexists; eapply T_LetLin; [exact Hlin | exact Hout | exact H2lift]
         | idtac ]
     end).
 
-  (* S_App_Step1 — LEFT closes via step_output_context_eq oracle. RIGHT
-     (touches_region) blocked on region weakening for non-values. *)
+  (* S_App_Step1 — 3-way. LEFT + MIDDLE close via oracle + region_add_typing.
+     RIGHT (pop) idtac — needs Brief C. *)
   all: try (
     match goal with
     | [ H1 : has_type ?R ?G ?e1 (TFun ?T1 ?T0) ?Gmid,
         H2 : has_type ?R ?Gmid ?e2 ?T1 ?G'
         |- exists _ : ctx, has_type ?R' ?G (EApp ?e1' ?e2) ?T0 _ ] =>
-        pose proof (step_R_eq_or_touches_region _ _ _ _ _ _ Hstep) as Hdis;
-        destruct Hdis as [HeqR | HTR];
+        pose proof (step_R_change_shape _ _ _ _ _ _ Hstep)
+          as [HeqR | [[r [Hadd Hnotin]] | [r [Hrem HinR]]]];
         [ rewrite <- HeqR in *;
           edestruct (IHHstep _ _ _ _ _ _ eq_refl eq_refl _ _ _ H1) as [Gout Hout];
           assert (Heq_out : Gmid = Gout) by
@@ -8908,39 +8938,53 @@ Proof.
               [ exact Hstep | exact H1 | exact Hout ]);
           subst Gmid;
           eexists; eapply T_App; [exact Hout | exact H2]
+        | subst R';
+          edestruct (IHHstep _ _ _ _ _ _ eq_refl eq_refl _ _ _ H1) as [Gout Hout];
+          assert (Heq_out : Gmid = Gout) by
+            (eapply step_output_context_eq;
+              [ exact Hstep | exact H1 | exact Hout ]);
+          subst Gmid;
+          pose proof (region_add_typing _ _ _ _ _ r H2) as H2lift;
+          eexists; eapply T_App; [exact Hout | exact H2lift]
         | idtac ]
     end).
 
-  (* S_App_Step2: v1 is a value so value_context_unchanged ⇒ Gmid = G.
-     IH on H2 gives Hout at input G, matching the second eapply slot
-     directly. RIGHT (touches_region) blocked on region weakening. *)
+  (* S_App_Step2: v1 value ⇒ Gmid = G. 3-way:
+     - LEFT (R = R'): IH on H2 gives Hout at input G; direct.
+     - MIDDLE (R' = r :: R): lift the value-sibling H1 via region_add_typing.
+     - RIGHT (pop): idtac — needs Brief C. *)
   all: try (
     match goal with
     | [ Hv : is_value ?v1,
         H1 : has_type ?R ?G ?v1 (TFun ?T1 ?T0) ?Gmid,
         H2 : has_type ?R ?Gmid ?e2 ?T1 ?G'
         |- exists _ : ctx, has_type ?R' ?G (EApp ?v1 ?e2') ?T0 _ ] =>
-        pose proof (step_R_eq_or_touches_region _ _ _ _ _ _ Hstep) as Hdis;
-        destruct Hdis as [HeqR | HTR];
+        pose proof (step_R_change_shape _ _ _ _ _ _ Hstep)
+          as [HeqR | [[r [Hadd Hnotin]] | [r [Hrem HinR]]]];
         [ rewrite <- HeqR in *;
           assert (Hgeq: Gmid = G) by (eapply value_context_unchanged; eassumption);
           subst Gmid;
           edestruct (IHHstep _ _ _ _ _ _ eq_refl eq_refl _ _ _ H2) as [Gout Hout];
           eexists; eapply T_App; [exact H1 | exact Hout]
+        | subst R';
+          assert (Hgeq: Gmid = G) by (eapply value_context_unchanged; eassumption);
+          subst Gmid;
+          edestruct (IHHstep _ _ _ _ _ _ eq_refl eq_refl _ _ _ H2) as [Gout Hout];
+          pose proof (region_add_typing _ _ _ _ _ r H1) as H1lift;
+          eexists; eapply T_App; [exact H1lift | exact Hout]
         | idtac ]
     end).
 
-  (* S_If_Step — LEFT closes via step_output_context_eq oracle on the
-     condition's typing. RIGHT (touches_region) blocked on region
-     weakening for non-values. *)
+  (* S_If_Step — 3-way. LEFT + MIDDLE close (both branches lifted via
+     region_add_typing in MIDDLE). RIGHT (pop) idtac — needs Brief C. *)
   all: try (
     match goal with
     | [ H1 : has_type ?R ?G ?e1 (TBase TBool) ?Gmid,
         H2 : has_type ?R ?Gmid ?e2 ?T0 ?G',
         H3 : has_type ?R ?Gmid ?e3 ?T0 ?G'
         |- exists _ : ctx, has_type ?R' ?G (EIf ?e1' ?e2 ?e3) ?T0 _ ] =>
-        pose proof (step_R_eq_or_touches_region _ _ _ _ _ _ Hstep) as Hdis;
-        destruct Hdis as [HeqR | HTR];
+        pose proof (step_R_change_shape _ _ _ _ _ _ Hstep)
+          as [HeqR | [[r [Hadd Hnotin]] | [r [Hrem HinR]]]];
         [ rewrite <- HeqR in *;
           edestruct (IHHstep _ _ _ _ _ _ eq_refl eq_refl _ _ _ H1) as [Gout Hout];
           assert (Heq_out : Gmid = Gout) by
@@ -8948,19 +8992,26 @@ Proof.
               [ exact Hstep | exact H1 | exact Hout ]);
           subst Gmid;
           eexists; eapply T_If; [exact Hout | exact H2 | exact H3]
+        | subst R';
+          edestruct (IHHstep _ _ _ _ _ _ eq_refl eq_refl _ _ _ H1) as [Gout Hout];
+          assert (Heq_out : Gmid = Gout) by
+            (eapply step_output_context_eq;
+              [ exact Hstep | exact H1 | exact Hout ]);
+          subst Gmid;
+          pose proof (region_add_typing _ _ _ _ _ r H2) as H2lift;
+          pose proof (region_add_typing _ _ _ _ _ r H3) as H3lift;
+          eexists; eapply T_If; [exact Hout | exact H2lift | exact H3lift]
         | idtac ]
     end).
 
-  (* S_Pair_Step1 — LEFT closes via step_output_context_eq oracle on the
-     first child's typing. RIGHT (touches_region) blocked on region
-     weakening for non-values. *)
+  (* S_Pair_Step1 — 3-way. LEFT + MIDDLE close. RIGHT (pop) idtac. *)
   all: try (
     match goal with
     | [ H1 : has_type ?R ?G ?e1 ?T1 ?Gmid,
         H2 : has_type ?R ?Gmid ?e2 ?T2 ?G'
         |- exists _ : ctx, has_type ?R' ?G (EPair ?e1' ?e2) (TProd ?T1 ?T2) _ ] =>
-        pose proof (step_R_eq_or_touches_region _ _ _ _ _ _ Hstep) as Hdis;
-        destruct Hdis as [HeqR | HTR];
+        pose proof (step_R_change_shape _ _ _ _ _ _ Hstep)
+          as [HeqR | [[r [Hadd Hnotin]] | [r [Hrem HinR]]]];
         [ rewrite <- HeqR in *;
           edestruct (IHHstep _ _ _ _ _ _ eq_refl eq_refl _ _ _ H1) as [Gout Hout];
           assert (Heq_out : Gmid = Gout) by
@@ -8968,39 +9019,53 @@ Proof.
               [ exact Hstep | exact H1 | exact Hout ]);
           subst Gmid;
           eexists; eapply T_Pair; [exact Hout | exact H2]
+        | subst R';
+          edestruct (IHHstep _ _ _ _ _ _ eq_refl eq_refl _ _ _ H1) as [Gout Hout];
+          assert (Heq_out : Gmid = Gout) by
+            (eapply step_output_context_eq;
+              [ exact Hstep | exact H1 | exact Hout ]);
+          subst Gmid;
+          pose proof (region_add_typing _ _ _ _ _ r H2) as H2lift;
+          eexists; eapply T_Pair; [exact Hout | exact H2lift]
         | idtac ]
     end).
 
-  (* S_Pair_Step2: v1 is a value so value_context_unchanged ⇒ Gmid = G.
-     IH on H2 gives Hout at input G. RIGHT (touches_region) blocked on
-     region weakening. *)
+  (* S_Pair_Step2: v1 value ⇒ Gmid = G. 3-way:
+     - LEFT (R = R'): IH on H2 gives Hout at G; direct.
+     - MIDDLE (R' = r :: R): lift the value-sibling H1.
+     - RIGHT (pop): idtac. *)
   all: try (
     match goal with
     | [ Hv : is_value ?v1,
         H1 : has_type ?R ?G ?v1 ?T1 ?Gmid,
         H2 : has_type ?R ?Gmid ?e2 ?T2 ?G'
         |- exists _ : ctx, has_type ?R' ?G (EPair ?v1 ?e2') (TProd ?T1 ?T2) _ ] =>
-        pose proof (step_R_eq_or_touches_region _ _ _ _ _ _ Hstep) as Hdis;
-        destruct Hdis as [HeqR | HTR];
+        pose proof (step_R_change_shape _ _ _ _ _ _ Hstep)
+          as [HeqR | [[r [Hadd Hnotin]] | [r [Hrem HinR]]]];
         [ rewrite <- HeqR in *;
           assert (Hgeq: Gmid = G) by (eapply value_context_unchanged; eassumption);
           subst Gmid;
           edestruct (IHHstep _ _ _ _ _ _ eq_refl eq_refl _ _ _ H2) as [Gout Hout];
           eexists; eapply T_Pair; [exact H1 | exact Hout]
+        | subst R';
+          assert (Hgeq: Gmid = G) by (eapply value_context_unchanged; eassumption);
+          subst Gmid;
+          edestruct (IHHstep _ _ _ _ _ _ eq_refl eq_refl _ _ _ H2) as [Gout Hout];
+          pose proof (region_add_typing _ _ _ _ _ r H1) as H1lift;
+          eexists; eapply T_Pair; [exact H1lift | exact Hout]
         | idtac ]
     end).
 
-  (* S_Case_Step — LEFT closes via step_output_context_eq oracle on the
-     scrutinee's typing; subst aligns the branches' ctx_extend inputs.
-     RIGHT (touches_region) blocked on region weakening for non-values. *)
+  (* S_Case_Step — 3-way. LEFT + MIDDLE close (both branch typings lifted
+     via region_add_typing in MIDDLE). RIGHT (pop) idtac — needs Brief C. *)
   all: try (
     match goal with
     | [ H1 : has_type ?R ?G ?e (TSum ?T1 ?T2) ?Gmid,
         H2 : has_type ?R (ctx_extend ?Gmid ?T1) ?e1 ?T0 ((?T1, true) :: ?G'),
         H3 : has_type ?R (ctx_extend ?Gmid ?T2) ?e2 ?T0 ((?T2, true) :: ?G')
         |- exists _ : ctx, has_type ?R' ?G (ECase ?e' ?e1 ?e2) ?T0 _ ] =>
-        pose proof (step_R_eq_or_touches_region _ _ _ _ _ _ Hstep) as Hdis;
-        destruct Hdis as [HeqR | HTR];
+        pose proof (step_R_change_shape _ _ _ _ _ _ Hstep)
+          as [HeqR | [[r [Hadd Hnotin]] | [r [Hrem HinR]]]];
         [ rewrite <- HeqR in *;
           edestruct (IHHstep _ _ _ _ _ _ eq_refl eq_refl _ _ _ H1) as [Gout Hout];
           assert (Heq_out : Gmid = Gout) by
@@ -9008,16 +9073,28 @@ Proof.
               [ exact Hstep | exact H1 | exact Hout ]);
           subst Gmid;
           eexists; eapply T_Case; [exact Hout | exact H2 | exact H3]
+        | subst R';
+          edestruct (IHHstep _ _ _ _ _ _ eq_refl eq_refl _ _ _ H1) as [Gout Hout];
+          assert (Heq_out : Gmid = Gout) by
+            (eapply step_output_context_eq;
+              [ exact Hstep | exact H1 | exact Hout ]);
+          subst Gmid;
+          pose proof (region_add_typing _ _ _ _ _ r H2) as H2lift;
+          pose proof (region_add_typing _ _ _ _ _ r H3) as H3lift;
+          eexists; eapply T_Case; [exact Hout | exact H2lift | exact H3lift]
         | idtac ]
     end).
 
 (* Show Existentials. *)  (* uncomment to dump the remaining open goals.
-                            Post-Swarm-C splice (2026-05-26 eve):
-                            10 RIGHT-only sub-cases (HTR : touches_region
-                            in context) + 1 S_Region_Step = 11 admits.
-                            Closing the 10 touches_region cases needs
-                            region-env weakening for non-values (the "C"
-                            structural problem, handed off separately). *)
+                            Post-MIDDLE narrowing (2026-05-26 late eve):
+                            10 POP sub-cases (`Hrem : R0' = remove_first r R0`
+                            and `HinR : In r R0` in scope) + 1 S_Region_Step
+                            = 11 admits. The 10 POP cases share the same
+                            shape: stepped child reaches R0' = remove_first r R0
+                            with surviving sibling still typed at R0; needs
+                            non-value region-env weakening (Brief C structural
+                            lemma; the [typing_free_of_absent_region] lemma
+                            at Semantics.v:3346 is the kernel). *)
 Admitted.
 (* PROOF STATUS [preservation] — ADMITTED, down to 12 open goals
    (from 910 cross-case, via PR #102's remember-cfg + PR #106's

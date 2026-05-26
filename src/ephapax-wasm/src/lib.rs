@@ -175,7 +175,7 @@ struct UserFnInfo {
     #[allow(dead_code)]
     param_names: Vec<String>,
     /// Whether each parameter is linear (must-use-once). Drives the
-    /// `affinescript.ownership` custom section emitted by
+    /// `typedwasm.ownership` custom section emitted by
     /// [`Codegen::emit_ownership_section`].
     param_linear: Vec<bool>,
 }
@@ -1269,7 +1269,7 @@ impl Codegen {
         self.module.section(&data);
     }
 
-    /// Emit the `affinescript.ownership` custom section if any user
+    /// Emit the `typedwasm.ownership` custom section if any user
     /// function takes a Linear parameter. The section is consumed by
     /// `typed-wasm-verify` (and by affinescript's OCaml verifier) to
     /// enforce L7 + L10 across emitted wasm modules. Functions with no
@@ -4569,10 +4569,10 @@ mod tests {
     }
 
     // -----------------------------------------------------------------------
-    // affinescript.ownership custom section (C6)
+    // typedwasm.ownership custom section (C6)
     // -----------------------------------------------------------------------
 
-    /// Locate the `affinescript.ownership` custom section in a wasm
+    /// Locate the `typedwasm.ownership` custom section in a wasm
     /// module's bytes and return its payload, or None if the section
     /// isn't present.
     fn ownership_payload(wasm: &[u8]) -> Option<Vec<u8>> {

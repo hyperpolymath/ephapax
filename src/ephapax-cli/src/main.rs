@@ -104,7 +104,7 @@ enum Commands {
         mode: String,
 
         /// Run the typed-wasm L7+L10 verifier on the emitted module.
-        /// Reads the `affinescript.ownership` custom section and
+        /// Reads the `typedwasm.ownership` custom section and
         /// reports any aliasing / linearity violations. Non-zero exit
         /// if any are found.
         #[arg(long)]

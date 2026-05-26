@@ -3345,6 +3345,83 @@ Proof.
   - exact (region_shrink_in_preserves r r0 R Hneq).
 Qed.
 
+(** [typing_free_of_absent_region]: if [e] is well-typed at [R] and
+    region [r] is NOT in [R], then [e] is syntactically free of [r].
+
+    This is the static-shadowing-prevention fact: T_Region's [~In r R]
+    premise rules out any subterm of [e] that would reference [r],
+    because T_Loc, T_StringNew, and T_Region_Active each require
+    [In r0 R] for their region argument [r0], which would force
+    [r0 <> r] when [~In r R]; T_Region for an inner [r0] either
+    matches [r] (shadowing-true branch of expr_free_of_region — vacuous)
+    or differs and recurses under [r0 :: R] where [~In r (r0 :: R)]
+    still holds.
+
+    Building block for Brief C (the C-lemma's structural recursion for
+    closing preservation's 10 touches_region RIGHT branches). Brief C
+    requires more than this lemma — it needs sibling-disjointness for
+    the case where [R] DOES contain the exited region — but this lemma
+    is the kernel of the static-no-shadowing argument and discharges
+    several intermediate goals along the way.
+
+    Proof: structural induction on the typing derivation. Each typing
+    rule's region premise (where one exists) is incompatible with
+    [~In r R] when applied at [r] — forcing the inner [r0 <> r] case
+    where the expr_free_of_region predicate's recursive structure
+    falls out. *)
+Lemma typing_free_of_absent_region :
+  forall R G e T G' r,
+    R; G |- e : T -| G' ->
+    ~ In r R ->
+    expr_free_of_region r e.
+Proof.
+  intros R G e T G' r Htype.
+  induction Htype; intros Hnot; simpl.
+  - (* T_Unit *) exact I.
+  - (* T_Bool *) exact I.
+  - (* T_I32 *) exact I.
+  - (* T_Var_Lin *) exact I.
+  - (* T_Var_Unr *) exact I.
+  - (* T_Loc l r0: In r0 R, so r <> r0. *)
+    intros ->. apply Hnot. exact H.
+  - (* T_StringNew r0 s: In r0 R, so r <> r0. *)
+    intros ->. apply Hnot. exact H.
+  - (* T_StringConcat *) split; [apply IHHtype1 | apply IHHtype2]; exact Hnot.
+  - (* T_StringLen *) apply IHHtype; exact Hnot.
+  - (* T_Let *) split; [apply IHHtype1 | apply IHHtype2]; exact Hnot.
+  - (* T_LetLin *) split; [apply IHHtype1 | apply IHHtype2]; exact Hnot.
+  - (* T_Lam *) apply IHHtype; exact Hnot.
+  - (* T_App *) split; [apply IHHtype1 | apply IHHtype2]; exact Hnot.
+  - (* T_Pair *) split; [apply IHHtype1 | apply IHHtype2]; exact Hnot.
+  - (* T_Fst *) apply IHHtype; exact Hnot.
+  - (* T_Snd *) apply IHHtype; exact Hnot.
+  - (* T_Inl *) apply IHHtype; exact Hnot.
+  - (* T_Inr *) apply IHHtype; exact Hnot.
+  - (* T_Case *) split; [|split];
+      [apply IHHtype1 | apply IHHtype2 | apply IHHtype3]; exact Hnot.
+  - (* T_If *) split; [|split];
+      [apply IHHtype1 | apply IHHtype2 | apply IHHtype3]; exact Hnot.
+  - (* T_Region r0 e: ~ In r0 R; body at r0 :: R. *)
+    destruct (String.eqb r r0) eqn:Heq.
+    + exact I.
+    + apply String.eqb_neq in Heq.
+      apply IHHtype.
+      intros [Hrr0 | HinR].
+      * apply Heq. exact (eq_sym Hrr0).
+      * apply Hnot. exact HinR.
+  - (* T_Region_Active r0 e: In r0 R; if r = r0, then In r R, contradiction. *)
+    destruct (String.eqb r r0) eqn:Heq.
+    + exact I.
+    + apply String.eqb_neq in Heq.
+      apply IHHtype. exact Hnot.
+  - (* T_Borrow: EVar i — trivially free of any region. *)
+    exact I.
+  - (* T_Borrow_Val: EBorrow v — recurse into v. *)
+    apply IHHtype; exact Hnot.
+  - (* T_Drop *) apply IHHtype; exact Hnot.
+  - (* T_Copy *) apply IHHtype; exact Hnot.
+Qed.
+
 (** ** Output-context determinacy
 
     Two derivations of the same expression in the same region

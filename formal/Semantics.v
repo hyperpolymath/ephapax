@@ -3634,13 +3634,705 @@ Proof.
     inversion Hcfg; subst;
     inversion Hcfg'; subst;
     intros G0 T0 Ga Hte T' Gb Hte'.
-  (* All 35 step rules pending per-case closure. Scaffolded 2026-05-26
-     to enable the line 4885 plug-in via region_env_perm_typing. The
-     proof structure mirrors step_preserves_type below, but with both
-     typings at the same R = R0 — which collapses the problematic
-     cross-cases (T_Region_Active vs T_Region) into vacuous
-     contradictions (In r R0 vs ~In r R0). Pending: per-case work,
-     ~6-10h focused. *)
+  (* Atomic-axiom closure: leaf-value typings invert + reflexivity.
+     Mirrors step_preserves_type's first big block. Closes
+     S_StringNew, S_StringConcat, S_StringLen, S_Region_Enter (some
+     of these via the leaf inversion chain). *)
+  all: try (
+    inversion Hte; subst;
+    inversion Hte'; subst;
+    repeat match goal with
+    | [ H : has_type _ _ (ELoc _ _) _ _ |- _ ] =>
+        inversion H; subst; clear H
+    | [ H : has_type _ _ (EI32 _) _ _ |- _ ] =>
+        inversion H; subst; clear H
+    | [ H : has_type _ _ EUnit _ _ |- _ ] =>
+        inversion H; subst; clear H
+    | [ H : has_type _ _ (EBool _) _ _ |- _ ] =>
+        inversion H; subst; clear H
+    end;
+    reflexivity).
+  (* S_Region_Step at-pre: both typings at R0 with In r R0 force
+     T_Region_Active on BOTH sides (T_Region's ~In r R0 contradicts).
+     Bodies typed under R0; IH on inner step applies directly. *)
+  all: try (
+    match goal with
+    | [ Hte : has_type ?R0 ?G0 (ERegion ?r ?e_body) _ _,
+        Hte' : has_type ?R0 ?G0 (ERegion ?r ?e_body') _ _,
+        Hin : In ?r ?R0 |- _ ] =>
+        inversion Hte; subst; [exfalso; auto |];
+        inversion Hte'; subst; [exfalso; auto |];
+        match goal with
+        | [ Hvt : has_type ?R0 ?G0 ?e_body ?T0 _,
+            Hvt' : has_type ?R0 ?G0 ?e_body' ?T' _ |- _ ] =>
+            eapply IHHstep; [reflexivity | reflexivity | exact Hvt | exact Hvt']
+        end
+    end).
+  (* S_Region_Exit at-pre: Hte = T_Region_Active (In r R0 forces).
+     Body v typed under R0 at T0. Hte' is v at R0 directly. Two
+     typings of same value at same R → type_determinacy. *)
+  all: try (
+    match goal with
+    | [ Hte : has_type ?R0 ?G0 (ERegion ?r ?v) _ _,
+        Hte' : has_type ?R0 ?G0 ?v _ _,
+        Hv : is_value ?v,
+        Hin : In ?r ?R0 |- _ ] =>
+        inversion Hte; subst; [exfalso; auto |];
+        match goal with
+        | [ Hvt : has_type ?R0 ?G0 ?v ?T0 _ |- ?T0 = _ ] =>
+            eapply type_determinacy;
+              [ exact Hvt | exact Hte' | apply ctx_types_agree_refl ]
+        end
+    end).
+  (* Cluster A — beta-reduction. For each: invert Hte, value_context_
+     unchanged, subst_preserves_typing_strong to construct a typing
+     of the post-step expression at the SAME T as the original, then
+     type_determinacy aligns it with Hte''s T'. *)
+  (* S_Let_Val *)
+  all: try solve [
+    match goal with
+    | [ Hv : is_value ?v1,
+        Hte : has_type ?R ?G (ELet ?v1 ?e2) ?T ?Ga,
+        Hte' : has_type ?R ?G (subst 0 ?v1 ?e2) ?T' ?Gb |- ?T = ?T' ] =>
+        inversion Hte; subst;
+        match goal with
+        | [ Hv1 : has_type ?R ?G ?v1 ?T1 ?G',
+            He2 : has_type ?R (ctx_extend ?G' ?T1) ?e2 ?T
+                                              ((?T1, true) :: ?Ga') |- _ ] =>
+            assert (HGv : G' = G) by
+              (eapply value_context_unchanged; eassumption);
+            subst G';
+            destruct (subst_preserves_typing_strong _ _ _ _ _ _ _ _
+                        He2 Hv1 Hv) as [_ Hsub];
+            eapply type_determinacy;
+              [exact Hsub | exact Hte' | apply ctx_types_agree_refl]
+        end
+    end
+  ].
+  (* S_LetLin_Val *)
+  all: try solve [
+    match goal with
+    | [ Hv : is_value ?v1,
+        Hte : has_type ?R ?G (ELetLin ?v1 ?e2) ?T ?Ga,
+        Hte' : has_type ?R ?G (subst 0 ?v1 ?e2) ?T' ?Gb |- ?T = ?T' ] =>
+        inversion Hte; subst;
+        match goal with
+        | [ Hv1 : has_type ?R ?G ?v1 ?T1 ?G',
+            He2 : has_type ?R (ctx_extend ?G' ?T1) ?e2 ?T
+                                              ((?T1, true) :: ?Ga') |- _ ] =>
+            assert (HGv : G' = G) by
+              (eapply value_context_unchanged; eassumption);
+            subst G';
+            destruct (subst_preserves_typing_strong _ _ _ _ _ _ _ _
+                        He2 Hv1 Hv) as [_ Hsub];
+            eapply type_determinacy;
+              [exact Hsub | exact Hte' | apply ctx_types_agree_refl]
+        end
+    end
+  ].
+  (* S_App_Fun: use Tann (ELam annotation) and Tfa (TFun arg) as
+     separate pattern vars; inversion Hlam forces them equal. *)
+  all: try solve [
+    match goal with
+    | [ Hv : is_value ?v2,
+        Hte : has_type ?R ?G (EApp (ELam ?T1 ?ebody) ?v2) ?T2 ?Ga,
+        Hte' : has_type ?R ?G (subst 0 ?v2 ?ebody) ?T' ?Gb |- ?T2 = ?T' ] =>
+        inversion Hte; subst;
+        match goal with
+        | [ Hlam : has_type ?Rx ?Gx (ELam ?Tann ?ebody2)
+                                    (TFun ?Tfa ?Tfr) ?Gmidx,
+            Harg : has_type ?Rx ?Gmidx ?v2 ?Tfa ?Ga2 |- _ ] =>
+            assert (HGlam : Gmidx = Gx) by
+              (eapply value_context_unchanged;
+               [exact Hlam | constructor]);
+            subst Gmidx;
+            assert (HGv : Ga2 = Gx) by
+              (eapply value_context_unchanged; eassumption);
+            subst Ga2;
+            inversion Hlam; subst;
+            match goal with
+            | [ Hbody : has_type ?Rx (ctx_extend ?Gx ?Tfa) ?ebody2 ?Tfr
+                                  ((?Tfa, true) :: ?Gx) |- _ ] =>
+                destruct (subst_preserves_typing_strong _ _ _ _ _ _ _ _
+                            Hbody Harg Hv) as [_ Hsub];
+                eapply type_determinacy;
+                  [exact Hsub | exact Hte' | apply ctx_types_agree_refl]
+            end
+        end
+    end
+  ].
+  (* S_If_True *)
+  all: try solve [
+    match goal with
+    | [ Hte : has_type ?R ?G (EIf (EBool true) ?e2x ?e3x) ?T ?Ga,
+        Hte' : has_type ?R ?G ?e2x ?T' ?Gb |- ?T = ?T' ] =>
+        inversion Hte; subst;
+        match goal with
+        | [ Hbool : has_type ?R ?G (EBool true) (TBase TBool) ?Gmid,
+            Hbranch : has_type ?R ?Gmid ?e2x ?T ?Ga |- _ ] =>
+            assert (HGmid : Gmid = G) by
+              (eapply value_context_unchanged;
+               [exact Hbool | constructor]);
+            subst Gmid;
+            eapply type_determinacy;
+              [exact Hbranch | exact Hte' | apply ctx_types_agree_refl]
+        end
+    end
+  ].
+  (* S_If_False *)
+  all: try solve [
+    match goal with
+    | [ Hte : has_type ?R ?G (EIf (EBool false) ?e2x ?e3x) ?T ?Ga,
+        Hte' : has_type ?R ?G ?e3x ?T' ?Gb |- ?T = ?T' ] =>
+        inversion Hte; subst;
+        match goal with
+        | [ Hbool : has_type ?R ?G (EBool false) (TBase TBool) ?Gmid,
+            Hbranch : has_type ?R ?Gmid ?e3x ?T ?Ga |- _ ] =>
+            assert (HGmid : Gmid = G) by
+              (eapply value_context_unchanged;
+               [exact Hbool | constructor]);
+            subst Gmid;
+            eapply type_determinacy;
+              [exact Hbranch | exact Hte' | apply ctx_types_agree_refl]
+        end
+    end
+  ].
+  (* S_Case_Inl *)
+  all: try (match goal with
+    | [ Hte : has_type _ _ (ECase (EInl _ ?vv) _ _) _ _,
+        Hv : is_value ?vv |- _ ] =>
+        inversion Hte; subst;
+        match goal with
+        | [ Hsum : has_type _ ?G (EInl _ ?vv) (TSum _ _) ?Gmid |- _ ] =>
+            assert (HGsum : Gmid = G) by
+              (eapply value_context_unchanged;
+               [exact Hsum | constructor; assumption]);
+            subst Gmid;
+            inversion Hsum; subst
+        end
+    end).
+  all: try solve [
+    match goal with
+    | [ Hv : is_value ?vv,
+        Hvt : has_type ?R ?G ?vv ?T1 ?G,
+        Hbr : has_type ?R (ctx_extend ?G ?T1) ?ebody ?T
+                                              ((?T1, true) :: ?Ga),
+        Hte' : has_type ?R ?G (subst 0 ?vv ?ebody) ?T' ?Gb
+        |- ?T = ?T' ] =>
+        destruct (subst_preserves_typing_strong _ _ _ _ _ _ _ _
+                    Hbr Hvt Hv) as [_ Hsub];
+        eapply type_determinacy;
+          [exact Hsub | exact Hte' | apply ctx_types_agree_refl]
+    end
+  ].
+  (* S_Case_Inr *)
+  all: try (match goal with
+    | [ Hte : has_type _ _ (ECase (EInr _ ?vv) _ _) _ _,
+        Hv : is_value ?vv |- _ ] =>
+        inversion Hte; subst;
+        match goal with
+        | [ Hsum : has_type _ ?G (EInr _ ?vv) (TSum _ _) ?Gmid |- _ ] =>
+            assert (HGsum : Gmid = G) by
+              (eapply value_context_unchanged;
+               [exact Hsum | constructor; assumption]);
+            subst Gmid;
+            inversion Hsum; subst
+        end
+    end).
+  all: try solve [
+    match goal with
+    | [ Hv : is_value ?vv,
+        Hvt : has_type ?R ?G ?vv ?T2 ?G,
+        Hbr : has_type ?R (ctx_extend ?G ?T2) ?ebody ?T
+                                              ((?T2, true) :: ?Ga),
+        Hte' : has_type ?R ?G (subst 0 ?vv ?ebody) ?T' ?Gb
+        |- ?T = ?T' ] =>
+        destruct (subst_preserves_typing_strong _ _ _ _ _ _ _ _
+                    Hbr Hvt Hv) as [_ Hsub];
+        eapply type_determinacy;
+          [exact Hsub | exact Hte' | apply ctx_types_agree_refl]
+    end
+  ].
+  (* Cluster B — congruence cases close via the IH's type-equality.
+     The IH for [step_preserves_type] handles the inner step
+     directly: given e1 → e1' and typings of e1 / e1' at any types
+     (each under its respective R / R'), the IH yields type-equality.
+     No need to dispatch on R = R' first — the IH is universal in
+     the typings' region envs. *)
+  (* S_StringConcat_Step1 — inner step on e1. *)
+  all: try solve [
+    match goal with
+    | [ IH : forall (_:mem) (_:region_env) (_:expr) (_:mem) (_:region_env) (_:expr),
+              _ = _ -> _ = _ -> forall (_:ctx) (_:ty) (_:ctx),
+              _ -> forall (_:ty) (_:ctx), _ -> _ = _,
+        Hte : has_type _ _ (EStringConcat _ _) _ _,
+        Hte' : has_type _ _ (EStringConcat _ _) _ _ |- _ ] =>
+        inversion Hte; subst;
+        inversion Hte'; subst;
+        match goal with
+        | [ H1 : has_type ?R ?G ?e1 (TString ?r) ?Gmid,
+            H1' : has_type ?R' ?G ?e1' (TString ?r') ?Gmid' |- _ ] =>
+            pose proof (IH _ _ _ _ _ _ eq_refl eq_refl _ _ _ H1 _ _ H1') as Hteq;
+            inversion Hteq; reflexivity
+        end
+    end
+  ].
+  (* S_App_Step1, S_App_Step2 — TFun T1 T2; IH gives T1 = T1' AND T2 = T2'. *)
+  all: try solve [
+    match goal with
+    | [ IH : forall (_:mem) (_:region_env) (_:expr) (_:mem) (_:region_env) (_:expr),
+              _ = _ -> _ = _ -> forall (_:ctx) (_:ty) (_:ctx),
+              _ -> forall (_:ty) (_:ctx), _ -> _ = _,
+        Hte : has_type _ _ (EApp _ _) _ _,
+        Hte' : has_type _ _ (EApp _ _) _ _ |- _ ] =>
+        inversion Hte; subst;
+        inversion Hte'; subst;
+        match goal with
+        | [ H1 : has_type ?R ?G ?e1 (TFun ?T1a ?T2a) ?Gmid,
+            H1' : has_type ?R' ?G ?e1' (TFun ?T1b ?T2b) ?Gmid' |- _ ] =>
+            pose proof (IH _ _ _ _ _ _ eq_refl eq_refl _ _ _ H1 _ _ H1') as Hteq;
+            inversion Hteq; reflexivity
+        end
+    end
+  ].
+  (* S_Let_Step, S_LetLin_Step — IH on e1 → e1' aligns T1, then need
+     T = T' from the body. *)
+  all: try solve [
+    match goal with
+    | [ IH : forall (_:mem) (_:region_env) (_:expr) (_:mem) (_:region_env) (_:expr),
+              _ = _ -> _ = _ -> forall (_:ctx) (_:ty) (_:ctx),
+              _ -> forall (_:ty) (_:ctx), _ -> _ = _,
+        Hte : has_type _ _ (ELet _ _) _ _,
+        Hte' : has_type _ _ (ELet _ _) _ _ |- _ ] =>
+        inversion Hte; subst;
+        inversion Hte'; subst;
+        match goal with
+        | [ H1 : has_type ?R ?G ?e1 ?T1a ?Gmid,
+            H1' : has_type ?R' ?G ?e1' ?T1b ?Gmid',
+            H2 : has_type ?R (ctx_extend ?Gmid ?T1a) ?e2 ?T ((?T1a, true) :: ?Ga),
+            H2' : has_type ?R' (ctx_extend ?Gmid' ?T1b) ?e2 ?T' ((?T1b, true) :: ?Gb) |- _ ] =>
+            (* IH aligns T1a = T1b *)
+            pose proof (IH _ _ _ _ _ _ eq_refl eq_refl _ _ _ H1 _ _ H1') as HT1;
+            subst T1b;
+            (* Now H2 and H2' both have body context ctx_extend ?_ T1a.
+               typing_types_agree composed via G aligns Gmid and Gmid'. *)
+            assert (HagrMid : ctx_types_agree Gmid Gmid')
+              by (apply (ctx_types_agree_trans _ G _);
+                  [ exact (typing_types_agree _ _ _ _ _ H1)
+                  | apply ctx_types_agree_sym;
+                    exact (typing_types_agree _ _ _ _ _ H1') ]);
+            assert (HagrExt : ctx_types_agree
+                              (ctx_extend Gmid T1a) (ctx_extend Gmid' T1a))
+              by (apply ctx_extend_types_agree; assumption);
+            eapply type_determinacy;
+              [ exact H2 | exact H2' | exact HagrExt ]
+        end
+    end
+  ].
+  (* S_LetLin_Step — same as S_Let_Step. *)
+  all: try solve [
+    match goal with
+    | [ IH : forall (_:mem) (_:region_env) (_:expr) (_:mem) (_:region_env) (_:expr),
+              _ = _ -> _ = _ -> forall (_:ctx) (_:ty) (_:ctx),
+              _ -> forall (_:ty) (_:ctx), _ -> _ = _,
+        Hte : has_type _ _ (ELetLin _ _) _ _,
+        Hte' : has_type _ _ (ELetLin _ _) _ _ |- _ ] =>
+        inversion Hte; subst;
+        inversion Hte'; subst;
+        match goal with
+        | [ H1 : has_type ?R ?G ?e1 ?T1a ?Gmid,
+            H1' : has_type ?R' ?G ?e1' ?T1b ?Gmid',
+            H2 : has_type ?R (ctx_extend ?Gmid ?T1a) ?e2 ?T ((?T1a, true) :: ?Ga),
+            H2' : has_type ?R' (ctx_extend ?Gmid' ?T1b) ?e2 ?T' ((?T1b, true) :: ?Gb) |- _ ] =>
+            pose proof (IH _ _ _ _ _ _ eq_refl eq_refl _ _ _ H1 _ _ H1') as HT1;
+            subst T1b;
+            assert (HagrMid : ctx_types_agree Gmid Gmid')
+              by (apply (ctx_types_agree_trans _ G _);
+                  [ exact (typing_types_agree _ _ _ _ _ H1)
+                  | apply ctx_types_agree_sym;
+                    exact (typing_types_agree _ _ _ _ _ H1') ]);
+            assert (HagrExt : ctx_types_agree
+                              (ctx_extend Gmid T1a) (ctx_extend Gmid' T1a))
+              by (apply ctx_extend_types_agree; assumption);
+            eapply type_determinacy;
+              [ exact H2 | exact H2' | exact HagrExt ]
+        end
+    end
+  ].
+  (* ===== Second-child congruences (inner step on e2, v1 value) ===== *)
+  (* S_StringConcat_Step2 *)
+  all: try solve [
+    match goal with
+    | [ IH : forall (_:mem) (_:region_env) (_:expr) (_:mem) (_:region_env) (_:expr),
+              _ = _ -> _ = _ -> forall (_:ctx) (_:ty) (_:ctx),
+              _ -> forall (_:ty) (_:ctx), _ -> _ = _,
+        Hv : is_value ?v1,
+        Hte : has_type _ _ (EStringConcat ?v1 _) _ _,
+        Hte' : has_type _ _ (EStringConcat ?v1 _) _ _ |- _ ] =>
+        inversion Hte; subst;
+        inversion Hte'; subst;
+        match goal with
+        | [ H2 : has_type ?R ?Gmid ?e2 (TString ?r) ?Ga,
+            H2' : has_type ?R' ?Gmid' ?e2' (TString ?r') ?Gb |- _ ] =>
+            pose proof (IH _ _ _ _ _ _ eq_refl eq_refl _ _ _ H2 _ _ H2') as Hteq;
+            inversion Hteq; reflexivity
+        end
+    end
+  ].
+  (* S_App_Step2 *)
+  all: try solve [
+    match goal with
+    | [ IH : forall (_:mem) (_:region_env) (_:expr) (_:mem) (_:region_env) (_:expr),
+              _ = _ -> _ = _ -> forall (_:ctx) (_:ty) (_:ctx),
+              _ -> forall (_:ty) (_:ctx), _ -> _ = _,
+        Hv : is_value ?v1,
+        Hte : has_type _ _ (EApp ?v1 _) _ _,
+        Hte' : has_type _ _ (EApp ?v1 _) _ _ |- _ ] =>
+        inversion Hte; subst;
+        inversion Hte'; subst;
+        match goal with
+        | [ H1 : has_type ?R ?G ?v1 (TFun ?T1a ?T2a) ?Gmid,
+            H2 : has_type ?R ?Gmid ?e2 ?T1a ?Ga,
+            H1' : has_type ?R' ?G ?v1 (TFun ?T1b ?T2b) ?Gmid',
+            H2' : has_type ?R' ?Gmid' ?e2' ?T1b ?Gb |- _ ] =>
+            (* Align v1's TFun types via type_determinacy. *)
+            assert (HGm : Gmid = G) by
+              (eapply value_context_unchanged; eassumption);
+            subst Gmid;
+            assert (HGm' : Gmid' = G) by
+              (eapply value_context_unchanged; eassumption);
+            subst Gmid';
+            assert (HTfun : TFun T1a T2a = TFun T1b T2b)
+              by (eapply type_determinacy;
+                  [exact H1 | exact H1' | apply ctx_types_agree_refl]);
+            inversion HTfun; subst;
+            pose proof (IH _ _ _ _ _ _ eq_refl eq_refl _ _ _ H2 _ _ H2') as Hteq;
+            exact Hteq
+        end
+    end
+  ].
+  (* S_Pair_Step1, S_Pair_Step2: TProd T1 T2 outer constraints both children. *)
+  all: try solve [
+    match goal with
+    | [ IH : forall (_:mem) (_:region_env) (_:expr) (_:mem) (_:region_env) (_:expr),
+              _ = _ -> _ = _ -> forall (_:ctx) (_:ty) (_:ctx),
+              _ -> forall (_:ty) (_:ctx), _ -> _ = _,
+        Hte : has_type _ _ (EPair _ _) _ _,
+        Hte' : has_type _ _ (EPair _ _) _ _ |- _ ] =>
+        inversion Hte; subst;
+        inversion Hte'; subst;
+        match goal with
+        | [ H1 : has_type ?R ?G ?e1 ?T1 ?Gmid,
+            H1' : has_type ?R' ?G ?e1' ?T1' ?Gmid' |- _ ] =>
+            pose proof (IH _ _ _ _ _ _ eq_refl eq_refl _ _ _ H1 _ _ H1') as Hteq;
+            subst T1'; reflexivity
+        end
+    end
+  ].
+  (* ===== Unary congruences (single child) ===== *)
+  (* S_Inl_Step: TSum T1 T2; outer T = TSum T1 T2 constrains T1. *)
+  all: try solve [
+    match goal with
+    | [ IH : forall (_:mem) (_:region_env) (_:expr) (_:mem) (_:region_env) (_:expr),
+              _ = _ -> _ = _ -> forall (_:ctx) (_:ty) (_:ctx),
+              _ -> forall (_:ty) (_:ctx), _ -> _ = _,
+        Hte : has_type _ _ (EInl _ _) _ _,
+        Hte' : has_type _ _ (EInl _ _) _ _ |- _ ] =>
+        inversion Hte; subst;
+        inversion Hte'; subst;
+        match goal with
+        | [ H1 : has_type ?R ?G ?e ?T1 ?Ga,
+            H1' : has_type ?R' ?G ?e' ?T1' ?Gb |- _ ] =>
+            pose proof (IH _ _ _ _ _ _ eq_refl eq_refl _ _ _ H1 _ _ H1') as Hteq;
+            subst T1'; reflexivity
+        end
+    end
+  ].
+  (* S_Inr_Step: symmetric. *)
+  all: try solve [
+    match goal with
+    | [ IH : forall (_:mem) (_:region_env) (_:expr) (_:mem) (_:region_env) (_:expr),
+              _ = _ -> _ = _ -> forall (_:ctx) (_:ty) (_:ctx),
+              _ -> forall (_:ty) (_:ctx), _ -> _ = _,
+        Hte : has_type _ _ (EInr _ _) _ _,
+        Hte' : has_type _ _ (EInr _ _) _ _ |- _ ] =>
+        inversion Hte; subst;
+        inversion Hte'; subst;
+        match goal with
+        | [ H1 : has_type ?R ?G ?e ?T2 ?Ga,
+            H1' : has_type ?R' ?G ?e' ?T2' ?Gb |- _ ] =>
+            pose proof (IH _ _ _ _ _ _ eq_refl eq_refl _ _ _ H1 _ _ H1') as Hteq;
+            subst T2'; reflexivity
+        end
+    end
+  ].
+  (* S_Borrow_Step: T_Borrow forces e = EVar (no step), T_Borrow_Val
+     forces e is value (no step). Vacuous. *)
+  all: try solve [
+    match goal with
+    | [ Hin : (_, _, _) -->> (_, _, _),
+        Hte : has_type _ _ (EBorrow _) _ _ |- _ ] =>
+        inversion Hte; subst;
+        [ inversion Hin
+        | exfalso;
+          match goal with
+          | [ Hv : is_value ?v |- _ ] =>
+              eapply values_dont_step; [exact Hv | exact Hin]
+          end
+        ]
+    end
+  ].
+  (* S_Drop_Step: T_Drop's inner type is independent; use sibling-
+     less approach via IH directly (the inner step's IH provides
+     type-equality even though outer T is fixed at TBase TUnit). *)
+  all: try solve [
+    match goal with
+    | [ IH : forall (_:mem) (_:region_env) (_:expr) (_:mem) (_:region_env) (_:expr),
+              _ = _ -> _ = _ -> forall (_:ctx) (_:ty) (_:ctx),
+              _ -> forall (_:ty) (_:ctx), _ -> _ = _,
+        Hte : has_type _ _ (EDrop _) _ _,
+        Hte' : has_type _ _ (EDrop _) _ _ |- _ ] =>
+        inversion Hte; subst;
+        inversion Hte'; subst;
+        reflexivity
+    end
+  ].
+  (* S_Copy_Step: T_Copy outputs TProd T T — symmetric. *)
+  all: try solve [
+    match goal with
+    | [ IH : forall (_:mem) (_:region_env) (_:expr) (_:mem) (_:region_env) (_:expr),
+              _ = _ -> _ = _ -> forall (_:ctx) (_:ty) (_:ctx),
+              _ -> forall (_:ty) (_:ctx), _ -> _ = _,
+        Hte : has_type _ _ (ECopy _) _ _,
+        Hte' : has_type _ _ (ECopy _) _ _ |- _ ] =>
+        inversion Hte; subst;
+        inversion Hte'; subst;
+        match goal with
+        | [ H1 : has_type ?R ?G ?e ?Ta ?Ga,
+            H1' : has_type ?R' ?G ?e' ?Tb ?Gb |- _ ] =>
+            pose proof (IH _ _ _ _ _ _ eq_refl eq_refl _ _ _ H1 _ _ H1') as Hteq;
+            subst Tb; reflexivity
+        end
+    end
+  ].
+  (* S_If_Step: cond at TBase TBool, branches at outer T. *)
+  all: try solve [
+    match goal with
+    | [ IH : forall (_:mem) (_:region_env) (_:expr) (_:mem) (_:region_env) (_:expr),
+              _ = _ -> _ = _ -> forall (_:ctx) (_:ty) (_:ctx),
+              _ -> forall (_:ty) (_:ctx), _ -> _ = _,
+        Hte : has_type _ _ (EIf _ _ _) _ _,
+        Hte' : has_type _ _ (EIf _ _ _) _ _ |- _ ] =>
+        inversion Hte; subst;
+        inversion Hte'; subst;
+        match goal with
+        | [ H2 : has_type ?R ?Gmid ?e2 ?T ?Ga,
+            H2' : has_type ?R' ?Gmid' ?e2 ?T' ?Gb |- _ ] =>
+            assert (HagrMid : ctx_types_agree Gmid Gmid')
+              by (apply (ctx_types_agree_trans _ _ _);
+                  [ eapply typing_types_agree; eassumption
+                  | apply ctx_types_agree_sym;
+                    eapply typing_types_agree; eassumption ]);
+            eapply type_determinacy;
+              [ exact H2 | exact H2' | exact HagrMid ]
+        end
+    end
+  ].
+  (* S_Fst_Step: T_Fst's T2 independent. Use IH directly — IH on
+     the inner step preserves type, so e and e' have same TProd type.
+     Output's T1 component (= outer T) follows. *)
+  all: try solve [
+    match goal with
+    | [ IH : forall (_:mem) (_:region_env) (_:expr) (_:mem) (_:region_env) (_:expr),
+              _ = _ -> _ = _ -> forall (_:ctx) (_:ty) (_:ctx),
+              _ -> forall (_:ty) (_:ctx), _ -> _ = _,
+        Hte : has_type _ _ (EFst _) _ _,
+        Hte' : has_type _ _ (EFst _) _ _ |- _ ] =>
+        inversion Hte; subst;
+        inversion Hte'; subst;
+        match goal with
+        | [ H1 : has_type ?R ?G ?e (TProd ?Ta1 ?Ta2) ?Ga,
+            H1' : has_type ?R' ?G ?e' (TProd ?Tb1 ?Tb2) ?Gb |- _ ] =>
+            pose proof (IH _ _ _ _ _ _ eq_refl eq_refl _ _ _ H1 _ _ H1') as Hteq;
+            inversion Hteq; reflexivity
+        end
+    end
+  ].
+  (* S_Snd_Step: T_Snd's T1 independent. Symmetric. *)
+  all: try solve [
+    match goal with
+    | [ IH : forall (_:mem) (_:region_env) (_:expr) (_:mem) (_:region_env) (_:expr),
+              _ = _ -> _ = _ -> forall (_:ctx) (_:ty) (_:ctx),
+              _ -> forall (_:ty) (_:ctx), _ -> _ = _,
+        Hte : has_type _ _ (ESnd _) _ _,
+        Hte' : has_type _ _ (ESnd _) _ _ |- _ ] =>
+        inversion Hte; subst;
+        inversion Hte'; subst;
+        match goal with
+        | [ H1 : has_type ?R ?G ?e (TProd ?Ta1 ?Ta2) ?Ga,
+            H1' : has_type ?R' ?G ?e' (TProd ?Tb1 ?Tb2) ?Gb |- _ ] =>
+            pose proof (IH _ _ _ _ _ _ eq_refl eq_refl _ _ _ H1 _ _ H1') as Hteq;
+            inversion Hteq; reflexivity
+        end
+    end
+  ].
+  (* S_Case_Step: scrutinee steps. Outer T comes from branches; IH
+     gives TSum T1 T2 alignment. *)
+  all: try solve [
+    match goal with
+    | [ IH : forall (_:mem) (_:region_env) (_:expr) (_:mem) (_:region_env) (_:expr),
+              _ = _ -> _ = _ -> forall (_:ctx) (_:ty) (_:ctx),
+              _ -> forall (_:ty) (_:ctx), _ -> _ = _,
+        Hte : has_type _ _ (ECase _ _ _) _ _,
+        Hte' : has_type _ _ (ECase _ _ _) _ _ |- _ ] =>
+        inversion Hte; subst;
+        inversion Hte'; subst;
+        match goal with
+        | [ Hs : has_type ?R ?G ?e (TSum ?Ta1 ?Ta2) ?Gmid,
+            Hb1 : has_type ?R (ctx_extend ?Gmid ?Ta1) ?eb1 ?T
+                              ((?Ta1, true) :: ?Gfin),
+            Hs' : has_type ?R' ?G ?e' (TSum ?Tb1 ?Tb2) ?Gmid',
+            Hb1' : has_type ?R' (ctx_extend ?Gmid' ?Tb1) ?eb1 ?T'
+                              ((?Tb1, true) :: ?Gfin') |- _ ] =>
+            pose proof (IH _ _ _ _ _ _ eq_refl eq_refl _ _ _ Hs _ _ Hs') as Hsum;
+            inversion Hsum; subst;
+            (* Now Ta1 = Tb1 and Ta2 = Tb2. Apply type_determinacy on
+               branch eb1 (same expression in agreeing contexts). *)
+            assert (HagrMid : ctx_types_agree Gmid Gmid')
+              by (apply (ctx_types_agree_trans _ _ _);
+                  [ eapply typing_types_agree; eassumption
+                  | apply ctx_types_agree_sym;
+                    eapply typing_types_agree; eassumption ]);
+            assert (HagrExt : ctx_types_agree
+                              (ctx_extend Gmid Ta1) (ctx_extend Gmid' Ta1))
+              by (apply ctx_extend_types_agree; assumption);
+            eapply type_determinacy;
+              [ exact Hb1 | exact Hb1' | exact HagrExt ]
+        end
+    end
+  ].
+  (* ===== Atomic compound-value cases (post = some value form) ===== *)
+  (* S_Copy: ECopy v -> EPair v v. Hte (T_Copy) gives outer TProd T T;
+     Hte' (T_Pair) gives outer TProd Ta1 Ta2. By T_Copy structure,
+     Ta1 = Ta2 = v's type. *)
+  all: try solve [
+    match goal with
+    | [ Hv : is_value ?v,
+        Hte : has_type _ _ (ECopy _) _ _,
+        Hte' : has_type _ _ (EPair _ _) _ _ |- _ ] =>
+        inversion Hte; subst;
+        inversion Hte'; subst;
+        match goal with
+        | [ H1 : has_type ?R ?G ?v ?Ta ?Ga,
+            H1' : has_type ?R ?G ?v ?Tb ?Gmid |- _ ] =>
+            assert (HTeq : Ta = Tb)
+              by (eapply type_determinacy;
+                  [ exact H1 | exact H1' | apply ctx_types_agree_refl ]);
+            subst Tb; reflexivity
+        end
+    end
+  ].
+  (* S_Fst: EFst (EPair v1 v2) -> v1. *)
+  all: try solve [
+    match goal with
+    | [ Hv1 : is_value ?v1, Hv2 : is_value ?v2,
+        Hte : has_type _ _ (EFst (EPair ?v1 ?v2)) _ _,
+        Hte' : has_type _ _ ?v1 _ _ |- _ ] =>
+        inversion Hte; subst;
+        match goal with
+        | [ Hp : has_type ?R ?G (EPair ?v1 ?v2) (TProd ?T1 ?T2) ?Gpost |- _ ] =>
+            inversion Hp; subst;
+            match goal with
+            | [ Hv1t : has_type ?R ?G ?v1 ?T1 ?Gmid |- _ ] =>
+                assert (HTeq : T1 = _)
+                  by (eapply type_determinacy;
+                      [ exact Hv1t | exact Hte' | apply ctx_types_agree_refl ]);
+                exact HTeq
+            end
+        end
+    end
+  ].
+  (* S_Snd: ESnd (EPair v1 v2) -> v2. *)
+  all: try solve [
+    match goal with
+    | [ Hv1 : is_value ?v1, Hv2 : is_value ?v2,
+        Hte : has_type _ _ (ESnd (EPair ?v1 ?v2)) _ _,
+        Hte' : has_type _ _ ?v2 _ _ |- _ ] =>
+        inversion Hte; subst;
+        match goal with
+        | [ Hp : has_type ?R ?G (EPair ?v1 ?v2) (TProd ?T1 ?T2) ?Gpost |- _ ] =>
+            inversion Hp; subst;
+            match goal with
+            | [ Hv2t : has_type _ _ ?v2 ?T2 _ |- _ ] =>
+                assert (HTeq : T2 = _)
+                  by (eapply type_determinacy;
+                      [ exact Hv2t | exact Hte' | apply ctx_types_agree_refl ]);
+                exact HTeq
+            end
+        end
+    end
+  ].
+  (* S_Region_Exit: ERegion r v -> v (R becomes remove_first r R).
+     Hte is T_Region_Active; Hte' types v at T'. *)
+  all: try solve [
+    match goal with
+    | [ Hv : is_value ?v,
+        Hte : has_type _ _ (ERegion _ _) ?T _,
+        Hte' : has_type _ _ ?v ?T' _ |- ?T = ?T' ] =>
+        inversion Hte; subst;
+        match goal with
+        | [ Hvt : has_type ?R ?G ?v ?T ?Gmid |- _ ] =>
+            eapply type_determinacy;
+              [ exact Hvt | exact Hte' | apply ctx_types_agree_refl ]
+        end
+    end
+  ].
+  (* S_Region_Enter: ERegion r e (under R) -> ERegion r e (under r::R).
+     Both Hte and Hte' invert to give inner e's typing under (r :: R).
+     The 4 inversion sub-goals split by T_Region / T_Region_Active. *)
+  all: try solve [
+    match goal with
+    | [ Hn : ~ In ?r _,
+        Hte : has_type _ _ (ERegion ?r ?e) ?T _,
+        Hte' : has_type _ _ (ERegion ?r ?e) ?T' _ |- ?T = ?T' ] =>
+        inversion Hte; subst;
+        inversion Hte'; subst;
+        first
+          [ exfalso; tauto
+          | exfalso;
+            match goal with
+            | [ H : ~ In ?r (?r :: _) |- _ ] =>
+                apply H; left; reflexivity
+            end
+          | match goal with
+            | [ H1 : has_type ?R ?G ?e ?T ?Ga,
+                H2 : has_type ?R ?G ?e ?T' ?Gb |- ?T = ?T' ] =>
+                eapply type_determinacy;
+                  [ exact H1 | exact H2 | apply ctx_types_agree_refl ]
+            end ]
+    end
+  ].
+  (* 12 cases remain. Each requires per-case adjustment beyond the
+     mass clone-out:
+       - S_Pair_Step1/2, S_App_Step2: need IH on stepping child +
+         type_determinacy on unchanged sibling to align BOTH outer
+         type components.
+       - S_StringConcat_Step2: similar to App_Step2.
+       - S_Let_Step, S_LetLin_Step, S_Case_Step: ctx_extend-with-
+         unfixed-T1 inversion needs explicit binder names that don't
+         match Coq's auto-renaming consistently.
+       - S_If_Step: inner step on cond e1 (TBase TBool); the e2/e3
+         branches need ctx_types_agree composition.
+       - S_Copy atomic (EPair v v from ECopy v): need extra
+         is_linear_ty premise discharge.
+       - S_Fst, S_Snd atomic: pattern var bind to outer goal's T
+         doesn't propagate through nested match cleanly.
+       - S_Region_Exit, S_Region_Step: as documented. *)
+  (* Remaining 8 cases: S_StringConcat_Step2, S_Let_Step, S_LetLin_Step,
+     S_App_Step2, S_If_Step, S_Pair_Step1, S_Pair_Step2, S_Case_Step.
+     These are the per-goal cases that step_preserves_type also needed
+     specific tactic blocks for (lines 4389+ of the original proof).
+     Pending: copy & adapt those blocks. Each ~30 LOC. *)
   all: admit.
 Admitted.
 

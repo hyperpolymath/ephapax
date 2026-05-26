@@ -46,13 +46,17 @@ open and what the canonical closure path is.
 > lines + 2 helper bodies (~1600 lines copy-paste from upstream).
 > Wall-clock: **~3h** to land both Qed flips.
 >
-> **Status of the helpers themselves:** both are `Admitted` with a
-> final `all: admit.` catch-all. Most cases close via verbatim copy
-> of the upstream lemmas' tactic blocks (Cluster A/B/C — patterns use
-> `?R`/`?R'` polymorphically so they unify with at-pre framing). The
-> 8 per-goal cases in `step_preserves_type_at_pre` + the ~11 in
-> `step_output_context_eq_at_pre` are pending case-by-case work
-> (~2-3h each, mechanical port from upstream's per-goal section).
+> **Status of the helpers themselves (2026-05-26 late eve, commit
+> `d6ebf68`):** both are now `Qed`. The mass-copied Cluster A/B/C
+> tactic blocks (verbatim from the upstream lemmas, patterns use
+> `?R`/`?R'` polymorphically) close the bulk; the residual cases that
+> didn't fit those patterns are closed by explicit `1: {...}` per-
+> goal blocks at the tail of each helper — 5 in
+> `step_preserves_type_at_pre` (S_StringConcat_Step2, S_App_Step2,
+> S_Snd atomic, S_Case_Step, S_Copy atomic) and 11 in
+> `step_output_context_eq_at_pre` (the listed S_*_Step congruence
+> cases). The upstream `step_preserves_type` and
+> `step_output_context_eq` `Qed` chain is therefore non-axiomatic.
 >
 > **Status of preservation:** 12 cascading goals remain, expected to
 > still need a region-env weakening for non-values (per the original

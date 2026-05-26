@@ -55,7 +55,7 @@ substitution semantics:
 
 | **`preservation`**
 | 🟡 Admitted
-| **12 open goals** after the reduction chain (PRs #92 / #102 / #104 / #106 / #114 / #116 / #117 / #121). Started at 910; 98.7% reduced. Phase 1 scaffold (Lemma B `step_output_context_eq`) landed; per-case discharges next. Remaining 12 = 11 congruence cases (blocked on Lemma B per-case closure) + 1 region case (`S_Region_Step + T_Region_Active`, blocked on region-env weakening). Canonical closure path: ROADMAP §"Preservation closure plan" below.
+| **11 open goals** after the reduction chain (PRs #92 / #102 / #104 / #106 / #114 / #116 / #117 / #121 / #146). Started at 910; 98.8% reduced. Lemma B (`step_output_context_eq`) + its `step_preserves_type_at_pre` / `step_output_context_eq_at_pre` plug-ins are all `Qed` (commit `d6ebf68`, 2026-05-26). Remaining 11 = 10 RIGHT-only congruence sub-cases (`HTR : touches_region` in scope, blocked on region-env weakening for non-values — see Phase 3 below) + 1 region case (`S_Region_Step + T_Region_Active`, same blocker). Canonical closure path: ROADMAP §"Preservation closure plan" below.
 |===
 
 **Historical note**: an earlier in-file comment claimed `preservation`

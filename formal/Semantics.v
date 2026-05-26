@@ -3596,6 +3596,54 @@ Proof.
   - subst R'. apply region_add_typing. exact Htype.
 Qed.
 
+(** ** Step preserves type at pre-step env (Path 3 helper, 2026-05-26)
+
+    Companion to [step_preserves_type]. Whereas [step_preserves_type]
+    asks about typings of [e] and [e'] at the step's actual pre/post
+    region envs (R and R'), [step_preserves_type_at_pre] asks about
+    typings of BOTH at the PRE-step env R.
+
+    Why this is needed: in [step_preserves_type]'s S_Region_Step case,
+    when the outer typing pre-step is [T_Region_Active] (In r R) and
+    the outer typing post-step is [T_Region] (~In r R'), the body
+    [e'] gets typed under [r :: R'] (T_Region's body env), not under
+    R'. Since R' = remove_first r R0 in this case (r appeared exactly
+    once in R0), [r :: R' = r :: remove_first r R0] has the SAME
+    MEMBERSHIP as R0 (when In r R0). Via [region_env_perm_typing] we
+    can transport [e'] to a typing under R0 (= the pre-step env).
+    Now both [e] and [e'] are typed under R0 — exactly what this
+    lemma needs.
+
+    The single remaining admit in [step_preserves_type] (line 4885
+    in the source) plugs into this helper after the perm transport.
+    See `formal/PRESERVATION-HANDOFF.md` § "S_Region_Step's
+    `r = r1` cross-case" for the obstacle analysis. *)
+Lemma step_preserves_type_at_pre :
+  forall mu R e mu' R' e',
+    (mu, R, e) -->> (mu', R', e') ->
+    forall G T G_a, R; G |- e : T -| G_a ->
+    forall T' G_b, R; G |- e' : T' -| G_b ->
+    T = T'.
+Proof.
+  intros mu R e mu' R' e' Hstep.
+  remember (mu, R, e) as cfg eqn:Hcfg.
+  remember (mu', R', e') as cfg' eqn:Hcfg'.
+  revert mu R e mu' R' e' Hcfg Hcfg'.
+  induction Hstep;
+    intros mu0 R0 e0 mu0' R0' e0' Hcfg Hcfg';
+    inversion Hcfg; subst;
+    inversion Hcfg'; subst;
+    intros G0 T0 Ga Hte T' Gb Hte'.
+  (* All 35 step rules pending per-case closure. Scaffolded 2026-05-26
+     to enable the line 4885 plug-in via region_env_perm_typing. The
+     proof structure mirrors step_preserves_type below, but with both
+     typings at the same R = R0 — which collapses the problematic
+     cross-cases (T_Region_Active vs T_Region) into vacuous
+     contradictions (In r R0 vs ~In r R0). Pending: per-case work,
+     ~6-10h focused. *)
+  all: admit.
+Admitted.
+
 (** ** Step preserves type
 
     If [e] steps to [e'] and BOTH have typings, then they're at the
@@ -4872,17 +4920,22 @@ Proof.
         * (* R0' = remove_first r1 R0 *)
           subst R0'.
           destruct (String.eqb r r1) eqn:Heqrr1.
-          -- (* r = r1: r exited from inside. To close this we need a
-                typing of e' under R0' = remove_first r R0 (the IH's
-                fixed R'), not under R0. Going from H11 (e' under
-                r :: R0') to e' under R0' requires
-                `expr_free_of_region r e'` — derivable when the inner
-                step is S_Region_Exit on the outer r (its precondition
-                gives the freedom), but extracting it requires
-                additional inversion on Hstep. Left as a small
-                follow-up. *)
+          -- (* r = r1: r exited from inside. The expr_free approach
+                was BLOCKED (PRESERVATION-HANDOFF.md § "Genuinely-
+                closing options"): sibling references to r survive
+                across the exit, so expr_free_of_region r e' is FALSE
+                in general (counterexample: ELet (ERegion r v) (ELoc l r)).
+                Path 3 plug-in (2026-05-26): use region_env_perm_typing
+                to transport H11 from r :: remove_first r R0 to R0
+                (same membership when In r R0), then apply the at-pre
+                helper [step_preserves_type_at_pre] for type-equality
+                across the inner step. *)
              apply String.eqb_eq in Heqrr1. subst r1.
-             admit.
+             pose proof (region_env_perm_typing _ _ _ _ _ H11 R0
+                           (remove_first_then_cons_membership_eq r R0 H))
+               as H11_R0.
+             eapply step_preserves_type_at_pre;
+               [ exact Hstep | exact H8 | exact H11_R0 ].
           -- (* r ≠ r1: In r R0 → In r R0' contradicts ~In r R0'. *)
              apply String.eqb_neq in Heqrr1. exfalso. apply H3.
              apply (region_shrink_in_preserves r1 r R0 (fun H' => Heqrr1 (eq_sym H'))).
@@ -4921,7 +4974,7 @@ Proof.
         subst T1' T2'; reflexivity
     end.
   }
-Admitted.
+Qed.
 
 (** ** Lemma B — Linearity-context invariance for siblings under step.
 
@@ -4940,6 +4993,36 @@ Admitted.
     handles the type).
 
     Phase 1 of the closure plan in ROADMAP §"Preservation closure plan". *)
+
+(** ** Step output context equality at pre-step env (Path 3 helper, 2026-05-26)
+
+    Companion to [step_output_context_eq], mirroring the relationship
+    between [step_preserves_type_at_pre] and [step_preserves_type].
+    Both typings are at the SAME pre-step env R (not R/R').
+
+    Plugs into [step_output_context_eq]'s line 6016 admit (S_Region_Step
+    case (b) sub-case r=r1) after the region_env_perm_typing transport.
+    Pending: per-case work (~6-10h), all cases admitted as scaffold. *)
+Lemma step_output_context_eq_at_pre :
+  forall mu R e mu' R' e',
+    (mu, R, e) -->> (mu', R', e') ->
+    forall G T G_a G_b,
+      R; G |- e  : T -| G_a ->
+      R; G |- e' : T -| G_b ->
+      G_a = G_b.
+Proof.
+  intros mu R e mu' R' e' Hstep.
+  remember (mu, R, e) as cfg eqn:Hcfg.
+  remember (mu', R', e') as cfg' eqn:Hcfg'.
+  revert mu R e mu' R' e' Hcfg Hcfg'.
+  induction Hstep;
+    intros mu0 R0 e0 mu0' R0' e0' Hcfg Hcfg';
+    inversion Hcfg; subst;
+    inversion Hcfg'; subst;
+    intros G0 T0 Ga Gb Htype_e Htype_e'.
+  (* Scaffolded 2026-05-26. Per-case closures pending. *)
+  all: admit.
+Admitted.
 
 Lemma step_output_context_eq :
   forall mu R e mu' R' e',
@@ -5957,11 +6040,8 @@ Proof.
                     pose proof (region_env_perm_typing _ _ _ _ _ Hvt' R0
                                   (remove_first_then_cons_membership_eq r R0 Hin))
                       as Hvt'_R0;
-                    match goal with
-                    | [ IH : forall _ _ _ _ _ _, _ = _ -> _ = _
-                              -> forall _ _ _ _, _ -> _ -> _ = _ |- _ ] =>
-                        admit (* IH wants e' at remove_first r R0, we have it at R0 *)
-                    end
+                    eapply step_output_context_eq_at_pre;
+                      [ exact Hstep | exact Hvt | exact Hvt'_R0 ]
                   | apply String.eqb_neq in Heqrr1; exfalso; apply Hnin;
                     apply (region_shrink_in_preserves r1 r R0
                             (fun H' => Heqrr1 (eq_sym H'))); exact Hin
@@ -5980,7 +6060,7 @@ Proof.
           ]
         ]
     end).
-Admitted.
+Qed.
 
 Theorem preservation :
   forall mu R e mu' R' e',

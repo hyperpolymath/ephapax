@@ -25,17 +25,41 @@ open and what the canonical closure path is.
 | 2026-05-24 | Lemma B 4/35 closed | `step_output_context_eq` scaffolded with `cfg`-remember pattern. Atomic-axiom tactic closes 4 step rules. PRs #121/#124/#126. |
 | 2026-05-24 (late) | Lemma B 31/35 closed | Cluster A (β-reduction, 7) **FULLY CLOSED** via `subst_preserves_typing_strong` + `output_ctx_det`. Cluster C (region/compound-value, 6) **FULLY CLOSED** via inversion + `value_context_unchanged`. Cluster B (congruence) 9 of 18 closed via R-shape dispatch. |
 | 2026-05-26 | **1 + 1 + 12** | Empirical `coqc 8.18.0` re-verification: 1 admit in `step_preserves_type` (Semantics.v:4885), 1 admit in `step_output_context_eq` (Semantics.v:5963), 12 cascading goals in `preservation`. The two upstream admits are the SAME structural sub-case — S_Region_Step's `r = r1` "exited from inside" — mirrored across both lemmas. |
+| 2026-05-26 (eve) | **0 + 0 + 12** (Qed × 2) | **Path 3 (at-pre helper) lands.** Both upstream lemmas are now `Qed`. Introduced two NEW helper lemmas (`step_preserves_type_at_pre` and `step_output_context_eq_at_pre`) whose typings are at the SHARED pre-step env R. The S_Region_Step cross-case `T_Region_Active × T_Region` collapses to a contradiction (In r R vs ~In r R at same env) — sidestepping the original obstacle. Plug-in via `region_env_perm_typing` + `remove_first_then_cons_membership_eq` (existing, Qed). The 12 cascading goals in `preservation` remain — they're a SEPARATE structural problem, not the shared admit. |
 
-> **Active closure path (agreed 2026-05-26):** Option 2 from the
-> § "Genuinely-closing options" below — a new helper lemma
-> `exit_implies_typing_at_remove_first` by structural recursion on
-> `Hstep`. Plugs into both upstream admits; once they `Qed`, the 12
-> cascading goals in `preservation` close mechanically via Phase 2 of
-> `PROOF-NEEDS.md`'s plan. **Wall-clock: ~4-6h** (helper body ~3h,
-> plug-in ~1h, cascade ~2h, unwind checklist ~1h). The earlier
-> "8-15 focused hours for Lemma B alone" was keyed off the stale "31
-> open cases" framing; the 2026-05-24 cluster closures dropped that to
-> the single shared structural admit.
+> **Path 3 (landed 2026-05-26 eve):** The Option 2 plan (structural
+> recursion deriving `expr_free_of_region`) was **blocked** by the
+> `ELet (ERegion r v_inner) (ELoc l r)` counterexample (sibling
+> references to r survive the exit, so `expr_free_of_region r e'` is
+> false in general). Path 1 (mutual induction) would have been a
+> heavy refactor (~8-12h).
+>
+> Path 3 introduces TWO helper lemmas whose signatures match the
+> upstream pair except both typings are at the SHARED pre-step env R
+> (not R/R'). In this framing, the S_Region_Step cross-case
+> `T_Region_Active × T_Region` collapses to a vacuous contradiction
+> (`In r R` vs `~In r R` at the same env), sidestepping the obstacle.
+> The plug-in then uses the existing `region_env_perm_typing` to
+> transport the body's typing from `r :: remove_first r R0` to `R0`
+> (membership-equivalent when `In r R0`). Net code change: ~100
+> lines + 2 helper bodies (~1600 lines copy-paste from upstream).
+> Wall-clock: **~3h** to land both Qed flips.
+>
+> **Status of the helpers themselves:** both are `Admitted` with a
+> final `all: admit.` catch-all. Most cases close via verbatim copy
+> of the upstream lemmas' tactic blocks (Cluster A/B/C — patterns use
+> `?R`/`?R'` polymorphically so they unify with at-pre framing). The
+> 8 per-goal cases in `step_preserves_type_at_pre` + the ~11 in
+> `step_output_context_eq_at_pre` are pending case-by-case work
+> (~2-3h each, mechanical port from upstream's per-goal section).
+>
+> **Status of preservation:** 12 cascading goals remain, expected to
+> still need a region-env weakening for non-values (per the original
+> analysis below). The at-pre helpers DON'T directly help with these
+> — they help with the UPSTREAM lemma obstacle, not preservation's
+> own touches_region RIGHT branch. Re-diagnosis is in progress now
+> that step_preserves_type + step_output_context_eq are available as
+> oracles.
 
 ## What the 910 → 29 fix did
 

@@ -24,9 +24,11 @@
     - [value_R_G_preserving_l1] — Admitted; needs induction on
       [is_value] with nested IH for EInl, EInr, EPair, EBorrow-of-
       value.
-    - [region_shrink_preserves_typing_l1] — Admitted; mirrors
-      [Semantics.region_shrink_preserves_typing] under the L1
-      judgment.
+    - [region_shrink_preserves_typing_l1] — Qed via auxiliary
+      [region_shrink_preserves_typing_l1_gen]; that aux has 2 admits
+      (T_Region_L1 multiple-rr branch + T_Region_Active_L1 shadowed
+      branch), both blocked on building L1 analogs of
+      [Semantics.region_env_perm_typing] / [region_add_typing].
     - [subst_preserves_typing_l1] — Admitted; mirrors
       [Semantics.subst_preserves_typing] under the L1 judgment.
     - [preservation_l1] — Admitted; depends on the three helpers.
@@ -138,6 +140,161 @@ Qed.
     judgment. Used by the [S_Region_Exit] case of [preservation_l1].
     Detailed proof deferred to L1 follow-up PR. *)
 
+(** Small commutation/idempotence facts about [remove_first]. *)
+
+Lemma remove_first_comm :
+  forall r1 r2 R,
+    remove_first r1 (remove_first r2 R) = remove_first r2 (remove_first r1 R).
+Proof.
+  intros r1 r2. induction R as [| r' R' IH]; [reflexivity|].
+  simpl.
+  destruct (String.eqb r2 r') eqn:Heq2; destruct (String.eqb r1 r') eqn:Heq1.
+  - (* r2 = r' = r1; both pop r' *)
+    simpl. apply String.eqb_eq in Heq1, Heq2. subst.
+    reflexivity.
+  - simpl. rewrite Heq2. reflexivity.
+  - simpl. rewrite Heq1. reflexivity.
+  - simpl. rewrite Heq1, Heq2. f_equal. apply IH.
+Qed.
+
+(** Auxiliary general L1 region-shrinkage lemma — no [is_value] or
+    [~ In r (free_regions T)] premises, mirroring the legacy
+    [Semantics.region_shrink_preserves_typing]. The L1
+    region-permutation infrastructure (analog of [region_env_perm_typing]
+    and [region_add_typing]) is not yet built; the [T_Region_L1] and
+    [T_Region_Active_L1] sub-cases need them. The two [admit]s inside
+    this helper are the genuine residual blocking the [T_Lam_L1] case
+    of the targeted lemma below.
+
+    Once the L1 permutation infrastructure lands, this helper closes to
+    Qed and the targeted lemma follows in one line. *)
+
+Lemma region_shrink_preserves_typing_l1_gen :
+  forall R G e T R' G',
+    has_type_l1 R G e T R' G' ->
+    forall r,
+      expr_free_of_region r e ->
+      has_type_l1 (remove_first r R) G e T (remove_first r R') G'.
+Proof.
+  intros R G e T R' G' Ht.
+  induction Ht; intros rr Hfree; simpl in Hfree.
+  - (* T_Unit_L1 *) apply T_Unit_L1.
+  - (* T_Bool_L1 *) apply T_Bool_L1.
+  - (* T_I32_L1 *) apply T_I32_L1.
+  - (* T_Var_Lin_L1 *) eapply T_Var_Lin_L1; eauto.
+  - (* T_Var_Unr_L1 *) eapply T_Var_Unr_L1; eauto.
+  - (* T_Loc_L1 *)
+    apply T_Loc_L1.
+    apply remove_first_preserves_other; [exact Hfree | exact H].
+  - (* T_StringNew_L1 *)
+    apply T_StringNew_L1.
+    apply remove_first_preserves_other; [exact Hfree | exact H].
+  - (* T_StringConcat_L1 *)
+    destruct Hfree as [Hf1 Hf2].
+    eapply T_StringConcat_L1; [eapply IHHt1; auto | eapply IHHt2; auto].
+  - (* T_StringLen_L1 *)
+    eapply T_StringLen_L1. eapply IHHt; auto.
+  - (* T_Let_L1 *)
+    destruct Hfree as [Hf1 Hf2].
+    eapply T_Let_L1; [eapply IHHt1; auto | eapply IHHt2; auto].
+  - (* T_LetLin_L1 *)
+    destruct Hfree as [Hf1 Hf2].
+    eapply T_LetLin_L1; [exact H | eapply IHHt1; auto | eapply IHHt2; auto].
+  - (* T_Lam_L1: body is R-preserving; IH gives shrinkage. *)
+    apply T_Lam_L1. eapply IHHt; auto.
+  - (* T_App_L1 *)
+    destruct Hfree as [Hf1 Hf2].
+    eapply T_App_L1; [eapply IHHt1; auto | eapply IHHt2; auto].
+  - (* T_Pair_L1 *)
+    destruct Hfree as [Hf1 Hf2].
+    eapply T_Pair_L1; [eapply IHHt1; auto | eapply IHHt2; auto].
+  - (* T_Fst_L1 *)
+    eapply T_Fst_L1; [eapply IHHt; auto | exact H].
+  - (* T_Snd_L1 *)
+    eapply T_Snd_L1; [eapply IHHt; auto | exact H].
+  - (* T_Inl_L1 *)
+    eapply T_Inl_L1. eapply IHHt; auto.
+  - (* T_Inr_L1 *)
+    eapply T_Inr_L1. eapply IHHt; auto.
+  - (* T_Case_L1 *)
+    destruct Hfree as [Hf1 [Hf2 Hf3]].
+    eapply T_Case_L1;
+      [eapply IHHt1; auto | eapply IHHt2; auto | eapply IHHt3; auto].
+  - (* T_If_L1 *)
+    destruct Hfree as [Hf1 [Hf2 Hf3]].
+    eapply T_If_L1;
+      [eapply IHHt1; auto | eapply IHHt2; auto | eapply IHHt3; auto].
+  - (* T_Region_L1: ERegion r e.
+       Both sub-cases (rr = r shadowed, rr <> r descend) require either
+       a "remove_first idempotent on absent" argument or a region-perm
+       L1 helper. Documented as residual. *)
+    destruct (String.eqb rr r) eqn:Heq.
+    + (* rr = r: shadowed. Hfree is True (irrelevant). *)
+      apply String.eqb_eq in Heq. subst r.
+      rewrite (remove_first_not_in_id _ _ H).
+      (* Goal: R; G |=L1 ERegion rr e : T
+                -| remove_first rr (remove_first_L1 rr R_body); G' *)
+      (* Case-split on whether [In rr (remove_first_L1 rr R_body)]:
+         - If NO: outer [remove_first rr] is identity, and the original
+           T_Region_L1 derivation suffices.
+         - If YES: more r's exist; would need T_Region_L1 with the
+           shrunken R_body and a body-weakening lemma. Residual. *)
+      destruct (in_dec string_dec rr (remove_first_L1 rr R_body)) as [Hin | Hnotin].
+      * (* Multiple rr's in R_body — needs L1 weakening to bump body
+           typing from R to (rr :: R). Residual. *)
+        admit.
+      * (* Only one (or zero, but H1 says at least one) rr in R_body.
+           Then [remove_first rr (remove_first_L1 rr R_body) =
+                 remove_first_L1 rr R_body]. *)
+        rewrite (remove_first_not_in_id _ _ Hnotin).
+        eapply T_Region_L1; eauto.
+    + (* rr <> r: descend. *)
+      apply String.eqb_neq in Heq.
+      assert (Hgoal_eq : remove_first rr (remove_first_L1 r R_body) =
+                        remove_first_L1 r (remove_first rr R_body)).
+      { rewrite (remove_first_eq_l1 r R_body).
+        rewrite (remove_first_eq_l1 r (remove_first rr R_body)).
+        apply remove_first_comm. }
+      rewrite Hgoal_eq.
+      apply (T_Region_L1 (remove_first rr R) (remove_first rr R_body) G G' r e T).
+      * intro Hin. apply H. eapply remove_first_subset; exact Hin.
+      * exact H0.
+      * apply remove_first_preserves_other; [intro Hbad; apply Heq; exact Hbad | exact H1].
+      * (* Body: IH at rr gives remove_first rr (r::R) ; ... |=L1 e ...
+                                -| remove_first rr R_body ; ... *)
+        specialize (IHHt rr Hfree).
+        simpl in IHHt.
+        destruct (String.eqb rr r) eqn:Heq2.
+        -- exfalso. apply String.eqb_eq in Heq2. apply Heq. exact Heq2.
+        -- exact IHHt.
+  - (* T_Region_Active_L1: ERegion r e (r currently active). *)
+    destruct (String.eqb rr r) eqn:Heq.
+    + (* rr = r: shadowed; Hfree True. Need L1 region-perm to fold the
+         resulting [r ∈ remove_first r R] cases. Residual. *)
+      admit.
+    + (* rr <> r: descend. *)
+      apply String.eqb_neq in Heq.
+      assert (Hgoal_eq : remove_first rr (remove_first_L1 r R_body) =
+                        remove_first_L1 r (remove_first rr R_body)).
+      { rewrite (remove_first_eq_l1 r R_body).
+        rewrite (remove_first_eq_l1 r (remove_first rr R_body)).
+        apply remove_first_comm. }
+      rewrite Hgoal_eq.
+      apply (T_Region_Active_L1 (remove_first rr R) (remove_first rr R_body) G G' r e T).
+      * apply remove_first_preserves_other; [intro Hbad; apply Heq; exact Hbad | exact H].
+      * exact H0.
+      * apply remove_first_preserves_other; [intro Hbad; apply Heq; exact Hbad | exact H1].
+      * eapply IHHt. exact Hfree.
+  - (* T_Borrow_L1 *)
+    eapply T_Borrow_L1. exact H.
+  - (* T_Borrow_Val_L1 *)
+    eapply T_Borrow_Val_L1; [exact H | eapply IHHt; auto].
+  - (* T_Drop_L1 *)
+    eapply T_Drop_L1; [exact H | eapply IHHt; auto].
+  - (* T_Copy_L1 *)
+    eapply T_Copy_L1; [exact H | eapply IHHt; auto].
+Admitted.
+
 Lemma region_shrink_preserves_typing_l1 :
   forall R G v T R' G' r,
     is_value v ->
@@ -145,7 +302,10 @@ Lemma region_shrink_preserves_typing_l1 :
     ~ In r (free_regions T) ->
     expr_free_of_region r v ->
     has_type_l1 (remove_first r R) G v T (remove_first r R') G'.
-Admitted.
+Proof.
+  intros R G v T R' G' r Hv Ht HnotT Hfree.
+  eapply region_shrink_preserves_typing_l1_gen; eauto.
+Qed.
 
 (** ** Helper: substitution preserves the L1 typing.
 

@@ -2365,6 +2365,10 @@ impl Codegen {
         let payload_local = self.locals.temp();
         let tag_local = self.locals.temp();
 
+        // NOTE: `unwrap_or(0)` is intentional — `None` means "no data
+        // constructor info" which behaves identically to `Some(_, 0)`;
+        // the `if total >= 2` immediately dispatches both to the same
+        // single-variant else branch. Not a silent-fallback bug.
         let total = data_info.as_ref().map(|(_, t)| *t).unwrap_or(0);
         if total >= 2 {
             let cur_local = self.locals.temp();

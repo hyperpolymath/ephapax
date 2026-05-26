@@ -356,6 +356,8 @@ impl Interpreter {
     /// Loading shared libraries is inherently unsafe. The caller must
     /// ensure the library is trustworthy.
     pub fn load_ffi_library(&mut self, path: &str) -> Result<(), RuntimeError> {
+        // SAFETY: loading a shared library is inherently unsafe — the caller
+        // is responsible for trusting the path (see the function-level # Safety).
         let lib = unsafe {
             libloading::Library::new(path).map_err(|e| {
                 RuntimeError::Unimplemented(format!("Failed to load FFI library '{}': {}", path, e))
@@ -372,6 +374,9 @@ impl Interpreter {
     ) -> Option<libloading::Symbol<'a, unsafe extern "C" fn(i64, i64, i64, i64, i64, i64) -> i64>>
     {
         for lib in &self.ffi_libraries {
+            // SAFETY: lib.get() requires that the symbol's signature matches
+            // the type erasure above (unsafe extern "C" fn 6-arg → i64).
+            // FFI typechecking at the Ephapax level is the caller's contract.
             if let Ok(sym) = unsafe { lib.get(name.as_bytes()) } {
                 return Some(sym);
             }
@@ -532,6 +537,10 @@ impl Interpreter {
                 if let Some(func) = self.find_ffi_symbol(symbol) {
                     // Pad args to 6 (max C ABI args we support)
                     let a = |i: usize| *c_args.get(i).unwrap_or(&0);
+                    // SAFETY: `func` is the FFI symbol resolved via
+                    // `find_ffi_symbol`, which constrains the signature to
+                    // unsafe extern "C" fn 6×i64 -> i64. The Ephapax-level
+                    // FFI typechecker validates the call site matches.
                     let result = unsafe { func(a(0), a(1), a(2), a(3), a(4), a(5)) };
                     Ok(Value::I64(result))
                 } else {
@@ -1232,6 +1241,10 @@ impl Interpreter {
                 // until the FFI call completes.
                 match std::ffi::CString::new(data.as_str()) {
                     Ok(cstr) => {
+                        // SAFETY: `cstr.as_ptr()` is non-dangling for the
+                        // CString's lifetime, which is extended by pushing
+                        // `cstr` into `cstrings` immediately below. Caller
+                        // must not retain the pointer past the current FFI call.
                         let ptr = cstr.as_ptr() as i64;
                         cstrings.push(cstr);
                         ptr

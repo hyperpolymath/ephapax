@@ -91,6 +91,34 @@ Benchmark code is allowed to panic on unexpected input — benchmarks
 crash on bad data rather than fall back to slower paths that would
 distort the measurement.
 
+### `unsafe` blocks (3 occurrences) in `src/ephapax-interp/src/lib.rs`
+
+All three sit at FFI boundaries (`libloading::Library::new`,
+`lib.get(name)`, calling the resolved `extern "C" fn` symbol). All
+three now carry inline `// SAFETY: …` comments documenting the
+relevant invariant (caller-trusted path, type-erasure contract,
+Ephapax-level FFI typecheck). Inline annotation lands in the same
+commit as this row.
+
+### `as_ptr()` in `src/ephapax-interp/src/lib.rs`
+
+A single `CString::as_ptr()` used to pass a UTF-8 string to a C
+function. The CString is pushed into `cstrings` immediately to
+extend its lifetime past the FFI call. Inline `// SAFETY:` comment
+documents the contract.
+
+### `unwrap_or(0)` in `src/ephapax-wasm/src/lib.rs` — **NOT actually dangerous**
+
+Flagged "critical" by Hypatia's `unwrap_dangerous_default` rule but
+the `0` default is meaningful: `None` ("no data constructor info")
+behaves identically to `Some(_, 0)` because the immediately-following
+`if total >= 2` dispatches both to the same else branch. Inline
+`// NOTE:` comment explains the intent.
+
+False positive at the rule level; left in place because annotating
+silently with `#[allow(...)]` would hide the intent from future
+readers. The `// NOTE` is the honest fix.
+
 ## Workflow audit
 
 ### `unpinned_action` — `governance.yml` references `@main`

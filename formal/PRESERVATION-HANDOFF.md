@@ -22,6 +22,20 @@ open and what the canonical closure path is.
 | 2026-05-20 (eve) | 22 | After `revert mu R e mu' R' e' Hcfg Hcfg'` before `induction Hstep` so each case's IH carries universal quantification over the inner step's config. PR #106. |
 | 2026-05-20 (eve) | 22 | Region-invariance lemma `step_R_eq_or_touches_region` landed as infrastructure (no goal closures). PR #114. |
 | 2026-05-20 (night) | **12** | 10 β-reduction / value-step cases discharged via per-case manual proofs using the lemma. PR #116. **98.7% reduction across one day.** |
+| 2026-05-24 | Lemma B 4/35 closed | `step_output_context_eq` scaffolded with `cfg`-remember pattern. Atomic-axiom tactic closes 4 step rules. PRs #121/#124/#126. |
+| 2026-05-24 (late) | Lemma B 31/35 closed | Cluster A (β-reduction, 7) **FULLY CLOSED** via `subst_preserves_typing_strong` + `output_ctx_det`. Cluster C (region/compound-value, 6) **FULLY CLOSED** via inversion + `value_context_unchanged`. Cluster B (congruence) 9 of 18 closed via R-shape dispatch. |
+| 2026-05-26 | **1 + 1 + 12** | Empirical `coqc 8.18.0` re-verification: 1 admit in `step_preserves_type` (Semantics.v:4885), 1 admit in `step_output_context_eq` (Semantics.v:5963), 12 cascading goals in `preservation`. The two upstream admits are the SAME structural sub-case — S_Region_Step's `r = r1` "exited from inside" — mirrored across both lemmas. |
+
+> **Active closure path (agreed 2026-05-26):** Option 2 from the
+> § "Genuinely-closing options" below — a new helper lemma
+> `exit_implies_typing_at_remove_first` by structural recursion on
+> `Hstep`. Plugs into both upstream admits; once they `Qed`, the 12
+> cascading goals in `preservation` close mechanically via Phase 2 of
+> `PROOF-NEEDS.md`'s plan. **Wall-clock: ~4-6h** (helper body ~3h,
+> plug-in ~1h, cascade ~2h, unwind checklist ~1h). The earlier
+> "8-15 focused hours for Lemma B alone" was keyed off the stale "31
+> open cases" framing; the 2026-05-24 cluster closures dropped that to
+> the single shared structural admit.
 
 ## What the 910 → 29 fix did
 
@@ -406,10 +420,40 @@ Recipes:
 | `S_Copy` | atomic but compound: `T_Copy` outputs `G'` where `G'` is value-input; needs `value_context_unchanged` invocation |
 | `S_Fst` / `S_Snd` | atomic but inversion of `T_Pair` premise needs `value_context_unchanged` to align inner v1/v2 typings |
 
-### Effort revision
+### Effort revision (current — 2026-05-26)
 
-The ROADMAP's "3-4 hours focused session" estimate for Phase 1 was
-optimistic. Empirical evidence:
+The earlier "8-15 focused hours for Lemma B alone" estimate (recorded
+2026-05-24) was keyed off a "31 remaining cases" framing. Subsequent
+work on the same day closed Clusters A and C entirely, and most of
+Cluster B, leaving the shape below.
+
+Empirical `coqc 8.18.0` verification (2026-05-26):
+
+- `step_preserves_type`: **1 open admit** at `Semantics.v:4885`
+- `step_output_context_eq` (Lemma B): **1 open admit** at `Semantics.v:5963`
+- `preservation`: 12 cascading goals (the `S_*_Step` congruence
+  cases + `S_Region_Step`) — these close mechanically once Lemma B is
+  `Qed.`; they are NOT independently hard.
+
+The two upstream admits are the SAME structural sub-case (S_Region_Step's
+`r = r1` "inner step exits the outer region from inside") mirrored
+across both lemmas.
+
+**Revised estimate: 4-6 hours wall-clock** for the whole chain to `Qed`:
+
+- ~3h: Option 2 helper lemma body
+  (`exit_implies_typing_at_remove_first`, ~150 LOC by structural
+  recursion on `Hstep`).
+- ~1h: plug helper into the two upstream admits.
+- ~2h: Phase 2 cascade through `preservation`'s 12 congruence goals
+  (most fall through the existing `all: try (...)` chain once Lemma B
+  is `Qed.`).
+- ~1h: unwind checklist (PROOF-NEEDS.md, ROADMAP.adoc,
+  RUST-SPARK-STANCE.adoc, delete this file, `Admitted → Qed`).
+
+### Effort revision (historical — 2026-05-24)
+
+[Retained for context; superseded by the section above.]
 
 - 4 trivial cases closed by a uniform tactic in ~30 minutes.
 - Each of the remaining 31 needs a hand-rolled per-case tactic block.
@@ -420,10 +464,10 @@ optimistic. Empirical evidence:
   per case once the recipe is debugged on the first one.
 - Cluster C (6) is a mixed bag; `S_Region_Step` carries Phase 3 risk.
 
-**Revised estimate**: **8–15 focused hours** for Lemma B alone,
-assuming no circularity surprises with `type_determinacy` across
-stepped pairs. Phase 2 (apply Lemma B to preservation's congruence
-cases) remains ~2 hours of mechanical wiring once Lemma B is closed.
+Original estimate: **8–15 focused hours** for Lemma B alone. Cluster A
+and Cluster C closed by 2026-05-24 night; most of Cluster B by the same
+session. By 2026-05-26 the surface had collapsed to the single shared
+S_Region_Step admit.
 
 ### Watch for: circularity risk
 

@@ -26,12 +26,27 @@ ephapax-wasm.workspace = true
 ephapax-interp.workspace = true
 ephapax-repl.workspace = true
 ephapax-package.workspace = true
-typed-wasm-verify.workspace = true
+# `typed-wasm-verify` is optional: it powers `ephapax compile
+# --verify-ownership`, which is a post-codegen L7+L10 verifier. With
+# the feature OFF the CLI builds + runs without any reference to the
+# typed-wasm repo; emitted wasm still carries the `typedwasm.ownership`
+# section (codec lives in ephapax-wasm/src/ownership.rs), but the
+# `--verify-ownership` flag becomes a no-op (warns and continues).
+typed-wasm-verify = { workspace = true, optional = true }
 smol_str.workspace = true
 clap.workspace = true
 colored.workspace = true
 ariadne.workspace = true
 serde_json.workspace = true
+
+[features]
+default = ["typed-wasm-verify"]
+# Enabling this feature pulls in `typed-wasm-verify` (a git dep on
+# hyperpolymath/typed-wasm) and activates the post-codegen verifier
+# behind `ephapax compile --verify-ownership`. Disabling it removes
+# all references to typed-wasm and makes ephapax fully buildable
+# without any sibling-repo network access.
+"typed-wasm-verify" = ["dep:typed-wasm-verify"]
 
 [dev-dependencies]
 wasmtime.workspace = true

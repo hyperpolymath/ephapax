@@ -45,8 +45,13 @@
 //! Mode is set per-module compilation and affects how unused linear values are handled.
 
 mod debug;
+pub mod ownership;
 
 pub use debug::{DebugInfo, VariableMetadata};
+pub use ownership::{
+    build_ownership_section_payload, parse_ownership_section_payload, OwnershipEntry,
+    OwnershipKind, OWNERSHIP_SECTION_NAME,
+};
 
 use ephapax_ir::module_from_sexpr;
 use ephapax_syntax::{
@@ -1277,7 +1282,7 @@ impl Codegen {
     /// missing entries as fully Unrestricted, so the smaller payload
     /// has identical semantics.
     fn emit_ownership_section(&mut self) {
-        let mut entries: Vec<typed_wasm_verify::OwnershipEntry> = self
+        let mut entries: Vec<ownership::OwnershipEntry> = self
             .user_fns
             .values()
             .filter(|info| info.param_linear.iter().any(|&l| l))
@@ -1287,16 +1292,16 @@ impl Codegen {
                     .iter()
                     .map(|&is_linear| {
                         if is_linear {
-                            typed_wasm_verify::OwnershipKind::Linear
+                            ownership::OwnershipKind::Linear
                         } else {
-                            typed_wasm_verify::OwnershipKind::Unrestricted
+                            ownership::OwnershipKind::Unrestricted
                         }
                     })
                     .collect();
-                typed_wasm_verify::OwnershipEntry {
+                ownership::OwnershipEntry {
                     func_idx: info.wasm_fn_idx,
                     param_kinds,
-                    ret_kind: typed_wasm_verify::OwnershipKind::Unrestricted,
+                    ret_kind: ownership::OwnershipKind::Unrestricted,
                 }
             })
             .collect();
@@ -1306,9 +1311,9 @@ impl Codegen {
         // `user_fns` is a HashMap; sort by func_idx for deterministic output.
         entries.sort_by_key(|e| e.func_idx);
 
-        let payload = typed_wasm_verify::build_ownership_section_payload(&entries);
+        let payload = ownership::build_ownership_section_payload(&entries);
         let custom = wasm_encoder::CustomSection {
-            name: typed_wasm_verify::OWNERSHIP_SECTION_NAME.into(),
+            name: ownership::OWNERSHIP_SECTION_NAME.into(),
             data: payload.as_slice().into(),
         };
         self.module.section(&custom);
@@ -4580,7 +4585,7 @@ mod tests {
         for payload in WP::new(0).parse_all(wasm) {
             if let Payload::CustomSection(reader) = payload.expect("wasm parse")
             {
-                if reader.name() == typed_wasm_verify::OWNERSHIP_SECTION_NAME {
+                if reader.name() == ownership::OWNERSHIP_SECTION_NAME {
                     return Some(reader.data().to_vec());
                 }
             }
@@ -4609,15 +4614,15 @@ mod tests {
         assert_wasm_header(&wasm);
 
         let payload = ownership_payload(&wasm).expect("ownership section missing");
-        let entries = typed_wasm_verify::parse_ownership_section_payload(&payload);
+        let entries = ownership::parse_ownership_section_payload(&payload);
         assert_eq!(entries.len(), 1, "expected one ownership entry");
         assert_eq!(
             entries[0].param_kinds,
-            vec![typed_wasm_verify::OwnershipKind::Linear]
+            vec![ownership::OwnershipKind::Linear]
         );
         assert_eq!(
             entries[0].ret_kind,
-            typed_wasm_verify::OwnershipKind::Unrestricted
+            ownership::OwnershipKind::Unrestricted
         );
     }
 
@@ -4683,7 +4688,7 @@ mod tests {
         };
         let wasm = compile_module(&module).expect("compilation failed");
         let payload = ownership_payload(&wasm).expect("ownership section missing");
-        let entries = typed_wasm_verify::parse_ownership_section_payload(&payload);
+        let entries = ownership::parse_ownership_section_payload(&payload);
         assert_eq!(entries.len(), 2);
         assert!(
             entries[0].func_idx < entries[1].func_idx,
@@ -4720,11 +4725,11 @@ mod tests {
         };
         let wasm = compile_module(&module).expect("compilation failed");
         let payload = ownership_payload(&wasm).expect("ownership section missing");
-        let entries = typed_wasm_verify::parse_ownership_section_payload(&payload);
+        let entries = ownership::parse_ownership_section_payload(&payload);
         assert_eq!(entries.len(), 1, "only the Linear fn should be listed");
         assert_eq!(
             entries[0].param_kinds,
-            vec![typed_wasm_verify::OwnershipKind::Linear]
+            vec![ownership::OwnershipKind::Linear]
         );
     }
 

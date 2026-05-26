@@ -15,3 +15,40 @@ permissions:
 jobs:
   rust-ci:
     uses: hyperpolymath/standards/.github/workflows/rust-ci-reusable.yml@4fdf4314b4ab54269adbaff10e30e483b5e86845
+
+  no-default-features:
+    name: Cargo build + test (ephapax-cli, --no-default-features)
+    runs-on: ubuntu-latest
+    if: hashFiles('Cargo.toml') != ''
+
+    # Proves ephapax can be built and tested with zero git dep on the
+    # sibling `hyperpolymath/typed-wasm` repo. Enforces the estate
+    # architectural rule that typed-wasm must be removable from either
+    # language with no impact. See `src/ephapax-wasm/src/ownership.rs`
+    # for the in-tree codec that makes this possible.
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9 # stable
+
+      - name: Cache cargo registry and build
+        uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2
+        with:
+          key: no-default-features
+
+      - name: Cargo build -p ephapax-cli --no-default-features
+        run: cargo build -p ephapax-cli --no-default-features
+
+      - name: Cargo test -p ephapax-cli --no-default-features
+        run: cargo test -p ephapax-cli --no-default-features
+
+      - name: Write summary
+        if: always()
+        run: |
+          echo "## --no-default-features build" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "Proves the typed-wasm-verify feature is genuinely optional:" >> "$GITHUB_STEP_SUMMARY"
+          echo "ephapax-cli builds + tests with zero git dep on the" >> "$GITHUB_STEP_SUMMARY"
+          echo "hyperpolymath/typed-wasm repo." >> "$GITHUB_STEP_SUMMARY"

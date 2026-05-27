@@ -341,3 +341,181 @@ Proof.
   - apply echo_true_ne_echo_false.
   - apply weaken_collapses_distinction.
 Qed.
+
+(** ===== Phase 2: General residue + no-section irreversibility =====
+
+    The Phase 1 [weaken] above goes directly to [unit] for the
+    Affine carrier, which is the simplest possible witness that
+    information is lost. Phase 2 introduces a richer residue
+    [EchoR C Cert y] — a [C]-valued residue plus a certification
+    relation [Cert : C → B → Type] — and lowers the Linear echo into
+    it via [echo_to_residue].
+
+    The Phase-2 carrier matches the Agda upstream
+    [echo-types/proofs/agda/EchoResidue.agda] one-for-one. The
+    headline of Phase 2 is [no_section_collapse_to_residue]: there is
+    no inverse to the lowering, so the Linear→Affine collapse is
+    *genuinely* irreversible, not merely "I happened to throw away
+    the bit".
+
+    Why this matters for L3: when [TEcho] eventually lands in
+    [Syntax.v] (separate slice), an Affine-mode residue value will be
+    typed at [TEcho ⟨affine-collapse⟩] which inhabits
+    [EchoR ⊤ TrivialCert tt]. The fact that no section exists is the
+    *structural* statement that an Affine implicit drop has nowhere
+    to go back to — the typing system can permit it precisely because
+    irreversibility is mechanised. *)
+
+(** Weakened echo: keep a residue [r : C] plus a certification
+    relation [Cert r y] to the visible [y : B]. Mirrors
+    EchoResidue.agda's [EchoR]. *)
+
+Record EchoR {B : Type} (C : Type) (Cert : C -> B -> Type) (y : B)
+  : Type := mkEchoR {
+  residue  : C;
+  residue_cert : Cert residue y
+}.
+
+Arguments mkEchoR {B C Cert y} residue residue_cert.
+Arguments residue {B C Cert y} _.
+Arguments residue_cert {B C Cert y} _.
+
+(** Every full echo can be lowered to a residue echo, provided
+    residue-soundness: a residue-projection [κ] and a soundness
+    witness that [κ] respects [Cert] along [f]. Mirrors
+    EchoResidue.agda's [echo-to-residue]. *)
+
+Definition echo_to_residue
+  {A B C : Type}
+  (f : A -> B)
+  (kappa : A -> C)
+  (Cert : C -> B -> Type)
+  (sound : forall x, Cert (kappa x) (f x))
+  {y : B}
+  (e : Echo f y) : EchoR C Cert y :=
+  mkEchoR
+    (kappa (echo_witness e))
+    (eq_rect (f (echo_witness e))
+             (fun b => Cert (kappa (echo_witness e)) b)
+             (sound (echo_witness e))
+             y
+             (echo_eq e)).
+
+(** Specialised to the collapse [bool → unit]: the residue carrier
+    is [unit], the certificate is trivial. *)
+
+Definition TrivialCert (_ _ : unit) : Type := unit.
+
+Definition collapse_kappa (b : bool) : unit := tt.
+
+Definition collapse_sound (b : bool)
+  : TrivialCert (collapse_kappa b) (collapse b) := tt.
+
+Definition collapse_to_residue
+  : Echo collapse tt -> EchoR unit TrivialCert tt :=
+  echo_to_residue collapse collapse_kappa TrivialCert collapse_sound.
+
+(** Both [echo_true] and [echo_false] lower to the same residue —
+    the bool distinction collapses under the residue projection.
+    Mirrors EchoResidue.agda's [collapse-residue-same]. *)
+
+Lemma collapse_residue_same :
+  collapse_to_residue echo_true = collapse_to_residue echo_false.
+Proof. reflexivity. Qed.
+
+(** ===== Headline irreversibility theorem =====
+
+    There is NO section to the Linear→Affine residue lowering — no
+    function from [EchoR ⊤ TrivialCert tt] back to [Echo collapse tt]
+    can be a one-sided inverse of [collapse_to_residue].
+
+    This is the *type-theoretic* witness that the Linear→Affine
+    collapse is genuinely irreversible: if such a section existed,
+    [collapse_residue_same] would force [echo_true = echo_false],
+    contradicting [echo_true_ne_echo_false].
+
+    Mirrors EchoResidue.agda's [no-section-collapse-to-residue]. *)
+
+Lemma no_section_collapse_to_residue :
+  ~ exists reify : EchoR unit TrivialCert tt -> Echo collapse tt,
+      forall e, reify (collapse_to_residue e) = e.
+Proof.
+  intros [reify sec].
+  apply echo_true_ne_echo_false.
+  (** Both [echo_true] and [echo_false] must round-trip through
+      [reify ∘ collapse_to_residue] to themselves. But
+      [collapse_residue_same] forces both inputs to [reify] to be
+      equal — so the two outputs must be equal as well. *)
+  pose proof (sec echo_true)  as p_true.
+  pose proof (sec echo_false) as p_false.
+  assert (p_false' : reify (collapse_to_residue echo_true) = echo_false).
+  { rewrite collapse_residue_same. exact p_false. }
+  rewrite <- p_true. exact p_false'.
+Qed.
+
+(** M3 pass: explicit weakening packaged with its non-recoverability
+    witness. The L3 layer ships *both* directions — the lowering
+    arrow [collapse_to_residue] AND the no-section impossibility —
+    because the type-theoretic guarantee of L3 is that the lowering
+    exists exactly when the recovery does not.
+
+    Mirrors EchoResidue.agda's [strict-weakening-collapse]. *)
+
+Lemma strict_weakening_collapse :
+  exists lower : Echo collapse tt -> EchoR unit TrivialCert tt,
+    ~ exists raise : EchoR unit TrivialCert tt -> Echo collapse tt,
+        forall e, raise (lower e) = e.
+Proof.
+  exists collapse_to_residue.
+  exact no_section_collapse_to_residue.
+Qed.
+
+(** ===== Mode-join structure (propositional join) =====
+
+    Mirrors EchoLinear.agda's [_⊔m_], [≤m-⊔m-{left,right,univ}], and
+    [degradeMode-via-join]. The join makes [Mode] a thin meet-
+    semilattice: [Affine] is top, [Linear ⊔ _] = the other argument. *)
+
+Definition mode_join (m1 m2 : Mode) : Mode :=
+  match m1 with
+  | Linear => m2
+  | Affine => Affine
+  end.
+
+Lemma mode_le_join_left :
+  forall m1 m2, mode_le m1 (mode_join m1 m2).
+Proof.
+  intros [|] [|]; simpl; constructor.
+Qed.
+
+Lemma mode_le_join_right :
+  forall m1 m2, mode_le m2 (mode_join m1 m2).
+Proof.
+  intros [|] [|]; simpl; constructor.
+Qed.
+
+Lemma mode_le_join_univ :
+  forall {m1 m2 m3},
+    mode_le m1 m3 -> mode_le m2 m3 -> mode_le (mode_join m1 m2) m3.
+Proof.
+  intros m1 m2 m3 p1 p2.
+  destruct p1; simpl; try assumption; constructor.
+Qed.
+
+(** Restating the per-mode weakening through the join structure:
+    any weakening into a common upper bound [m3] factors through
+    [mode_join m1 m2]. Mirrors EchoLinear.agda's [degradeMode-via-join]. *)
+
+Lemma degrade_mode_via_join :
+  forall {m1 m2 m3}
+         (p1 : mode_le m1 m3) (p2 : mode_le m2 m3) (e : LEcho m1),
+    degrade_mode p1 e =
+    degrade_mode (mode_le_join_univ p1 p2)
+                 (degrade_mode (mode_le_join_left m1 m2) e).
+Proof.
+  intros m1 m2 m3 p1 p2 e.
+  symmetry.
+  apply (degrade_mode_compose (mode_le_join_left m1 m2)
+                              (mode_le_join_univ p1 p2)
+                              p1 e).
+Qed.

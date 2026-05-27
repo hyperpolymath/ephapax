@@ -1,6 +1,27 @@
 <!-- SPDX-License-Identifier: PMPL-1.0-or-later -->
 <!-- TOPOLOGY.md — Project architecture map and completion dashboard -->
-<!-- Last updated: 2026-03-22 -->
+<!-- Last updated: 2026-05-27 (post-counterexample doctrine landing) -->
+
+> ## Post-counterexample doctrine — read before editing this file
+>
+> This TOPOLOGY map predates the 2026-05-26 counterexample landing in
+> parts of its system architecture diagram. The canonical *current*
+> architecture lives in:
+>
+> - [`STATUS.adoc`](STATUS.adoc) — past/present/future map
+> - [`formal/PRESERVATION-DESIGN.md`](formal/PRESERVATION-DESIGN.md) — four-layer architecture
+> - [`PROOF-NEEDS.md`](PROOF-NEEDS.md) — per-sublanguage proof debt
+> - [`CLAUDE.md`](CLAUDE.md) — agent guidance + owner directive 2026-05-27
+>
+> ### Layer mapping (formal/ contents post-2026-05-27)
+>
+> | Layer | Concern | File(s) | Status |
+> |---|---|---|---|
+> | **L1** | Region capabilities + capability environment threading | `formal/TypingL1.v` + `formal/Semantics_L1.v` | judgment 100%, semantics 15 Qed / 9 admits (L2-integration debt) |
+> | **L2** | Structural modality (Linear vs Affine) | `formal/Modality.v` + `m : Modality` in `has_type_l1` | core landed, `linear_to_affine` Qed with zero axioms |
+> | **L3** | Echo / residue (irreversibility evidence) | `formal/Echo.v` + upstream `hyperpolymath/echo-types` | calculus done (12 Qed), wiring into typing pending |
+> | **L4** | Dyadic interaction semantics | (none yet) | design in `PRESERVATION-DESIGN.md §7` |
+> | 🛑 | Legacy `formal/Semantics.v` + `formal/Typing.v` | archaeology | preservation provably false — see `formal/Counterexample.v` |
 
 # ephapax (selur) — Project Topology
 

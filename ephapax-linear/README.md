@@ -1,5 +1,26 @@
 # ephapax-linear
 
+> ## 🛑 First-read disambiguation
+>
+> This crate is part of **`hyperpolymath/ephapax`** — a research language for
+> compile-time WebAssembly memory safety, formally verified in Coq + Idris2.
+>
+> **`ephapax-linear` is *not* `hyperpolymath/affinescript`.** AffineScript is
+> a separate, unrelated language (JS/TS/ReScript successor, OCaml + ReScript
+> runtime). The two share only the compile target (`hyperpolymath/typed-wasm`).
+>
+> **Internal naming trap (important):** This crate implements *both*
+> sublanguages of Ephapax — `ephapax-linear` (strict core) AND `ephapax-affine`
+> (versatile prototyping companion). The name of the crate is `ephapax-linear`
+> for historical reasons, but **the affine grammar in this crate is NOT
+> `AffineScript`.** The lexical overlap of the word `affine` is a coincidence
+> of substructural-logic family terminology, not a project relationship. Do
+> not apply tactics, lessons, or framings from `hyperpolymath/affinescript`
+> here, and vice versa.
+>
+> Canonical disambiguation:
+> [`hyperpolymath/nextgen-languages/docs/disambiguation/ephapax-vs-affinescript.md`](https://github.com/hyperpolymath/nextgen-languages/blob/main/docs/disambiguation/ephapax-vs-affinescript.md).
+
 Standalone linear/affine discipline checker for the Ephapax language.
 
 ## Dual Grammars

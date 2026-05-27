@@ -5,6 +5,42 @@ Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk>
 :toclevels: 3
 :icons: font
 
+[IMPORTANT]
+.Post-counterexample reorientation 2026-05-27
+====
+This vision document is **the design rationale**. The architecture
+described here was reframed on 2026-05-26 when a verified Coq
+counterexample showed the original single-layer typing judgment was
+*provably false*. The current architecture is a *four orthogonal
+layers* design (region capabilities / structural modality / echo
+residue / dyadic mode) where preservation is re-derived per layer
+from explicit invariants.
+
+The *intent* below — dyadic discipline, region-based memory, no
+tracing GC, WASM target — survives the redesign intact. The
+*mechanisation* is layered.
+
+For implementation status (per-layer counts, what's done, what's
+todo, what's banned), read in this order:
+
+. link:../../STATUS.adoc[`STATUS.adoc`] — past/present/future map.
+. link:../../formal/PRESERVATION-DESIGN.md[`formal/PRESERVATION-DESIGN.md`] — the four-layer architecture doctrine.
+. link:../../PROOF-NEEDS.md[`PROOF-NEEDS.md`] — per-sublanguage proof debt.
+====
+
+[NOTE]
+.Disambiguation (ephapax ≠ AffineScript)
+====
+This is **`hyperpolymath/ephapax`** — a research language with
+mechanised Coq + Idris2 proofs. It is **not**
+`hyperpolymath/affinescript`, which is a separate JS/TS/ReScript
+successor with no mechanised proofs. The lexical overlap of "affine"
+in both names is a coincidence of substructural-logic terminology.
+Internal naming trap: `ephapax-affine` (the sublanguage *inside*
+this repo) is also **not** AffineScript. Canonical disambiguation:
+https://github.com/hyperpolymath/nextgen-languages/blob/main/docs/disambiguation/ephapax-vs-affinescript.md.
+====
+
 == What Ephapax Is
 
 Ephapax is a *programming language*. Not a proof assistant, not a type checker

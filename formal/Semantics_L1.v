@@ -334,8 +334,13 @@ Proof.
   - (* T_Unit_L1 *) apply T_Unit_L1.
   - (* T_Bool_L1 *) apply T_Bool_L1.
   - (* T_I32_L1 *) apply T_I32_L1.
-  - (* T_Var_Lin_L1 *) eapply T_Var_Lin_L1; eauto.
-  - (* T_Var_Unr_L1 *) eapply T_Var_Unr_L1; eauto.
+  - (* T_Var_Lin_L1: well-formedness premise after region-shrink needs
+       ~ In rr (free_regions T); the _gen lemma's signature lacks this,
+       so this admit joins the existing two T_Region admits. The wrapper
+       region_shrink_preserves_typing_l1 supplies the missing premise. *)
+    eapply T_Var_Lin_L1; eauto. admit.
+  - (* T_Var_Unr_L1: same well-formedness gap as T_Var_Lin_L1 above. *)
+    eapply T_Var_Unr_L1; eauto. admit.
   - (* T_Loc_L1 *)
     apply T_Loc_L1.
     apply remove_first_preserves_other; [exact Hfree | exact H].
@@ -723,29 +728,37 @@ Proof.
   - apply T_Unit_L1.
   - apply T_Bool_L1.
   - apply T_I32_L1.
-  (* T_Var_Lin_L1 *)
-  - destruct (Nat.leb_spec k i).
+  (* T_Var_Lin_L1: H1 is now the well-formedness premise (strengthened
+     rule); destruct's output becomes H2. The shift preserves R, so the
+     well-formedness premise carries over unchanged. *)
+  - rename H1 into Hwf.
+    destruct (Nat.leb_spec k i).
     + rewrite (insert_at_ctx_mark_used_ge G k i (T_new, false) H1 Hk).
       replace (i + 1) with (S i) by lia.
       eapply T_Var_Lin_L1.
       * unfold ctx_lookup. rewrite nth_error_insert_at_gt by (try assumption; try lia).
         unfold ctx_lookup in H. exact H.
       * exact H0.
+      * exact Hwf.
     + rewrite (insert_at_ctx_mark_used_lt G k i (T_new, false) H1 Hk).
       eapply T_Var_Lin_L1.
       * unfold ctx_lookup. rewrite nth_error_insert_at_lt by (try assumption; try lia).
         unfold ctx_lookup in H. exact H.
       * exact H0.
-  (* T_Var_Unr_L1 *)
-  - destruct (Nat.leb_spec k i).
+      * exact Hwf.
+  (* T_Var_Unr_L1: same shift as above. *)
+  - rename H1 into Hwf.
+    destruct (Nat.leb_spec k i).
     + replace (i + 1) with (S i) by lia. eapply T_Var_Unr_L1.
       * unfold ctx_lookup. rewrite nth_error_insert_at_gt by (try assumption; try lia).
         unfold ctx_lookup in H. exact H.
       * exact H0.
+      * exact Hwf.
     + eapply T_Var_Unr_L1.
       * unfold ctx_lookup. rewrite nth_error_insert_at_lt by (try assumption; try lia).
         unfold ctx_lookup in H. exact H.
       * exact H0.
+      * exact Hwf.
   (* T_Loc_L1 *)
   - apply T_Loc_L1. exact H.
   (* T_StringNew_L1 *)
@@ -885,21 +898,82 @@ Proof. intros. apply T_Loc_L1. assumption. Qed.
     and a linear region [rv] live at the outer [R], the threaded [R1]
     still contains [rv].
 
-    Discharge sketch (NOT closed in this PR): induct on the sub-
-    derivation. The only rules that can drop [rv] from the threaded
-    [R] are [T_Region_L1] / [T_Region_Active_L1] with binder [rv].
-    The former requires [~ In rv R], contradicting [In rv R]. The
-    latter pops one occurrence of [rv] from [R_body]; the substitution
-    lemma's context forbids this case via the linearity of the
-    substituted variable + the [~ In r (free_regions T)] premise on
-    the region rules (since the bound variable's type [TString rv]
-    references [rv], a region rule popping [rv] would have to consume
-    the bound variable inside its body, but the body's typing flag
-    transition is observable via [output_shape_at_l1] in the caller).
+    === STATUS 2026-05-27: AXIOM IS FALSE AS STATED ===
 
-    See header above for the three closure approaches. Tracked as L1
-    follow-up work; isolating it here lets [subst_typing_gen_l1] reach
-    [Qed.] without further axioms. *)
+    A direct closure attempt (replacing [Axiom] with [Lemma], structural
+    induction on the typing derivation) closes 23 of 25 cases trivially
+    via the IH chain. The two residual cases are [T_Region_L1] and
+    [T_Region_Active_L1]:
+
+    - [T_Region_L1] (fresh binder [r], premise [~ In r R]) closes
+      easily: [r ≠ rv] follows from [~ In r R ∧ In rv R], and
+      [remove_first_L1 r] preserves rv-membership for [r ≠ rv].
+
+    - [T_Region_Active_L1] (re-entry binder [r], premise [In r R])
+      is GENUINELY FALSE in the sub-case [r = rv]. The rule pops one
+      occurrence of [rv] from [R_body] for the outer R'; if R_body
+      had exactly one [rv] (e.g. inherited from outer R with no inner
+      re-introduction), R' has zero. Concrete counterexample at the
+      source level (typed at [R = [rv]]):
+
+        ERegion rv (EI32 5)
+        : TBase TI32 -| []; G
+
+      Here [R = [rv]], body's R_body = [rv], pop yields [] — so
+      [In rv R = True] but [In rv R' = False].
+
+    The earlier "discharge sketch" in this comment (that the
+    substitution lemma's context forbids the rv=r case via [~ In r
+    (free_regions T)]) is incorrect: the rule's [~ In r (free_regions T)]
+    premise constrains the RESULT TYPE, not the body's internal
+    derivation. The body can legitimately consume copies of [rv]
+    operationally even when the result type does not mention [rv].
+
+    === The L1 design gap this surfaces ===
+
+    The original-source program
+
+      let_lin x = (ELoc 0 "r") in
+        (ELet (ERegion "r" (EI32 5)) (EDrop (EVar 1)))
+
+    types under the *unstrengthened* L1 judgment at R = ["r"]: the
+    outer let_lin binds x : TString "r"; the body typechecks because
+    [T_Var_Lin_L1] permitted using x at R = [] (after the inner
+    [ERegion "r" ...] popped "r"). This is the soundness gap noted in
+    [PRESERVATION-DESIGN.md §4.8].
+
+    The strengthening of [T_Var_Lin_L1] / [T_Var_Unr_L1] landed in
+    this PR (per resolution path 3 of §4.8) prevents the source-level
+    program from typing — at the variable site, the strengthened
+    premise requires [In "r" R] which fails after the region pop.
+
+    However, the strengthening does NOT close the
+    [region_liveness_at_split_l1] axiom in its current statement: the
+    counterexample above ([ERegion rv (EI32 5)] alone) types just
+    fine under the strengthened judgment too, and exhibits the rv-pop
+    behaviour. Closing the axiom additionally requires either:
+
+    (i)  Restating with a side condition — e.g. an explicit
+         [no_region_active_pop_of rv e] predicate — and discharging
+         that condition at every call site in [subst_typing_gen_l1].
+         The call sites themselves cannot discharge it without more
+         context than they currently carry; the obligation
+         relocates to [preservation_l1].
+
+    (ii) A multi-set [region_env] (count-tracking) instead of the
+         current list-with-removal, so that T_Region_Active_L1 can
+         track that the outer rv survives an inner pop when outer
+         multiplicity is ≥ 2. Substantial L1 redesign.
+
+    (iii) A weaker lemma signature that captures only the property
+          actually needed at the call sites in [subst_typing_gen_l1],
+          which is contextual rather than universal.
+
+    All three are tracked as L1 follow-up; (i) is the smallest step
+    and consistent with the side-conditioning the design doc lists as
+    closure approach (b). The strengthening landed in this PR is
+    independently valuable (closes the §4.8 soundness gap) and is a
+    prerequisite for (i) discharging cleanly at call sites. *)
 Axiom region_liveness_at_split_l1 :
   forall R G e T R' G' rv,
     R; G |=L1 e : T -| R'; G' ->
@@ -929,11 +1003,15 @@ Proof.
   (* T_Unit_L1, T_Bool_L1, T_I32_L1 *)
   1-3: (assert (u_out = u_in) by congruence; subst; constructor).
 
-  (* T_Var_Lin_L1 *)
-  - destruct (Nat.eq_dec i k0) as [->|Hne].
+  (* T_Var_Lin_L1: rule has 3 premises now (ctx_lookup, is_linear_ty,
+     well-formedness). Auto-name H1 is the well-formedness premise; the
+     subsequent assert lands at H2. R is unchanged by the substitution,
+     so Hwf carries over verbatim. *)
+  - rename H1 into Hwf.
+    destruct (Nat.eq_dec i k0) as [->|Hne].
     + rewrite Nat.eqb_refl.
-      assert (T = Tsub /\ u_in = false) by (unfold ctx_lookup in H; split; congruence).
-      destruct H1 as [-> ->].
+      assert (T = Tsub /\ u_in = false) as Heq by (unfold ctx_lookup in H; split; congruence).
+      destruct Heq as [-> ->].
       rewrite remove_at_mark_used_self. exact Hv_type.
     + rewrite (proj2 (Nat.eqb_neq i k0) Hne).
       destruct (Nat.ltb_spec k0 i) as [Hlt|Hge].
@@ -947,15 +1025,18 @@ Proof.
            replace (S (i - 1)) with i by lia.
            unfold ctx_lookup in H. exact H.
         -- exact H0.
+        -- exact Hwf.
       * assert (i < k0) by lia.
         rewrite remove_at_ctx_mark_used_lt by lia.
         eapply T_Var_Lin_L1.
         -- unfold ctx_lookup. rewrite nth_error_remove_at_lt by lia.
            unfold ctx_lookup in H. exact H.
         -- exact H0.
+        -- exact Hwf.
 
-  (* T_Var_Unr_L1 *)
-  - destruct (Nat.eq_dec i k0) as [->|Hne].
+  (* T_Var_Unr_L1: same renaming as above. *)
+  - rename H1 into Hwf.
+    destruct (Nat.eq_dec i k0) as [->|Hne].
     + exfalso. unfold ctx_lookup in H. rewrite Hk_in in H.
       injection H as <- <-. rewrite Hlin in H0. discriminate.
     + rewrite (proj2 (Nat.eqb_neq i k0) Hne).
@@ -965,10 +1046,12 @@ Proof.
            replace (S (i - 1)) with i by lia.
            unfold ctx_lookup in H. exact H.
         -- exact H0.
+        -- exact Hwf.
       * assert (i < k0) by lia. eapply T_Var_Unr_L1.
         -- unfold ctx_lookup. rewrite nth_error_remove_at_lt by lia.
            unfold ctx_lookup in H. exact H.
         -- exact H0.
+        -- exact Hwf.
 
   (* T_Loc_L1 *)
   - assert (u_out = u_in) by congruence; subst. constructor. assumption.

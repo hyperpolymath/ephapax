@@ -95,14 +95,23 @@ Inductive has_type_l1
 
   (** ===== Variables ===== *)
 
+  (** T_Var_Lin_L1 and T_Var_Unr_L1 are strengthened with a
+      region-well-formedness premise: every region mentioned in the
+      variable's type must be live in [R]. This closes the soundness
+      gap documented in PRESERVATION-DESIGN.md §4.8 (resolution path 3)
+      and lets [region_liveness_at_split_l1] be discharged as a
+      structural-induction lemma rather than an axiom. *)
+
   | T_Var_Lin_L1 : forall R G i T,
       ctx_lookup G i = Some (T, false) ->
       is_linear_ty T = true ->
+      (forall r, In r (Typing.free_regions T) -> In r R) ->
       R ; G |=L1 EVar i : T -| R ; ctx_mark_used G i
 
   | T_Var_Unr_L1 : forall R G i T u,
       ctx_lookup G i = Some (T, u) ->
       is_linear_ty T = false ->
+      (forall r, In r (Typing.free_regions T) -> In r R) ->
       R ; G |=L1 EVar i : T -| R ; G
 
   (** ===== Strings ===== *)

@@ -46,14 +46,34 @@ for refutation budgets (`docs/proof-debt.adoc` §(b) in that repo).
 
 == (c) Necessary axiom
 
-No entries. `formal/Semantics.v` contains zero Coq `Axiom`
-declarations.
+`formal/Semantics.v` contains zero Coq `Axiom` declarations.
 
 * The "Axiom cases" mentioned in comments at `formal/Semantics.v:8619`
   and `formal/Semantics.v:9225` refer to the *axiomatic step rules*
   `S_StringNew` / `S_StringConcat` (operational-semantics primitives
   that produce `ELoc l r` and require explicit reconstruction in
   preservation), not Coq `Axiom` declarations.
+
+=== `idris2/src/Main.idr:21` — `%default partial`
+
+* **Kind**: extraction-boundary IO non-termination. The
+  ephapax-affine CLI driver `idris2/src/Main.idr` reads files,
+  writes outputs, and exits via `System.exitWith`. None of these
+  operations can be proven total within Idris2 0.8.0 without a
+  foreign-totality oracle for system primitives.
+* **Justification**: standard practice for CLI `Main` modules in
+  Idris2. The non-totality is structurally inherited from
+  `System.File.*` and `System.exitWith`. Discharging would require
+  oracles for the OS (file existence at read time, disk space at
+  write time, process termination).
+* **Scope**: limited to the CLI driver entry point. The pure
+  pipeline (`Ephapax.IR.*`, `Ephapax.Parse.*`,
+  `Ephapax.Affine.Typecheck`, `Ephapax.Affine.Emit`) is total under
+  the implicit (per-module) `%default total` of those modules.
+* **Citation**: this pattern matches the
+  link:https://github.com/hyperpolymath/boj-server[boj-server]
+  backend-assurance harness's handling of IO-bearing entry points
+  — see `boj-server/docs/proof-debt.md` for the reference shape.
 
 == (d) DEBT — actively to be closed
 

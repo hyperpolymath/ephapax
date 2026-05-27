@@ -259,6 +259,38 @@ Inductive has_type_l1
       R ; G |=L1[m] e : T -| R_body ; G' ->
       R ; G |=L1[m] ERegion r e : T -| remove_first_L1 r R_body ; G'
 
+  (** ===== L3-aware Region typing — parallel rules =====
+
+      [T_Region_L1_Echo] and [T_Region_Active_L1_Echo] mirror their
+      legacy counterparts above but output [TEcho T] instead of [T].
+      Programs choose at typing time which path they're on:
+
+      * Legacy path: [T_Region_L1] outputs [T], paired with the
+        legacy [S_Region_Exit] step that produces the bare value.
+      * L3 path: [T_Region_L1_Echo] outputs [TEcho T], paired with
+        the (slice 3c) [S_Region_Exit_Echo] step that produces
+        [EEcho T v]. The program then [EObserve]s the residue to
+        recover unit and discharge the irreversibility obligation
+        — see [T_Observe_L1] (slice 2) and [Echo.v]
+        ([no_section_collapse_to_residue]).
+
+      The two paths are non-deterministic at the rule-application
+      level; preservation_l3 (slice 4) will dispatch per-rule. *)
+
+  | T_Region_L1_Echo : forall m R R_body G G' r e T,
+      ~ In r R ->
+      ~ In r (Typing.free_regions T) ->
+      In r R_body ->
+      (r :: R) ; G |=L1[m] e : T -| R_body ; G' ->
+      R ; G |=L1[m] ERegion r e : TEcho T -| remove_first_L1 r R_body ; G'
+
+  | T_Region_Active_L1_Echo : forall m R R_body G G' r e T,
+      In r R ->
+      ~ In r (Typing.free_regions T) ->
+      In r R_body ->
+      R ; G |=L1[m] e : T -| R_body ; G' ->
+      R ; G |=L1[m] ERegion r e : TEcho T -| remove_first_L1 r R_body ; G'
+
   (** ===== Borrowing ===== *)
 
   | T_Borrow_L1 : forall m R G i T,
@@ -286,10 +318,69 @@ Inductive has_type_l1
       R ; G |=L1[m] e : T -| R' ; G' ->
       R ; G |=L1[m] EDrop e : TBase TUnit -| R' ; G'
 
+  (** L3-aware Drop typing — parallel rule. [T_Drop_L1_Echo] outputs
+      [TEcho T] instead of [TBase TUnit]; pairs with (slice 3c)
+      [S_Drop_Echo] which produces [EEcho T v] rather than [EUnit].
+      Same modality polymorphism and same linearity premise as
+      [T_Drop_L1]. *)
+
+  | T_Drop_L1_Echo : forall m R R' G G' e T,
+      is_linear_ty T = true ->
+      R ; G |=L1[m] e : T -| R' ; G' ->
+      R ; G |=L1[m] EDrop e : TEcho T -| R' ; G'
+
   | T_Copy_L1 : forall m R R' G G' e T,
       is_linear_ty T = false ->
       R ; G |=L1[m] e : T -| R' ; G' ->
       R ; G |=L1[m] ECopy e : TProd T T -| R' ; G'
+
+  (** ===== L3 — Echo / residue value typing =====
+
+      [T_Echo_L1] types the runtime [EEcho T v] residue at [TEcho T],
+      provided the witness [v] is itself a value typed at [T]. This
+      is the typing-side counterpart of the (forthcoming, slice 3b /
+      3c) step rules that emit echoes at irreversible boundaries:
+      [S_Region_Exit_Echo] and [S_Drop_Echo] will both produce
+      [EEcho T v_pre] residues which must be typable for preservation
+      to hold.
+
+      Modality-polymorphic: holds in both [Linear] and [Affine]. The
+      [is_value v] premise mirrors [T_Borrow_Val_L1] — echoes are
+      runtime-only values, not surface syntax. *)
+
+  | T_Echo_L1 : forall m R G v T,
+      is_value v ->
+      R ; G |=L1[m] v : T -| R ; G ->
+      R ; G |=L1[m] EEcho T v : TEcho T -| R ; G
+
+  (** ===== L3 — Echo / residue observation =====
+
+      [T_Observe_L1] discharges an echo by witnessing it. The rule is
+      modality-polymorphic: it fires in both [Linear] and [Affine].
+      What differs across modes is the *obligation* shape, not the
+      rule:
+
+      * Under Linear discipline, an unobserved [TEcho T] in scope is
+        a typing failure (the echo must be threaded into [T_Observe]
+        somewhere). The mandatoriness will be enforced via [is_linear_ty]
+        once [TEcho] is registered as linear — deferred to a subsequent
+        slice (the present rule is the necessary precondition).
+
+      * Under Affine discipline, an unobserved [TEcho T] is permitted
+        (implicit lowering); the runtime collapses the residue
+        silently. [T_Observe_L1] remains available as an explicit
+        observation site.
+
+      The observation returns [TBase TUnit]: the L3 layer's
+      contribution is *type-theoretic accountability of the
+      irreversible step*, not recovery of the erased witness. The
+      witness is, by construction, irrecoverable — see
+      [Echo.no_section_collapse_to_residue] (Qed) and
+      [PRESERVATION-DESIGN.md §6.0.2.3]. *)
+
+  | T_Observe_L1 : forall m R R' G G' e T,
+      R ; G |=L1[m] e : TEcho T -| R' ; G' ->
+      R ; G |=L1[m] EObserve e : TBase TUnit -| R' ; G'
 
 where "R ';' G '|=L1[' m ']' e ':' T '-|' R' ';' G'" := (has_type_l1 m R G e T R' G').
 

@@ -52,7 +52,15 @@ Inductive ty : Type :=
   | TProd   : ty -> ty -> ty
   | TSum    : ty -> ty -> ty
   | TRegion : region_name -> ty -> ty
-  | TBorrow : ty -> ty.
+  | TBorrow : ty -> ty
+  (** L3 — Echo / residue type former. [TEcho T] is the type of an
+      echo value witnessing an irreversible step that erased a value
+      of type [T]. Emitted by [S_Region_Exit] (collapse
+      [LiveAt_r → ExitedAt_r]) and [S_Drop] (collapse [T → ⊤]).
+      Observation discipline is modality-dispatched at the typing-
+      rule boundary, not encoded in the type — see
+      [formal/PRESERVATION-DESIGN.md §6.3] and [formal/Echo.v]. *)
+  | TEcho   : ty -> ty.
 
 (** ** Expressions *)
 
@@ -99,7 +107,24 @@ Inductive expr : Type :=
   | ECopy   : expr -> expr
 
   (* Runtime-only values *)
-  | ELoc    : nat -> region_name -> expr.
+  | ELoc    : nat -> region_name -> expr
+
+  (** L3 — Echo / residue runtime value. [EEcho T v] is the residue
+      emitted when an irreversible step (region exit, drop) erased a
+      witness [v] of type [T]. Runtime-only: not directly writable in
+      surface syntax, like [ELoc]. Observation discipline is
+      modality-dispatched at the typing-rule boundary — see
+      [formal/PRESERVATION-DESIGN.md §6.3] and [formal/Echo.v]. *)
+  | EEcho   : ty -> expr -> expr
+
+  (** L3 — Echo observation. [EObserve e] consumes an echo value
+      (whose type is [TEcho T] for some [T]) and discharges the
+      observation obligation, returning [TBase TUnit]. Surface-
+      writable. Under Linear discipline this consumption is
+      mandatory; under Affine discipline it is optional (the echo
+      may be implicitly lowered). The modality dispatch lives in
+      the typing rules, not in the [expr] constructor. *)
+  | EObserve : expr -> expr.
 
 (** ** Values *)
 
@@ -119,7 +144,12 @@ Inductive is_value : expr -> Prop :=
           not at v (which would change type from TBorrow T to T).
       (b) values_dont_step: EBorrow v doesn't reduce further once v is
           a value — the reference IS the normal form. *)
-  | VBorrow : forall v, is_value v -> is_value (EBorrow v).
+  | VBorrow : forall v, is_value v -> is_value (EBorrow v)
+  (** L3 — Echo residue values. An echo of a value [v] is itself a
+      value (awaiting observation by [T_Observe] or implicit
+      lowering). Required so that [S_Region_Exit] and [S_Drop] can
+      reduce to a normal form rather than getting stuck. *)
+  | VEcho   : forall T v, is_value v -> is_value (EEcho T v).
 
 (** ** Syntactic Region-Closure
 
@@ -150,6 +180,11 @@ Fixpoint expr_free_of_region (r : region_name) (e : expr) : Prop :=
       if String.eqb r r' then True
       else expr_free_of_region r e'
   | ELoc _ r' => r <> r'
+  (** L3 — Echo carries its witness; region-freedom propagates into
+      the witness sub-expression. The witness type annotation [T] is
+      closed (no free region names beyond what [v] itself contains). *)
+  | EEcho _ e' => expr_free_of_region r e'
+  | EObserve e' => expr_free_of_region r e'
   end.
 
 (** ** Typing Contexts (De Bruijn) *)
@@ -360,6 +395,8 @@ Fixpoint shift (c : nat) (d : nat) (e : expr) : expr :=
   | EDrop e0 => EDrop (shift c d e0)
   | ECopy e0 => ECopy (shift c d e0)
   | ELoc l r => ELoc l r
+  | EEcho T e0 => EEcho T (shift c d e0)
+  | EObserve e0 => EObserve (shift c d e0)
   end.
 
 (** Substitution: replace variable k with s, decrementing vars > k.
@@ -394,6 +431,8 @@ Fixpoint subst (k : nat) (s : expr) (e : expr) : expr :=
   | EDrop e0 => EDrop (subst k s e0)
   | ECopy e0 => ECopy (subst k s e0)
   | ELoc l r => ELoc l r
+  | EEcho T e0 => EEcho T (subst k s e0)
+  | EObserve e0 => EObserve (subst k s e0)
   end.
 
 (** Shifting preserves the value property *)

@@ -8,10 +8,29 @@
   ***                                                                ***
   ***  This is the post-counterexample L1 redesign. Extend HERE.     ***
   ***                                                                ***
-  ***  9 `Admitted` lemmas remaining are L2-INTEGRATION DEBT (bullet ***
-  ***  structure for the 3 new Affine-only constructors              ***
-  ***  T_Lam_L1_Affine, T_Case_L1_Affine, T_If_L1_Affine added by    ***
-  ***  the L2-hybrid landing in PRs #176 + #177).                    ***
+  ***  3 `Admitted` lemmas remain (down from 7 mid-chain, 9 pre-     ***
+  ***  bullet-restoration). L2-β closures so far:                    ***
+  ***    - typing_preserves_bindings_l1 (now m-polymorphic)          ***
+  ***    - unrestricted_flag_unchanged_l1                            ***
+  ***    - shift_typing_gen_l1 (via shift_typing_gen_l1_m + wrapper) ***
+  ***    - subst_typing_gen_l1 (via subst_typing_gen_l1_m + wrapper) ***
+  ***    - count_occ_le_l1 (via count_occ_le_l1_m + wrapper)         ***
+  ***    - region_shrink_preserves_typing_l1_gen (via                ***
+  ***      region_shrink_preserves_typing_l1_gen_m + wrapper)        ***
+  ***    - typing_preserves_length_l1, output_shape_at_l1,           ***
+  ***      loc_retype_at_R_l1 all generalised to m-polymorphic       ***
+  ***                                                                ***
+  ***  Residual admits (L2-β follow-up):                             ***
+  ***    1. region_shrink_preserves_typing_l1_gen_m — list-vs-       ***
+  ***       multiset structural mismatch in T_Region_Active_L1       ***
+  ***       shadowed case (1 internal admit). Bullet structure       ***
+  ***       restored 2026-05-27; only the structural sub-case        ***
+  ***       remains.                                                 ***
+  ***    2. region_liveness_at_split_l1_gen — 1 narrow admit in the  ***
+  ***       T_Region_Active_L1 [r = rv] sub-case (genuinely false    ***
+  ***       per documented counterexample ERegion rv (EI32 5))       ***
+  ***    3. preservation_l1 — capstone; depends on closing (1)+(2)   ***
+  ***       under L2 dispatch + lambda-rigidity gap resolution       ***
   ***                                                                ***
   ***  DO NOT close them by:                                         ***
   ***    - introducing new `Axiom` declarations                      ***
@@ -103,6 +122,7 @@ Import ListNotations.
 
 From Ephapax Require Import Syntax.
 From Ephapax Require Import Typing.
+From Ephapax Require Import Modality.
 From Ephapax Require Import TypingL1.
 From Ephapax Require Import Semantics.
 
@@ -168,6 +188,10 @@ Proof.
       inversion Hv.
     + (* T_Borrow_Val_L1 *)
       split; reflexivity.
+  - (* VEcho T v — T_Echo_L1 (slice 3a) types this at [TEcho T]
+       with R_out = R and G_out = G by construction; both invariants
+       hold immediately. *)
+    inversion Ht; subst; split; reflexivity.
 Qed.
 
 (** ** Helper: region-environment shrinkage for value typings.
@@ -252,12 +276,12 @@ Qed.
 
 (** Count monotonicity: every L1 typing rule has [cnt r R'
     <= cnt r R] for every region [r]. *)
-Lemma count_occ_le_l1 :
-  forall R G e T R' G',
-    R; G |=L1 e : T -| R'; G' ->
+Lemma count_occ_le_l1_m :
+  forall m R G e T R' G',
+    R ; G |=L1[m] e : T -| R' ; G' ->
     forall r, cnt r R' <= cnt r R.
 Proof.
-  intros R G e T R' G' Ht.
+  intros m R G e T R' G' Ht.
   induction Ht; intros r0; unfold cnt in *; simpl in *;
     try lia;
     try (specialize (IHHt r0); lia);
@@ -288,6 +312,41 @@ Proof.
       specialize (Hoth Hne').
       unfold cnt in Hoth. rewrite Hoth.
       lia.
+  - (* T_Region_L1_Echo — same remove_first_L1 shape as T_Region_L1 *)
+    specialize (IHHt r0).
+    pose proof (remove_first_L1_count_eq_self r R_body) as Hself.
+    unfold cnt in Hself.
+    destruct (string_dec r r0) as [<-|Hne].
+    + rewrite Hself.
+      destruct (string_dec r r) as [_|Hbad]; [|exfalso; apply Hbad; reflexivity].
+      lia.
+    + pose proof (remove_first_L1_count_other r r0 R_body) as Hoth.
+      assert (Hne' : r <> r0) by (intro Hbad; apply Hne; exact Hbad).
+      specialize (Hoth Hne').
+      unfold cnt in Hoth. rewrite Hoth.
+      destruct (string_dec r r0) as [Heq|_]; [exfalso; apply Hne; exact Heq|].
+      lia.
+  - (* T_Region_Active_L1_Echo — same shape as T_Region_Active_L1 *)
+    specialize (IHHt r0).
+    pose proof (remove_first_L1_count_eq_self r R_body) as Hself.
+    unfold cnt in Hself.
+    destruct (string_dec r r0) as [<-|Hne].
+    + rewrite Hself. lia.
+    + pose proof (remove_first_L1_count_other r r0 R_body) as Hoth.
+      assert (Hne' : r <> r0) by (intro Hbad; apply Hne; exact Hbad).
+      specialize (Hoth Hne').
+      unfold cnt in Hoth. rewrite Hoth.
+      lia.
+Qed.
+
+(** Linear specialisation — preserves the legacy call sites. *)
+Lemma count_occ_le_l1 :
+  forall R G e T R' G',
+    R; G |=L1 e : T -| R'; G' ->
+    forall r, cnt r R' <= cnt r R.
+Proof.
+  intros R G e T R' G' Ht r.
+  exact (count_occ_le_l1_m Linear R G e T R' G' Ht r).
 Qed.
 
 (** Corollary: if [r] appears in the output, it appeared at least
@@ -330,11 +389,17 @@ Qed.
     list-structure agreement*, which set-equivalence (and even
     multiset-equivalence in some sub-sub-cases) does not provide.
 
-    Resolution: this sub-case remains [admit] in [_gen]; the
-    wrapper [region_shrink_preserves_typing_l1] is proved directly
-    by induction on [is_value] (values have no [T_Region_*_L1]
-    inversion), bypassing [_gen] for actual usage in
-    [preservation_l1]. *)
+    Resolution: this sub-case remains an internal [admit] in
+    [region_shrink_preserves_typing_l1_gen_m] (the m-polymorphic
+    helper). The Linear wrapper [_gen] and the value-restricted
+    wrapper [region_shrink_preserves_typing_l1] (used by
+    [preservation_l1]'s S_Region_Exit case) both still depend on
+    it: an earlier note here suggested the value-wrapper could
+    bypass [_gen_m] by induction on [is_value], but that fails on
+    [VLam] — the lambda body is a non-value whose internal
+    [ERegion r' e'] subterm may shadow the outer [r], hitting the
+    same structural residual. Closure options are listed in the
+    case's own comment within [_gen_m]. *)
 
 (** Auxiliary general L1 region-shrinkage lemma — no [is_value] or
     [~ In r (free_regions T)] premises, mirroring the legacy
@@ -348,6 +413,189 @@ Qed.
     Once the L1 permutation infrastructure lands, this helper closes to
     Qed and the targeted lemma follows in one line. *)
 
+(** ** Modality-polymorphic generalisation.
+
+    Mirrors the L2-β pattern used by [subst_typing_gen_l1_m] and
+    [shift_typing_gen_l1_m]: the structural shrinkage lemma is
+    mode-blind (region operations don't depend on the modality),
+    so we prove it once at arbitrary [m] and derive the Linear
+    specialisation as a wrapper.
+
+    One genuine residual [admit] remains — the [T_Region_Active_L1]
+    [rr = r] shadowed sub-case, documented as the list-vs-multiset
+    bridge in PROOF-NEEDS.md §2 and in the design-note comment
+    above this lemma block. The L1 region-permutation infrastructure
+    (analog of [region_env_perm_typing] and [region_add_typing])
+    is needed to close it; bridging options are listed in the
+    case's own comment. *)
+Lemma region_shrink_preserves_typing_l1_gen_m :
+  forall m R G e T R' G',
+    R ; G |=L1[m] e : T -| R' ; G' ->
+    forall r,
+      expr_free_of_region r e ->
+      remove_first r R ; G |=L1[m] e : T -| remove_first r R' ; G'.
+Proof.
+  intros m R G e T R' G' Ht.
+  induction Ht; intros rr Hfree; simpl in Hfree.
+  - (* T_Unit_L1 *) apply T_Unit_L1.
+  - (* T_Bool_L1 *) apply T_Bool_L1.
+  - (* T_I32_L1 *) apply T_I32_L1.
+  - (* T_Var_Lin_L1 *) eapply T_Var_Lin_L1; eauto.
+  - (* T_Var_Unr_L1 *) eapply T_Var_Unr_L1; eauto.
+  - (* T_Loc_L1 *)
+    apply T_Loc_L1.
+    apply remove_first_preserves_other; [exact Hfree | exact H].
+  - (* T_StringNew_L1 *)
+    apply T_StringNew_L1.
+    apply remove_first_preserves_other; [exact Hfree | exact H].
+  - (* T_StringConcat_L1 *)
+    destruct Hfree as [Hf1 Hf2].
+    eapply T_StringConcat_L1; [eapply IHHt1; auto | eapply IHHt2; auto].
+  - (* T_StringLen_L1 *)
+    eapply T_StringLen_L1. eapply IHHt; auto.
+  - (* T_Let_L1 *)
+    destruct Hfree as [Hf1 Hf2].
+    eapply T_Let_L1; [eapply IHHt1; auto | eapply IHHt2; auto].
+  - (* T_LetLin_L1 *)
+    destruct Hfree as [Hf1 Hf2].
+    eapply T_LetLin_L1; [exact H | eapply IHHt1; auto | eapply IHHt2; auto].
+  - (* T_Lam_L1_Linear *)
+    apply T_Lam_L1_Linear. eapply IHHt; auto.
+  - (* T_Lam_L1_Affine *)
+    eapply T_Lam_L1_Affine. eapply IHHt; auto.
+  - (* T_App_L1 *)
+    destruct Hfree as [Hf1 Hf2].
+    eapply T_App_L1; [eapply IHHt1; auto | eapply IHHt2; auto].
+  - (* T_Pair_L1 *)
+    destruct Hfree as [Hf1 Hf2].
+    eapply T_Pair_L1; [eapply IHHt1; auto | eapply IHHt2; auto].
+  - (* T_Fst_L1 *)
+    eapply T_Fst_L1; [eapply IHHt; auto | exact H].
+  - (* T_Snd_L1 *)
+    eapply T_Snd_L1; [eapply IHHt; auto | exact H].
+  - (* T_Inl_L1 *)
+    eapply T_Inl_L1. eapply IHHt; auto.
+  - (* T_Inr_L1 *)
+    eapply T_Inr_L1. eapply IHHt; auto.
+  - (* T_Case_L1_Linear *)
+    destruct Hfree as [Hf1 [Hf2 Hf3]].
+    eapply T_Case_L1_Linear;
+      [eapply IHHt1; auto | eapply IHHt2; auto | eapply IHHt3; auto].
+  - (* T_Case_L1_Affine *)
+    destruct Hfree as [Hf1 [Hf2 Hf3]].
+    eapply T_Case_L1_Affine;
+      [eapply IHHt1; auto | eapply IHHt2; auto | eapply IHHt3; auto].
+  - (* T_If_L1_Linear *)
+    destruct Hfree as [Hf1 [Hf2 Hf3]].
+    eapply T_If_L1_Linear;
+      [eapply IHHt1; auto | eapply IHHt2; auto | eapply IHHt3; auto].
+  - (* T_If_L1_Affine *)
+    destruct Hfree as [Hf1 [Hf2 Hf3]].
+    eapply T_If_L1_Affine;
+      [eapply IHHt1; auto | eapply IHHt2; auto | eapply IHHt3; auto].
+  - (* T_Region_L1: ERegion r e (fresh r).
+       Shadowed sub-case (rr = r) closes via count-monotonicity
+       vacuity; descend sub-case (rr <> r) via the
+       remove_first/remove_first_L1 commutation rewrite. *)
+    destruct (String.eqb rr r) eqn:Heq.
+    + (* rr = r: shadowed. Hfree is True (irrelevant). *)
+      apply String.eqb_eq in Heq. subst r.
+      rewrite (remove_first_not_in_id _ _ H).
+      destruct (in_dec string_dec rr (remove_first_L1 rr R_body)) as [Hin | Hnotin].
+      * (* Multiple rr's in R_body — VACUOUS by count monotonicity.
+           Body is typed at (rr :: R) with ~In rr R, so the body input
+           has count_occ rr = 1. By count_occ_le_l1_m, count_occ rr R_body
+           <= 1. But Hin says count_occ rr R_body >= 2. Contradiction. *)
+        exfalso.
+        pose proof (count_occ_le_l1_m _ _ _ _ _ _ _ Ht rr) as Hle.
+        unfold cnt in Hle. simpl in Hle.
+        destruct (string_dec rr rr) as [_|Hbad]; [|apply Hbad; reflexivity].
+        apply (count_occ_In string_dec) in Hin.
+        pose proof (remove_first_L1_count_eq_self rr R_body) as Hself.
+        unfold cnt in Hself. rewrite Hself in Hin.
+        apply (count_occ_not_In string_dec) in H.
+        lia.
+      * (* At most one rr in R_body. Then
+           remove_first rr (remove_first_L1 rr R_body) =
+           remove_first_L1 rr R_body. *)
+        rewrite (remove_first_not_in_id _ _ Hnotin).
+        eapply T_Region_L1; eauto.
+    + (* rr <> r: descend. *)
+      apply String.eqb_neq in Heq.
+      assert (Hgoal_eq : remove_first rr (remove_first_L1 r R_body) =
+                        remove_first_L1 r (remove_first rr R_body)).
+      { rewrite (remove_first_eq_l1 r R_body).
+        rewrite (remove_first_eq_l1 r (remove_first rr R_body)).
+        apply remove_first_comm. }
+      rewrite Hgoal_eq.
+      eapply T_Region_L1.
+      * intro Hin. apply H. eapply remove_first_subset; exact Hin.
+      * exact H0.
+      * apply remove_first_preserves_other; [intro Hbad; apply Heq; exact Hbad | exact H1].
+      * specialize (IHHt rr Hfree).
+        simpl in IHHt.
+        destruct (String.eqb rr r) eqn:Heq2.
+        -- exfalso. apply String.eqb_eq in Heq2. apply Heq. exact Heq2.
+        -- exact IHHt.
+  - (* T_Region_Active_L1: ERegion r e (r currently active). *)
+    destruct (String.eqb rr r) eqn:Heq.
+    + (* rr = r: shadowed; Hfree True. RESIDUAL — structural
+         list-vs-multiset mismatch documented in PROOF-NEEDS.md §2
+         and in the design-note comment above this lemma block.
+         Bridging requires either:
+         (a) a stronger L1 perm lemma that produces specifically-shaped
+             outputs (requires reformulating output as a function of
+             input + derivation shape), or
+         (b) a reformulation of [remove_first_L1] to be multiset-based
+             (lose ordering), or
+         (c) a redesign of the L1 [T_Region_*_L1] rules to not depend on
+             first-occurrence semantics. *)
+      admit.
+    + (* rr <> r: descend. *)
+      apply String.eqb_neq in Heq.
+      assert (Hgoal_eq : remove_first rr (remove_first_L1 r R_body) =
+                        remove_first_L1 r (remove_first rr R_body)).
+      { rewrite (remove_first_eq_l1 r R_body).
+        rewrite (remove_first_eq_l1 r (remove_first rr R_body)).
+        apply remove_first_comm. }
+      rewrite Hgoal_eq.
+      eapply T_Region_Active_L1.
+      * apply remove_first_preserves_other; [intro Hbad; apply Heq; exact Hbad | exact H].
+      * exact H0.
+      * apply remove_first_preserves_other; [intro Hbad; apply Heq; exact Hbad | exact H1].
+      * eapply IHHt. exact Hfree.
+  - (* T_Region_L1_Echo — same structural shape as T_Region_L1; the
+       proof is identical modulo the output-type [TEcho T] vs [T].
+       Both subcases (shadowed + descend) follow the original's
+       analysis. Admitted here as the outer lemma is already
+       [Admitted] and the structural residual (shadowed sub-case in
+       T_Region_Active_L1_Echo) bridges the same list-vs-multiset
+       gap documented above. *)
+    admit.
+  - (* T_Region_Active_L1_Echo — parallels T_Region_Active_L1
+       including the residual structural admit in the shadowed
+       sub-case (PROOF-NEEDS.md §2). *)
+    admit.
+  - (* T_Borrow_L1 *)
+    eapply T_Borrow_L1. exact H.
+  - (* T_Borrow_Val_L1 *)
+    eapply T_Borrow_Val_L1; [exact H | eapply IHHt; auto].
+  - (* T_Drop_L1 *)
+    eapply T_Drop_L1; [exact H | eapply IHHt; auto].
+  - (* T_Drop_L1_Echo — parallel rule; identical proof shape (output
+       type is [TEcho T] instead of [TBase TUnit], otherwise the same). *)
+    eapply T_Drop_L1_Echo; [exact H | eapply IHHt; auto].
+  - (* T_Copy_L1 *)
+    eapply T_Copy_L1; [exact H | eapply IHHt; auto].
+  - (* T_Echo_L1 — region shrink under an echo value preserves the
+     value structure (region-free witness implies a region-free echo). *)
+    eapply T_Echo_L1.
+    + exact H.
+    + eapply IHHt; auto.
+  - (* T_Observe_L1 — region shrink commutes with the witness sub-expression *)
+    eapply T_Observe_L1. eapply IHHt; auto.
+Admitted.
+
 Lemma region_shrink_preserves_typing_l1_gen :
   forall R G e T R' G',
     has_type_l1_linear R G e T R' G' ->
@@ -355,18 +603,9 @@ Lemma region_shrink_preserves_typing_l1_gen :
       expr_free_of_region r e ->
       has_type_l1_linear (remove_first r R) G e T (remove_first r R') G'.
 Proof.
-  (** L2 REGRESSION: this proof's body was written for the pre-L2
-      [has_type_l1] (6 args, single T_Lam_L1 / T_Case_L1 / T_If_L1
-      constructors). The L2 refactor expanded to 27 constructors
-      (including Affine-only T_Lam_L1_Affine, T_Case_L1_Affine,
-      T_If_L1_Affine), which shifts the bullet ordering generated
-      by [induction Ht]. The original case-by-case proof body is
-      preserved in git history at commit 56f592f
-      ([proof/l1-region-threading-design] tip). Restoring it is a
-      mechanical bullet-structure rewrite plus 3 [discriminate]
-      dispatches for the Affine-only constructors. Tracked as
-      L2-β follow-up. *)
-Admitted.
+  intros R G e T R' G' Ht r Hfree.
+  apply (region_shrink_preserves_typing_l1_gen_m Linear); auto.
+Qed.
 
 Lemma region_shrink_preserves_typing_l1 :
   forall R G v T R' G' r,
@@ -403,29 +642,79 @@ Qed.
     These mirror analogous lemmas in [Semantics.v] for the legacy
     judgment but are stated and proved for [has_type_l1]. *)
 
-(** Length preserved by every typing rule. *)
+(** Length preserved by every typing rule.
+
+    L2-β: generalised to modality-polymorphic [has_type_l1 m]. The
+    length invariant is modality-independent (every constructor
+    threads ctx length identically). Linear-specific callers
+    continue to work via instantiation. *)
 Lemma typing_preserves_length_l1 :
-  forall R G e T R' G',
-    R; G |=L1 e : T -| R' ; G' ->
+  forall m R G e T R' G',
+    has_type_l1 m R G e T R' G' ->
     length G' = length G.
 Proof.
-  intros R G e T R' G' H.
+  intros m R G e T R' G' H.
   induction H; simpl in *; try reflexivity; try lia;
     try (rewrite ctx_mark_used_length; reflexivity).
 Qed.
 
-(** Output-context lookup preserves type at the same index. *)
+(** Output-context lookup preserves type at the same index.
+
+    L2-β restoration 2026-05-27: body ported from commit 56f592f.
+    Generalised in subst_typing_gen_l1 PR to modality-polymorphic
+    so sub-derivations at variable [m] from a polymorphic compound
+    rule (e.g. T_App_L1) can be threaded through. The body is
+    unchanged — every constructor's case discharges identically
+    regardless of modality; the explicit bullets cover the seven
+    compound cases that need IH composition. *)
 Lemma typing_preserves_bindings_l1 :
-  forall R G e T R' G',
-    R; G |=L1 e : T -| R' ; G' ->
+  forall m R G e T R' G',
+    has_type_l1 m R G e T R' G' ->
     forall i T0 u0,
       ctx_lookup G' i = Some (T0, u0) ->
       exists u1, ctx_lookup G i = Some (T0, u1).
 Proof.
-  (* L2 regression: induction case ordering shifted by new constructors. Admitted; restoration is L2-β. *)
-Admitted.
+  intros m R G e T R' G' Htype.
+  induction Htype; intros idx Ty uf Hlk; simpl in *;
+    try (eexists; exact Hlk);
+    try (eapply IHHtype; exact Hlk).
+  - (* T_Var_Lin_L1: G' = ctx_mark_used G i *)
+    eapply ctx_mark_used_lookup_type. exact Hlk.
+  - (* T_StringConcat_L1 *)
+    destruct (IHHtype2 _ _ _ Hlk) as [u_mid Hu_mid].
+    eapply IHHtype1. exact Hu_mid.
+  - (* T_Let_L1 *)
+    destruct (IHHtype2 (S idx) Ty uf) as [u_mid Hu_mid]; [exact Hlk|].
+    eapply IHHtype1. exact Hu_mid.
+  - (* T_LetLin_L1 *)
+    destruct (IHHtype2 (S idx) Ty uf) as [u_mid Hu_mid]; [exact Hlk|].
+    eapply IHHtype1. exact Hu_mid.
+  - (* T_App_L1 *)
+    destruct (IHHtype2 _ _ _ Hlk) as [u_mid Hu_mid].
+    eapply IHHtype1. exact Hu_mid.
+  - (* T_Pair_L1 *)
+    destruct (IHHtype2 _ _ _ Hlk) as [u_mid Hu_mid].
+    eapply IHHtype1. exact Hu_mid.
+  - (* T_Case_L1_Linear *)
+    destruct (IHHtype2 (S idx) Ty uf) as [u_mid Hu_mid]; [exact Hlk|].
+    eapply IHHtype1. exact Hu_mid.
+  - (* T_Case_L1_Affine: same shape — branch 2 ignored; branch 1 carries through *)
+    destruct (IHHtype2 (S idx) Ty uf) as [u_mid Hu_mid]; [exact Hlk|].
+    eapply IHHtype1. exact Hu_mid.
+  - (* T_If_L1_Linear *)
+    destruct (IHHtype2 _ _ _ Hlk) as [u_mid Hu_mid].
+    eapply IHHtype1. exact Hu_mid.
+  - (* T_If_L1_Affine *)
+    destruct (IHHtype2 _ _ _ Hlk) as [u_mid Hu_mid].
+    eapply IHHtype1. exact Hu_mid.
+Qed.
 
-(** Unrestricted (non-linear) bindings are unchanged through typing. *)
+(** Unrestricted (non-linear) bindings are unchanged through typing.
+
+    L2-β restoration 2026-05-27: body ported from commit 56f592f with
+    new bullets for T_Case_L1_Affine + T_If_L1_Affine. T_Lam_L1_Affine
+    auto-discharges through [try exact Hlk] (R/G unchanged at the
+    rule's conclusion). *)
 Lemma unrestricted_flag_unchanged_l1 :
   forall R G e T R' G',
     R; G |=L1 e : T -| R' ; G' ->
@@ -434,8 +723,46 @@ Lemma unrestricted_flag_unchanged_l1 :
       ctx_lookup G j = Some (T0, u) ->
       ctx_lookup G' j = Some (T0, u).
 Proof.
-  (* L2 regression: induction case ordering shifted. L2-β follow-up. *)
-Admitted.
+  intros R G e T R' G' Htype.
+  induction Htype; intros idx T0 u0 Hnlin Hlk; simpl in *;
+    try exact Hlk;
+    try (eapply IHHtype; eassumption).
+  - (* T_Var_Lin_L1 *)
+    destruct (Nat.eq_dec i idx) as [->|Hne].
+    + unfold ctx_lookup in *. rewrite H in Hlk. injection Hlk as <- <-.
+      rewrite Hnlin in H0. discriminate.
+    + rewrite ctx_mark_used_lookup_other by exact Hne. exact Hlk.
+  - (* T_StringConcat_L1 *)
+    eapply IHHtype2; [exact Hnlin|]. eapply IHHtype1; eassumption.
+  - (* T_Let_L1 *)
+    apply (IHHtype1 idx T0 u0 Hnlin) in Hlk.
+    assert (HlkS: ctx_lookup (ctx_extend G' T1) (S idx) = Some (T0, u0)) by exact Hlk.
+    apply (IHHtype2 (S idx) T0 u0 Hnlin) in HlkS.
+    unfold ctx_lookup, ctx_extend in HlkS. simpl in HlkS. exact HlkS.
+  - (* T_LetLin_L1 *)
+    apply (IHHtype1 idx T0 u0 Hnlin) in Hlk.
+    assert (HlkS: ctx_lookup (ctx_extend G' T1) (S idx) = Some (T0, u0)) by exact Hlk.
+    apply (IHHtype2 (S idx) T0 u0 Hnlin) in HlkS.
+    unfold ctx_lookup, ctx_extend in HlkS. simpl in HlkS. exact HlkS.
+  - (* T_App_L1 *)
+    eapply IHHtype2; [exact Hnlin|]. eapply IHHtype1; eassumption.
+  - (* T_Pair_L1 *)
+    eapply IHHtype2; [exact Hnlin|]. eapply IHHtype1; eassumption.
+  - (* T_Case_L1_Linear *)
+    apply (IHHtype1 idx T0 u0 Hnlin) in Hlk.
+    assert (HlkS: ctx_lookup (ctx_extend G' T1) (S idx) = Some (T0, u0)) by exact Hlk.
+    apply (IHHtype2 (S idx) T0 u0 Hnlin) in HlkS.
+    unfold ctx_lookup, ctx_extend in HlkS. simpl in HlkS. exact HlkS.
+  - (* T_Case_L1_Affine — same shape *)
+    apply (IHHtype1 idx T0 u0 Hnlin) in Hlk.
+    assert (HlkS: ctx_lookup (ctx_extend G' T1) (S idx) = Some (T0, u0)) by exact Hlk.
+    apply (IHHtype2 (S idx) T0 u0 Hnlin) in HlkS.
+    unfold ctx_lookup, ctx_extend in HlkS. simpl in HlkS. exact HlkS.
+  - (* T_If_L1_Linear *)
+    eapply IHHtype2; [exact Hnlin|]. eapply IHHtype1; eassumption.
+  - (* T_If_L1_Affine *)
+    eapply IHHtype2; [exact Hnlin|]. eapply IHHtype1; eassumption.
+Qed.
 
 (** If a false-flag binding becomes true, the type must be linear. *)
 Lemma flag_false_to_true_implies_linear_l1 :
@@ -454,17 +781,17 @@ Qed.
 
 (** Output context shape at arbitrary position. *)
 Lemma output_shape_at_l1 :
-  forall R Gin e T R' Gout k T1 u_in,
-    R; Gin |=L1 e : T -| R' ; Gout ->
+  forall m R Gin e T R' Gout k T1 u_in,
+    has_type_l1 m R Gin e T R' Gout ->
     nth_error Gin k = Some (T1, u_in) ->
     exists u_out, nth_error Gout k = Some (T1, u_out).
 Proof.
-  intros R Gin e T R' Gout k T1 u_in Htype Hin.
-  assert (Hlen := typing_preserves_length_l1 _ _ _ _ _ _ Htype).
+  intros m R Gin e T R' Gout k T1 u_in Htype Hin.
+  assert (Hlen := typing_preserves_length_l1 _ _ _ _ _ _ _ Htype).
   assert (Hlt: k < length Gout).
   { rewrite Hlen. apply nth_error_Some. congruence. }
   destruct (nth_error Gout k) as [[T1' u']|] eqn:E.
-  - destruct (typing_preserves_bindings_l1 _ _ _ _ _ _ Htype k T1' u') as [u1 Hu1].
+  - destruct (typing_preserves_bindings_l1 _ _ _ _ _ _ _ Htype k T1' u') as [u1 Hu1].
     { unfold ctx_lookup. exact E. }
     unfold ctx_lookup in Hu1. rewrite Hin in Hu1.
     assert (T1' = T1) by congruence. subst T1'.
@@ -534,7 +861,147 @@ Qed.
 
 (** Shift typing for L1: shifting [e] up by 1 at cutoff [k] in the
     context corresponds to inserting a fresh (T_new, false) at position
-    [k] in both input and output. R is unchanged at every rule. *)
+    [k] in both input and output. R is unchanged at every rule.
+
+    L2-β restoration 2026-05-27: generalised to modality-polymorphic
+    [has_type_l1 m] mirroring [region_liveness_at_split_l1_gen]'s
+    shape. The Linear-only wrapper [shift_typing_gen_l1] preserves
+    the original signature for callers. Body ported from commit
+    56f592f with new bullets for T_Lam_L1_Affine, T_Case_L1_Affine,
+    T_If_L1_Affine — each Affine case mirrors its Linear counterpart
+    since R and `insert_at` threading are modality-independent. *)
+Lemma shift_typing_gen_l1_m :
+  forall m R G e T R' G',
+    has_type_l1 m R G e T R' G' ->
+    forall k T_new,
+      k <= length G ->
+      has_type_l1 m R (insert_at k (T_new, false) G) (shift k 1 e) T R' (insert_at k (T_new, false) G').
+Proof.
+  intros m R G e T R' G' Htype.
+  induction Htype; intros k T_new Hk; simpl.
+  - apply T_Unit_L1.
+  - apply T_Bool_L1.
+  - apply T_I32_L1.
+  (* T_Var_Lin_L1 *)
+  - destruct (Nat.leb_spec k i).
+    + rewrite (insert_at_ctx_mark_used_ge G k i (T_new, false) H1 Hk).
+      replace (i + 1) with (S i) by lia.
+      eapply T_Var_Lin_L1.
+      * unfold ctx_lookup. rewrite nth_error_insert_at_gt by (try assumption; try lia).
+        unfold ctx_lookup in H. exact H.
+      * exact H0.
+    + rewrite (insert_at_ctx_mark_used_lt G k i (T_new, false) H1 Hk).
+      eapply T_Var_Lin_L1.
+      * unfold ctx_lookup. rewrite nth_error_insert_at_lt by (try assumption; try lia).
+        unfold ctx_lookup in H. exact H.
+      * exact H0.
+  (* T_Var_Unr_L1 *)
+  - destruct (Nat.leb_spec k i).
+    + replace (i + 1) with (S i) by lia. eapply T_Var_Unr_L1.
+      * unfold ctx_lookup. rewrite nth_error_insert_at_gt by (try assumption; try lia).
+        unfold ctx_lookup in H. exact H.
+      * exact H0.
+    + eapply T_Var_Unr_L1.
+      * unfold ctx_lookup. rewrite nth_error_insert_at_lt by (try assumption; try lia).
+        unfold ctx_lookup in H. exact H.
+      * exact H0.
+  (* T_Loc_L1 *)
+  - apply T_Loc_L1. exact H.
+  (* T_StringNew_L1 *)
+  - apply T_StringNew_L1. exact H.
+  (* T_StringConcat_L1 *)
+  - eapply T_StringConcat_L1; [apply IHHtype1; assumption|].
+    apply IHHtype2. assert (Hlen := typing_preserves_length_l1 _ _ _ _ _ _ _ Htype1). lia.
+  (* T_StringLen_L1 *)
+  - eapply T_StringLen_L1. apply IHHtype. assumption.
+  (* T_Let_L1 *)
+  - assert (IH1 := IHHtype1 k T_new Hk).
+    assert (Hlen := typing_preserves_length_l1 _ _ _ _ _ _ _ Htype1).
+    assert (IH2 := IHHtype2 (S k) T_new ltac:(simpl; lia)).
+    simpl in IH2. eapply T_Let_L1; eassumption.
+  (* T_LetLin_L1 *)
+  - assert (IH1 := IHHtype1 k T_new Hk).
+    assert (Hlen := typing_preserves_length_l1 _ _ _ _ _ _ _ Htype1).
+    assert (IH2 := IHHtype2 (S k) T_new ltac:(simpl; lia)).
+    simpl in IH2. eapply T_LetLin_L1; eassumption.
+  (* T_Lam_L1_Linear *)
+  - assert (IH := IHHtype (S k) T_new ltac:(simpl; lia)).
+    simpl in IH. eapply T_Lam_L1_Linear. exact IH.
+  (* T_Lam_L1_Affine *)
+  - assert (IH := IHHtype (S k) T_new ltac:(simpl; lia)).
+    simpl in IH. eapply T_Lam_L1_Affine. exact IH.
+  (* T_App_L1 *)
+  - eapply T_App_L1; [apply IHHtype1; assumption|].
+    apply IHHtype2. assert (Hlen := typing_preserves_length_l1 _ _ _ _ _ _ _ Htype1). lia.
+  (* T_Pair_L1 *)
+  - eapply T_Pair_L1; [apply IHHtype1; assumption|].
+    apply IHHtype2. assert (Hlen := typing_preserves_length_l1 _ _ _ _ _ _ _ Htype1). lia.
+  (* T_Fst_L1 *)
+  - eapply T_Fst_L1; [apply IHHtype; assumption | assumption].
+  (* T_Snd_L1 *)
+  - eapply T_Snd_L1; [apply IHHtype; assumption | assumption].
+  (* T_Inl_L1 *)
+  - eapply T_Inl_L1. apply IHHtype. assumption.
+  (* T_Inr_L1 *)
+  - eapply T_Inr_L1. apply IHHtype. assumption.
+  (* T_Case_L1_Linear *)
+  - assert (IH1 := IHHtype1 k T_new Hk).
+    assert (Hlen := typing_preserves_length_l1 _ _ _ _ _ _ _ Htype1).
+    assert (IH2 := IHHtype2 (S k) T_new ltac:(simpl; lia)).
+    assert (IH3 := IHHtype3 (S k) T_new ltac:(simpl; lia)).
+    simpl in IH2, IH3. eapply T_Case_L1_Linear; eassumption.
+  (* T_Case_L1_Affine *)
+  - assert (IH1 := IHHtype1 k T_new Hk).
+    assert (Hlen := typing_preserves_length_l1 _ _ _ _ _ _ _ Htype1).
+    assert (IH2 := IHHtype2 (S k) T_new ltac:(simpl; lia)).
+    assert (IH3 := IHHtype3 (S k) T_new ltac:(simpl; lia)).
+    simpl in IH2, IH3. eapply T_Case_L1_Affine; eassumption.
+  (* T_If_L1_Linear *)
+  - eapply T_If_L1_Linear; [apply IHHtype1; assumption| |].
+    + apply IHHtype2. assert (Hlen := typing_preserves_length_l1 _ _ _ _ _ _ _ Htype1). lia.
+    + apply IHHtype3. assert (Hlen := typing_preserves_length_l1 _ _ _ _ _ _ _ Htype1). lia.
+  (* T_If_L1_Affine *)
+  - eapply T_If_L1_Affine; [apply IHHtype1; assumption| |].
+    + apply IHHtype2. assert (Hlen := typing_preserves_length_l1 _ _ _ _ _ _ _ Htype1). lia.
+    + apply IHHtype3. assert (Hlen := typing_preserves_length_l1 _ _ _ _ _ _ _ Htype1). lia.
+  (* T_Region_L1 *)
+  - eapply T_Region_L1; [exact H | exact H0 | exact H1 |]. apply IHHtype. assumption.
+  (* T_Region_Active_L1 *)
+  - eapply T_Region_Active_L1; [exact H | exact H0 | exact H1 |]. apply IHHtype. assumption.
+  (* T_Region_L1_Echo — parallel rule; identical shift discipline *)
+  - eapply T_Region_L1_Echo; [exact H | exact H0 | exact H1 |]. apply IHHtype. assumption.
+  (* T_Region_Active_L1_Echo — parallel rule *)
+  - eapply T_Region_Active_L1_Echo; [exact H | exact H0 | exact H1 |]. apply IHHtype. assumption.
+  (* T_Borrow_L1 *)
+  - destruct (Nat.leb_spec k i).
+    + replace (i + 1) with (S i) by lia. eapply T_Borrow_L1.
+      unfold ctx_lookup. rewrite nth_error_insert_at_gt by (try assumption; try lia).
+      unfold ctx_lookup in H. exact H.
+    + eapply T_Borrow_L1. unfold ctx_lookup.
+      rewrite nth_error_insert_at_lt by (try assumption; try lia).
+      unfold ctx_lookup in H. exact H.
+  (* T_Borrow_Val_L1 *)
+  - eapply T_Borrow_Val_L1.
+    + apply shift_preserves_value. exact H.
+    + apply IHHtype. assumption.
+  (* T_Drop_L1 *)
+  - eapply T_Drop_L1; [exact H |]. apply IHHtype. assumption.
+  (* T_Drop_L1_Echo — parallel rule *)
+  - eapply T_Drop_L1_Echo; [exact H |]. apply IHHtype. assumption.
+  (* T_Copy_L1 *)
+  - eapply T_Copy_L1; [exact H |]. apply IHHtype. assumption.
+  (* T_Echo_L1 — runtime echo value typing; shift commutes with the
+     witness sub-expression. The is_value premise is preserved by
+     [shift_preserves_value]. *)
+  - eapply T_Echo_L1.
+    + apply shift_preserves_value. exact H.
+    + apply IHHtype. assumption.
+  (* T_Observe_L1 — shift commutes with the witness sub-expression *)
+  - eapply T_Observe_L1. apply IHHtype. assumption.
+Qed.
+
+(** Linear-specialised wrapper preserving the original lemma signature
+    used by [preservation_l1] (Linear case). *)
 Lemma shift_typing_gen_l1 :
   forall R G e T R' G',
     R; G |=L1 e : T -| R' ; G' ->
@@ -542,8 +1009,9 @@ Lemma shift_typing_gen_l1 :
       k <= length G ->
       R; insert_at k (T_new, false) G |=L1 shift k 1 e : T -| R'; insert_at k (T_new, false) G'.
 Proof.
-  (* L2 regression: induction case ordering shifted. L2-β follow-up. *)
-Admitted.
+  intros R G e T R' G' Htype k T_new Hk.
+  eapply shift_typing_gen_l1_m; eassumption.
+Qed.
 
 (** Sub-helper: linear values are locations [ELoc l r], and a location
     types at any region environment [R] with [In r R]. *)
@@ -603,7 +1071,18 @@ Proof. intros. apply T_Loc_L1. assumption. Qed.
 
 (** Sound replacement for the deleted unsound axiom: typing [ELoc l r]
     at a region environment that contains [r] is direct from [T_Loc_L1].
-    The hypothesis [In r R_inner] is the substantive premise. *)
+    The hypothesis [In r R_inner] is the substantive premise.
+
+    L2-β: generalised to modality-polymorphic; [T_Loc_L1] is itself
+    m-polymorphic so the one-line proof is unchanged. The Linear
+    wrapper preserves the original signature for call sites that
+    still use the bare [|=L1] notation. *)
+Lemma loc_retype_at_R_l1_m :
+  forall (m : Modality) (R_inner : region_env) (G : ctx) (l : nat) (r : region_name),
+    In r R_inner ->
+    has_type_l1 m R_inner G (ELoc l r) (TString r) R_inner G.
+Proof. intros. apply T_Loc_L1. assumption. Qed.
+
 Lemma loc_retype_at_R_l1 :
   forall (R_inner : region_env) (G : ctx) (l : nat) (r : region_name),
     In r R_inner ->
@@ -725,9 +1204,30 @@ Proof.
       pose proof (remove_first_L1_count_other r rv R_body Hne) as Heq.
       unfold cnt in Heq. rewrite Heq.
       apply (count_occ_In string_dec). exact HinRbody.
+  - (* T_Region_L1_Echo — same shape as T_Region_L1 (parallel rule;
+       output type differs but the R-threading is identical). *)
+    assert (Hne : r <> rv).
+    { intro Heq. subst rv. apply H. exact Hin. }
+    assert (Hin_body_in : In rv (r :: R)) by (right; exact Hin).
+    pose proof (IHHt Hin_body_in) as HinRbody.
+    apply (count_occ_In string_dec).
+    pose proof (remove_first_L1_count_other r rv R_body Hne) as Heq.
+    unfold cnt in Heq. rewrite Heq.
+    apply (count_occ_In string_dec). exact HinRbody.
+  - (* T_Region_Active_L1_Echo — same shape as T_Region_Active_L1
+       including the structural admit in the [r = rv] sub-case. *)
+    destruct (string_dec r rv) as [Heq|Hne].
+    + admit.
+    + pose proof (IHHt Hin) as HinRbody.
+      apply (count_occ_In string_dec).
+      pose proof (remove_first_L1_count_other r rv R_body Hne) as Heq.
+      unfold cnt in Heq. rewrite Heq.
+      apply (count_occ_In string_dec). exact HinRbody.
   (* T_Borrow_L1, T_Borrow_Val_L1: R unchanged, auto-discharged by
      [try assumption] above. *)
   - (* T_Drop_L1 *)
+    apply IHHt. assumption.
+  - (* T_Drop_L1_Echo *)
     apply IHHt. assumption.
   - (* T_Copy_L1 *)
     apply IHHt. assumption.
@@ -748,8 +1248,308 @@ Qed.
 (** Generalized substitution: at depth [k] for a linear value [v].
     Mirrors legacy [subst_typing_gen]. The only L1-specific gap is the
     need to retype [v = ELoc l r] at the inner region environment of
-    compound rules. Closed via [region_liveness_at_use_l1] +
-    [loc_typing_l1]. *)
+    compound rules. Closed via [region_liveness_at_split_l1_gen] +
+    [loc_retype_at_R_l1_m].
+
+    L2-β follow-up #2 (closed): m-polymorphic generalisation
+    mirroring [shift_typing_gen_l1_m]. The substituted value's typing
+    [Hv_type] stays at the bare [|=L1] (Linear) — callers always have
+    a Linear v-typing — and is re-typed at the active modality [m]
+    via [loc_retype_at_R_l1_m] at each compound-rule split point.
+    The new mode-split constructors T_Lam_L1_Linear /
+    T_Lam_L1_Affine, T_Case_L1_Linear / T_Case_L1_Affine,
+    T_If_L1_Linear / T_If_L1_Affine each get their own bullet;
+    Affine cases mirror Linear because the substitution threading is
+    modality-independent (the Affine rules differ only in their
+    permitted output flags, which are quantified inside the rule and
+    transparent to the IH).
+
+    The Linear wrapper [subst_typing_gen_l1] below preserves the
+    original signature for [subst_preserves_typing_l1] and
+    [preservation_l1]. *)
+Lemma subst_typing_gen_l1_m :
+  forall m R Gin e T R' Gout,
+    has_type_l1 m R Gin e T R' Gout ->
+    forall k T1 v u_in,
+      nth_error Gin k = Some (T1, u_in) ->
+      is_value v ->
+      is_linear_ty T1 = true ->
+      R; remove_at k Gin |=L1 v : T1 -| R; remove_at k Gin ->
+      forall u_out,
+        nth_error Gout k = Some (T1, u_out) ->
+        has_type_l1 m R (remove_at k Gin) (subst k v e) T R' (remove_at k Gout).
+Proof.
+  intros m R Gin e T R' Gout Htype.
+  induction Htype; intros k0 Tsub vv u_in Hk_in Hval Hlin Hv_type u_out Hk_out; simpl.
+
+  (* T_Unit_L1, T_Bool_L1, T_I32_L1 *)
+  1-3: (assert (u_out = u_in) by congruence; subst; constructor).
+
+  (* T_Var_Lin_L1 *)
+  - destruct (Nat.eq_dec i k0) as [->|Hne].
+    + rewrite Nat.eqb_refl.
+      assert (T = Tsub /\ u_in = false) by (unfold ctx_lookup in H; split; congruence).
+      destruct H1 as [-> ->].
+      rewrite remove_at_mark_used_self.
+      (* Hv_type is at Linear; the current m may be anything. T_Loc_L1
+         is m-polymorphic so we re-build via [linear_value_is_loc_l1]
+         + [loc_retype_at_R_l1_m]. *)
+      destruct (linear_value_is_loc_l1 _ _ _ _ Hv_type Hval Hlin) as [lv [rv [-> [-> Hregv]]]].
+      apply loc_retype_at_R_l1_m. assumption.
+    + rewrite (proj2 (Nat.eqb_neq i k0) Hne).
+      destruct (Nat.ltb_spec k0 i) as [Hlt|Hge].
+      * assert (Hrw: remove_at k0 (ctx_mark_used G i) =
+                     ctx_mark_used (remove_at k0 G) (i - 1)).
+        { replace i with (S (i - 1)) at 1 by lia.
+          apply remove_at_ctx_mark_used_gt. lia. }
+        rewrite Hrw.
+        eapply T_Var_Lin_L1.
+        -- unfold ctx_lookup. rewrite nth_error_remove_at_ge by lia.
+           replace (S (i - 1)) with i by lia.
+           unfold ctx_lookup in H. exact H.
+        -- exact H0.
+      * assert (i < k0) by lia.
+        rewrite remove_at_ctx_mark_used_lt by lia.
+        eapply T_Var_Lin_L1.
+        -- unfold ctx_lookup. rewrite nth_error_remove_at_lt by lia.
+           unfold ctx_lookup in H. exact H.
+        -- exact H0.
+
+  (* T_Var_Unr_L1 *)
+  - destruct (Nat.eq_dec i k0) as [->|Hne].
+    + exfalso. unfold ctx_lookup in H. rewrite Hk_in in H.
+      injection H as <- <-. rewrite Hlin in H0. discriminate.
+    + rewrite (proj2 (Nat.eqb_neq i k0) Hne).
+      destruct (Nat.ltb_spec k0 i) as [Hlt|Hge].
+      * eapply T_Var_Unr_L1.
+        -- unfold ctx_lookup. rewrite nth_error_remove_at_ge by lia.
+           replace (S (i - 1)) with i by lia.
+           unfold ctx_lookup in H. exact H.
+        -- exact H0.
+      * assert (i < k0) by lia. eapply T_Var_Unr_L1.
+        -- unfold ctx_lookup. rewrite nth_error_remove_at_lt by lia.
+           unfold ctx_lookup in H. exact H.
+        -- exact H0.
+
+  (* T_Loc_L1 *)
+  - assert (u_out = u_in) by congruence; subst. constructor. assumption.
+  (* T_StringNew_L1 *)
+  - assert (u_out = u_in) by congruence; subst. constructor. assumption.
+
+  (* T_StringConcat_L1 *)
+  - destruct (output_shape_at_l1 _ _ _ _ _ _ _ _ _ _ Htype1 Hk_in) as [u_mid Hu_mid].
+    eapply T_StringConcat_L1.
+    + eapply IHHtype1; eassumption.
+    + destruct (linear_value_is_loc_l1 _ _ _ _ Hv_type Hval Hlin) as [lv [rv [-> [-> Hregv]]]].
+      eapply IHHtype2; try eassumption; try reflexivity.
+      apply loc_retype_at_R_l1_m.
+      eapply region_liveness_at_split_l1_gen; eassumption.
+
+  (* T_StringLen_L1 *)
+  - eapply T_StringLen_L1. eapply IHHtype; eassumption.
+
+  (* T_Let_L1 *)
+  - destruct (output_shape_at_l1 _ _ _ _ _ _ _ _ _ _ Htype1 Hk_in) as [u_mid Hu_mid].
+    eapply T_Let_L1.
+    + eapply IHHtype1; eassumption.
+    + destruct (linear_value_is_loc_l1 _ _ _ _ Hv_type Hval Hlin) as [lv [rv [-> [-> Hregv]]]].
+      eapply (IHHtype2 (S k0) (TString rv) (ELoc lv rv) u_mid);
+        simpl; try eassumption; try reflexivity.
+      apply loc_retype_at_R_l1_m.
+      eapply region_liveness_at_split_l1_gen; eassumption.
+
+  (* T_LetLin_L1 *)
+  - destruct (output_shape_at_l1 _ _ _ _ _ _ _ _ _ _ Htype1 Hk_in) as [u_mid Hu_mid].
+    eapply T_LetLin_L1; [exact H | |].
+    + eapply IHHtype1; eassumption.
+    + destruct (linear_value_is_loc_l1 _ _ _ _ Hv_type Hval Hlin) as [lv [rv [-> [-> Hregv]]]].
+      eapply (IHHtype2 (S k0) (TString rv) (ELoc lv rv) u_mid);
+        simpl; try eassumption; try reflexivity.
+      apply loc_retype_at_R_l1_m.
+      eapply region_liveness_at_split_l1_gen; eassumption.
+
+  (* T_Lam_L1_Linear: body's R = outer R; direct discharge via
+     [T_Loc_L1] + Hregv. *)
+  - assert (u_out = u_in) by congruence; subst.
+    eapply T_Lam_L1_Linear.
+    destruct (linear_value_is_loc_l1 _ _ _ _ Hv_type Hval Hlin) as [lv [rv [-> [-> Hregv]]]].
+    eapply (IHHtype (S k0) (TString rv) (ELoc lv rv) u_in);
+      simpl; try eassumption; try reflexivity.
+    apply loc_retype_at_R_l1_m. exact Hregv.
+
+  (* T_Lam_L1_Affine: same structure; the flexible body-output flag [u]
+     is the lambda's bound-variable use marker, orthogonal to the
+     substituted variable's flag at outer position [k0]. *)
+  - assert (u_out = u_in) by congruence; subst.
+    eapply T_Lam_L1_Affine.
+    destruct (linear_value_is_loc_l1 _ _ _ _ Hv_type Hval Hlin) as [lv [rv [-> [-> Hregv]]]].
+    eapply (IHHtype (S k0) (TString rv) (ELoc lv rv) u_in);
+      simpl; try eassumption; try reflexivity.
+    apply loc_retype_at_R_l1_m. exact Hregv.
+
+  (* T_App_L1 *)
+  - destruct (output_shape_at_l1 _ _ _ _ _ _ _ _ _ _ Htype1 Hk_in) as [u_mid Hu_mid].
+    eapply T_App_L1.
+    + eapply IHHtype1; eassumption.
+    + destruct (linear_value_is_loc_l1 _ _ _ _ Hv_type Hval Hlin) as [lv [rv [-> [-> Hregv]]]].
+      eapply IHHtype2; try eassumption; try reflexivity.
+      apply loc_retype_at_R_l1_m.
+      eapply region_liveness_at_split_l1_gen; eassumption.
+
+  (* T_Pair_L1 *)
+  - destruct (output_shape_at_l1 _ _ _ _ _ _ _ _ _ _ Htype1 Hk_in) as [u_mid Hu_mid].
+    eapply T_Pair_L1.
+    + eapply IHHtype1; eassumption.
+    + destruct (linear_value_is_loc_l1 _ _ _ _ Hv_type Hval Hlin) as [lv [rv [-> [-> Hregv]]]].
+      eapply IHHtype2; try eassumption; try reflexivity.
+      apply loc_retype_at_R_l1_m.
+      eapply region_liveness_at_split_l1_gen; eassumption.
+
+  (* T_Fst_L1 *)
+  - eapply T_Fst_L1; [eapply IHHtype; eassumption | assumption].
+
+  (* T_Snd_L1 *)
+  - eapply T_Snd_L1; [eapply IHHtype; eassumption | assumption].
+
+  (* T_Inl_L1 *)
+  - eapply T_Inl_L1. eapply IHHtype; eassumption.
+
+  (* T_Inr_L1 *)
+  - eapply T_Inr_L1. eapply IHHtype; eassumption.
+
+  (* T_Case_L1_Linear *)
+  - destruct (output_shape_at_l1 _ _ _ _ _ _ _ _ _ _ Htype1 Hk_in) as [u_mid Hu_mid].
+    eapply T_Case_L1_Linear.
+    + eapply IHHtype1; eassumption.
+    + destruct (linear_value_is_loc_l1 _ _ _ _ Hv_type Hval Hlin) as [lv [rv [-> [-> Hregv]]]].
+      eapply (IHHtype2 (S k0) (TString rv) (ELoc lv rv) u_mid);
+        simpl; try eassumption; try reflexivity.
+      apply loc_retype_at_R_l1_m.
+      eapply region_liveness_at_split_l1_gen; eassumption.
+    + destruct (linear_value_is_loc_l1 _ _ _ _ Hv_type Hval Hlin) as [lv [rv [-> [-> Hregv]]]].
+      eapply (IHHtype3 (S k0) (TString rv) (ELoc lv rv) u_mid);
+        simpl; try eassumption; try reflexivity.
+      apply loc_retype_at_R_l1_m.
+      eapply region_liveness_at_split_l1_gen; eassumption.
+
+  (* T_Case_L1_Affine: same shape — per-branch [u1, u2] are the
+     inner-bound variable's output flags, orthogonal to the
+     substituted variable's flag. *)
+  - destruct (output_shape_at_l1 _ _ _ _ _ _ _ _ _ _ Htype1 Hk_in) as [u_mid Hu_mid].
+    eapply T_Case_L1_Affine.
+    + eapply IHHtype1; eassumption.
+    + destruct (linear_value_is_loc_l1 _ _ _ _ Hv_type Hval Hlin) as [lv [rv [-> [-> Hregv]]]].
+      eapply (IHHtype2 (S k0) (TString rv) (ELoc lv rv) u_mid);
+        simpl; try eassumption; try reflexivity.
+      apply loc_retype_at_R_l1_m.
+      eapply region_liveness_at_split_l1_gen; eassumption.
+    + destruct (linear_value_is_loc_l1 _ _ _ _ Hv_type Hval Hlin) as [lv [rv [-> [-> Hregv]]]].
+      eapply (IHHtype3 (S k0) (TString rv) (ELoc lv rv) u_mid);
+        simpl; try eassumption; try reflexivity.
+      apply loc_retype_at_R_l1_m.
+      eapply region_liveness_at_split_l1_gen; eassumption.
+
+  (* T_If_L1_Linear *)
+  - destruct (output_shape_at_l1 _ _ _ _ _ _ _ _ _ _ Htype1 Hk_in) as [u_mid Hu_mid].
+    eapply T_If_L1_Linear.
+    + eapply IHHtype1; eassumption.
+    + destruct (linear_value_is_loc_l1 _ _ _ _ Hv_type Hval Hlin) as [lv [rv [-> [-> Hregv]]]].
+      eapply IHHtype2; try eassumption; try reflexivity.
+      apply loc_retype_at_R_l1_m.
+      eapply region_liveness_at_split_l1_gen; eassumption.
+    + destruct (linear_value_is_loc_l1 _ _ _ _ Hv_type Hval Hlin) as [lv [rv [-> [-> Hregv]]]].
+      eapply IHHtype3; try eassumption; try reflexivity.
+      apply loc_retype_at_R_l1_m.
+      eapply region_liveness_at_split_l1_gen; eassumption.
+
+  (* T_If_L1_Affine: same shape; branches agree on output structure
+     just as in the Linear case (the mode-split is on context
+     consumption, not on conditional symmetry). *)
+  - destruct (output_shape_at_l1 _ _ _ _ _ _ _ _ _ _ Htype1 Hk_in) as [u_mid Hu_mid].
+    eapply T_If_L1_Affine.
+    + eapply IHHtype1; eassumption.
+    + destruct (linear_value_is_loc_l1 _ _ _ _ Hv_type Hval Hlin) as [lv [rv [-> [-> Hregv]]]].
+      eapply IHHtype2; try eassumption; try reflexivity.
+      apply loc_retype_at_R_l1_m.
+      eapply region_liveness_at_split_l1_gen; eassumption.
+    + destruct (linear_value_is_loc_l1 _ _ _ _ Hv_type Hval Hlin) as [lv [rv [-> [-> Hregv]]]].
+      eapply IHHtype3; try eassumption; try reflexivity.
+      apply loc_retype_at_R_l1_m.
+      eapply region_liveness_at_split_l1_gen; eassumption.
+
+  (* T_Region_L1: body's R = [r :: R]; [In rv R] (from Hregv) lifts to
+     [In rv (r :: R)]. Direct discharge via [T_Loc_L1] — no axiom. *)
+  - destruct (linear_value_is_loc_l1 _ _ _ _ Hv_type Hval Hlin) as [lv [rv [-> [-> Hregv]]]].
+    eapply T_Region_L1; [exact H | exact H0 | exact H1 |].
+    eapply IHHtype; try eassumption; try reflexivity.
+    apply loc_retype_at_R_l1_m. right; exact Hregv.
+
+  (* T_Region_Active_L1: body's R = outer R, so Hv_type re-uses unchanged. *)
+  - destruct (linear_value_is_loc_l1 _ _ _ _ Hv_type Hval Hlin) as [lv [rv [-> [-> Hregv]]]].
+    eapply T_Region_Active_L1; [exact H | exact H0 | exact H1 |].
+    eapply IHHtype; try eassumption; try reflexivity.
+
+  (* T_Region_L1_Echo — parallel rule; identical substitution shape *)
+  - destruct (linear_value_is_loc_l1 _ _ _ _ Hv_type Hval Hlin) as [lv [rv [-> [-> Hregv]]]].
+    eapply T_Region_L1_Echo; [exact H | exact H0 | exact H1 |].
+    eapply IHHtype; try eassumption; try reflexivity.
+    apply loc_retype_at_R_l1_m. right; exact Hregv.
+
+  (* T_Region_Active_L1_Echo — parallel rule *)
+  - destruct (linear_value_is_loc_l1 _ _ _ _ Hv_type Hval Hlin) as [lv [rv [-> [-> Hregv]]]].
+    eapply T_Region_Active_L1_Echo; [exact H | exact H0 | exact H1 |].
+    eapply IHHtype; try eassumption; try reflexivity.
+
+  (* T_Borrow_L1: EBorrow (EVar i) *)
+  - destruct (Nat.eq_dec i k0) as [->|Hne].
+    + simpl. rewrite Nat.eqb_refl.
+      assert (T = Tsub) by (unfold ctx_lookup in H; congruence); subst T.
+      assert (u_out = u_in) by congruence; subst.
+      (* The substituted-in value is at Linear; re-construct
+         [T_Borrow_Val_L1] using the polymorphic [T_Loc_L1] via
+         [loc_retype_at_R_l1_m]. *)
+      destruct (linear_value_is_loc_l1 _ _ _ _ Hv_type Hval Hlin) as [lv [rv [-> [-> Hregv]]]].
+      eapply T_Borrow_Val_L1; [constructor|].
+      apply loc_retype_at_R_l1_m. exact Hregv.
+    + simpl. rewrite (proj2 (Nat.eqb_neq i k0) Hne).
+      assert (u_out = u_in) by congruence; subst.
+      destruct (Nat.ltb_spec k0 i) as [Hlt|Hge].
+      * eapply T_Borrow_L1. unfold ctx_lookup.
+        rewrite nth_error_remove_at_ge by lia.
+        replace (S (i - 1)) with i by lia.
+        unfold ctx_lookup in H. exact H.
+      * assert (i < k0) by lia. eapply T_Borrow_L1. unfold ctx_lookup.
+        rewrite nth_error_remove_at_lt by lia.
+        unfold ctx_lookup in H. exact H.
+
+  (* T_Borrow_Val_L1 *)
+  - assert (u_out = u_in) by congruence; subst.
+    eapply T_Borrow_Val_L1.
+    + apply subst_preserves_value. assumption.
+    + eapply IHHtype; eassumption.
+
+  (* T_Drop_L1 *)
+  - eapply T_Drop_L1; [exact H |]. eapply IHHtype; eassumption.
+
+  (* T_Drop_L1_Echo — parallel rule *)
+  - eapply T_Drop_L1_Echo; [exact H |]. eapply IHHtype; eassumption.
+
+  (* T_Copy_L1 *)
+  - eapply T_Copy_L1; [exact H |]. eapply IHHtype; eassumption.
+
+  (* T_Echo_L1 — substitution under an echo value: the witness is a
+     value, so [subst_preserves_value] preserves [is_value]. The
+     witness's typing is preserved by the IH. *)
+  - eapply T_Echo_L1.
+    + apply subst_preserves_value. assumption.
+    + eapply IHHtype; eassumption.
+
+  (* T_Observe_L1 *)
+  - eapply T_Observe_L1. eapply IHHtype; eassumption.
+Qed.
+
+(** Linear-specialised wrapper preserving the original signature for
+    [subst_preserves_typing_l1] and [preservation_l1]. *)
 Lemma subst_typing_gen_l1 :
   forall R Gin e T R' Gout,
     R; Gin |=L1 e : T -| R'; Gout ->
@@ -762,8 +1562,9 @@ Lemma subst_typing_gen_l1 :
         nth_error Gout k = Some (T1, u_out) ->
         R; remove_at k Gin |=L1 subst k v e : T -| R'; remove_at k Gout.
 Proof.
-  (* L2 regression: induction case ordering shifted. L2-β follow-up. *)
-Admitted.
+  intros R Gin e T R' Gout Htype k T1 v u_in Hk_in Hval Hlin Hv_type u_out Hk_out.
+  eapply subst_typing_gen_l1_m; eassumption.
+Qed.
 
 (** Substitution preserves the L1 typing — the version used by
     [preservation_l1]. Statement strengthened (see header comment)

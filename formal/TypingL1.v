@@ -291,6 +291,35 @@ Inductive has_type_l1
       R ; G |=L1[m] e : T -| R' ; G' ->
       R ; G |=L1[m] ECopy e : TProd T T -| R' ; G'
 
+  (** ===== L3 — Echo / residue observation =====
+
+      [T_Observe_L1] discharges an echo by witnessing it. The rule is
+      modality-polymorphic: it fires in both [Linear] and [Affine].
+      What differs across modes is the *obligation* shape, not the
+      rule:
+
+      * Under Linear discipline, an unobserved [TEcho T] in scope is
+        a typing failure (the echo must be threaded into [T_Observe]
+        somewhere). The mandatoriness will be enforced via [is_linear_ty]
+        once [TEcho] is registered as linear — deferred to a subsequent
+        slice (the present rule is the necessary precondition).
+
+      * Under Affine discipline, an unobserved [TEcho T] is permitted
+        (implicit lowering); the runtime collapses the residue
+        silently. [T_Observe_L1] remains available as an explicit
+        observation site.
+
+      The observation returns [TBase TUnit]: the L3 layer's
+      contribution is *type-theoretic accountability of the
+      irreversible step*, not recovery of the erased witness. The
+      witness is, by construction, irrecoverable — see
+      [Echo.no_section_collapse_to_residue] (Qed) and
+      [PRESERVATION-DESIGN.md §6.0.2.3]. *)
+
+  | T_Observe_L1 : forall m R R' G G' e T,
+      R ; G |=L1[m] e : TEcho T -| R' ; G' ->
+      R ; G |=L1[m] EObserve e : TBase TUnit -| R' ; G'
+
 where "R ';' G '|=L1[' m ']' e ':' T '-|' R' ';' G'" := (has_type_l1 m R G e T R' G').
 
 (** Legacy [|=L1] notation: shorthand for the Linear specialisation

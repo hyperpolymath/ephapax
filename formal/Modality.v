@@ -1,6 +1,24 @@
 (* SPDX-License-Identifier: PMPL-1.0-or-later *)
 (* SPDX-FileCopyrightText: 2026 Jonathan D.A. Jewell *)
 
+(**
+
+  *********************************************************************
+  ***  ✅ ACTIVE -- L2 modality (Linear / Affine).                    ***
+  ***                                                                ***
+  ***  Linear ≤ Affine as a K-free thin poset.                       ***
+  ***  `linear_to_affine` Qed with zero axioms.                      ***
+  ***                                                                ***
+  ***  L3 (Echo) reads the modality off this layer at typing-rule    ***
+  ***  boundaries to dispatch observation discipline. DO NOT pattern ***
+  ***  match on `Linear`/`Affine` inside `Echo.v` -- L3 orthogonality ***
+  ***  requires that the echo type former remains modality-agnostic. ***
+  ***                                                                ***
+  ***  See `STATUS.adoc`, `formal/PRESERVATION-DESIGN.md §5` and §6. ***
+  *********************************************************************
+
+*)
+
 (** * Ephapax L2 — Modality (the typing-layer mode parameter)
 
     This file defines the modality parameter that the L2 typing

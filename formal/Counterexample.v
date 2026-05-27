@@ -1,6 +1,28 @@
 (* SPDX-License-Identifier: PMPL-1.0-or-later *)
 (* SPDX-FileCopyrightText: 2026 Jonathan D.A. Jewell *)
 
+(**
+
+  *********************************************************************
+  ***  📌 PINNED REGRESSION WITNESS                                   ***
+  ***                                                                ***
+  ***  5 Qed lemmas. Authoritative source of the 2026-05-26          ***
+  ***  soundness gap.                                                ***
+  ***                                                                ***
+  ***  This file SHOULD NOT BE WEAKENED. Any future proof work must  ***
+  ***  coexist with these lemmas. The legacy judgment's falsity is   ***
+  ***  load-bearing for the regression theorem; do not "fix" the     ***
+  ***  legacy judgment to make these lemmas fail.                    ***
+  ***                                                                ***
+  ***  bad_input_untypable_l1 is also Qed under BOTH modalities,     ***
+  ***  showing that the new L1 judgment closes the gap regardless of ***
+  ***  Linear vs Affine.                                             ***
+  ***                                                                ***
+  ***  See `STATUS.adoc`, `formal/PRESERVATION-DESIGN.md §1`.        ***
+  *********************************************************************
+
+*)
+
 (** * Soundness gap: counterexample to preservation as currently stated
 
     Exhibits a concrete configuration where the calculus's typing rules

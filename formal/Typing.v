@@ -1,6 +1,29 @@
 (* SPDX-License-Identifier: PMPL-1.0-or-later *)
 (* SPDX-FileCopyrightText: 2025-2026 Jonathan D.A. Jewell *)
 
+(**
+
+  *********************************************************************
+  ***  🛑 ARCHAEOLOGY -- DO NOT EXTEND                                ***
+  ***                                                                ***
+  ***  This is the LEGACY typing judgment. `formal/Counterexample.v` ***
+  ***  depends on its falsity for the regression theorem -- the      ***
+  ***  counterexample shows that this judgment types a configuration ***
+  ***  that the operational semantics steps to an untypable state.   ***
+  ***                                                                ***
+  ***  Do NOT patch. Do NOT close gaps. Do NOT extend with new       ***
+  ***  rules to "fix" the unsoundness.                               ***
+  ***                                                                ***
+  ***  Active typing judgment is `formal/TypingL1.v` (the L1         ***
+  ***  redesign: modality-indexed `has_type_l1`, R-threaded          ***
+  ***  capability environment).                                      ***
+  ***                                                                ***
+  ***  See `STATUS.adoc`, `PROOF-NEEDS.md`, and                      ***
+  ***  `formal/PRESERVATION-DESIGN.md`.                              ***
+  *********************************************************************
+
+*)
+
 (** * Ephapax Typing Rules (De Bruijn)
 
     Linear typing judgement: R; G |- e : T -| G'

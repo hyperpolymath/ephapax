@@ -1,59 +1,265 @@
-# Proof Requirements
+<!-- SPDX-License-Identifier: PMPL-1.0-or-later -->
+<!-- SPDX-FileCopyrightText: 2026 Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk> -->
 
-## Current state
-- `formal/Syntax.v` — Coq formalization of Ephapax syntax (clean)
-- `formal/Semantics.v` — Coq legacy operational semantics
-  - `step_preserves_type` — **Qed** (closed 2026-05-26 via [Path 3 at-pre helper](#path-3-at-pre-helper))
-  - `step_output_context_eq` (Lemma B) — **Qed** (closed 2026-05-26 via Path 3)
-  - `step_preserves_type_at_pre` — **Admitted** (NEW helper; 8 of 35 cases remain admitted, falls through to `all: admit.` catch-all)
-  - `step_output_context_eq_at_pre` — **Admitted** (NEW helper; analogous shape)
-  - `preservation` — **Admitted** (12 cascading goals — separate problem, region-env weakening for non-values; superseded by L1 redesign — see `formal/PRESERVATION-DESIGN.md`)
-- `formal/Typing.v` — Coq typing rules, legacy (clean)
-- `formal/TypingL1.v` — **L2** Coq typing rules: `has_type_l1` indexed by `m : Modality ∈ {Linear, Affine}`. 21 modality-polymorphic constructors + 3 mode-split rule pairs (T_Lam / T_Case / T_If Linear vs Affine). `linear_to_affine` **Qed (zero axioms)**. Mode-split mechanises the PRESERVATION-DESIGN.md §5 distinction.
-- `formal/Modality.v` — K-free `Modality` datatype + `modality_le` thin poset + `_refl`/`_trans`/`_prop` lemmas. Mirrors `echo-types/proofs/agda/EchoLinear.agda:75-101`.
-- `formal/Semantics_L1.v` — L1 operational semantics; `preservation_l1` Admitted under `forall m : Modality, ...`. Six supporting lemmas L2-β regressed (bullet-structure rewrite needed for the new Affine-only constructors).
-- `formal/TypingL2.v` — thin re-indexing wrapper: `has_type_l2 m R G e T R' G' := L2_lift_l1 m (TypingL1.has_type_l1 m ...)`. `weaken_modality` dispatches through `TypingL1.linear_to_affine`.
-- `formal/Echo.v` — **L3** echo residue scaffold (`Mode + LEcho + decoration-commuting weakening + EchoR + no-section irreversibility`).
-- `formal/Counterexample.v` — `bad_input_untypable_l1 : forall m, ~ has_type_l1 m ...` Qed (regression witness under both modes).
-- `src/formal/Ephapax/Formal/RegionLinear.idr` — Idris2 region-based linearity proof (explicitly states "REAL proof — not believe_me, not assert_total")
-- 17 Idris2 files across formal verification layer
-- No `believe_me`, `sorry`, or `assert_total` in Idris2 source code
+# Proof needs — Ephapax (linear + affine sublanguages)
 
-## Path 3 at-pre helper
+> ## 🛑 First-read disambiguation (human + machine readers)
+>
+> **This document is for `hyperpolymath/ephapax`.** Ephapax is a research
+> language for compile-time WebAssembly memory safety, formally verified
+> in Coq + Idris2.
+>
+> **Ephapax is NOT `hyperpolymath/affinescript`.** AffineScript is a
+> separate, unrelated language (JS/TS/ReScript successor, OCaml + ReScript
+> runtime, no mechanised proofs, no first-class regions). The two share
+> only the compile target (`hyperpolymath/typed-wasm`).
+>
+> **`ephapax-affine` (in this document) is the affine *sublanguage* of
+> Ephapax** — the versatile prototyping companion to `ephapax-linear`.
+> It lives inside this repo (`ephapax-linear/` crate). **It is NOT
+> AffineScript.** The lexical overlap of the word `affine` is a
+> coincidence of substructural-logic terminology, not a project
+> relationship. Do not apply lessons or tactics across the boundary.
+>
+> If you found this document by searching for "affine type system",
+> verify which language you actually need before proceeding. Canonical
+> side-by-side table:
+> https://github.com/hyperpolymath/nextgen-languages/blob/main/docs/disambiguation/ephapax-vs-affinescript.md
 
-The 2026-05-26 Path-1 (mutual induction) plan was superseded by a simpler approach: introduce two NEW helper lemmas whose typings are at the SAME pre-step env R (not R/R'). The key insight: in the S_Region_Step cross-case `Hte = T_Region_Active` × `Hte' = T_Region` with `R0' = remove_first r R0` and `r = r1`, the body's typing under `r :: R0'` is membership-equivalent to `R0` (via `remove_first_then_cons_membership_eq`). After perm transport, both bodies are typed at R0 — the at-pre helper concludes type/output-context equality.
+## Reading guide
 
-The at-pre helpers' S_Region_Step case is structurally simpler than the original because `In r R0` (from S_Region_Step's premise) FORCES `T_Region_Active` on both sides — the problematic cross-case vanishes by contradiction.
+This file is the *proof-debt audit* for Ephapax post-counterexample
+(2026-05-26). It supersedes earlier versions of `PROOF-NEEDS.md` that
+still referenced the legacy preservation closure plan as if it were
+viable.
 
-Most of the helpers' OTHER cases were closed by copying step_preserves_type's and step_output_context_eq's tactic blocks verbatim (patterns use `?R`/`?R'` polymorphically and match at-pre framing trivially). What remains in each helper is the per-goal cases (~8 of 35), pending case-by-case closure.
+The audit is split by sublanguage:
 
-## What needs proving
+* **§1** — what's done (mechanised, Qed) for each sublanguage.
+* **§2** — what's todo (active work, by layer).
+* **§3** — what's banned (explicit do-not-do anti-patterns).
+* **§4** — counts and file-by-file map.
 
-### L2-β follow-up (post-PR #176)
-- **6 L1 supporting lemmas in `Semantics_L1.v`** — bullet-structure rewrite of the `induction Htype` proofs to account for the 3 new Affine-only constructors (T_Lam_L1_Affine, T_Case_L1_Affine, T_If_L1_Affine). Each restoration adds 3 `discriminate` dispatches on the `Linear = Affine` equality and re-aligns case bullets. Mechanical; ~2-3 hours.
-- **`preservation_l1` body** under `forall m`: Linear branch is the old partial proof (12 admits in R-weakening territory); Affine branch needs the supporting lemmas above plus mode-aware handling for T_Lam_Affine / T_Case_Affine / T_If_Affine. Estimated 3-4 sessions once the supporting lemmas are restored.
+For the architectural background see
+[`STATUS.adoc`](STATUS.adoc) and
+[`formal/PRESERVATION-DESIGN.md`](formal/PRESERVATION-DESIGN.md).
 
-### Legacy preservation
-- **`step_preserves_type_at_pre`**: Close the remaining ~8 admitted cases (the per-goal cases of step_preserves_type's structure that need explicit blocks: S_StringConcat_Step2, S_Let_Step, S_LetLin_Step, S_App_Step2, S_If_Step, S_Pair_Step1, S_Pair_Step2, S_Case_Step). Each ~30 LOC, ported from step_preserves_type's "Per-goal" section (lines 5033-5562). Estimated 2-3h.
-- **`step_output_context_eq_at_pre`**: Close ~11 remaining admitted cases (the per-goal cases + S_Region_Step). Patterns parallel step_output_context_eq's body. Estimated 2-3h.
-- **`preservation`**: Close the remaining **12 open goals** — the RIGHT branch (R' = remove_first r R) sub-cases of each congruence step rule. These need a **region-env weakening for non-values** lemma that doesn't follow trivially from current infrastructure. Per the handoff doc, this is a deeper problem: when a binder steps to exit region r, the sibling expression might still mention r and not be typeable at the post-step R'. Closing requires either (a) a strengthened type invariant preventing such configurations, (b) a weakened preservation statement, or (c) a region-env weakening helper that case-analyses on the sibling's syntactic shape. Estimated 4-8h.
+---
 
-  Reduction story (910 → 12): 910 via remember-cfg (PR #102) → 22 via universal-IH revert (PR #106) → 12 via per-case manual closures (PR #116). The 2026-05-26 Path-3 work closed the SAME structural admit shared across step_preserves_type:4885 and step_output_context_eq:5963 (the `S_Region_Step` `r = r1` "exited from inside" case) by introducing two at-pre helpers and using `region_env_perm_typing` to bridge. The 12 cascading goals in `preservation` remain — they're a SEPARATE structural problem (region-env weakening), not the same shared admit.
+## §1. What's done
 
-  Total focused wall-clock to full Qed: **~6-12h** (depending on the depth of the preservation region-env weakening fix).
+### ephapax-linear (strict / obligation-preserving sublanguage)
 
-  Supporting lemmas already Qed: `subst_preserves_typing`, `region_env_perm_typing`, `region_add_typing`, `region_shrink_preserves_typing`, `values_dont_step`, **`step_R_eq_or_touches_region`** (PR #114), and now **`step_preserves_type`** + **`step_output_context_eq`** (closed 2026-05-26 via at-pre helpers).
-- **Linear type consumption**: Prove resources with linear types are consumed exactly once across all execution paths (region boundaries, exception handlers)
-- **Effect system soundness**: Prove the effect type system correctly tracks side effects and that effect-free terms are truly pure
-- **Region safety**: Prove that region-based memory management prevents use-after-free and dangling references across region boundaries
-- **Compiler correctness**: Prove the Rust compiler preserves Ephapax semantics (at minimum, type-preserving compilation)
+| Component | File | Status |
+|---|---|---|
+| L1 judgment (`has_type_l1`) | `formal/TypingL1.v` | 100% — 0 admits, 2 Qed |
+| L1 judgment indexed by modality `m : Modality` | `formal/TypingL1.v` | landed via PRs #176 + #177 |
+| L2 modality core (`Modality.v`, `linear_to_affine`) | `formal/Modality.v` | 1 Qed, zero axioms |
+| L3 calculus (echo / residue fiber + degrade + no-section proof) | `formal/Echo.v` | 12 Qed, 0 admits |
+| Linear-mode forward progress lemmas | `formal/Semantics_L1.v` | 15 Qed (subset of the 24 lemmas; 9 in transition) |
+| Counterexample regression witness | `formal/Counterexample.v` | 5 Qed (`bad_input_untypable_l1` proved under both modes) |
+| Operational checker (Rust, ephapax-linear sublanguage) | `ephapax-linear/src/linear.rs` | working — discharges resource-exact obligation |
 
-> Note: an earlier version of this list claimed `preservation` was closed at Qed on 2026-04-27 (citing the in-file comment at `formal/Semantics.v` L3328) and that the prior "progress 92%" ROADMAP entry was the only stale item. Both claims were wrong: the cited in-file comment was itself unsubstantiated — `coqc` 8.18.0 rejects the `Qed.` with "Attempt to save an incomplete proof (there are remaining open goals)", which is why `rust-ci.yml`'s "Coq proofs" job has been failing on every push. The honest mark is `Admitted`. `progress` was deleted in the substitution-semantics rewrite and is genuinely not currently formalised in this tree.
+### ephapax-affine (relaxed / degradable sublanguage)
 
-## Recommended prover
-- **Coq** for the existing soundness chain in `formal/` (already invested in Coq formalization)
-- **Idris2** for region linearity and effect system properties (already in use, fits dependent type style)
-- **Agda** as backup for metatheory if Coq proof terms become unwieldy
+| Component | File | Status |
+|---|---|---|
+| Affine-mode judgment indexing | `formal/TypingL1.v` (`m = Affine` branch) | landed; 3 Affine-only rules `T_Lam_L1_Affine`, `T_Case_L1_Affine`, `T_If_L1_Affine` |
+| Linear ⇒ Affine weakening | `formal/TypingL1.v` `linear_to_affine` | Qed, zero axioms |
+| Operational checker (Rust, ephapax-affine sublanguage) | `ephapax-linear/src/affine.rs` | working — permits weakening / graceful abandonment |
+| Affine-mode echo discipline (LEcho Affine = lowered triple) | `formal/Echo.v` (calculus) | calculus done; rule wiring pending |
+| Affine forward progress lemmas | `formal/Semantics_L1.v` | bullet-structure rewrite for new Affine-only constructors — **9 admits queued** (see §2) |
 
-## Priority
-- **MEDIUM-HIGH** — Ephapax is a programming language whose core value proposition is linear types and memory safety. `preservation` remains `Admitted` (the immediate soundness blocker is still in place, contrary to the previously-claimed-but-incorrect "closed 2026-04-27" status). The next highest-leverage item is closing the open goals in the `preservation` proof script so the `Qed` lands and the Coq CI gate goes green.
+### Counterexample regression
+
+| Lemma | Status | What it shows |
+|---|---|---|
+| `bad_input_untypable_l1` | Qed | the configuration that steps-and-untypes is rejected at type check under the new L1 judgment, in both Linear and Affine modes |
+| 4 supporting lemmas | Qed | the legacy judgment *types* the same configuration |
+
+→ The counterexample establishes the gap. The new L1 judgment closes it.
+
+---
+
+## §2. What's todo
+
+### Near-term (L1 ⇒ L2 integration debt — mechanical)
+
+| Item | File | Estimate |
+|---|---|---|
+| Close 9 Affine-only bullet-structure regressions in supporting lemmas | `formal/Semantics_L1.v` | ~2-3 hours |
+| State and prove `preservation_l1` for both modes | `formal/Semantics_L1.v` | ~3-4 sessions after the 9 supporting lemmas land |
+
+### Near-term (L3 wiring — design + mechanisation)
+
+L3 calculus is done in `formal/Echo.v` (12 Qed, no admits). What's missing
+is the *integration* into the typing judgment and the step rules.
+The shape is laid out in `formal/PRESERVATION-DESIGN.md §6.3` "Where echo
+enters the typing rules" and (for the diagram) in §6 (to be added).
+
+| Item | What it does | Notes |
+|---|---|---|
+| Add `T_Observe` to `has_type_l1` | Consumes a Linear echo / permits Affine lowering | Modality-aware: Linear ⇒ mandatory observation; Affine ⇒ optional silent lowering |
+| Add collapse-function emission to step rules at irreversible boundaries | `S_Region_Exit` emits `Echo (LiveAt_r) (ExitedAt_r) v_pre`; `S_Drop` emits `Echo T ⊤ v_pre` | Each irreversible step has an associated collapse function `f : A → B`; the echo is the proof-relevant preimage |
+| Thread `G` (echo context) alongside `R` (region context) through compound rules | New context parameter on every L1 compound rule | Parallel to R-threading; no overlap |
+| State and prove `preservation_l3` | Per-layer preservation theorem against the L3 invariants | Cross-layer dependency annotated in `PRESERVATION-DESIGN.md §5.1` |
+
+### Mid-term (L4 — not started)
+
+L4 covers dyadic interaction semantics (mother–child distinction).
+Design lives in `formal/PRESERVATION-DESIGN.md §7`. No file, no mechanisation
+yet. To be approached only after L3 wiring lands.
+
+### Value-prop directions (committed and speculative)
+
+| Direction | Status | Proof obligation |
+|---|---|---|
+| Linear Echo + Region-Based Memory Management (S_Region_Exit certified-evidence emission) | Committed for v1 | `preservation_l3` for the Region branch |
+| Selective reversibility via L2 modality (Linear ≤ Affine thin-poset) | Committed for v1 | Already mechanised in `Modality.v` |
+| Debugging / provenance via Linear Echoes as type-system receipts | Committed for v1 | Follows from L3 wiring |
+| Linear discipline on deterministic drop (Rust-style) for critical resources | Speculative | Compatible with L3 wiring; not committed v1 |
+| GDPR-style certified erasure as compliance use-case | Direction | Concrete instantiation; no separate proof obligation |
+
+---
+
+## §3. What's NOT to do (banned anti-patterns)
+
+These are not preferences. They are explicit, durable, owner-issued
+2026-05-27 directives.
+
+### A. Do not close the legacy preservation theorem
+
+* ❌ `Theorem preservation` in `formal/Semantics.v` is **provably false**.
+  No proof closes it. The `Admitted.` is correct. Leave it.
+* ❌ Do not add lemmas to `formal/Semantics.v` aimed at that closure.
+  Examples that have wasted real session time:
+  * Lemma B variants (`step_preserves_type`,
+    `step_output_context_eq`, `step_preserves_type_at_pre`,
+    `step_output_context_eq_at_pre`)
+  * `region_add_typing_for_non_values`
+  * Strengthened substitution lemmas
+  * `sibling_typing_transfers_across_step`-style helpers
+* ❌ Do not patch the legacy `formal/Typing.v` judgment.
+  `Counterexample.v` depends on its falsity.
+
+### B. Do not close L1/L2 admits by ad-hoc cross-layer reasoning
+
+* ❌ `region_liveness_at_split_l1` (if it returns) must NOT be closed
+  by adding proof tricks, side conditions discharged ad-hoc, or
+  strengthened lemma signatures within the current judgment shape.
+  Post-L2-hybrid these closures are cross-layer; the layered design
+  intentionally splits some closures across layers.
+* ❌ The 9 Semantics_L1.v admits are L2-integration debt (bullet
+  structure for new Affine constructors). They are *not* invitations
+  to introduce new `Axiom` declarations.
+
+### C. Do not bake linearity into Echo Types
+
+Echo semantics (L3) and structural discipline (L2) must remain
+orthogonal and compositional.
+
+* ❌ Do not write `LinearEcho` and `AffineEcho` as separate type
+  formers. There is **one** type former (the fiber); the two modes
+  are *applications* of it with different witness shapes.
+* ❌ Do not pattern-match on `Linear`/`Affine` inside `Echo.v`.
+  The discipline is read from L2's `m : Modality` at the typing-rule
+  boundary, not inside the calculus.
+
+### D. Do not treat Echo Types as a tracing-GC replacement
+
+* ❌ Echo Types do not solve reachability or cycles.
+* ❌ Echo Types are not a "fire-and-forget" automatic memory manager.
+* ✅ Echo Types are a *type-theoretic discipline for accountability of
+  irreversible reclamation* — strongest in conjunction with RBMM
+  (regions) or deterministic ownership (Rust-style drop).
+
+### E. Do not follow pre-2026-05-26 plans
+
+* ❌ Anything dated before 2026-05-26 that proposes closing
+  `preservation` to `Qed.` is pre-discovery. PRs #92, #102, #104,
+  #106, #114, #116, #117, #121, #146 are archaeology.
+* ❌ Branch `lemma-b-phase2-middle-narrow` (deleted post-archaeology
+  cherry-pick) was the most recent pre-discovery attempt. Do not
+  resurrect.
+
+### F. Do not conflate `ephapax-affine` with AffineScript
+
+* ❌ `ephapax-affine` lives in this repo's `ephapax-linear/` crate
+  alongside `ephapax-linear`. It is a *sublanguage* of Ephapax.
+* ❌ `AffineScript` (`hyperpolymath/affinescript`) is a different
+  language with no source-level overlap. Borrow-checker tactics from
+  `affinescript/lib/borrow.ml` do not apply here, and vice versa.
+* ❌ The lexical overlap of the word `affine` is a coincidence.
+  Substructural-logic family terminology, not project relationship.
+
+### Anti-pattern detector
+
+If your session is producing any of the following, **stop and escalate
+to the owner**:
+
+* `sibling-region-disjointness` side conditions on compound rules
+* region-weakening predicates indexed on syntactic shape
+* admit-shuffling between `Semantics.v` and a new lemma file
+* "the previous-PR-line-of-attack just needs one more lemma"
+* proposing to close `Theorem preservation` in `Semantics.v` to `Qed.`
+  by any chain of reasoning
+* adding new `Axiom` declarations to discharge L1/L2 gaps
+* writing a `LinearEcho` distinct from an `AffineEcho`
+* applying tactics or framings from `hyperpolymath/affinescript` here
+
+---
+
+## §4. Counts + file-by-file map
+
+### Per-file Qed / Admitted summary (as of 2026-05-27)
+
+| File | Qed | Admitted | Disposition |
+|---|---:|---:|---|
+| `formal/Semantics.v` (legacy) | n/a | **3** | 🛑 archaeology — do not extend |
+| `formal/Typing.v` (legacy) | n/a | 0 | 🛑 archaeology — `Counterexample.v` depends on falsity |
+| `formal/Counterexample.v` | **5** | 0 | ✅ pinned regression witness |
+| `formal/TypingL1.v` | **2** | 0 | ✅ active — L1 judgment, modality-indexed |
+| `formal/Semantics_L1.v` | **15** | **9** | ✅ active — 9 admits are L2-integration debt, not legacy patching |
+| `formal/Modality.v` | **1** | 0 | ✅ active — L2 core, zero axioms |
+| `formal/Echo.v` | **12** | 0 | ✅ active — L3 calculus, not yet wired into L1 |
+| `formal/TypingL2.v` | (wrapper) | (wrapper) | ✅ thin re-indexing through `TypingL1.has_type_l1` |
+| `src/abi/Ephapax/…` (Idris2) | n/a | n/a | ✅ active — ABI, Region linearity, no `believe_me` / `sorry` / `assert_total` |
+
+### Idris2 side (proof carriers, not Coq mechanisation)
+
+| Concern | File(s) | Status |
+|---|---|---|
+| Region linearity | `src/formal/Ephapax/Formal/RegionLinear.idr` | working — explicitly "REAL proof — not believe_me, not assert_total" |
+| ABI surface (17 files) | `src/abi/Ephapax/…` | working — clean of `believe_me` / `sorry` |
+
+### Tools
+
+* **Coq 8.18+** for `formal/*.v` — primary mechanisation.
+* **Idris2 0.8.0** (needs `IDRIS2_PREFIX` pointing at a prefix with TTCs)
+  for `src/abi/Ephapax/…`.
+* **Just** as the build orchestrator (`just proofs`, `just idris-build`,
+  `just golden`).
+
+### Build oracles
+
+* `coqc 8.18.0` is the **only authoritative answer** to "is this proved?"
+  for `.v` files. Comments in source claiming `Qed` without `coqc`
+  acceptance are not evidence.
+* `idris2 --check` is the same for `.idr` files.
+* Both are wired into `rust-ci.yml`'s "Coq proofs" and "Idris2 build"
+  jobs.
+
+---
+
+## Cross-references
+
+* [`STATUS.adoc`](STATUS.adoc) — past / present / future temporal map.
+* [`formal/PRESERVATION-DESIGN.md`](formal/PRESERVATION-DESIGN.md) —
+  canonical four-layer design doctrine.
+* [`CLAUDE.md`](CLAUDE.md) — agent guidance; owner directive 2026-05-27.
+* [`formal/Counterexample.v`](formal/Counterexample.v) — the 5 Qed
+  lemmas that pin the soundness gap.
+* [`https://github.com/hyperpolymath/echo-types`](https://github.com/hyperpolymath/echo-types)
+  — upstream Agda foundation for L3.
+* [Disambiguation: ephapax vs AffineScript](https://github.com/hyperpolymath/nextgen-languages/blob/main/docs/disambiguation/ephapax-vs-affinescript.md)
+  — canonical side-by-side table.

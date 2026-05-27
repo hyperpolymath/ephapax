@@ -486,6 +486,106 @@ and already ships.
 This layer is **not required for preservation**. Documented here so
 that L1 + L2 don't bake in assumptions that block L3 later.
 
+### 6.0 One-sentence anchor
+
+> **L3 is the one place ephapax mechanises what happens to the
+> information that an irreversible step erases** — region exit,
+> drop, anything that throws away a distinguishable preimage. It
+> introduces exactly **one type former** (the echo, a fiber); the
+> linear-vs-affine distinction is layered over that one type former
+> as a thin-poset of *observation disciplines* — not as two separate
+> echo types.
+
+### 6.0.1 The picture (mechanical map)
+
+```
+L3 — Irreversibility residue (Echo Types)
+═════════════════════════════════════════
+▸ ONE type former
+▸ TWO observation disciplines (inherited from L2 — not invented here)
+▸ The disciplines order as a thin poset:  Linear ≤ Affine
+
+
+┌─ TRIGGER: irreversible operational steps ──────────────────────────┐
+│                                                                    │
+│   S_Region_Exit  : (μ, R,    ERegion r v)  →  (μ', R\r, v)         │
+│   S_Drop         : (μ, R,    EDrop v)      →  (μ,  R,   EUnit)     │
+│   …  every step that throws away which preimage hit y               │
+│                                                                    │
+└──────────────────────┬─────────────────────────────────────────────┘
+                       │  each step has an associated
+                       │  COLLAPSE FUNCTION f : A → B
+                       │     e.g.   collapse_r : LiveAt_r → ExitedAt_r
+                       │            collapse_T : T → ⊤
+                       ▼
+┌─ L3's CONTRIBUTION: the echo, mode-agnostic ──────────────────────┐
+│                                                                    │
+│            ┌───────────────────────────────────────────┐           │
+│            │   Echo (f : A → B) (y : B)                │           │
+│            │     :=   Σ (x : A) .  f x ≡ y             │           │
+│            │   "the proof-relevant preimage of y"      │           │
+│            │   (echo-types/proofs/agda/Echo.agda:14)   │           │
+│            └───────────────────────────────────────────┘           │
+│                ONE definition, no Linear/Affine inside              │
+│                                                                    │
+└──────────────────────┬─────────────────────────────────────────────┘
+                       │  L2 modality decorates the echo
+                       │  with an OBSERVATION DISCIPLINE
+                       │
+           ┌───────────┴───────────┐
+           ▼                       ▼
+╔═ LINEAR ══════════════════╗    ╔═ AFFINE ══════════════════╗
+║                           ║    ║                           ║
+║   LEcho Linear            ║    ║   LEcho Affine            ║
+║     ≡  Echo f y           ║    ║     ≡  EchoR ⊤ TrivCert y ║
+║   (full fiber: all        ║    ║   (lowered triple:        ║
+║    witnesses retained)    ║    ║    witnesses erased to ⊤) ║
+║                           ║    ║                           ║
+║   Discipline:             ║    ║   Discipline:             ║
+║   • MUST be observed      ║    ║   • MAY be observed       ║
+║     (T_Observe consumes)  ║    ║   • MAY be silently lowered║
+║   • Non-duplicable        ║    ║   • Non-duplicable        ║
+║   • Resource-exact        ║    ║   • Resource-bounded      ║
+║                           ║    ║                           ║
+╚═══════════════════════════╝    ╚═══════════════════════════╝
+                  │                                ▲
+                  │         weaken                 │
+                  └───────────────────────────────►
+                  LEcho Linear  ⟶  LEcho Affine
+
+      echo-types' "degrade" map — the SAME map that lowers the full
+      fiber to the trivial residue. No reverse map exists
+      (proved by no-section-collapse-to-residue,
+       EchoResidue.agda:33-73).
+
+      Linear ≤ Affine is a TWO-POINT THIN POSET. Composition
+      commutes with R-threading and G-threading by degradeMode-comp
+      (EchoLinear.agda:93-101).
+```
+
+### 6.0.2 What this diagram makes precise
+
+1. **"Echo" lives in L3.** It is a single type former, defined as a
+   fiber. There is no `LinearEcho` distinct from `AffineEcho` —
+   there is *one* `Echo`, and `LEcho Linear` / `LEcho Affine` are
+   applications of it with different witness shapes.
+
+2. **"Linear" and "Affine" do not live in L3.** They are L2
+   modalities. L3 just reads the current modality and chooses which
+   discipline (mandatory observation vs optional lowering) to enforce
+   on the echo value. **This is what makes the layers orthogonal** —
+   L3's type former is the same regardless of L2; only the rule for
+   consuming the echo differs.
+
+3. **The Linear ⟶ Affine arrow is one-way.** Every Linear-disciplined
+   echo can be lowered to an Affine-disciplined one (weaken /
+   degrade). The reverse direction does not exist — echo-types proves
+   `no-section-collapse-to-residue`. This is the precise sense in
+   which "Linear ⊂ Affine in valid programs" holds at the echo
+   layer: every Linear program's echo obligations can be satisfied
+   affinely (by lowering), but not every Affine program can be
+   retrofitted to Linear.
+
 ### 6.1 Echo, the fiber
 
 Echo-types defines:

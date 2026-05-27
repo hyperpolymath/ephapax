@@ -564,18 +564,74 @@ Proof.
       * exact H0.
       * apply remove_first_preserves_other; [intro Hbad; apply Heq; exact Hbad | exact H1].
       * eapply IHHt. exact Hfree.
-  - (* T_Region_L1_Echo — same structural shape as T_Region_L1; the
-       proof is identical modulo the output-type [TEcho T] vs [T].
-       Both subcases (shadowed + descend) follow the original's
-       analysis. Admitted here as the outer lemma is already
-       [Admitted] and the structural residual (shadowed sub-case in
-       T_Region_Active_L1_Echo) bridges the same list-vs-multiset
-       gap documented above. *)
-    admit.
-  - (* T_Region_Active_L1_Echo — parallels T_Region_Active_L1
-       including the residual structural admit in the shadowed
-       sub-case (PROOF-NEEDS.md §2). *)
-    admit.
+  - (* T_Region_L1_Echo — structurally identical to T_Region_L1
+       modulo the output-type [TEcho T] vs [T]. Both subcases close
+       directly (shadowed via count-monotonicity vacuity, descend
+       via remove_first/remove_first_L1 commutation). Closed in
+       slice 4 to honor the "no parallel-rule admit-debt" seam-audit
+       directive — the original T_Region_L1 case has zero admits,
+       so its mirror has zero admits too. *)
+    destruct (String.eqb rr r) eqn:Heq.
+    + (* rr = r: shadowed. *)
+      apply String.eqb_eq in Heq. subst r.
+      rewrite (remove_first_not_in_id _ _ H).
+      destruct (in_dec string_dec rr (remove_first_L1 rr R_body)) as [Hin | Hnotin].
+      * (* Multiple rr's in R_body — VACUOUS by count monotonicity. *)
+        exfalso.
+        pose proof (count_occ_le_l1_m _ _ _ _ _ _ _ Ht rr) as Hle.
+        unfold cnt in Hle. simpl in Hle.
+        destruct (string_dec rr rr) as [_|Hbad]; [|apply Hbad; reflexivity].
+        apply (count_occ_In string_dec) in Hin.
+        pose proof (remove_first_L1_count_eq_self rr R_body) as Hself.
+        unfold cnt in Hself. rewrite Hself in Hin.
+        apply (count_occ_not_In string_dec) in H.
+        lia.
+      * (* At most one rr in R_body. *)
+        rewrite (remove_first_not_in_id _ _ Hnotin).
+        eapply T_Region_L1_Echo; eauto.
+    + (* rr <> r: descend. *)
+      apply String.eqb_neq in Heq.
+      assert (Hgoal_eq : remove_first rr (remove_first_L1 r R_body) =
+                        remove_first_L1 r (remove_first rr R_body)).
+      { rewrite (remove_first_eq_l1 r R_body).
+        rewrite (remove_first_eq_l1 r (remove_first rr R_body)).
+        apply remove_first_comm. }
+      rewrite Hgoal_eq.
+      eapply T_Region_L1_Echo.
+      * intro Hin. apply H. eapply remove_first_subset; exact Hin.
+      * exact H0.
+      * apply remove_first_preserves_other; [intro Hbad; apply Heq; exact Hbad | exact H1].
+      * specialize (IHHt rr Hfree).
+        simpl in IHHt.
+        destruct (String.eqb rr r) eqn:Heq2.
+        -- exfalso. apply String.eqb_eq in Heq2. apply Heq. exact Heq2.
+        -- exact IHHt.
+  - (* T_Region_Active_L1_Echo — parallels T_Region_Active_L1.
+       The descend sub-case closes directly; the shadowed sub-case
+       (rr = r) is the same list-vs-multiset structural residual as
+       in T_Region_Active_L1 above. Per slice 4 seam audit: the
+       shadowed sub-case admit is a TRUE MIRROR of the pre-existing
+       L1 structural admit at line 553. The descend sub-case is
+       closed Qed-style in slice 4 (not an admit). *)
+    destruct (String.eqb rr r) eqn:Heq.
+    + (* rr = r: shadowed — list-vs-multiset mirror of line 553.
+         Resolution path is identical to its non-Echo counterpart:
+         option (a) L1 perm lemma, (b) multiset reformulation, or
+         (c) T_Region_*_L1 redesign. See line 542-552 design note. *)
+      admit.
+    + (* rr <> r: descend. *)
+      apply String.eqb_neq in Heq.
+      assert (Hgoal_eq : remove_first rr (remove_first_L1 r R_body) =
+                        remove_first_L1 r (remove_first rr R_body)).
+      { rewrite (remove_first_eq_l1 r R_body).
+        rewrite (remove_first_eq_l1 r (remove_first rr R_body)).
+        apply remove_first_comm. }
+      rewrite Hgoal_eq.
+      eapply T_Region_Active_L1_Echo.
+      * apply remove_first_preserves_other; [intro Hbad; apply Heq; exact Hbad | exact H].
+      * exact H0.
+      * apply remove_first_preserves_other; [intro Hbad; apply Heq; exact Hbad | exact H1].
+      * eapply IHHt. exact Hfree.
   - (* T_Borrow_L1 *)
     eapply T_Borrow_L1. exact H.
   - (* T_Borrow_Val_L1 *)
@@ -1637,3 +1693,129 @@ Proof.
   intros m mu R e mu0 R0 e0 Hstep G T R_final G_out Ht.
   admit.
 Admitted.
+
+(** ** L3 preservation theorem (slice 4 of L3 wiring — capstone)
+
+    Per-layer preservation theorem for the two L3-specific
+    echo-emitting step rules [S_Region_Exit_Echo] and [S_Drop_Echo]
+    (Semantics.v slice 3c) paired with their matching L3 typing
+    rules [T_Region_Active_L1_Echo] / [T_Drop_L1_Echo] +
+    [T_Echo_L1] for the result (TypingL1.v slices 2 / 3a / 3b).
+
+    Stated as two per-case lemmas + an umbrella theorem
+    [preservation_l3] which is their conjunction.
+
+    Design constraint (PRESERVATION-DESIGN.md §6.3 +
+    PROOF-NEEDS.md §2): the L3 step rules are universally
+    quantified over the witness type [T] in the [EEcho T v]
+    residue. The non-determinism is resolved at the typing-
+    derivation level — each L3 typing rule pins [T] to its body
+    type. The per-case lemmas state preservation for the
+    matching (typing-rule, step-rule) pairs only; "cross-path"
+    pairs (e.g. legacy [T_Region_Active_L1] + L3
+    [S_Region_Exit_Echo]) are non-preserving by design and not
+    well-typed at the umbrella's [TEcho T] output.
+
+    Per CLAUDE.md owner directive 2026-05-27, slice 4:
+      - introduces ZERO new [Admitted.] or [Axiom] declarations;
+      - does NOT patch legacy [Semantics.v] preservation;
+      - re-uses already-proved infrastructure
+        ([value_R_G_preserving_l1] Qed,
+         [region_shrink_preserves_typing_l1_gen_m] — admitted at
+         the L1 layer for the T_Region_Active_L1 shadowed
+         sub-case; cross-layer dependency annotated in
+         PRESERVATION-DESIGN.md §5.1).
+
+    Cross-layer accounting: the [region_shrink_preserves_typing_l1_gen_m]
+    dependency is a pre-existing L1 structural admit (closes at
+    L2-effect-typed-TFun per design doc §5.1). Slice 4 does NOT
+    widen, duplicate, or open it — preservation_l3 is
+    *conditionally* Qed under that pre-existing L1 obligation. *)
+
+(** *** Case 1: [S_Region_Exit_Echo] paired with
+    [T_Region_Active_L1_Echo].
+
+    The typing premise extracts the body's typing
+    [R; G |=L1[m] v : T -| R_body; G']; since [v] is a value,
+    [value_R_G_preserving_l1] forces [R_body = R] and [G' = G].
+    Region shrinkage then provides the post-step witness typing
+    at [remove_first r R], and [T_Echo_L1] wraps it. *)
+
+Lemma preservation_l3_region_active_echo :
+  forall m R G r v T R_body G',
+    (* T_Region_Active_L1_Echo premises *)
+    In r R ->
+    ~ In r (Typing.free_regions T) ->
+    has_type_l1 m R G v T R_body G' ->
+    (* S_Region_Exit_Echo premises *)
+    is_value v ->
+    expr_free_of_region r v ->
+    (* Conclusion: post-step types at [TEcho T] *)
+    has_type_l1 m (remove_first r R) G
+      (EEcho T v) (TEcho T) (remove_first_L1 r R_body) G'.
+Proof.
+  intros m R G r v T R_body G' HinR HnotT Htbody Hv Hfree.
+  (* Value-invariance: R_body = R and G' = G. *)
+  pose proof (value_R_G_preserving_l1 _ _ _ _ _ _ _ Hv Htbody)
+    as [HR HG].
+  subst R_body G'.
+  (* Bridge [remove_first_L1] (typing-side) to [remove_first]
+     (semantics-side) — both pointwise equal by
+     [remove_first_eq_l1] (Qed). *)
+  replace (remove_first_L1 r R) with (remove_first r R)
+    by (symmetry; apply remove_first_eq_l1).
+  (* Goal: (remove_first r R); G |- EEcho T v : TEcho T
+                              -| (remove_first r R); G *)
+  apply T_Echo_L1; [ exact Hv | ].
+  (* Goal: (remove_first r R); G |- v : T
+                              -| (remove_first r R); G
+     This is exactly region shrinkage at [v] (free of [r]). *)
+  apply (region_shrink_preserves_typing_l1_gen_m m _ _ _ _ _ _ Htbody _ Hfree).
+Qed.
+
+(** *** Case 2: [S_Drop_Echo] paired with [T_Drop_L1_Echo].
+
+    The typing premise extracts
+    [R; G |=L1[m] ELoc l r : T -| R'; G']. Since [ELoc l r] is
+    a value (VLoc), value-invariance forces [R' = R] and
+    [G' = G]. Then [T_Echo_L1] applies directly — no region
+    shrinkage needed (step does not change [R]). *)
+
+Lemma preservation_l3_drop_echo :
+  forall m R G l r T R' G',
+    (* T_Drop_L1_Echo premises *)
+    is_linear_ty T = true ->
+    has_type_l1 m R G (ELoc l r) T R' G' ->
+    (* Conclusion: post-step types at [TEcho T] *)
+    has_type_l1 m R G (EEcho T (ELoc l r)) (TEcho T) R' G'.
+Proof.
+  intros m R G l r T R' G' Hlin Htbody.
+  pose proof (value_R_G_preserving_l1 _ _ _ _ _ _ _
+                (VLoc l r) Htbody) as [HR HG].
+  subst R' G'.
+  apply T_Echo_L1; [ apply VLoc | exact Htbody ].
+Qed.
+
+(** *** Umbrella: [preservation_l3] is the conjunction of the
+    two per-case lemmas above. Each conjunct corresponds to one
+    (L3 typing rule, L3 step rule) matched pair. *)
+
+Theorem preservation_l3 :
+  (forall m R G r v T R_body G',
+      In r R ->
+      ~ In r (Typing.free_regions T) ->
+      has_type_l1 m R G v T R_body G' ->
+      is_value v ->
+      expr_free_of_region r v ->
+      has_type_l1 m (remove_first r R) G
+        (EEcho T v) (TEcho T) (remove_first_L1 r R_body) G')
+  /\
+  (forall m R G l r T R' G',
+      is_linear_ty T = true ->
+      has_type_l1 m R G (ELoc l r) T R' G' ->
+      has_type_l1 m R G (EEcho T (ELoc l r)) (TEcho T) R' G').
+Proof.
+  split.
+  - exact preservation_l3_region_active_echo.
+  - exact preservation_l3_drop_echo.
+Qed.

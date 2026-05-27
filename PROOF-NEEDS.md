@@ -56,7 +56,7 @@ For the architectural background see
 | L1 judgment indexed by modality `m : Modality` | `formal/TypingL1.v` | landed via PRs #176 + #177 |
 | L2 modality core (`Modality.v`, `linear_to_affine`) | `formal/Modality.v` | 1 Qed, zero axioms |
 | L3 calculus (echo / residue fiber + degrade + no-section proof) | `formal/Echo.v` | 12 Qed, 0 admits |
-| Linear-mode forward progress lemmas | `formal/Semantics_L1.v` | 23 Qed; 3 residual admits (L2-β follow-up) |
+| Linear-mode forward progress lemmas | `formal/Semantics_L1.v` | 26 Qed (incl. 3 new from L3 slice 4: `preservation_l3_region_active_echo` / `preservation_l3_drop_echo` / `preservation_l3` umbrella); 3 outer `Admitted.` markers cover 5 internal `admit.` cases — all pre-existing L1 structural debt OR true parallel mirrors |
 | Counterexample regression witness | `formal/Counterexample.v` | 5 Qed (`bad_input_untypable_l1` proved under both modes) |
 | Operational checker (Rust, ephapax-linear sublanguage) | `ephapax-linear/src/linear.rs` | working — discharges resource-exact obligation |
 
@@ -106,10 +106,10 @@ enters the typing rules" and (for the diagram) in §6 (to be added).
 | ✅ Extend AST with [TEcho : ty -> ty] and [EEcho : ty -> expr -> expr] | Type former + runtime value form for L3 echoes | done 2026-05-27 (L3 wiring slice 1 — Syntax.v + free_regions + value/shift/subst cases) |
 | ✅ Add `T_Observe_L1` typing rule + `EObserve` expr form | Consumes a `TEcho T` echo, returns `TBase TUnit` | done 2026-05-27 (L3 wiring slice 2 — modality-polymorphic single rule; mandatoriness via `is_linear_ty TEcho`/implicit-drop discipline is a follow-up) |
 | ✅ Add `T_Echo_L1` typing rule | Types runtime [EEcho T v] residue values at `TEcho T` | done 2026-05-27 (L3 wiring slice 3a — typing-side counterpart of forthcoming `S_Region_Exit_Echo` / `S_Drop_Echo` step rules; mode-polymorphic) |
-| ✅ Add parallel typing rules `T_Region_L1_Echo` / `T_Region_Active_L1_Echo` / `T_Drop_L1_Echo` | Output `TEcho T` instead of `T` / `TBase TUnit`. Programs choose at typing time which path | done 2026-05-27 (L3 wiring slice 3b — owner-approved parallel-rule strategy). +3 internal admits in [region_shrink_preserves_typing_l1_gen_m] + [region_liveness_at_split_l1_gen] are parallel-rule MIRRORS of pre-existing structural admits, NOT new structural debt |
+| ✅ Add parallel typing rules `T_Region_L1_Echo` / `T_Region_Active_L1_Echo` / `T_Drop_L1_Echo` | Output `TEcho T` instead of `T` / `TBase TUnit`. Programs choose at typing time which path | done 2026-05-27 (L3 wiring slice 3b — owner-approved parallel-rule strategy). Initial +3 internal admits in [region_shrink_preserves_typing_l1_gen_m] + [region_liveness_at_split_l1_gen] were parallel-rule MIRRORS of pre-existing structural admits; the avoidable T_Region_L1_Echo mirror was CLOSED in slice 4 — only the two true T_Region_Active_*_L1_Echo shadowed-case mirrors remain, both blocked by the same pre-existing list-vs-multiset structural debt as the originals |
 | ✅ Add collapse-function emission to step rules at irreversible boundaries | `S_Region_Exit_Echo` emits `EEcho T v` paralleling `S_Region_Exit` (untouched); `S_Drop_Echo` emits `EEcho T (ELoc l r)` paralleling `S_Drop` | done 2026-05-27 (L3 wiring slice 3c — owner-approved parallel-rule strategy in Semantics.v; updated `step_from_eregion` to 4-disjunct classification + `step_R_change_shape` + `no_leaks_gen` cascade); rules quantified over witness type T |
 | ~~Thread `G` (echo context) alongside `R` (region context) through compound rules~~ | ~~New context parameter on every L1 compound rule~~ | **OBSOLETE 2026-05-27**: under the owner-approved parallel-rules design (slices 3a–3c), echoes are values of type `TEcho T` that flow through the existing `ctx` G. No separate echo-context parameter is needed. |
-| State and prove `preservation_l3` | Per-layer preservation theorem against the L3 invariants for the new echo-emitting step rules + echo-typed paths | Cross-layer dependency annotated in `PRESERVATION-DESIGN.md §5.1`. The four prerequisite slices (1, 2, 3a, 3b, 3c) all landed; `preservation_l3` is the capstone. |
+| ✅ State and prove `preservation_l3` | Per-layer preservation theorem against the L3 invariants for the new echo-emitting step rules + echo-typed paths | done 2026-05-27 (L3 wiring slice 4 — capstone). Two per-case Qed lemmas (`preservation_l3_region_active_echo` for `S_Region_Exit_Echo` × `T_Region_Active_L1_Echo`, and `preservation_l3_drop_echo` for `S_Drop_Echo` × `T_Drop_L1_Echo`) plus an umbrella `preservation_l3` (their conjunction, Qed). Zero new admits or axioms. Per-case alignment forced by `T_Echo_L1`'s witness-type premise; non-deterministic crossover cases are non-preserving by design (typing derivation pins the path). Conditionally Qed under the pre-existing `region_shrink_preserves_typing_l1_gen_m` L1 structural admit per PRESERVATION-DESIGN.md §5.1. |
 
 ### Mid-term (L4 — not started)
 
@@ -226,11 +226,36 @@ to the owner**:
 | `formal/Typing.v` (legacy) | n/a | 0 | 🛑 archaeology — `Counterexample.v` depends on falsity |
 | `formal/Counterexample.v` | **5** | 0 | ✅ pinned regression witness |
 | `formal/TypingL1.v` | **2** | 0 | ✅ active — L1 judgment, modality-indexed |
-| `formal/Semantics_L1.v` | **23** | **3** | ✅ active — bullet-structure regressions + subst_typing_gen_l1_m + region_shrink_preserves_typing_l1_gen_m closed 2026-05-27; 3 residual admits are deeper L2-β debt (region_shrink T_Region_Active_L1 list-vs-multiset case now isolated in _gen_m internal admit, region_liveness_at_split narrow admit per ERegion counterexample, preservation_l1 cap) |
+| `formal/Semantics_L1.v` | **26** | **3** | ✅ active — bullet-structure regressions + subst_typing_gen_l1_m + region_shrink_preserves_typing_l1_gen_m closed 2026-05-27; 3 residual outer `Admitted.` markers cover 5 internal `admit.` cases — all pre-existing L1 structural debt OR true parallel mirrors (T_Region_Active_*_L1_Echo shadowed sub-cases mirror T_Region_Active_L1's debt; the avoidable T_Region_L1_Echo mirror was closed in slice 4). Slice 4 added 3 new Qed: `preservation_l3_region_active_echo`, `preservation_l3_drop_echo`, `preservation_l3` (umbrella). Zero new admits. |
 | `formal/Modality.v` | **1** | 0 | ✅ active — L2 core, zero axioms |
 | `formal/Echo.v` | **12** | 0 | ✅ active — L3 calculus, not yet wired into L1 |
 | `formal/TypingL2.v` | (wrapper) | (wrapper) | ✅ thin re-indexing through `TypingL1.has_type_l1` |
 | `src/abi/Ephapax/…` (Idris2) | n/a | n/a | ✅ active — ABI, Region linearity, no `believe_me` / `sorry` / `assert_total` |
+
+### Seam audit (slice 4, 2026-05-27): every admit/axiom classified
+
+Every `admit.` and `Admitted.` in `formal/*.v` after L3 slice 4
+landed. No new debt was introduced; the avoidable T_Region_L1_Echo
+mirror was closed. The remaining set is exactly the **pre-existing
+L1 structural debt** (with two true parallel mirrors that close
+when their originals close) plus the **sacrosanct legacy
+preservation** (provably false per `Counterexample.v`).
+
+| Location | Class | Closes when |
+|---|---|---|
+| `Semantics_L1.v:553` (`admit.`) | **Pre-existing** L1 structural — `region_shrink_preserves_typing_l1_gen_m` / T_Region_Active_L1 shadowed sub-case; list-vs-multiset gap | L1 perm/multiset bridge OR `T_Region_*_L1` redesign |
+| `Semantics_L1.v:621` (`admit.`) | **Parallel mirror** of `:553` — T_Region_Active_L1_Echo shadowed sub-case; structurally identical | Same as `:553` (mechanical replay) |
+| `Semantics_L1.v:653` (`Admitted.`) | **Outer marker** — depends on internal `:553` + `:621` | When both internal admits close |
+| `Semantics_L1.v:1256` (`admit.`) | **Pre-existing** L1 structural — `region_liveness_at_split_l1_gen` / T_Region_Active_L1 `r = rv` sub-case; "GENUINELY FALSE" counterexample documented at site | L2 effect-typed `TFun` per `PRESERVATION-DESIGN.md §5.1` |
+| `Semantics_L1.v:1276` (`admit.`) | **Parallel mirror** of `:1256` — T_Region_Active_L1_Echo `r = rv` sub-case | Same as `:1256` (mechanical replay) |
+| `Semantics_L1.v:1290` (`Admitted.`) | **Outer marker** — depends on internal `:1256` + `:1276` | When both internal admits close |
+| `Semantics_L1.v:1694` (`admit.`) | **Pre-existing** — `preservation_l1` body; lambda-rigidity gap per `PRESERVATION-DESIGN.md §4.8` | L2 effect-typed `TFun` (Phase 2) |
+| `Semantics_L1.v:1695` (`Admitted.`) | **Outer marker** — depends on internal `:1694` | When `:1694` closes |
+| `Semantics.v:9257` (`Admitted.`) | **🛑 Sacrosanct** — legacy `Theorem preservation`, **provably false** per `Counterexample.v` (owner directive 2026-05-27) | Never. The `Admitted.` is correct. |
+
+No `Axiom` declarations in `formal/*.v`. Counterexample.v carries 5
+Qed; TypingL1.v / Modality.v / Echo.v / TypingL2.v are all
+admit-free.
 
 ### Idris2 side (proof carriers, not Coq mechanisation)
 

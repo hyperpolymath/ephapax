@@ -14,12 +14,18 @@
   ***    - unrestricted_flag_unchanged_l1                            ***
   ***    - shift_typing_gen_l1 (via shift_typing_gen_l1_m + wrapper) ***
   ***    - subst_typing_gen_l1 (via subst_typing_gen_l1_m + wrapper) ***
+  ***    - count_occ_le_l1 (via count_occ_le_l1_m + wrapper)         ***
+  ***    - region_shrink_preserves_typing_l1_gen (via                ***
+  ***      region_shrink_preserves_typing_l1_gen_m + wrapper)        ***
   ***    - typing_preserves_length_l1, output_shape_at_l1,           ***
   ***      loc_retype_at_R_l1 all generalised to m-polymorphic       ***
   ***                                                                ***
   ***  Residual admits (L2-β follow-up):                             ***
-  ***    1. region_shrink_preserves_typing_l1_gen — list-vs-multiset ***
-  ***       structural mismatch in T_Region_Active_L1 shadowed case  ***
+  ***    1. region_shrink_preserves_typing_l1_gen_m — list-vs-       ***
+  ***       multiset structural mismatch in T_Region_Active_L1       ***
+  ***       shadowed case (1 internal admit). Bullet structure       ***
+  ***       restored 2026-05-27; only the structural sub-case        ***
+  ***       remains.                                                 ***
   ***    2. region_liveness_at_split_l1_gen — 1 narrow admit in the  ***
   ***       T_Region_Active_L1 [r = rv] sub-case (genuinely false    ***
   ***       per documented counterexample ERegion rv (EI32 5))       ***
@@ -266,12 +272,12 @@ Qed.
 
 (** Count monotonicity: every L1 typing rule has [cnt r R'
     <= cnt r R] for every region [r]. *)
-Lemma count_occ_le_l1 :
-  forall R G e T R' G',
-    R; G |=L1 e : T -| R'; G' ->
+Lemma count_occ_le_l1_m :
+  forall m R G e T R' G',
+    R ; G |=L1[m] e : T -| R' ; G' ->
     forall r, cnt r R' <= cnt r R.
 Proof.
-  intros R G e T R' G' Ht.
+  intros m R G e T R' G' Ht.
   induction Ht; intros r0; unfold cnt in *; simpl in *;
     try lia;
     try (specialize (IHHt r0); lia);
@@ -302,6 +308,16 @@ Proof.
       specialize (Hoth Hne').
       unfold cnt in Hoth. rewrite Hoth.
       lia.
+Qed.
+
+(** Linear specialisation — preserves the legacy call sites. *)
+Lemma count_occ_le_l1 :
+  forall R G e T R' G',
+    R; G |=L1 e : T -| R'; G' ->
+    forall r, cnt r R' <= cnt r R.
+Proof.
+  intros R G e T R' G' Ht r.
+  exact (count_occ_le_l1_m Linear R G e T R' G' Ht r).
 Qed.
 
 (** Corollary: if [r] appears in the output, it appeared at least
@@ -344,11 +360,17 @@ Qed.
     list-structure agreement*, which set-equivalence (and even
     multiset-equivalence in some sub-sub-cases) does not provide.
 
-    Resolution: this sub-case remains [admit] in [_gen]; the
-    wrapper [region_shrink_preserves_typing_l1] is proved directly
-    by induction on [is_value] (values have no [T_Region_*_L1]
-    inversion), bypassing [_gen] for actual usage in
-    [preservation_l1]. *)
+    Resolution: this sub-case remains an internal [admit] in
+    [region_shrink_preserves_typing_l1_gen_m] (the m-polymorphic
+    helper). The Linear wrapper [_gen] and the value-restricted
+    wrapper [region_shrink_preserves_typing_l1] (used by
+    [preservation_l1]'s S_Region_Exit case) both still depend on
+    it: an earlier note here suggested the value-wrapper could
+    bypass [_gen_m] by induction on [is_value], but that fails on
+    [VLam] — the lambda body is a non-value whose internal
+    [ERegion r' e'] subterm may shadow the outer [r], hitting the
+    same structural residual. Closure options are listed in the
+    case's own comment within [_gen_m]. *)
 
 (** Auxiliary general L1 region-shrinkage lemma — no [is_value] or
     [~ In r (free_regions T)] premises, mirroring the legacy
@@ -362,6 +384,167 @@ Qed.
     Once the L1 permutation infrastructure lands, this helper closes to
     Qed and the targeted lemma follows in one line. *)
 
+(** ** Modality-polymorphic generalisation.
+
+    Mirrors the L2-β pattern used by [subst_typing_gen_l1_m] and
+    [shift_typing_gen_l1_m]: the structural shrinkage lemma is
+    mode-blind (region operations don't depend on the modality),
+    so we prove it once at arbitrary [m] and derive the Linear
+    specialisation as a wrapper.
+
+    One genuine residual [admit] remains — the [T_Region_Active_L1]
+    [rr = r] shadowed sub-case, documented as the list-vs-multiset
+    bridge in PROOF-NEEDS.md §2 and in the design-note comment
+    above this lemma block. The L1 region-permutation infrastructure
+    (analog of [region_env_perm_typing] and [region_add_typing])
+    is needed to close it; bridging options are listed in the
+    case's own comment. *)
+Lemma region_shrink_preserves_typing_l1_gen_m :
+  forall m R G e T R' G',
+    R ; G |=L1[m] e : T -| R' ; G' ->
+    forall r,
+      expr_free_of_region r e ->
+      remove_first r R ; G |=L1[m] e : T -| remove_first r R' ; G'.
+Proof.
+  intros m R G e T R' G' Ht.
+  induction Ht; intros rr Hfree; simpl in Hfree.
+  - (* T_Unit_L1 *) apply T_Unit_L1.
+  - (* T_Bool_L1 *) apply T_Bool_L1.
+  - (* T_I32_L1 *) apply T_I32_L1.
+  - (* T_Var_Lin_L1 *) eapply T_Var_Lin_L1; eauto.
+  - (* T_Var_Unr_L1 *) eapply T_Var_Unr_L1; eauto.
+  - (* T_Loc_L1 *)
+    apply T_Loc_L1.
+    apply remove_first_preserves_other; [exact Hfree | exact H].
+  - (* T_StringNew_L1 *)
+    apply T_StringNew_L1.
+    apply remove_first_preserves_other; [exact Hfree | exact H].
+  - (* T_StringConcat_L1 *)
+    destruct Hfree as [Hf1 Hf2].
+    eapply T_StringConcat_L1; [eapply IHHt1; auto | eapply IHHt2; auto].
+  - (* T_StringLen_L1 *)
+    eapply T_StringLen_L1. eapply IHHt; auto.
+  - (* T_Let_L1 *)
+    destruct Hfree as [Hf1 Hf2].
+    eapply T_Let_L1; [eapply IHHt1; auto | eapply IHHt2; auto].
+  - (* T_LetLin_L1 *)
+    destruct Hfree as [Hf1 Hf2].
+    eapply T_LetLin_L1; [exact H | eapply IHHt1; auto | eapply IHHt2; auto].
+  - (* T_Lam_L1_Linear *)
+    apply T_Lam_L1_Linear. eapply IHHt; auto.
+  - (* T_Lam_L1_Affine *)
+    eapply T_Lam_L1_Affine. eapply IHHt; auto.
+  - (* T_App_L1 *)
+    destruct Hfree as [Hf1 Hf2].
+    eapply T_App_L1; [eapply IHHt1; auto | eapply IHHt2; auto].
+  - (* T_Pair_L1 *)
+    destruct Hfree as [Hf1 Hf2].
+    eapply T_Pair_L1; [eapply IHHt1; auto | eapply IHHt2; auto].
+  - (* T_Fst_L1 *)
+    eapply T_Fst_L1; [eapply IHHt; auto | exact H].
+  - (* T_Snd_L1 *)
+    eapply T_Snd_L1; [eapply IHHt; auto | exact H].
+  - (* T_Inl_L1 *)
+    eapply T_Inl_L1. eapply IHHt; auto.
+  - (* T_Inr_L1 *)
+    eapply T_Inr_L1. eapply IHHt; auto.
+  - (* T_Case_L1_Linear *)
+    destruct Hfree as [Hf1 [Hf2 Hf3]].
+    eapply T_Case_L1_Linear;
+      [eapply IHHt1; auto | eapply IHHt2; auto | eapply IHHt3; auto].
+  - (* T_Case_L1_Affine *)
+    destruct Hfree as [Hf1 [Hf2 Hf3]].
+    eapply T_Case_L1_Affine;
+      [eapply IHHt1; auto | eapply IHHt2; auto | eapply IHHt3; auto].
+  - (* T_If_L1_Linear *)
+    destruct Hfree as [Hf1 [Hf2 Hf3]].
+    eapply T_If_L1_Linear;
+      [eapply IHHt1; auto | eapply IHHt2; auto | eapply IHHt3; auto].
+  - (* T_If_L1_Affine *)
+    destruct Hfree as [Hf1 [Hf2 Hf3]].
+    eapply T_If_L1_Affine;
+      [eapply IHHt1; auto | eapply IHHt2; auto | eapply IHHt3; auto].
+  - (* T_Region_L1: ERegion r e (fresh r).
+       Shadowed sub-case (rr = r) closes via count-monotonicity
+       vacuity; descend sub-case (rr <> r) via the
+       remove_first/remove_first_L1 commutation rewrite. *)
+    destruct (String.eqb rr r) eqn:Heq.
+    + (* rr = r: shadowed. Hfree is True (irrelevant). *)
+      apply String.eqb_eq in Heq. subst r.
+      rewrite (remove_first_not_in_id _ _ H).
+      destruct (in_dec string_dec rr (remove_first_L1 rr R_body)) as [Hin | Hnotin].
+      * (* Multiple rr's in R_body — VACUOUS by count monotonicity.
+           Body is typed at (rr :: R) with ~In rr R, so the body input
+           has count_occ rr = 1. By count_occ_le_l1_m, count_occ rr R_body
+           <= 1. But Hin says count_occ rr R_body >= 2. Contradiction. *)
+        exfalso.
+        pose proof (count_occ_le_l1_m _ _ _ _ _ _ _ Ht rr) as Hle.
+        unfold cnt in Hle. simpl in Hle.
+        destruct (string_dec rr rr) as [_|Hbad]; [|apply Hbad; reflexivity].
+        apply (count_occ_In string_dec) in Hin.
+        pose proof (remove_first_L1_count_eq_self rr R_body) as Hself.
+        unfold cnt in Hself. rewrite Hself in Hin.
+        apply (count_occ_not_In string_dec) in H.
+        lia.
+      * (* At most one rr in R_body. Then
+           remove_first rr (remove_first_L1 rr R_body) =
+           remove_first_L1 rr R_body. *)
+        rewrite (remove_first_not_in_id _ _ Hnotin).
+        eapply T_Region_L1; eauto.
+    + (* rr <> r: descend. *)
+      apply String.eqb_neq in Heq.
+      assert (Hgoal_eq : remove_first rr (remove_first_L1 r R_body) =
+                        remove_first_L1 r (remove_first rr R_body)).
+      { rewrite (remove_first_eq_l1 r R_body).
+        rewrite (remove_first_eq_l1 r (remove_first rr R_body)).
+        apply remove_first_comm. }
+      rewrite Hgoal_eq.
+      eapply T_Region_L1.
+      * intro Hin. apply H. eapply remove_first_subset; exact Hin.
+      * exact H0.
+      * apply remove_first_preserves_other; [intro Hbad; apply Heq; exact Hbad | exact H1].
+      * specialize (IHHt rr Hfree).
+        simpl in IHHt.
+        destruct (String.eqb rr r) eqn:Heq2.
+        -- exfalso. apply String.eqb_eq in Heq2. apply Heq. exact Heq2.
+        -- exact IHHt.
+  - (* T_Region_Active_L1: ERegion r e (r currently active). *)
+    destruct (String.eqb rr r) eqn:Heq.
+    + (* rr = r: shadowed; Hfree True. RESIDUAL — structural
+         list-vs-multiset mismatch documented in PROOF-NEEDS.md §2
+         and in the design-note comment above this lemma block.
+         Bridging requires either:
+         (a) a stronger L1 perm lemma that produces specifically-shaped
+             outputs (requires reformulating output as a function of
+             input + derivation shape), or
+         (b) a reformulation of [remove_first_L1] to be multiset-based
+             (lose ordering), or
+         (c) a redesign of the L1 [T_Region_*_L1] rules to not depend on
+             first-occurrence semantics. *)
+      admit.
+    + (* rr <> r: descend. *)
+      apply String.eqb_neq in Heq.
+      assert (Hgoal_eq : remove_first rr (remove_first_L1 r R_body) =
+                        remove_first_L1 r (remove_first rr R_body)).
+      { rewrite (remove_first_eq_l1 r R_body).
+        rewrite (remove_first_eq_l1 r (remove_first rr R_body)).
+        apply remove_first_comm. }
+      rewrite Hgoal_eq.
+      eapply T_Region_Active_L1.
+      * apply remove_first_preserves_other; [intro Hbad; apply Heq; exact Hbad | exact H].
+      * exact H0.
+      * apply remove_first_preserves_other; [intro Hbad; apply Heq; exact Hbad | exact H1].
+      * eapply IHHt. exact Hfree.
+  - (* T_Borrow_L1 *)
+    eapply T_Borrow_L1. exact H.
+  - (* T_Borrow_Val_L1 *)
+    eapply T_Borrow_Val_L1; [exact H | eapply IHHt; auto].
+  - (* T_Drop_L1 *)
+    eapply T_Drop_L1; [exact H | eapply IHHt; auto].
+  - (* T_Copy_L1 *)
+    eapply T_Copy_L1; [exact H | eapply IHHt; auto].
+Admitted.
+
 Lemma region_shrink_preserves_typing_l1_gen :
   forall R G e T R' G',
     has_type_l1_linear R G e T R' G' ->
@@ -369,18 +552,9 @@ Lemma region_shrink_preserves_typing_l1_gen :
       expr_free_of_region r e ->
       has_type_l1_linear (remove_first r R) G e T (remove_first r R') G'.
 Proof.
-  (** L2 REGRESSION: this proof's body was written for the pre-L2
-      [has_type_l1] (6 args, single T_Lam_L1 / T_Case_L1 / T_If_L1
-      constructors). The L2 refactor expanded to 27 constructors
-      (including Affine-only T_Lam_L1_Affine, T_Case_L1_Affine,
-      T_If_L1_Affine), which shifts the bullet ordering generated
-      by [induction Ht]. The original case-by-case proof body is
-      preserved in git history at commit 56f592f
-      ([proof/l1-region-threading-design] tip). Restoring it is a
-      mechanical bullet-structure rewrite plus 3 [discriminate]
-      dispatches for the Affine-only constructors. Tracked as
-      L2-β follow-up. *)
-Admitted.
+  intros R G e T R' G' Ht r Hfree.
+  apply (region_shrink_preserves_typing_l1_gen_m Linear); auto.
+Qed.
 
 Lemma region_shrink_preserves_typing_l1 :
   forall R G v T R' G' r,

@@ -380,7 +380,7 @@ recipe (echo-types' `degradeMode-comp`, `EchoLinear.agda:93-101`).
 
 | Property | Ephapax-Linear | Ephapax-Affine |
 |---|---|---|
-| Preservation | ✓ (L1 fix) | ✓ (same fix; Affine derivations are L1-safe by weakening) |
+| Preservation | ✓ (L1 fix, *conditional on §5.1*) | ✓ (same fix; Affine derivations are L1-safe by weakening) |
 | Progress | ✓ | ✓ |
 | **No-leak** (every introduced linear value is consumed) | proved | does **not** hold; replaced by "no-duplicate" |
 | **No-duplicate** | trivially (Linear ⇒ no-duplicate) | proved as a structural property |
@@ -390,6 +390,70 @@ recipe (echo-types' `degradeMode-comp`, `EchoLinear.agda:93-101`).
 Cross-mode: the Linear ⇒ Affine weakening lemma is a single induction.
 Combined with monomode preservation, this gives Affine preservation
 for free.
+
+### 5.1 Cross-layer dependency: L1's lambda-rigidity gap closes at L2
+
+The "Preservation ✓ (L1 fix)" cell above is **not realised by L1 alone**.
+`formal/Semantics_L1.v`'s `preservation_l1` is currently `Admitted`
+because of three internal admits in its proof body:
+
+- `S_StringConcat_Step2` — tractable; needs a
+  `step_pop_disjoint_from_type_l1` lemma.
+- `S_App_Step2` and `S_Pair_Step2` — the **lambda-rigidity gap** per
+  §4.8: `T_Lam_L1` fixes the body's region environment at lambda-
+  creation time; the rules give no way to re-derive the lambda's
+  typing at a shifted `R'` after the inner step. §4.8 lists three
+  resolution paths.
+
+§4.8.1 records that **path (3) — strengthening `T_Var_*_L1` — landed
+2026-05-27 via PR #170**. It closes the source-level *variable*
+soundness gap (variables of type `TString r` can no longer type at
+`R` that doesn't contain `r`) but leaves the lambda-body case open
+because the body's typing is fixed at `T_Lam_L1`-introduction, not
+at variable-use. Path (3) is necessary but **not sufficient**.
+
+**Path (1) — effect-typed lambdas — is L2's mechanism.** The mode-
+specific `T_Lam_Linear_L2` / `T_Lam_Affine_L2` constructors should
+carry an annotation of the body's region effect (how `R` shifts
+through the body). Concretely, the lambda type would extend from
+
+```
+TFun T1 T2
+```
+
+to
+
+```
+TFun T1 T2 (R_in : region_env) (R_out : region_env)
+```
+
+(or an equivalent abstract `Effect` parameter). At application time,
+`T_App_L2` would consume `R_in` and produce `R_out`, threading the
+region change properly. This lets `S_App_Step2`'s preservation close:
+the lambda's typing at the post-step `R'` is derived from the
+recorded effect, not blocked by rigid `T_Lam` introduction.
+
+**Sequencing.** This file's [§5 mode-specific rules table] currently
+lists only the per-type-flag changes (`(T1, true) :: G` vs
+`(T1, true_or_unused) :: G`). The effect-typed `TFun` is an
+additional, orthogonal extension of `T_Lam_Linear_L2` /
+`T_Lam_Affine_L2` planned for L2 Phase 2. When it lands, the L1
+preservation closure can return and discharge the lambda-rigidity
+admits in `Semantics_L1.v` (via an L1-level lemma that consumes the
+L2-introduced effect signatures).
+
+**Why this isn't L1's job.** Effect-typed function types are a typing-
+layer property, not a region-layer property. Adding them to L1's
+unparameterised judgment would conflate the two. L2 is the natural
+home: the modality parameter is *already* a typing-layer decoration;
+the effect annotation rides alongside it. After L2 lands, L1's gap
+closes by importation, not by re-deriving L1.
+
+Until that follow-up lands, the §5 table's "Preservation ✓" should
+be read as "achievable under the L1 architecture once L2 effect-
+typed lambdas are introduced". The Linear ⇒ Affine weakening
+(`weaken_modality` Qed, PR #168) is independent of this dependency
+and already ships in the L2 skeleton.
 
 ---
 

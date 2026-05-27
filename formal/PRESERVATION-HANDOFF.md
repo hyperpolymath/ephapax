@@ -2,16 +2,32 @@
 
 # Hand-off: closing `preservation` in `formal/Semantics.v`
 
-> **🟠 Superseded for the closure decision (2026-05-26).** The
-> verified counterexample at `formal/Counterexample.v` (three lemmas
-> `Qed`) shows preservation as currently stated is **false**, not
-> unproven. The canonical *design* for the fix is now
-> `formal/PRESERVATION-DESIGN.md` (four orthogonal layers; L1 region
-> capability threading is the preservation fix).
+> # 🛑 ARCHAEOLOGY ONLY — do NOT follow the closure plans in this file
 >
-> This handoff document remains valid as a **diagnostic record** of
-> the attempted minimal-patch closure paths and what they hit. It is
-> no longer the design source.
+> The verified counterexample at `formal/Counterexample.v` (three
+> lemmas `Qed.`) shows `Theorem preservation` in `formal/Semantics.v`
+> is **provably false**. The reduction-from-910-goals story below is
+> the **historical record** of attempts that, at the time, looked
+> like they would close it. None of them work — preservation
+> cannot be closed because no proof exists.
+>
+> **DO NOT** spend session time on:
+> - The 5-phase "Preservation closure plan" (Lemma B / region-weakening
+>   / Phase 5 Qed flip).
+> - Continuing the 12 → 0 reduction story.
+> - Extending the legacy `Semantics.v` with new lemmas to support
+>   any of the above.
+>
+> The canonical design for the fix is the **four-layer redesign** in
+> `formal/PRESERVATION-DESIGN.md`. Preservation is re-derived
+> per-layer (`preservation_l1` in `Semantics_L1.v`, etc.), not
+> closed against the legacy judgment. The owner directive
+> (2026-05-27) is in `CLAUDE.md` at the repo root.
+>
+> This file is retained so the per-case diagnostic data (which
+> congruence patterns hit which obstacle, etc.) remains available
+> to inform the layered design — but reading it as a closure plan
+> is the trap.
 
 Diagnostic + remediation log. The proof is still `Admitted.`, but as
 of **2026-05-21** it's **down from 910 open goals to 12** via four

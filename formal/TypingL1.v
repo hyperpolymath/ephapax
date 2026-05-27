@@ -1,6 +1,25 @@
 (* SPDX-License-Identifier: PMPL-1.0-or-later *)
 (* SPDX-FileCopyrightText: 2026 Jonathan D.A. Jewell *)
 
+(**
+
+  *********************************************************************
+  ***  ✅ ACTIVE -- L1 typing judgment. Modality-indexed.             ***
+  ***                                                                ***
+  ***  This is the post-counterexample L1 redesign. Extend HERE for  ***
+  ***  region-capability + modality typing work.                     ***
+  ***                                                                ***
+  ***  Judgment is 100% (0 admits, 2 Qed at last count). The         ***
+  ***  modality parameter `m : Modality` lives directly in           ***
+  ***  `has_type_l1` (L2-hybrid landing, PRs #176 + #177).            ***
+  ***  `linear_to_affine` is Qed with zero axioms.                   ***
+  ***                                                                ***
+  ***  See `STATUS.adoc`, `PROOF-NEEDS.md`,                          ***
+  ***  `formal/PRESERVATION-DESIGN.md`.                              ***
+  *********************************************************************
+
+*)
+
 (** * Ephapax Typing Rules — L1 redesign (region capability threading)
 
     This file contains the **new** typing judgment as specified in

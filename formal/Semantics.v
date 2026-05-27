@@ -1,6 +1,35 @@
 (* SPDX-License-Identifier: PMPL-1.0-or-later *)
 (* SPDX-FileCopyrightText: 2025-2026 Jonathan D.A. Jewell *)
 
+(**
+
+  *********************************************************************
+  ***  🛑 ARCHAEOLOGY -- DO NOT EXTEND                                ***
+  ***                                                                ***
+  ***  This is the LEGACY operational semantics. The `preservation`  ***
+  ***  theorem here is PROVABLY FALSE -- verified by                 ***
+  ***  `formal/Counterexample.v` (5 Qed lemmas).                     ***
+  ***                                                                ***
+  ***  Do NOT add lemmas to close it. Do NOT add `Admitted` or       ***
+  ***  `Axiom` declarations. Do NOT extend with Lemma B variants,    ***
+  ***  region-weakening predicates,                                  ***
+  ***  `step_preserves_type_at_pre`-style helpers, or strengthened   ***
+  ***  substitution lemmas.                                          ***
+  ***                                                                ***
+  ***  Active proof work happens in:                                 ***
+  ***    formal/TypingL1.v     -- L1 judgment (modality-indexed)     ***
+  ***    formal/Semantics_L1.v -- L1 semantics                       ***
+  ***    formal/Modality.v     -- L2 modality                        ***
+  ***    formal/Echo.v         -- L3 echo / residue                  ***
+  ***                                                                ***
+  ***  See `STATUS.adoc`, `PROOF-NEEDS.md`, and                      ***
+  ***  `formal/PRESERVATION-DESIGN.md` for the full doctrine.        ***
+  ***  Owner directive 2026-05-27: `CLAUDE.md` "Owner directive"     ***
+  ***  section.                                                      ***
+  *********************************************************************
+
+*)
+
 (** * Ephapax Operational Semantics (De Bruijn, Substitution-Based)
 
     Small-step reduction semantics using De Bruijn indices with explicit

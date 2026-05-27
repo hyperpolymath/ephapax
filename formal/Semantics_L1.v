@@ -1,6 +1,32 @@
 (* SPDX-License-Identifier: PMPL-1.0-or-later *)
 (* SPDX-FileCopyrightText: 2026 Jonathan D.A. Jewell *)
 
+(**
+
+  *********************************************************************
+  ***  ✅ ACTIVE -- L1 semantics. Modality-indexed.                   ***
+  ***                                                                ***
+  ***  This is the post-counterexample L1 redesign. Extend HERE.     ***
+  ***                                                                ***
+  ***  9 `Admitted` lemmas remaining are L2-INTEGRATION DEBT (bullet ***
+  ***  structure for the 3 new Affine-only constructors              ***
+  ***  T_Lam_L1_Affine, T_Case_L1_Affine, T_If_L1_Affine added by    ***
+  ***  the L2-hybrid landing in PRs #176 + #177).                    ***
+  ***                                                                ***
+  ***  DO NOT close them by:                                         ***
+  ***    - introducing new `Axiom` declarations                      ***
+  ***    - ad-hoc side conditions on compound rules                  ***
+  ***    - strengthened lemma signatures dodging the L2 dispatch     ***
+  ***                                                                ***
+  ***  Cross-layer dependencies (L1's lambda-rigidity gap closes at  ***
+  ***  L2) are documented in `formal/PRESERVATION-DESIGN.md §5.1`.   ***
+  ***                                                                ***
+  ***  See `STATUS.adoc`, `PROOF-NEEDS.md`, and                      ***
+  ***  `formal/PRESERVATION-DESIGN.md`.                              ***
+  *********************************************************************
+
+*)
+
 (** * Ephapax Preservation under the L1 judgment (R-threaded typing)
 
     This file states [preservation_l1] for the new [has_type_l1]

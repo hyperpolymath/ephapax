@@ -1,6 +1,35 @@
 (* SPDX-License-Identifier: PMPL-1.0-or-later *)
 (* SPDX-FileCopyrightText: 2026 Jonathan D.A. Jewell *)
 
+(**
+
+  *********************************************************************
+  ***  ✅ ACTIVE -- L3 echo / residue. ONE type former, fiber-shaped. ***
+  ***                                                                ***
+  ***  12 Qed, 0 admits at last count. K-free.                       ***
+  ***                                                                ***
+  ***  Mirrors upstream Agda development at                          ***
+  ***    https://github.com/hyperpolymath/echo-types                 ***
+  ***                                                                ***
+  ***  RULE: Echo Types and structural discipline (Linear/Affine)    ***
+  ***  must remain ORTHOGONAL. There is ONE Echo type former. DO NOT ***
+  ***  define a `LinearEcho` distinct from an `AffineEcho`. The two  ***
+  ***  modes are *applications* of `Echo` with different witness     ***
+  ***  shapes, dispatched at the typing-rule boundary by reading     ***
+  ***  L2's `m : Modality`. Pattern-matching on Linear/Affine inside ***
+  ***  this file is a layering violation.                            ***
+  ***                                                                ***
+  ***  Next-block work (integration, not calculus):                  ***
+  ***   - T_Observe rule in has_type_l1 (Linear consumes; Affine     ***
+  ***     permits silent lowering)                                   ***
+  ***   - step rules emit Echo on S_Region_Exit, S_Drop              ***
+  ***   - G (echo context) threaded alongside R (region context)     ***
+  ***                                                                ***
+  ***  See `STATUS.adoc`, `formal/PRESERVATION-DESIGN.md §6`.        ***
+  *********************************************************************
+
+*)
+
 (** * Ephapax L3 — Echo / residue type former (forward-looking scaffold)
 
     This file mechanises Layer 3 of the four-layer preservation

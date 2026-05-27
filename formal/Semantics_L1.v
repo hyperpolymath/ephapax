@@ -973,12 +973,99 @@ Proof. intros. apply T_Loc_L1. assumption. Qed.
     and consistent with the side-conditioning the design doc lists as
     closure approach (b). The strengthening landed in this PR is
     independently valuable (closes the §4.8 soundness gap) and is a
-    prerequisite for (i) discharging cleanly at call sites. *)
-Axiom region_liveness_at_split_l1 :
+    prerequisite for (i) discharging cleanly at call sites.
+
+    === 2026-05-27 partial discharge: Axiom → Lemma with 1 narrow admit ===
+
+    [Axiom] is replaced with [Lemma .. Admitted.] below. The proof
+    body now structurally encodes the case-by-case analysis the
+    header describes:
+
+    - 23 base + compound cases close mechanically (R unchanged or
+      threaded through sub-derivations via IH).
+    - T_Region_L1 (fresh binder) closes via [remove_first_L1_count_other]:
+      [~ In r R ∧ In rv R] gives [r ≠ rv], so the pop preserves rv.
+    - T_Region_Active_L1 (re-entry binder):
+      * Sub-case [r ≠ rv]: same [remove_first_L1_count_other] argument.
+      * Sub-case [r = rv]: the GENUINELY-FALSE case. One [admit] sits
+        here, with a comment quoting the counterexample at the source
+        level (ERegion rv (EI32 5)).
+
+    This converts an opaque universal Axiom into a Lemma with one
+    explicitly-narrow admit. The remaining admit is a structural
+    obligation tied to a documented counterexample, addressable by
+    any of the three closure paths (i)/(ii)/(iii) above. *)
+Lemma region_liveness_at_split_l1 :
   forall R G e T R' G' rv,
     R; G |=L1 e : T -| R'; G' ->
     In rv R ->
     In rv R'.
+Proof.
+  intros R G e T R' G' rv Ht.
+  induction Ht; intros Hin; try assumption.
+  (* Compound cases — thread rv through sub-derivations via IH. *)
+  - (* T_StringConcat_L1: R -> R1 -> R2 *)
+    apply IHHt2. apply IHHt1. assumption.
+  - (* T_StringLen_L1: R -> R' *)
+    apply IHHt. assumption.
+  - (* T_Let_L1: R -> R1 -> R2 *)
+    apply IHHt2. apply IHHt1. assumption.
+  - (* T_LetLin_L1: R -> R1 -> R2 *)
+    apply IHHt2. apply IHHt1. assumption.
+  - (* T_App_L1: R -> R1 -> R2 *)
+    apply IHHt2. apply IHHt1. assumption.
+  - (* T_Pair_L1: R -> R1 -> R2 *)
+    apply IHHt2. apply IHHt1. assumption.
+  - (* T_Fst_L1: R -> R' *)
+    apply IHHt. assumption.
+  - (* T_Snd_L1: R -> R' *)
+    apply IHHt. assumption.
+  - (* T_Inl_L1: R -> R' *)
+    apply IHHt. assumption.
+  - (* T_Inr_L1: R -> R' *)
+    apply IHHt. assumption.
+  - (* T_Case_L1: R -> R1 -> R_final (both branches converge) *)
+    apply IHHt2. apply IHHt1. assumption.
+  - (* T_If_L1: R -> R1 -> R2 (both branches converge) *)
+    apply IHHt2. apply IHHt1. assumption.
+  - (* T_Region_L1 (fresh): premise ~ In r R, body input r::R, output
+       remove_first_L1 r R_body. Since ~In r R but In rv R, r ≠ rv;
+       remove_first_L1 preserves rv. *)
+    assert (Hne : r <> rv).
+    { intro Heq. subst rv. apply H. exact Hin. }
+    (* Body's input is r :: R; In rv R lifts to In rv (r :: R) on the right *)
+    assert (Hin_body_in : In rv (r :: R)) by (right; exact Hin).
+    pose proof (IHHt Hin_body_in) as HinRbody.
+    (* Goal: In rv (remove_first_L1 r R_body) *)
+    apply (count_occ_In string_dec).
+    pose proof (remove_first_L1_count_other r rv R_body Hne) as Heq.
+    unfold cnt in Heq. rewrite Heq.
+    apply (count_occ_In string_dec). exact HinRbody.
+  - (* T_Region_Active_L1 (re-entry): premise In r R, body input R,
+       output remove_first_L1 r R_body. Two sub-cases: *)
+    destruct (string_dec r rv) as [Heq|Hne].
+    + (* r = rv: GENUINELY FALSE. Counterexample at the source level:
+         ERegion rv (EI32 5) types at R = [rv] via T_Region_Active_L1
+         (T = TBase TI32, ~In rv (free_regions T) holds vacuously,
+         body R_body = [rv]); the rule pops the only rv, R' = [] —
+         so In rv R = True but In rv R' = False.
+
+         This is the residual structural obstacle described in the
+         header. Closing it requires one of (i)/(ii)/(iii). *)
+      admit.
+    + (* r ≠ rv: same shape as T_Region_L1. *)
+      pose proof (IHHt Hin) as HinRbody.
+      apply (count_occ_In string_dec).
+      pose proof (remove_first_L1_count_other r rv R_body Hne) as Heq.
+      unfold cnt in Heq. rewrite Heq.
+      apply (count_occ_In string_dec). exact HinRbody.
+  (* T_Borrow_L1, T_Borrow_Val_L1: both have R unchanged — auto-
+     discharged by [try assumption] above. *)
+  - (* T_Drop_L1: R -> R' *)
+    apply IHHt. assumption.
+  - (* T_Copy_L1: R -> R' *)
+    apply IHHt. assumption.
+Admitted.
 
 (** Generalized substitution: at depth [k] for a linear value [v].
     Mirrors legacy [subst_typing_gen]. The only L1-specific gap is the

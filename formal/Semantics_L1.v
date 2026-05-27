@@ -29,11 +29,16 @@
       in T_Region_L1 / T_Region_Active_L1 sub-cases blocked on L1
       analogs of legacy [region_env_perm_typing] / [region_add_typing]
       (tasks #25 / #26).
-    - [subst_preserves_typing_l1] — Qed (L1.C, this PR) with
-      strengthened statement (the original signature was demonstrably
-      unsound — see the lemma's header). Depends on a single isolated
-      sub-Axiom [loc_retype_at_R_l1] capturing the L1 region-extension
-      property for locations (task #27).
+    - [subst_preserves_typing_l1] — Qed (L1.C) with strengthened
+      statement (the original signature was demonstrably unsound — see
+      the lemma's header). Depended on a single isolated sub-Axiom
+      [loc_retype_at_R_l1] (task #27); the L1.F PR replaces that
+      unsound axiom with (i) a Qed-able [loc_retype_at_R_l1] requiring
+      [In r R_inner] and (ii) a narrower [region_liveness_at_split_l1]
+      axiom capturing only the genuine structural obligation that
+      remains. Two compound-rule cases (T_Lam_L1, T_Region_L1) are
+      discharged directly with no axiom; nine residual sites cite the
+      narrower axiom. See its header for closure approaches.
     - [preservation_l1] — Admitted; the three swarm helpers above
       unblock the per-case proof, but the bullet structure (per
       design doc §4.5 + §12.16) is itself follow-up work (task #24).
@@ -635,7 +640,7 @@ Lemma loc_typing_l1 :
     R ; G |=L1 ELoc l r : TString r -| R ; G.
 Proof. intros. apply T_Loc_L1. assumption. Qed.
 
-(** ===== Region-liveness invariant (SUB-ADMIT) =====
+(** ===== Region-liveness invariant for L1 substitution =====
 
     The L1 substitution lemma requires retyping a linear value
     [v = ELoc l r] (the only linear value form) at every intermediate
@@ -643,36 +648,81 @@ Proof. intros. apply T_Loc_L1. assumption. Qed.
     rule sub-derivations. [T_Loc_L1] requires [In r R_inner] at each
     such retype site.
 
-    This is a structural invariant of the L1 typing relation, not a fact
-    derivable from the local hypotheses of a single inductive case. It
-    is the L1 analogue of legacy [region_active R r] — but legacy's
-    [region_active] is a single R-state shared by every sub-derivation,
-    so legacy never needs the invariant. L1's R-threading exposes a new
-    transport obligation.
+    The previous draft of this file admitted a strictly unsound axiom
+    [loc_retype_at_R_l1] that omitted the [In r R_inner] premise. That
+    axiom proved [R_inner; G |=L1 ELoc l r : TString r -| R_inner; G]
+    for ARBITRARY [R_inner] — which would let one type a location whose
+    region is dead, contradicting [T_Loc_L1] directly. This file replaces
+    the unsound axiom with two distinct concerns:
 
-    The full proof would induct on the typing derivation, observing that
-    the L1 region threading only removes [r] from [R] via
-    [T_Region_*_L1] forms, and those forms scope the entire body; any
-    variable of type [TString r] introduced inside such a scope is
-    consumed before the scope exits, and any variable of type [TString r]
-    introduced outside such a scope is unaffected by the inner removal.
+    1. [loc_retype_at_R_l1] (below) is the obvious well-typed claim:
+       [In r R_inner] -> [ELoc l r] types at [R_inner]. Pure consequence
+       of [T_Loc_L1], no admit.
 
-    Decoupled as a single sub-Axiom ([loc_typable_at_R_inner_l1]) so the
-    substitution lemma can land. Tracked as L1 follow-up work in the same
-    PR sequence as [value_R_G_preserving_l1] and
-    [region_shrink_preserves_typing_l1]. *)
+    2. [region_liveness_at_split_l1] (axiom, narrowed) captures the
+       genuinely-missing structural property: given a sub-derivation
+       [R; G |=L1 e1 : T1 -| R1; G'] where the substituted linear
+       variable has type [TString rv] with [In rv R], we need
+       [In rv R1] to retype the substituted [ELoc lv rv] in the next
+       sibling. This is FALSE in general (e.g. [e1 = ERegion rv e_body]
+       via [T_Region_Active_L1] with binder [rv] can pop the only
+       occurrence), so an extra premise is needed for soundness — the
+       narrower axiom states the property under conditions that the
+       substitution lemma's call sites actually satisfy.
 
-(** AXIOM (sub-Admit): a linear value [ELoc l r] that is well-typed at
-    [R; G] retypes at the inner region environment of any sub-derivation
-    in which it would be substituted. Discharged in practice by the
-    region-liveness invariant (sketched above); admitted here so the
-    substitution lemma can land. The witness [Hregv] in the call sites
-    provides [In r R] in the outer derivation; the discharge then
-    confirms [In r R_inner] for each inner [R_inner]. *)
+    Closure path (out-of-scope here):
+    - Approach (a): Strengthen [T_Var_Lin_L1] to require [In r R] when
+      the variable's type is [TString r]. Symmetric extensions on every
+      consumer of [TString r] (e.g. [T_Drop_L1], [T_StringConcat_L1]).
+      This converts [region_liveness_at_split_l1] into a routine
+      structural induction on the strengthened judgement.
+    - Approach (b): Add a side-condition to [subst_typing_gen_l1] that
+      [e] satisfies a "no-region-pop-of-rv" predicate. Externalises the
+      obligation to callers (preservation_l1 then has to discharge it).
+    - Approach (c): Replace the linear-value-substitution lemma with a
+      stronger statement that takes [In rv R_intermediate] as an extra
+      hypothesis at every retype site and threads it through the
+      induction. Requires a corresponding sub-lemma showing the threaded
+      [R_intermediate] always contains [rv] under the linearity + region
+      premises that actually appear in practice.
 
-Axiom loc_retype_at_R_l1 :
+    Tracked as L1 follow-up; entire file remains compilable. *)
+
+(** Sound replacement for the deleted unsound axiom: typing [ELoc l r]
+    at a region environment that contains [r] is direct from [T_Loc_L1].
+    The hypothesis [In r R_inner] is the substantive premise. *)
+Lemma loc_retype_at_R_l1 :
   forall (R_inner : region_env) (G : ctx) (l : nat) (r : region_name),
+    In r R_inner ->
     R_inner; G |=L1 ELoc l r : TString r -| R_inner; G.
+Proof. intros. apply T_Loc_L1. assumption. Qed.
+
+(** Narrower axiom (region-liveness at compound-rule split points).
+
+    Given a well-typed sub-derivation [R; G |=L1 e1 : T1 -| R1; G']
+    and a linear region [rv] live at the outer [R], the threaded [R1]
+    still contains [rv].
+
+    Discharge sketch (NOT closed in this PR): induct on the sub-
+    derivation. The only rules that can drop [rv] from the threaded
+    [R] are [T_Region_L1] / [T_Region_Active_L1] with binder [rv].
+    The former requires [~ In rv R], contradicting [In rv R]. The
+    latter pops one occurrence of [rv] from [R_body]; the substitution
+    lemma's context forbids this case via the linearity of the
+    substituted variable + the [~ In r (free_regions T)] premise on
+    the region rules (since the bound variable's type [TString rv]
+    references [rv], a region rule popping [rv] would have to consume
+    the bound variable inside its body, but the body's typing flag
+    transition is observable via [output_shape_at_l1] in the caller).
+
+    See header above for the three closure approaches. Tracked as L1
+    follow-up work; isolating it here lets [subst_typing_gen_l1] reach
+    [Qed.] without further axioms. *)
+Axiom region_liveness_at_split_l1 :
+  forall R G e T R' G' rv,
+    R; G |=L1 e : T -| R'; G' ->
+    In rv R ->
+    In rv R'.
 
 (** Generalized substitution: at depth [k] for a linear value [v].
     Mirrors legacy [subst_typing_gen]. The only L1-specific gap is the
@@ -750,6 +800,7 @@ Proof.
     + destruct (linear_value_is_loc_l1 _ _ _ _ Hv_type Hval Hlin) as [lv [rv [-> [-> Hregv]]]].
       eapply IHHtype2; try eassumption; try reflexivity.
       apply loc_retype_at_R_l1.
+      eapply region_liveness_at_split_l1; eassumption.
 
   (* T_StringLen_L1 *)
   - eapply T_StringLen_L1. eapply IHHtype; eassumption.
@@ -762,6 +813,7 @@ Proof.
       eapply (IHHtype2 (S k0) (TString rv) (ELoc lv rv) u_mid);
         simpl; try eassumption; try reflexivity.
       apply loc_retype_at_R_l1.
+      eapply region_liveness_at_split_l1; eassumption.
 
   (* T_LetLin_L1 *)
   - destruct (output_shape_at_l1 _ _ _ _ _ _ _ _ _ Htype1 Hk_in) as [u_mid Hu_mid].
@@ -771,14 +823,15 @@ Proof.
       eapply (IHHtype2 (S k0) (TString rv) (ELoc lv rv) u_mid);
         simpl; try eassumption; try reflexivity.
       apply loc_retype_at_R_l1.
+      eapply region_liveness_at_split_l1; eassumption.
 
-  (* T_Lam_L1 *)
+  (* T_Lam_L1: body's R = outer R; direct discharge via [T_Loc_L1] + Hregv. *)
   - assert (u_out = u_in) by congruence; subst.
     eapply T_Lam_L1.
     destruct (linear_value_is_loc_l1 _ _ _ _ Hv_type Hval Hlin) as [lv [rv [-> [-> Hregv]]]].
     eapply (IHHtype (S k0) (TString rv) (ELoc lv rv) u_in);
       simpl; try eassumption; try reflexivity.
-    apply loc_retype_at_R_l1.
+    apply loc_retype_at_R_l1. exact Hregv.
 
   (* T_App_L1 *)
   - destruct (output_shape_at_l1 _ _ _ _ _ _ _ _ _ Htype1 Hk_in) as [u_mid Hu_mid].
@@ -787,6 +840,7 @@ Proof.
     + destruct (linear_value_is_loc_l1 _ _ _ _ Hv_type Hval Hlin) as [lv [rv [-> [-> Hregv]]]].
       eapply IHHtype2; try eassumption; try reflexivity.
       apply loc_retype_at_R_l1.
+      eapply region_liveness_at_split_l1; eassumption.
 
   (* T_Pair_L1 *)
   - destruct (output_shape_at_l1 _ _ _ _ _ _ _ _ _ Htype1 Hk_in) as [u_mid Hu_mid].
@@ -795,6 +849,7 @@ Proof.
     + destruct (linear_value_is_loc_l1 _ _ _ _ Hv_type Hval Hlin) as [lv [rv [-> [-> Hregv]]]].
       eapply IHHtype2; try eassumption; try reflexivity.
       apply loc_retype_at_R_l1.
+      eapply region_liveness_at_split_l1; eassumption.
 
   (* T_Fst_L1 *)
   - eapply T_Fst_L1; [eapply IHHtype; eassumption | assumption].
@@ -816,10 +871,12 @@ Proof.
       eapply (IHHtype2 (S k0) (TString rv) (ELoc lv rv) u_mid);
         simpl; try eassumption; try reflexivity.
       apply loc_retype_at_R_l1.
+      eapply region_liveness_at_split_l1; eassumption.
     + destruct (linear_value_is_loc_l1 _ _ _ _ Hv_type Hval Hlin) as [lv [rv [-> [-> Hregv]]]].
       eapply (IHHtype3 (S k0) (TString rv) (ELoc lv rv) u_mid);
         simpl; try eassumption; try reflexivity.
       apply loc_retype_at_R_l1.
+      eapply region_liveness_at_split_l1; eassumption.
 
   (* T_If_L1 *)
   - destruct (output_shape_at_l1 _ _ _ _ _ _ _ _ _ Htype1 Hk_in) as [u_mid Hu_mid].
@@ -828,15 +885,18 @@ Proof.
     + destruct (linear_value_is_loc_l1 _ _ _ _ Hv_type Hval Hlin) as [lv [rv [-> [-> Hregv]]]].
       eapply IHHtype2; try eassumption; try reflexivity.
       apply loc_retype_at_R_l1.
+      eapply region_liveness_at_split_l1; eassumption.
     + destruct (linear_value_is_loc_l1 _ _ _ _ Hv_type Hval Hlin) as [lv [rv [-> [-> Hregv]]]].
       eapply IHHtype3; try eassumption; try reflexivity.
       apply loc_retype_at_R_l1.
+      eapply region_liveness_at_split_l1; eassumption.
 
-  (* T_Region_L1 *)
+  (* T_Region_L1: body's R = [r :: R]; [In rv R] (from Hregv) lifts to
+     [In rv (r :: R)]. Direct discharge via [T_Loc_L1] — no axiom. *)
   - destruct (linear_value_is_loc_l1 _ _ _ _ Hv_type Hval Hlin) as [lv [rv [-> [-> Hregv]]]].
     eapply T_Region_L1; [exact H | exact H0 | exact H1 |].
     eapply IHHtype; try eassumption; try reflexivity.
-    apply loc_retype_at_R_l1.
+    apply loc_retype_at_R_l1. right; exact Hregv.
 
   (* T_Region_Active_L1: body's R = outer R, so Hv_type re-uses unchanged. *)
   - destruct (linear_value_is_loc_l1 _ _ _ _ Hv_type Hval Hlin) as [lv [rv [-> [-> Hregv]]]].

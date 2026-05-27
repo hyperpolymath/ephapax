@@ -5,6 +5,37 @@ All notable changes to Ephapax are documented here.
 
 ## [Unreleased]
 
+### Four-layer preservation redesign (2026-05-26 → 2026-05-27)
+
+- **L1 — region capabilities** (PRs #153-line, integration branch
+  `proof/l1-region-threading-design`): introduces `has_type_l1` with
+  R-threading in `formal/TypingL1.v`. Supporting lemmas in
+  `formal/Semantics_L1.v`. Counterexample regression (`bad_input_untypable_l1`)
+  Qed in `formal/Counterexample.v`. `preservation_l1` Admitted with 4
+  residual admits in R-weakening territory.
+- **L2 — Linear/Affine modality** (PR #176, this entry): `has_type_l1`
+  carries `m : Modality` parameter so a single judgment specialises to
+  ephapax-linear AND ephapax-affine. New `formal/Modality.v` with K-free
+  thin poset (`modality_le` at `Type` sort + `_refl`/`_trans`/`_prop`).
+  Mode-split constructors for `T_Lam` / `T_Case` / `T_If`; remaining 21
+  rules modality-polymorphic. **`linear_to_affine` Qed, closed under the
+  global context (zero axioms).** Mirrors `EchoLinear.agda:38-58`'s
+  `weaken : LEcho linear → LEcho affine`. `weaken_modality` at the L2
+  layer dispatches through `linear_to_affine`. Six pre-L2 `Semantics_L1.v`
+  lemmas regressed to `Admitted` (bullet-structure rewrite needed for
+  the 3 new Affine-only constructors); restoration tracked as L2-β.
+  `Counterexample.bad_input_untypable_l1` generalised to `forall m,
+  ~ has_type_l1 m ...` — Qed under both indices.
+- **L3 — Echo / residue** (PRs #166, #167-line, parallel track):
+  `formal/Echo.v` scaffold with `Mode + LEcho + decoration-commuting
+  weakening`; `EchoR` residue + no-section irreversibility headline.
+  Decouples residue layer from typing layer; couples through L2's
+  thin-poset structure.
+- **Disambiguation, durable**: `ephapax-affine ≠ AffineScript`. They are
+  separate languages sharing only the typed-wasm target. Per `README`,
+  `CLAUDE.md`, `.machine_readable/disambiguation.a2ml` hooks landed via
+  PRs #152 / affinescript#393 / typed-wasm#73.
+
 ### Proof state (2026-05-20 → 2026-05-21)
 - **Coq `preservation` reduction campaign**: 910 open goals → 12 (98.7% reduction). PR chain:
   - **#92** — honest framing: replaced unsubstantiated "Qed 2026-04-27" claim with `Admitted.`

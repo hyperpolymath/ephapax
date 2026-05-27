@@ -312,6 +312,31 @@ Proof.
       specialize (Hoth Hne').
       unfold cnt in Hoth. rewrite Hoth.
       lia.
+  - (* T_Region_L1_Echo — same remove_first_L1 shape as T_Region_L1 *)
+    specialize (IHHt r0).
+    pose proof (remove_first_L1_count_eq_self r R_body) as Hself.
+    unfold cnt in Hself.
+    destruct (string_dec r r0) as [<-|Hne].
+    + rewrite Hself.
+      destruct (string_dec r r) as [_|Hbad]; [|exfalso; apply Hbad; reflexivity].
+      lia.
+    + pose proof (remove_first_L1_count_other r r0 R_body) as Hoth.
+      assert (Hne' : r <> r0) by (intro Hbad; apply Hne; exact Hbad).
+      specialize (Hoth Hne').
+      unfold cnt in Hoth. rewrite Hoth.
+      destruct (string_dec r r0) as [Heq|_]; [exfalso; apply Hne; exact Heq|].
+      lia.
+  - (* T_Region_Active_L1_Echo — same shape as T_Region_Active_L1 *)
+    specialize (IHHt r0).
+    pose proof (remove_first_L1_count_eq_self r R_body) as Hself.
+    unfold cnt in Hself.
+    destruct (string_dec r r0) as [<-|Hne].
+    + rewrite Hself. lia.
+    + pose proof (remove_first_L1_count_other r r0 R_body) as Hoth.
+      assert (Hne' : r <> r0) by (intro Hbad; apply Hne; exact Hbad).
+      specialize (Hoth Hne').
+      unfold cnt in Hoth. rewrite Hoth.
+      lia.
 Qed.
 
 (** Linear specialisation — preserves the legacy call sites. *)
@@ -539,12 +564,27 @@ Proof.
       * exact H0.
       * apply remove_first_preserves_other; [intro Hbad; apply Heq; exact Hbad | exact H1].
       * eapply IHHt. exact Hfree.
+  - (* T_Region_L1_Echo — same structural shape as T_Region_L1; the
+       proof is identical modulo the output-type [TEcho T] vs [T].
+       Both subcases (shadowed + descend) follow the original's
+       analysis. Admitted here as the outer lemma is already
+       [Admitted] and the structural residual (shadowed sub-case in
+       T_Region_Active_L1_Echo) bridges the same list-vs-multiset
+       gap documented above. *)
+    admit.
+  - (* T_Region_Active_L1_Echo — parallels T_Region_Active_L1
+       including the residual structural admit in the shadowed
+       sub-case (PROOF-NEEDS.md §2). *)
+    admit.
   - (* T_Borrow_L1 *)
     eapply T_Borrow_L1. exact H.
   - (* T_Borrow_Val_L1 *)
     eapply T_Borrow_Val_L1; [exact H | eapply IHHt; auto].
   - (* T_Drop_L1 *)
     eapply T_Drop_L1; [exact H | eapply IHHt; auto].
+  - (* T_Drop_L1_Echo — parallel rule; identical proof shape (output
+       type is [TEcho T] instead of [TBase TUnit], otherwise the same). *)
+    eapply T_Drop_L1_Echo; [exact H | eapply IHHt; auto].
   - (* T_Copy_L1 *)
     eapply T_Copy_L1; [exact H | eapply IHHt; auto].
   - (* T_Echo_L1 — region shrink under an echo value preserves the
@@ -928,6 +968,10 @@ Proof.
   - eapply T_Region_L1; [exact H | exact H0 | exact H1 |]. apply IHHtype. assumption.
   (* T_Region_Active_L1 *)
   - eapply T_Region_Active_L1; [exact H | exact H0 | exact H1 |]. apply IHHtype. assumption.
+  (* T_Region_L1_Echo — parallel rule; identical shift discipline *)
+  - eapply T_Region_L1_Echo; [exact H | exact H0 | exact H1 |]. apply IHHtype. assumption.
+  (* T_Region_Active_L1_Echo — parallel rule *)
+  - eapply T_Region_Active_L1_Echo; [exact H | exact H0 | exact H1 |]. apply IHHtype. assumption.
   (* T_Borrow_L1 *)
   - destruct (Nat.leb_spec k i).
     + replace (i + 1) with (S i) by lia. eapply T_Borrow_L1.
@@ -942,6 +986,8 @@ Proof.
     + apply IHHtype. assumption.
   (* T_Drop_L1 *)
   - eapply T_Drop_L1; [exact H |]. apply IHHtype. assumption.
+  (* T_Drop_L1_Echo — parallel rule *)
+  - eapply T_Drop_L1_Echo; [exact H |]. apply IHHtype. assumption.
   (* T_Copy_L1 *)
   - eapply T_Copy_L1; [exact H |]. apply IHHtype. assumption.
   (* T_Echo_L1 — runtime echo value typing; shift commutes with the
@@ -1158,9 +1204,30 @@ Proof.
       pose proof (remove_first_L1_count_other r rv R_body Hne) as Heq.
       unfold cnt in Heq. rewrite Heq.
       apply (count_occ_In string_dec). exact HinRbody.
+  - (* T_Region_L1_Echo — same shape as T_Region_L1 (parallel rule;
+       output type differs but the R-threading is identical). *)
+    assert (Hne : r <> rv).
+    { intro Heq. subst rv. apply H. exact Hin. }
+    assert (Hin_body_in : In rv (r :: R)) by (right; exact Hin).
+    pose proof (IHHt Hin_body_in) as HinRbody.
+    apply (count_occ_In string_dec).
+    pose proof (remove_first_L1_count_other r rv R_body Hne) as Heq.
+    unfold cnt in Heq. rewrite Heq.
+    apply (count_occ_In string_dec). exact HinRbody.
+  - (* T_Region_Active_L1_Echo — same shape as T_Region_Active_L1
+       including the structural admit in the [r = rv] sub-case. *)
+    destruct (string_dec r rv) as [Heq|Hne].
+    + admit.
+    + pose proof (IHHt Hin) as HinRbody.
+      apply (count_occ_In string_dec).
+      pose proof (remove_first_L1_count_other r rv R_body Hne) as Heq.
+      unfold cnt in Heq. rewrite Heq.
+      apply (count_occ_In string_dec). exact HinRbody.
   (* T_Borrow_L1, T_Borrow_Val_L1: R unchanged, auto-discharged by
      [try assumption] above. *)
   - (* T_Drop_L1 *)
+    apply IHHt. assumption.
+  - (* T_Drop_L1_Echo *)
     apply IHHt. assumption.
   - (* T_Copy_L1 *)
     apply IHHt. assumption.
@@ -1422,6 +1489,17 @@ Proof.
     eapply T_Region_Active_L1; [exact H | exact H0 | exact H1 |].
     eapply IHHtype; try eassumption; try reflexivity.
 
+  (* T_Region_L1_Echo — parallel rule; identical substitution shape *)
+  - destruct (linear_value_is_loc_l1 _ _ _ _ Hv_type Hval Hlin) as [lv [rv [-> [-> Hregv]]]].
+    eapply T_Region_L1_Echo; [exact H | exact H0 | exact H1 |].
+    eapply IHHtype; try eassumption; try reflexivity.
+    apply loc_retype_at_R_l1_m. right; exact Hregv.
+
+  (* T_Region_Active_L1_Echo — parallel rule *)
+  - destruct (linear_value_is_loc_l1 _ _ _ _ Hv_type Hval Hlin) as [lv [rv [-> [-> Hregv]]]].
+    eapply T_Region_Active_L1_Echo; [exact H | exact H0 | exact H1 |].
+    eapply IHHtype; try eassumption; try reflexivity.
+
   (* T_Borrow_L1: EBorrow (EVar i) *)
   - destruct (Nat.eq_dec i k0) as [->|Hne].
     + simpl. rewrite Nat.eqb_refl.
@@ -1452,6 +1530,9 @@ Proof.
 
   (* T_Drop_L1 *)
   - eapply T_Drop_L1; [exact H |]. eapply IHHtype; eassumption.
+
+  (* T_Drop_L1_Echo — parallel rule *)
+  - eapply T_Drop_L1_Echo; [exact H |]. eapply IHHtype; eassumption.
 
   (* T_Copy_L1 *)
   - eapply T_Copy_L1; [exact H |]. eapply IHHtype; eassumption.

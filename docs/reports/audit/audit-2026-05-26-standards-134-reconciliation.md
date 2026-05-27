@@ -1,3 +1,24 @@
+<!--
+  🛑 ARCHAEOLOGY DOCUMENT — preserved for the pathway-to-counterexample record.
+
+  This audit was written 2026-05-26 BEFORE the verified Coq counterexample
+  (formal/Counterexample.v, 5 Qed) showed that the preservation theorem
+  it attempts to close is provably false.
+
+  Its conclusions / closure plans / "just one more lemma" framings are
+  pre-discovery. DO NOT apply them to current proof work.
+
+  The post-discovery doctrine lives at:
+    - STATUS.adoc (past / present / future map)
+    - formal/PRESERVATION-DESIGN.md (four-layer architecture)
+    - PROOF-NEEDS.md (per-sublanguage proof debt)
+    - CLAUDE.md (owner directive 2026-05-27)
+
+  This file is preserved because the audit text DOCUMENTS the obstacle
+  that led to the counterexample discovery — useful historical record,
+  not instructions.
+-->
+
 <!-- SPDX-License-Identifier: PMPL-1.0-or-later -->
 
 # Audit Report: ephapax — 2026-05-26 — standards#134 reconciliation

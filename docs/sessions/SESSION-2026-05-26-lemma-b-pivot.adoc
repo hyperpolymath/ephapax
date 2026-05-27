@@ -1,3 +1,19 @@
+////
+  🛑 ARCHAEOLOGY DOCUMENT — preserved for the pathway-to-counterexample record.
+
+  This session note records the 2026-05-26 Lemma B pivot, BEFORE the
+  verified Coq counterexample (formal/Counterexample.v, 5 Qed) showed
+  that the preservation theorem it attempts to close is provably false.
+
+  Its conclusions / closure plans / "just one more lemma" framings are
+  pre-discovery. DO NOT apply them to current proof work.
+
+  Post-discovery doctrine: STATUS.adoc + formal/PRESERVATION-DESIGN.md
+  + PROOF-NEEDS.md + CLAUDE.md (owner directive 2026-05-27).
+
+  This file is preserved for historical accuracy, not as instructions.
+////
+
 // SPDX-License-Identifier: PMPL-1.0-or-later
 // SPDX-FileCopyrightText: 2026 Jonathan D.A. Jewell
 = Session: Lemma B Phase 2 — case-count truthing + Option 2 obstacle + Path 1 pivot (2026-05-26)

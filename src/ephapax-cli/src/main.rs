@@ -104,7 +104,7 @@ enum Commands {
         mode: String,
 
         /// Run the typed-wasm L7+L10 verifier on the emitted module.
-        /// Reads the `affinescript.ownership` custom section and
+        /// Reads the `typedwasm.ownership` custom section and
         /// reports any aliasing / linearity violations. Non-zero exit
         /// if any are found.
         #[arg(long)]
@@ -567,9 +567,23 @@ fn finish_compile(
 
     // Run the typed-wasm L7+L10 verifier on the emitted module if
     // requested. Fails the build with a non-zero exit if any
-    // ownership violation is found.
+    // ownership violation is found. Gated by the `typed-wasm-verify`
+    // feature: when off, --verify-ownership warns and continues.
     if verify_ownership {
-        report_ownership_verification(&wasm_bytes, verbose)?;
+        #[cfg(feature = "typed-wasm-verify")]
+        {
+            report_ownership_verification(&wasm_bytes, verbose)?;
+        }
+        #[cfg(not(feature = "typed-wasm-verify"))]
+        {
+            eprintln!(
+                "{} --verify-ownership requested but this build was \
+                 compiled without the `typed-wasm-verify` feature; \
+                 skipping verification (emitted wasm still carries the \
+                 typedwasm.ownership section).",
+                "warning:".yellow().bold()
+            );
+        }
     }
 
     // Write output
@@ -611,6 +625,11 @@ fn finish_compile(
 /// has no ownership section, which both verifiers treat as fully
 /// unconstrained). Returns `Err` with a user-facing message if any
 /// violation is found — the caller surfaces this as a non-zero exit.
+///
+/// Gated by `feature = "typed-wasm-verify"`. With the feature off, the
+/// call site at `compile_file` skips this function entirely and emits
+/// a stderr warning instead.
+#[cfg(feature = "typed-wasm-verify")]
 fn report_ownership_verification(wasm_bytes: &[u8], verbose: bool) -> Result<(), String> {
     use typed_wasm_verify::{verify_from_module, VerifyError};
 

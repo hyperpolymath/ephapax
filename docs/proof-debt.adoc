@@ -141,31 +141,46 @@ sequenced under the four-layer redesign plan.
   a documentation comment, not a Coq `Admitted.` declaration.
   Listed here for the scanner's substring match; no escape hatch
   at this position.
-* **`formal/Semantics_L1.v:466`** — `admit.` inside
+* **`formal/Semantics_L1.v:471`** (formerly L466) — `admit.` inside
   `region_shrink_preserves_typing_l1_gen` (T_Region_Active_L1
-  shadowed case). Blocked on a list-vs-multiset structural
-  mismatch with three documented closure approaches (lemma's
-  design note, lines 458-465).
-* **`formal/Semantics_L1.v:488`** — `Admitted.` capping the
-  `region_shrink_preserves_typing_l1_gen` lemma. Closes when its
-  one residual internal admit (above) closes.
-* **`formal/Semantics_L1.v:903`** — `Axiom region_liveness_at_split_l1`.
-  Documented in-file (lines 882-902) as understated: the universal
-  `forall e` form is not true, requires either statement
-  strengthening + 9-call-site propagation OR a global invariant via
-  approach (a) (strengthen `T_Var_Lin_L1`). Investigation 2026-05-27
-  concluded approach (c) is L2-gated via effect-typed `TFun`.
-* **`formal/Semantics_L1.v:1258`** — `admit.` for `S_StringConcat_Step2`
-  in `preservation_l1`. Needs a `step_pop_disjoint_from_type_l1`
-  lemma — tractable, deferred to L1.G slice.
-* **`formal/Semantics_L1.v:1344`** — `admit.` for `S_App_Step2` in
-  `preservation_l1`. Lambda-rigidity gap per
-  `PRESERVATION-DESIGN.md` §4.8 — explicitly L2/L3-gated.
-* **`formal/Semantics_L1.v:1385`** — `admit.` for `S_Pair_Step2` in
-  `preservation_l1`. Same lambda-rigidity gap as `S_App_Step2`.
-* **`formal/Semantics_L1.v:1515`** — `Admitted.` capping
-  `preservation_l1`. Closes when its three internal admits
-  (1258 / 1344 / 1385) close — L2-gated.
+  shadowed case). Blocked on a list-vs-multiset structural mismatch
+  with three documented closure approaches (lemma's design note).
+* **`formal/Semantics_L1.v:493`** (formerly L488) — `Admitted.`
+  capping the `region_shrink_preserves_typing_l1_gen` lemma. Closes
+  when its one residual internal admit (above) closes.
+* **`formal/Semantics_L1.v:998`** (formerly `Axiom` at L903 / L977) —
+  `Lemma region_liveness_at_split_l1`. Now a structurally-proved
+  lemma rather than an opaque axiom: 24 of 26 inductive cases close
+  with concrete proof bodies (8 R-unchanged cases auto-discharge;
+  10 compound cases route through IH chains; 1 region case closes
+  via [remove_first_L1_count_other]; 1 sub-case admitted — see
+  L1055). Statement still universal and still false in the L1055
+  sub-case; closure requires either (i) statement strengthening with
+  a `no_region_active_pop_of rv e` side-condition, (ii) a multi-set
+  region environment, or (iii) a weaker contextual signature. All
+  three are L1 follow-up; (i) is the smallest step.
+* **`formal/Semantics_L1.v:1055`** — `admit.` inside
+  `region_liveness_at_split_l1`'s `T_Region_Active_L1` `r = rv`
+  sub-case. GENUINELY FALSE: counterexample at the source level is
+  `ERegion rv (EI32 5)` typed at `R = [rv]` — the rule pops the only
+  `rv` from `R_body`, so `In rv R` holds but `In rv R'` does not.
+* **`formal/Semantics_L1.v:1068`** — `Admitted.` capping
+  `region_liveness_at_split_l1`. Closes when the L1055 sub-case
+  closes via any of (i)/(ii)/(iii).
+* **`formal/Semantics_L1.v:1428`** (formerly L1258) — `admit.` for
+  `S_StringConcat_Step2` in `preservation_l1`. Needs a
+  `step_pop_disjoint_from_type_l1` lemma — tractable, deferred to
+  L1.G slice.
+* **`formal/Semantics_L1.v:1514`** (formerly L1344) — `admit.` for
+  `S_App_Step2` in `preservation_l1`. Lambda-rigidity gap per
+  `PRESERVATION-DESIGN.md` §4.8 + §5.1 — explicitly L2-gated via
+  effect-typed `TFun`.
+* **`formal/Semantics_L1.v:1555`** (formerly L1385) — `admit.` for
+  `S_Pair_Step2` in `preservation_l1`. Same lambda-rigidity gap as
+  `S_App_Step2`.
+* **`formal/Semantics_L1.v:1685`** (formerly L1515) — `Admitted.`
+  capping `preservation_l1`. Closes when its three internal admits
+  (1428 / 1514 / 1555) close — L2-gated.
 
 All eight sites are tracked in the L1 closure plan (PRs
 https://github.com/hyperpolymath/ephapax/pull/155[#155]–https://github.com/hyperpolymath/ephapax/pull/163[#163]).
@@ -174,18 +189,15 @@ explicitly NOT scheduled before
 https://github.com/hyperpolymath/ephapax/pull/153[#153] lands on
 `main`.
 
-=== `formal/Echo.v` — L3 layer's documented K dependency
+=== `formal/Echo.v` — L3 layer K dependency CLOSED 2026-05-27
 
-* **`formal/Echo.v` `mode_le_trans` + `degrade_mode_comp`** — pull
-  in Coq's standard `Eqdep.Eq_rect_eq.eq_rect_eq` (K / UIP) axiom
-  via `dependent destruction`. The Agda upstream
-  (`echo-types/proofs/agda/EchoLinear.agda`) is `--safe --without-K`;
-  the rest of the Ephapax Coq codebase is K-free. Tracked closure:
-  rewrite both with raw dependent pattern matching using motive
-  tricks (see `formal/Modality.v`'s `modality_le_trans` for the
-  K-free template). All other 10+ lemmas in `Echo.v` (including
-  the headline `no_section_collapse_to_residue`) are closed under
-  the global context — zero axioms.
+* The previously-documented K dependency in `mode_le_trans` +
+  `degrade_mode_comp` (via `dependent destruction`) was discharged
+  in PR #173 using the K-free motive-trick template from
+  `formal/Modality.v`. **All 16+ lemmas in `Echo.v` are now closed
+  under the global context** — zero K, zero UIP, zero axioms.
+  Entry kept here for historical visibility; no current escape
+  hatch in `Echo.v`.
 
 === `idris2/src/Main.idr:21` — `%default partial`
 

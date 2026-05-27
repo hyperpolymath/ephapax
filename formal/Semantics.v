@@ -249,6 +249,28 @@ Inductive step : config -> config -> Prop :=
       (mu, R, ERegion r v) -->>
         (mem_free_region mu r, remove_first r R, v)
 
+  (** L3 — parallel echo-emitting region-exit rule. Same trigger as
+      [S_Region_Exit] but the output is [EEcho T v] instead of [v],
+      packaging the pre-collapse witness in a runtime echo residue
+      for downstream [EObserve] consumption. Quantified universally
+      over the witness type [T]; preservation_l3 (slice 4) picks the
+      T that matches the typing derivation in [T_Region_L1_Echo] /
+      [T_Region_Active_L1_Echo].
+
+      The legacy [S_Region_Exit] above is untouched — programs that
+      typed via [T_Region_L1] (non-echo path) reduce via that rule;
+      programs that typed via [T_Region_L1_Echo] reduce via this
+      one. Non-deterministic at the relation level, but each typing
+      derivation pins the path. See [PRESERVATION-DESIGN.md §6.3]
+      and [formal/Echo.v]. *)
+
+  | S_Region_Exit_Echo : forall mu R r v T,
+      is_value v ->
+      In r R ->
+      expr_free_of_region r v ->
+      (mu, R, ERegion r v) -->>
+        (mem_free_region mu r, remove_first r R, EEcho T v)
+
   | S_Region_Step : forall mu R r e e' mu' R',
       In r R ->
       (mu, R, e) -->> (mu', R', e') ->
@@ -266,6 +288,16 @@ Inductive step : config -> config -> Prop :=
   | S_Drop : forall mu R l r,
       (mu, R, EDrop (ELoc l r)) -->>
         (mem_write mu l CFree, R, EUnit)
+
+  (** L3 — parallel echo-emitting drop rule. Same trigger as
+      [S_Drop] but the output is [EEcho T (ELoc l r)] instead of
+      [EUnit], packaging the (pre-free) location witness in a
+      runtime echo residue. Quantified over witness type [T] —
+      preservation_l3 (slice 4) picks T to match [T_Drop_L1_Echo]. *)
+
+  | S_Drop_Echo : forall mu R l r T,
+      (mu, R, EDrop (ELoc l r)) -->>
+        (mem_write mu l CFree, R, EEcho T (ELoc l r))
 
   | S_Drop_Step : forall mu R e e' mu' R',
       (mu, R, e) -->> (mu', R', e') ->
@@ -325,21 +357,28 @@ Proof.
     + destruct l; simpl in Hread; [discriminate | eapply IHmu; eassumption].
 Qed.
 
-(** Classify steps from ERegion — avoids hypothesis naming issues *)
+(** Classify steps from ERegion — avoids hypothesis naming issues.
+    L3 (slice 3c) adds a fourth disjunct for the [S_Region_Exit_Echo]
+    rule, which mirrors Exit's memory + region effects but packages
+    the post-step value in an [EEcho] residue. *)
 Lemma step_from_eregion :
   forall mu R r e mu1 R1 e1,
     (mu, R, ERegion r e) -->> (mu1, R1, e1) ->
-    (* Enter *) (mu1 = mu /\ R1 = r :: R /\ e1 = ERegion r e)
-    (* Exit *)  \/ (In r R /\ is_value e /\ mu1 = mem_free_region mu r
-                    /\ R1 = remove_first r R /\ e1 = e)
-    (* Step *)  \/ (In r R /\ exists e',
-                    (mu, R, e) -->> (mu1, R1, e')
-                    /\ e1 = ERegion r e').
+    (* Enter *)     (mu1 = mu /\ R1 = r :: R /\ e1 = ERegion r e)
+    (* Exit *)      \/ (In r R /\ is_value e /\ mu1 = mem_free_region mu r
+                        /\ R1 = remove_first r R /\ e1 = e)
+    (* Exit_Echo *) \/ (In r R /\ is_value e /\ mu1 = mem_free_region mu r
+                        /\ R1 = remove_first r R
+                        /\ exists T, e1 = EEcho T e)
+    (* Step *)      \/ (In r R /\ exists e',
+                        (mu, R, e) -->> (mu1, R1, e')
+                        /\ e1 = ERegion r e').
 Proof.
   intros. inversion H; subst.
   + left. auto.
   + right. left. repeat (split; [auto; fail|]). auto.
-  + right. right. split; [assumption|].
+  + right. right. left. repeat (split; [auto; fail|]). eexists. reflexivity.
+  + right. right. right. split; [assumption|].
     eexists. split; [eassumption | reflexivity].
 Qed.
 
@@ -384,7 +423,8 @@ Proof.
     destruct Hcases as
       [[-> [-> ->]]
       | [[_ [Hval_e [-> [-> ->]]]]
-      | [_ [e' [Hsub ->]]]]].
+      | [[_ [Hval_e [-> [-> [TT ->]]]]]
+      | [_ [e' [Hsub ->]]]]]].
     + (* Enter *)
       eapply (IH r mu (r :: R) e eq_refl mu' v l s Hcc Hval Hread).
     + (* Exit: body is a value, memory freed *)
@@ -395,6 +435,17 @@ Proof.
           exfalso. eapply values_dont_step; eassumption. }
       assert (mem_free_region mu r = mu') by congruence.
       assert (e = v) by congruence.
+      subst. eapply mem_free_region_clears. eassumption.
+    + (* Exit_Echo: mirror of Exit, but cc ends at the EEcho residue
+         (also a value via VEcho). Memory is freed the same way. *)
+      assert (Hcc2: cc = (mem_free_region mu r, remove_first r R, EEcho TT e)).
+      { inversion Hmulti.
+        - reflexivity.
+        - destruct c2 as [[? ?] ?].
+          exfalso. eapply values_dont_step.
+          + apply VEcho. exact Hval_e.
+          + eassumption. }
+      assert (mem_free_region mu r = mu') by congruence.
       subst. eapply mem_free_region_clears. eassumption.
     + (* Step *)
       eapply (IH r _ _ e' eq_refl mu' v l s Hcc Hval Hread).
@@ -3675,6 +3726,8 @@ Proof.
   - (* S_Region_Enter: R0' = r :: R0, ~ In r R0 *)
     right; left; exists r; split; [reflexivity | assumption].
   - (* S_Region_Exit: R0' = remove_first r R0, In r R0 *)
+    right; right; exists r; split; [reflexivity | assumption].
+  - (* S_Region_Exit_Echo: same R-shape as S_Region_Exit *)
     right; right; exists r; split; [reflexivity | assumption].
 Qed.
 

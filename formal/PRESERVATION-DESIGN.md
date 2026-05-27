@@ -224,6 +224,70 @@ The at-pre helper pattern survives because it is orthogonal to the
 threading change: the pre-step env is the new `R_in` of the
 diagonal typing rule.
 
+### 4.7 L1 closure status (2026-05-27)
+
+Six follow-up PRs against `proof/l1-region-threading-design` (the
+design branch) landed the L1 implementation incrementally:
+
+| PR | Scope | Outcome |
+|---|---|---|
+| #155 | `TypingL1.v` — the R-threaded judgment + counterexample regression | `bad_input_untypable_l1` Qed |
+| #157 | `Semantics_L1.v` skeleton — `preservation_l1` stated | scaffold |
+| #158 (L1.A) | `value_R_G_preserving_l1` | Qed |
+| #159 (L1.B) | `region_shrink_preserves_typing_l1` (routes via `_gen`) | Qed; `_gen` Admitted (2 internal admits at the time) |
+| #160 (L1.C) | `subst_preserves_typing_l1` (strengthened statement) | Qed; introduced a sub-Axiom for the inner-R retype obligation |
+| #161 (L1.D) | `preservation_l1` proof body | 29/33 cases Qed; 4 admits surface region-env weakening gap |
+| #162 (L1.F) | Discharge unsound `loc_retype_at_R_l1` axiom | Original Axiom replaced by a Qed-able Lemma + a narrower (still admitted) `region_liveness_at_split_l1`; 2 of 11 call sites discharge directly |
+| #163 (L1.E) | Region-env weakening attack on the 6 admits (2 in `_gen` + 4 in `preservation_l1`) | 2 admits closed via new `count_occ_le_l1` monotonicity lemma; 4 admits remain with structural diagnosis (see below) |
+
+After all six PRs land on the design branch:
+
+- **4 admits remain** in `Semantics_L1.v`:
+  1. `region_shrink_preserves_typing_l1_gen` line ~390 — `T_Region_Active_L1` shadowed case. List-vs-multiset mismatch: set-equality bridges don't preserve `remove_first_L1` outputs (the operation depends on list position, not just membership).
+  2. `preservation_l1` `S_StringConcat_Step2` — operationally sound; needs a `step_pop_disjoint_from_type_l1` lemma (tractable, deferred to L1.G).
+  3. `preservation_l1` `S_App_Step2` — see §4.8 (fundamental soundness gap).
+  4. `preservation_l1` `S_Pair_Step2` — see §4.8 (same gap).
+
+- **1 Axiom remains**: `region_liveness_at_split_l1` (a narrower, sound-as-stated statement of what the original unsound `loc_retype_at_R_l1` was reaching for). Three closure paths documented in-file: strengthen `T_Var_Lin_L1`, add a side condition to `subst_typing_gen_l1`, or carry `In rv R_intermediate` through the induction.
+
+- **2 `Admitted.` markers** remain (`region_shrink_preserves_typing_l1_gen` and `preservation_l1`) — each closes the moment its internal admits close.
+
+### 4.8 Soundness finding: T_Lam_L1 + T_Var_*_L1 are too permissive
+
+L1.E surfaced a genuine soundness issue, separate from the proof-
+engineering gaps:
+
+**The finding.** `T_Lam_L1` rigidly fixes the lambda body's region
+environment `R` at lambda-creation time, with no mechanism to retype
+the body at a shifted `R` before application. Combined with the
+orthogonal observation that `T_Var_Lin_L1` and `T_Var_Unr_L1` permit
+typing variables of type `TString r` at *any* `R` (including `R = []`),
+the L1 typing system is genuinely too permissive about region presence
+for preservation under `R`-shifting steps.
+
+**Why this matters operationally.** `S_App_Step2` evaluates the
+argument of `EApp v_fn e_arg` when `v_fn` is a value (a lambda). The
+inner step on `e_arg` may shift `R → R'` via a region operation. The
+lambda's typing was fixed at the *original* `R`; the rules give no
+way to re-derive its typing at `R'`. The preservation theorem is
+therefore unprovable for these cases under the current rules — not a
+proof-engineering gap but a calculus-design gap.
+
+**Resolution paths** (each independent):
+
+1. **Effect-typed lambdas (L2/L3 territory)**: parameterise function
+   types over the region-effect they have, so the typing rule sees
+   how the body changes `R` and can re-derive at the call site.
+2. **Restrict T_Lam_L1**: require the lambda body to be region-pure
+   (no free regions in `T1`, `T2`, or the body's intermediate types).
+   This is restrictive but unblocks preservation immediately.
+3. **Restrict T_Var_*_L1**: require `In r R` for any variable whose
+   type contains `r`. This propagates the region constraint into the
+   variable-use side, closing the gap.
+
+The L1.E PR documents this in-source. None of (1)/(2)/(3) is in scope
+for the L1 minimal-fix; each is a follow-up. See ROADMAP for sequencing.
+
 ---
 
 ## 5. Layer 2 in detail — Linear vs Affine modality

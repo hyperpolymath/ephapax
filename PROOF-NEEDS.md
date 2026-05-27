@@ -56,7 +56,7 @@ For the architectural background see
 | L1 judgment indexed by modality `m : Modality` | `formal/TypingL1.v` | landed via PRs #176 + #177 |
 | L2 modality core (`Modality.v`, `linear_to_affine`) | `formal/Modality.v` | 1 Qed, zero axioms |
 | L3 calculus (echo / residue fiber + degrade + no-section proof) | `formal/Echo.v` | 12 Qed, 0 admits |
-| Linear-mode forward progress lemmas | `formal/Semantics_L1.v` | 15 Qed (subset of the 24 lemmas; 9 in transition) |
+| Linear-mode forward progress lemmas | `formal/Semantics_L1.v` | 19 Qed; 4 residual admits (L2-β follow-up) |
 | Counterexample regression witness | `formal/Counterexample.v` | 5 Qed (`bad_input_untypable_l1` proved under both modes) |
 | Operational checker (Rust, ephapax-linear sublanguage) | `ephapax-linear/src/linear.rs` | working — discharges resource-exact obligation |
 
@@ -68,7 +68,7 @@ For the architectural background see
 | Linear ⇒ Affine weakening | `formal/TypingL1.v` `linear_to_affine` | Qed, zero axioms |
 | Operational checker (Rust, ephapax-affine sublanguage) | `ephapax-linear/src/affine.rs` | working — permits weakening / graceful abandonment |
 | Affine-mode echo discipline (LEcho Affine = lowered triple) | `formal/Echo.v` (calculus) | calculus done; rule wiring pending |
-| Affine forward progress lemmas | `formal/Semantics_L1.v` | bullet-structure rewrite for new Affine-only constructors — **9 admits queued** (see §2) |
+| Affine forward progress lemmas | `formal/Semantics_L1.v` | bullet-structure rewrites for 3 lemmas landed 2026-05-27; remaining 4 admits are L2-β deeper-than-bullet debt (see §2) |
 
 ### Counterexample regression
 
@@ -87,8 +87,11 @@ For the architectural background see
 
 | Item | File | Estimate |
 |---|---|---|
-| Close 9 Affine-only bullet-structure regressions in supporting lemmas | `formal/Semantics_L1.v` | ~2-3 hours |
-| State and prove `preservation_l1` for both modes | `formal/Semantics_L1.v` | ~3-4 sessions after the 9 supporting lemmas land |
+| ✅ Close 3 pure bullet-structure regressions (typing_preserves_bindings_l1, unrestricted_flag_unchanged_l1, shift_typing_gen_l1) | `formal/Semantics_L1.v` | done 2026-05-27 |
+| ✅ Generalise typing_preserves_length_l1 to modality-polymorphic | `formal/Semantics_L1.v` | done 2026-05-27 |
+| Generalise subst_typing_gen_l1 to modality-polymorphic + Linear wrapper | `formal/Semantics_L1.v` | ~1-2 hours (L2-β follow-up #2) |
+| Close region_shrink_preserves_typing_l1_gen T_Region_Active_L1 case (list-vs-multiset bridge) | `formal/Semantics_L1.v` | structural; deeper than bullet-restoration |
+| State and prove `preservation_l1` for both modes | `formal/Semantics_L1.v` | depends on subst_typing_gen_l1 closure |
 
 ### Near-term (L3 wiring — design + mechanisation)
 
@@ -219,7 +222,7 @@ to the owner**:
 | `formal/Typing.v` (legacy) | n/a | 0 | 🛑 archaeology — `Counterexample.v` depends on falsity |
 | `formal/Counterexample.v` | **5** | 0 | ✅ pinned regression witness |
 | `formal/TypingL1.v` | **2** | 0 | ✅ active — L1 judgment, modality-indexed |
-| `formal/Semantics_L1.v` | **15** | **9** | ✅ active — 9 admits are L2-integration debt, not legacy patching |
+| `formal/Semantics_L1.v` | **19** | **4** | ✅ active — bullet-structure regressions closed 2026-05-27; 4 residual admits are deeper L2-β debt (subst_typing_gen_l1 m-poly generalisation, region_shrink T_Region_Active_L1 list-vs-multiset case, region_liveness_at_split narrow admit, preservation_l1 cap) |
 | `formal/Modality.v` | **1** | 0 | ✅ active — L2 core, zero axioms |
 | `formal/Echo.v` | **12** | 0 | ✅ active — L3 calculus, not yet wired into L1 |
 | `formal/TypingL2.v` | (wrapper) | (wrapper) | ✅ thin re-indexing through `TypingL1.has_type_l1` |

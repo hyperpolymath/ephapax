@@ -288,6 +288,39 @@ proof-engineering gap but a calculus-design gap.
 The L1.E PR documents this in-source. None of (1)/(2)/(3) is in scope
 for the L1 minimal-fix; each is a follow-up. See ROADMAP for sequencing.
 
+### 4.8.1 Resolution path (3) landed 2026-05-27 — and what it does not close
+
+`T_Var_Lin_L1` and `T_Var_Unr_L1` were strengthened with the premise
+`forall r, In r (free_regions T) -> In r R`. The strengthening:
+
+- **Compiles cleanly** across `TypingL1.v`, `Counterexample.v`
+  (bad_input_untypable_l1 still Qed), and `Semantics_L1.v` (22 Qed +
+  the same admits as before — region_shrink_preserves_typing_l1_gen
+  gains 2 admits in the T_Var cases, joining the existing T_Region
+  admits; that lemma is already Admitted and the wrapper supplies
+  the missing premise).
+- **Closes the source-level soundness gap**: programs like
+
+      let_lin x = (ELoc 0 "r") in (ELet (ERegion "r" (EI32 5)) (EDrop (EVar 1)))
+
+  no longer type, because the `EDrop (EVar 1)` site fails the
+  variable rule's new well-formedness premise at R = `[]`.
+
+What the strengthening does **not** close: the
+`region_liveness_at_split_l1` axiom in `formal/Semantics_L1.v`. An
+empirical closure attempt (replacing `Axiom` with `Lemma`, structural
+induction) closes 23 of 25 cases trivially; the residual T_Region_Active_L1
+case with `binder = rv` exhibits a real counterexample even under the
+strengthened judgment:
+
+    ERegion rv (EI32 5) : TBase TI32 — In rv R, In rv R' = False
+                                        (because remove_first_L1 pops the only rv)
+
+The axiom's in-source header (Semantics_L1.v ~L895) now documents this
+finding and three follow-up paths (side-conditioned lemma, multi-set R,
+contextual weaker signature). Closing the axiom remains L1 follow-up
+work — independent of, and additional to, this §4.8 resolution.
+
 ---
 
 ## 5. Layer 2 in detail — Linear vs Affine modality

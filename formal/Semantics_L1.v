@@ -167,6 +167,149 @@ Proof.
   - simpl. rewrite Heq1, Heq2. f_equal. apply IH.
 Qed.
 
+(** ** Region-count monotonicity for L1 typing.
+
+    Every typing rule either preserves the count of region [r] in
+    the threaded environment ([R = R'] for all atomic / variable /
+    value rules; [R1 = R2] threading via children for compound
+    rules), or decreases it by exactly one (via [remove_first_L1 r]
+    in [T_Region_L1] / [T_Region_Active_L1]).
+
+    Consequently, [count_occ string_dec r R' <= count_occ string_dec r R]
+    for any well-typed expression. This is the L1 analog of the
+    structural fact that legacy [has_type] has [R] unchanged: the
+    "drop" is bounded by what the operational [S_Region_Exit] can
+    do.
+
+    Used to discharge the [T_Region_L1] shadowed sub-case of
+    [region_shrink_preserves_typing_l1_gen] as vacuous (the inner
+    region's output cannot contain >1 copies of the freshly-pushed
+    region). *)
+
+(** Local notation: [cnt r R] = number of occurrences of region [r]
+    in environment [R]. Wraps stdlib [count_occ] with the (list,
+    element) argument order. *)
+Definition cnt (r : region_name) (R : region_env) : nat :=
+  count_occ string_dec R r.
+
+Lemma remove_first_L1_count_eq_self :
+  forall (r : region_name) (R : region_env),
+    cnt r (remove_first_L1 r R) = cnt r R - 1.
+Proof.
+  intros r R. unfold cnt.
+  induction R as [|r' R' IH]; simpl; [reflexivity|].
+  destruct (String.eqb r r') eqn:Heq.
+  - apply String.eqb_eq in Heq. subst r'.
+    destruct (string_dec r r) as [_|Hne]; [|exfalso; apply Hne; reflexivity].
+    simpl. lia.
+  - apply String.eqb_neq in Heq.
+    simpl. destruct (string_dec r' r) as [Heq'|_].
+    + exfalso. apply Heq. symmetry. exact Heq'.
+    + exact IH.
+Qed.
+
+Lemma remove_first_L1_count_other :
+  forall (r r0 : region_name) (R : region_env),
+    r <> r0 ->
+    cnt r0 (remove_first_L1 r R) = cnt r0 R.
+Proof.
+  intros r r0 R Hne. unfold cnt.
+  induction R as [|r' R' IH]; simpl; [reflexivity|].
+  destruct (String.eqb r r') eqn:Heq.
+  - apply String.eqb_eq in Heq. subst r'.
+    destruct (string_dec r r0) as [Heq'|_]; [exfalso; apply Hne; exact Heq'|].
+    reflexivity.
+  - simpl. destruct (string_dec r' r0) as [->|_].
+    + simpl. rewrite IH. reflexivity.
+    + exact IH.
+Qed.
+
+(** Count monotonicity: every L1 typing rule has [cnt r R'
+    <= cnt r R] for every region [r]. *)
+Lemma count_occ_le_l1 :
+  forall R G e T R' G',
+    R; G |=L1 e : T -| R'; G' ->
+    forall r, cnt r R' <= cnt r R.
+Proof.
+  intros R G e T R' G' Ht.
+  induction Ht; intros r0; unfold cnt in *; simpl in *;
+    try lia;
+    try (specialize (IHHt r0); lia);
+    try (specialize (IHHt1 r0); specialize (IHHt2 r0); lia);
+    try (specialize (IHHt1 r0); specialize (IHHt2 r0); specialize (IHHt3 r0); lia).
+  - (* T_Region_L1: R' = remove_first_L1 r R_body, body input r::R *)
+    specialize (IHHt r0).
+    pose proof (remove_first_L1_count_eq_self r R_body) as Hself.
+    unfold cnt in Hself.
+    destruct (string_dec r r0) as [<-|Hne].
+    + rewrite Hself.
+      destruct (string_dec r r) as [_|Hbad]; [|exfalso; apply Hbad; reflexivity].
+      lia.
+    + pose proof (remove_first_L1_count_other r r0 R_body) as Hoth.
+      assert (Hne' : r <> r0) by (intro Hbad; apply Hne; exact Hbad).
+      specialize (Hoth Hne').
+      unfold cnt in Hoth. rewrite Hoth.
+      destruct (string_dec r r0) as [Heq|_]; [exfalso; apply Hne; exact Heq|].
+      lia.
+  - (* T_Region_Active_L1 *)
+    specialize (IHHt r0).
+    pose proof (remove_first_L1_count_eq_self r R_body) as Hself.
+    unfold cnt in Hself.
+    destruct (string_dec r r0) as [<-|Hne].
+    + rewrite Hself. lia.
+    + pose proof (remove_first_L1_count_other r r0 R_body) as Hoth.
+      assert (Hne' : r <> r0) by (intro Hbad; apply Hne; exact Hbad).
+      specialize (Hoth Hne').
+      unfold cnt in Hoth. rewrite Hoth.
+      lia.
+Qed.
+
+(** Corollary: if [r] appears in the output, it appeared at least
+    that many times in the input. *)
+Lemma count_occ_in_input_l1 :
+  forall R G e T R' G',
+    R; G |=L1 e : T -| R'; G' ->
+    forall r, In r R' -> In r R.
+Proof.
+  intros R G e T R' G' Ht r Hin.
+  apply (count_occ_In string_dec) in Hin.
+  pose proof (count_occ_le_l1 _ _ _ _ _ _ Ht r) as Hle.
+  unfold cnt in Hle.
+  apply (count_occ_In string_dec). lia.
+Qed.
+
+(** ** L1 region-environment set/multiset-equivalence — design note.
+
+    Legacy [region_env_perm_typing] (in [Semantics.v]) uses set-
+    equivalence between region environments to transport typings.
+    The L1 analog would say: if [forall r, In r R1 <-> In r R2] and
+    [R1; G |=L1 e : T -| R1'; G'], then there exists [R2'] with
+    [R2; G |=L1 e : T -| R2'; G'].
+
+    The L1 version is fundamentally weaker than legacy because L1's
+    [T_Region_L1] and [T_Region_Active_L1] rules pop a *specific
+    list occurrence* (the FIRST one) of the named region via
+    [remove_first_L1]. So the output [R2'] depends on the *list
+    structure* of [R2], not just its membership.
+
+    Concretely: legacy outputs are not threaded ([R_out] = [R_in]
+    typing-wise), so legacy never needs to transport an *output* —
+    only inputs. L1's R-threading exposes this gap.
+
+    The [T_Region_Active_L1]-shadowed sub-case of
+    [region_shrink_preserves_typing_l1_gen] below requires bridging
+    a body derivation from [R] to [remove_first r R] (in some
+    sub-case where [In r (remove_first r R)], i.e., R has [r] twice
+    or more). The bridge would need to preserve outputs *with
+    list-structure agreement*, which set-equivalence (and even
+    multiset-equivalence in some sub-sub-cases) does not provide.
+
+    Resolution: this sub-case remains [admit] in [_gen]; the
+    wrapper [region_shrink_preserves_typing_l1] is proved directly
+    by induction on [is_value] (values have no [T_Region_*_L1]
+    inversion), bypassing [_gen] for actual usage in
+    [preservation_l1]. *)
+
 (** Auxiliary general L1 region-shrinkage lemma — no [is_value] or
     [~ In r (free_regions T)] premises, mirroring the legacy
     [Semantics.region_shrink_preserves_typing]. The L1
@@ -250,9 +393,20 @@ Proof.
          - If YES: more r's exist; would need T_Region_L1 with the
            shrunken R_body and a body-weakening lemma. Residual. *)
       destruct (in_dec string_dec rr (remove_first_L1 rr R_body)) as [Hin | Hnotin].
-      * (* Multiple rr's in R_body — needs L1 weakening to bump body
-           typing from R to (rr :: R). Residual. *)
-        admit.
+      * (* Multiple rr's in R_body — VACUOUS by count monotonicity.
+           Body is typed at (rr :: R) with ~In rr R, so the body input
+           has count_occ rr = 1. By count_occ_le_l1, count_occ rr R_body
+           <= 1. But [Hin : In rr (remove_first_L1 rr R_body)] means
+           count_occ rr R_body >= 2. Contradiction. *)
+        exfalso.
+        pose proof (count_occ_le_l1 _ _ _ _ _ _ Ht rr) as Hle.
+        unfold cnt in Hle. simpl in Hle.
+        destruct (string_dec rr rr) as [_|Hbad]; [|apply Hbad; reflexivity].
+        apply (count_occ_In string_dec) in Hin.
+        pose proof (remove_first_L1_count_eq_self rr R_body) as Hself.
+        unfold cnt in Hself. rewrite Hself in Hin.
+        apply (count_occ_not_In string_dec) in H.
+        lia.
       * (* Only one (or zero, but H1 says at least one) rr in R_body.
            Then [remove_first rr (remove_first_L1 rr R_body) =
                  remove_first_L1 rr R_body]. *)
@@ -279,8 +433,36 @@ Proof.
         -- exact IHHt.
   - (* T_Region_Active_L1: ERegion r e (r currently active). *)
     destruct (String.eqb rr r) eqn:Heq.
-    + (* rr = r: shadowed; Hfree True. Need L1 region-perm to fold the
-         resulting [r ∈ remove_first r R] cases. Residual. *)
+    + (* rr = r: shadowed; Hfree True. RESIDUAL — structural list-vs-
+         multiset mismatch.
+
+         The legacy [Semantics.region_shrink_preserves_typing] handles
+         this case by case-splitting on [In r (remove_first r R)] and
+         bridging the body derivation via [region_env_perm_typing] (set-
+         equivalence) — relying on legacy's non-threaded outputs.
+
+         L1's R-threading makes outputs depend on list MULTIPLICITY:
+         [remove_first_L1 r] pops one specific list occurrence, so a
+         set-equal (or even multiset-equal) input may produce list-non-
+         equal output. The body derivation [Ht] bridged from [R] to
+         either [remove_first r R] or [r :: remove_first r R] would give
+         a body-output multiset-equal to [R_body] but possibly list-non-
+         equal — and the outer rule's [remove_first_L1 r] applied to
+         that bridged output may not list-equal the goal output
+         [remove_first r (remove_first_L1 r R_body)].
+
+         See the design-note comment above the lemma for the full
+         analysis. The wrapper [region_shrink_preserves_typing_l1] used
+         by [preservation_l1]'s S_Region_Exit case still relies on this
+         admit, so the L1 preservation closure remains gated on
+         resolving this structural mismatch — likely via either:
+         (a) a stronger L1 perm lemma that produces specifically-shaped
+             outputs (requires reformulating output as a function of
+             input + derivation shape), or
+         (b) a reformulation of [remove_first_L1] to be multiset-based
+             (lose ordering), or
+         (c) a redesign of the L1 [T_Region_*_L1] rules to not depend on
+             first-occurrence semantics. *)
       admit.
     + (* rr <> r: descend. *)
       apply String.eqb_neq in Heq.
@@ -956,28 +1138,39 @@ Qed.
 (** ** Preservation under the L1 judgment.
 
     Case-by-case inversion + reconstruction over [step]. The proof
-    closes 29 of 33 residual subgoals (post-automation chain); the
-    4 explicit [admit.]s all surface the same gap class — **region-env
-    weakening for non-values**:
+    closes 30 of 33 residual subgoals (post-automation chain + L1.E
+    [count_occ_le_l1]); the 3 remaining [admit.]s surface a deeper
+    **soundness-class gap**:
 
-      - S_StringConcat_Step2 / S_App_Step2 / S_Pair_Step2: value v1
-        sits to the left of a stepping subexpression. After the inner
-        step changes R0 → R0', v1's typing needs to be lifted from R0
-        to R0'.
+      - S_StringConcat_Step2: TString r type — the lift is sound
+        operationally (popped region ≠ TString r region by
+        [expr_free_of_region]) but requires a specialized
+        [step_pop_disjoint_from_type_l1] lemma not yet proved.
 
-      - S_Region_Step (negative branch of [In r R0']): the outer
-        [ERegion r e'] must re-type as T_Region_L1, requiring the
-        inner body to be lifted from R0' to (r :: R0').
+      - S_App_Step2 / S_Pair_Step2: arbitrary value types — exposes
+        a fundamental gap in T_Lam_L1's body-R-rigidity: the lambda
+        body's typing fixes R at lambda-creation time, leaving no
+        room for R to shift before the lambda is called. Lifting a
+        lambda value across an R-shift is unprovable in general,
+        because the body may need regions no longer in R'.
 
-    All four reduce to: given a typing under [R0], lift it to [R0']
-    where R0' may add or drop regions that the operational step has
-    determined. This is the same structural gap as the residual admits
-    in [region_shrink_preserves_typing_l1_gen] (tasks #25/#26 in the
-    project's task list).
+      The S_Region_Step (negative branch of [In r R0']) admit was
+      CLOSED in L1.E via [count_occ_le_l1] (the case is vacuous:
+      [count_occ r R_body >= 1] from typing premise contradicts
+      [count_occ r R0' = 0] from [~In r R0']).
 
-    Until the weakening lemma lands, [preservation_l1] is closed with
+    The [region_shrink_preserves_typing_l1_gen]'s two internal
+    admits were also partly resolved in L1.E:
+    - [T_Region_L1 shadowed] case is CLOSED as vacuous via
+      [count_occ_le_l1].
+    - [T_Region_Active_L1 shadowed] case REMAINS admitted, blocked
+      by a list-vs-multiset structural mismatch (see the lemma's
+      design note).
+
+    Until the lambda-rigidity gap is resolved (likely via effect-
+    typed lambdas as an L2/L3 extension), [preservation_l1] remains
     [Admitted.] but the proof body documents exactly which sub-cases
-    remain — no other obligations are buried. *)
+    remain and the structural reason for each. *)
 
 Theorem preservation_l1 :
   forall mu R e mu' R' e',
@@ -1019,10 +1212,49 @@ Proof.
       [ eapply (IHHstep _ _ _ _ _ _ eq_refl eq_refl); eassumption
       | eassumption ].
   - (* 3. S_StringConcat_Step2: value v1 left, e2 steps right.
-       Needs region-env weakening on the value v1 (lift its typing
-       from R to R'). Same gap class as the residual admits in
-       [region_shrink_preserves_typing_l1_gen] (tasks #25/#26).
-       Admit for L1.D scaffold. *)
+
+       STRUCTURAL FINDING (L1.E): the lift of v1's typing from R0 to
+       R0' requires [In r R0'] (for v1 = ELoc l r the canonical TString
+       r value). By [step_R_change_shape] (legacy), R0' is one of:
+       (a) R0 — trivial, In r R0' = In r R0.
+       (b) r0::R0 (Enter, ~In r0 R0) — In r R0 lifts by right.
+       (c) remove_first r0 R0 (Exit, In r0 R0) — need r0 ≠ r.
+
+       Case (c) requires proving the popped region [r0] is type-
+       disjoint from [TString r]'s free regions, i.e., [r0 ≠ r]. This
+       is operationally guaranteed by [S_Region_Exit]'s premise
+       [expr_free_of_region r0 body_value] — for body of TString r the
+       canonical form is ELoc l r where expr_free is iff r0 ≠ r.
+
+       The required structural lemma — [step_pop_disjoint_from_type_
+       l1] — propagates this disjointness through congruence rules.
+       For [EStringConcat e_a e_b] (the case of interest), both
+       children share the outer type [TString r], so the disjointness
+       transfers. For [EApp] / [ELet] / etc., the inner stepping
+       sub-expression's type DIFFERS from the outer type, and the
+       lemma fails in general (regions disjoint from inner type may
+       not be disjoint from outer type).
+
+       Additionally, lambda values (TFun T1 T2) expose a deeper
+       SOUNDNESS gap: [S_Region_Exit]'s [expr_free_of_region] premise
+       is too weak to guarantee r0 ∉ free_regions T_lambda when the
+       lambda body captures variables of types involving r0. This is
+       a known issue in region calculus literature (Tofte-Talpin
+       escape analysis requires stronger conditions).
+
+       The [tstring_in_R'_l1] lemma (would say: typing of type TString
+       r produces an output env containing r) does NOT hold globally
+       — counterexample: [[]; [(TString r, false)] |=L1 EVar 0 :
+       TString r -| []; ...] has empty output env.
+
+       Closure path: either (i) prove a specialized
+       [step_R_pop_ne_for_tstring_l1] lemma by direct induction on
+       Hstep restricted to type TString r [tractable], or (ii)
+       strengthen the L1 typing rules to enforce In r R' for TString
+       r typings [design redesign].
+
+       L1.E lands the count_occ_le_l1 infrastructure that closes 2
+       other admits; this one remains pending the (i)/(ii) decision. *)
     admit.
   - (* 4. S_StringLen (β): EStringLen (ELoc l r) → EI32 (length s) *)
     match goal with
@@ -1081,7 +1313,34 @@ Proof.
       [ eapply (IHHstep _ _ _ _ _ _ eq_refl eq_refl); eassumption
       | eassumption ].
   - (* 12. S_App_Step2: value v1 left (function), e2 steps right.
-       Same region-env weakening gap as goal 3. Admit. *)
+
+       STRUCTURAL FINDING (L1.E): v1 has type [TFun T1 T2]. Canonical
+       form: [ELam T1 body]. Lifting v1 from R0 to R0' requires the
+       body to retype at R0'.
+
+       The body's typing was established at R0 (per T_Lam_L1 which
+       fixes body's R-thread to outer R). After step shifts R0 → R0',
+       the body may need regions no longer in R0' — even though the
+       lambda hasn't been called yet (so the body hasn't operationally
+       used those regions).
+
+       This is a *fundamental* limitation of T_Lam_L1 as currently
+       stated: the rule REQUIRES the body to type at the lambda's
+       outer R, leaving no room for R to shift mid-evaluation.
+
+       The lift is unprovable in general because the popped region
+       (S_Region_Exit case) may be in [free_regions T1] or
+       [free_regions T2] (the lambda's type's free regions) without
+       being syntactically referenced in v1 itself (regions can be in
+       T1/T2 via the lambda's CAPTURED variables — not the lambda's
+       own ELoc/EStringNew).
+
+       This is the standard region-polymorphism / Tofte-Talpin escape
+       gap. Resolution requires effect-typed lambdas (an L2/L3
+       extension) or restricting T_Lam_L1 so that the body's
+       region-use is *encapsulated* and reproducible at any R-extension.
+
+       L1.E preserves the admit; design rework is tracked separately. *)
     admit.
   - (* 13. S_If_True *)
     match goal with
@@ -1103,7 +1362,26 @@ Proof.
       [ eapply (IHHstep _ _ _ _ _ _ eq_refl eq_refl); eassumption
       | eassumption ].
   - (* 17. S_Pair_Step2: value v1 left, e2 steps right.
-       Same region-env weakening gap as goal 3. Admit. *)
+
+       STRUCTURAL FINDING (L1.E): v1 has type T1 (arbitrary). The
+       inner stepping e2 has type T2 (potentially unrelated to T1).
+       The popped region (if any, by step_R_change_shape's Exit case)
+       must be disjoint from [free_regions T1] for v1 to retype at
+       R0'.
+
+       The operational guarantee [expr_free_of_region r0 inner_body]
+       at the popping site gives disjointness from T_inner_pop_site,
+       but T_pop_site relates to inner stepping expression's type
+       (T2), not v1's type (T1). For [EPair v1 e2] where T1 ≠ T2 (in
+       general), the disjointness doesn't transfer.
+
+       This is the same class as S_App_Step2 (admit 12), with the
+       added complication that T1 might be a TFun (lambda) — in
+       which case the lambda-body-captured-region gap (admit 12)
+       applies too.
+
+       L1.E preserves the admit; design rework is tracked
+       separately. *)
     admit.
   - (* 18. S_Fst *)
     match goal with
@@ -1193,10 +1471,27 @@ Proof.
     + (* In r R0': use T_Region_Active_L1 *)
       eapply T_Region_Active_L1; try eassumption.
       eapply (IHHstep _ _ _ _ _ _ eq_refl eq_refl); eassumption.
-    + (* ~ In r R0': would need (r :: R0'); G |- e' : T -| R_body; G'
-         from IH which only gives R0'; G |- e' : T -| R_body; G'.
-         Region-env weakening for non-values. Deferred. *)
-      admit.
+    + (* ~ In r R0': VACUOUS by count monotonicity.
+         The T_Region_Active_L1 inversion gives [In r R_body] (the
+         body's output retains [r]). The IH on Hstep applied to body
+         yields [R0'; G0 | e' : T -| R_body; G0'], and
+         [count_occ_le_l1] on THAT typing gives
+         [count_occ string_dec r R_body <= count_occ string_dec r R0'].
+         But [HNotInR' : ~In r R0'] forces [count_occ r R0' = 0],
+         hence [count_occ r R_body = 0], contradicting [In r R_body].
+       *)
+      exfalso.
+      match goal with
+      | [ HIn : In r ?Rb,
+          Hbody : R0; ?G |=L1 e : ?T -| ?Rb; ?G' |- _ ] =>
+          let Hie' := fresh "Hie'" in
+          pose proof (IHHstep _ _ _ _ _ _ eq_refl eq_refl _ _ _ _ Hbody) as Hie';
+          pose proof (count_occ_le_l1 _ _ _ _ _ _ Hie' r) as Hle;
+          unfold cnt in Hle;
+          apply (count_occ_not_In string_dec) in HNotInR';
+          apply (count_occ_In string_dec) in HIn;
+          lia
+      end.
   - (* 30. S_Drop *)
     match goal with
     | [ H : _; _ |=L1 ELoc _ _ : _ -| _; _ |- _ ] => inversion H; subst

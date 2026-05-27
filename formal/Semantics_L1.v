@@ -188,6 +188,11 @@ Proof.
       inversion Hv.
     + (* T_Borrow_Val_L1 *)
       split; reflexivity.
+  - (* VEcho T v — no L1 typing rule produces EEcho yet (L3 wiring is
+       a separate slice; see PROOF-NEEDS.md §2). The hypothesis [Ht]
+       on [EEcho T v] is therefore vacuous: [inversion] discharges
+       all impossible constructor cases. *)
+    inversion Ht.
 Qed.
 
 (** ** Helper: region-environment shrinkage for value typings.

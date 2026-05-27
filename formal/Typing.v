@@ -62,6 +62,7 @@ Fixpoint free_regions (T : ty) : list region_name :=
   | TSum T1 T2       => free_regions T1 ++ free_regions T2
   | TRegion r T'     => r :: free_regions T'
   | TBorrow T'       => free_regions T'
+  | TEcho T'         => free_regions T'
   end.
 
 (* Note: We don't need a separate determinism lemma for free_regions

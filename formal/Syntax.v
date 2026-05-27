@@ -115,7 +115,16 @@ Inductive expr : Type :=
       surface syntax, like [ELoc]. Observation discipline is
       modality-dispatched at the typing-rule boundary — see
       [formal/PRESERVATION-DESIGN.md §6.3] and [formal/Echo.v]. *)
-  | EEcho   : ty -> expr -> expr.
+  | EEcho   : ty -> expr -> expr
+
+  (** L3 — Echo observation. [EObserve e] consumes an echo value
+      (whose type is [TEcho T] for some [T]) and discharges the
+      observation obligation, returning [TBase TUnit]. Surface-
+      writable. Under Linear discipline this consumption is
+      mandatory; under Affine discipline it is optional (the echo
+      may be implicitly lowered). The modality dispatch lives in
+      the typing rules, not in the [expr] constructor. *)
+  | EObserve : expr -> expr.
 
 (** ** Values *)
 
@@ -175,6 +184,7 @@ Fixpoint expr_free_of_region (r : region_name) (e : expr) : Prop :=
       the witness sub-expression. The witness type annotation [T] is
       closed (no free region names beyond what [v] itself contains). *)
   | EEcho _ e' => expr_free_of_region r e'
+  | EObserve e' => expr_free_of_region r e'
   end.
 
 (** ** Typing Contexts (De Bruijn) *)
@@ -386,6 +396,7 @@ Fixpoint shift (c : nat) (d : nat) (e : expr) : expr :=
   | ECopy e0 => ECopy (shift c d e0)
   | ELoc l r => ELoc l r
   | EEcho T e0 => EEcho T (shift c d e0)
+  | EObserve e0 => EObserve (shift c d e0)
   end.
 
 (** Substitution: replace variable k with s, decrementing vars > k.
@@ -421,6 +432,7 @@ Fixpoint subst (k : nat) (s : expr) (e : expr) : expr :=
   | ECopy e0 => ECopy (subst k s e0)
   | ELoc l r => ELoc l r
   | EEcho T e0 => EEcho T (subst k s e0)
+  | EObserve e0 => EObserve (subst k s e0)
   end.
 
 (** Shifting preserves the value property *)

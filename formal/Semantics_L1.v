@@ -548,6 +548,8 @@ Proof.
     eapply T_Drop_L1; [exact H | eapply IHHt; auto].
   - (* T_Copy_L1 *)
     eapply T_Copy_L1; [exact H | eapply IHHt; auto].
+  - (* T_Observe_L1 — region shrink commutes with the witness sub-expression *)
+    eapply T_Observe_L1. eapply IHHt; auto.
 Admitted.
 
 Lemma region_shrink_preserves_typing_l1_gen :
@@ -938,6 +940,8 @@ Proof.
   - eapply T_Drop_L1; [exact H |]. apply IHHtype. assumption.
   (* T_Copy_L1 *)
   - eapply T_Copy_L1; [exact H |]. apply IHHtype. assumption.
+  (* T_Observe_L1 — shift commutes with the witness sub-expression *)
+  - eapply T_Observe_L1. apply IHHtype. assumption.
 Qed.
 
 (** Linear-specialised wrapper preserving the original lemma signature
@@ -1441,6 +1445,9 @@ Proof.
 
   (* T_Copy_L1 *)
   - eapply T_Copy_L1; [exact H |]. eapply IHHtype; eassumption.
+
+  (* T_Observe_L1 *)
+  - eapply T_Observe_L1. eapply IHHtype; eassumption.
 Qed.
 
 (** Linear-specialised wrapper preserving the original signature for

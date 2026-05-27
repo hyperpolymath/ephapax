@@ -104,7 +104,7 @@ enters the typing rules" and (for the diagram) in §6 (to be added).
 | Item | What it does | Notes |
 |---|---|---|
 | ✅ Extend AST with [TEcho : ty -> ty] and [EEcho : ty -> expr -> expr] | Type former + runtime value form for L3 echoes | done 2026-05-27 (L3 wiring slice 1 — Syntax.v + free_regions + value/shift/subst cases) |
-| Add `T_Observe` to `has_type_l1` | Consumes a Linear echo / permits Affine lowering | Modality-aware: Linear ⇒ mandatory observation; Affine ⇒ optional silent lowering |
+| ✅ Add `T_Observe_L1` typing rule + `EObserve` expr form | Consumes a `TEcho T` echo, returns `TBase TUnit` | done 2026-05-27 (L3 wiring slice 2 — modality-polymorphic single rule; mandatoriness via `is_linear_ty TEcho`/implicit-drop discipline is a follow-up) |
 | Add collapse-function emission to step rules at irreversible boundaries | `S_Region_Exit` emits `Echo (LiveAt_r) (ExitedAt_r) v_pre`; `S_Drop` emits `Echo T ⊤ v_pre` | Each irreversible step has an associated collapse function `f : A → B`; the echo is the proof-relevant preimage |
 | Thread `G` (echo context) alongside `R` (region context) through compound rules | New context parameter on every L1 compound rule | Parallel to R-threading; no overlap |
 | State and prove `preservation_l3` | Per-layer preservation theorem against the L3 invariants | Cross-layer dependency annotated in `PRESERVATION-DESIGN.md §5.1` |

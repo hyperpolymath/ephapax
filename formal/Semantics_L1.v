@@ -8,12 +8,14 @@
   ***                                                                ***
   ***  This is the post-counterexample L1 redesign. Extend HERE.     ***
   ***                                                                ***
-  ***  4 `Admitted` lemmas remain (down from 7 mid-chain, 9 pre-     ***
-  ***  bullet-restoration). Three pure bullet-structure regressions  ***
-  ***  closed 2026-05-27 (typing_preserves_bindings_l1,              ***
-  ***  unrestricted_flag_unchanged_l1, shift_typing_gen_l1 via       ***
-  ***  shift_typing_gen_l1_m + wrapper). typing_preserves_length_l1  ***
-  ***  generalised to m-polymorphic.                                 ***
+  ***  3 `Admitted` lemmas remain (down from 7 mid-chain, 9 pre-     ***
+  ***  bullet-restoration). L2-β closures so far:                    ***
+  ***    - typing_preserves_bindings_l1 (now m-polymorphic)          ***
+  ***    - unrestricted_flag_unchanged_l1                            ***
+  ***    - shift_typing_gen_l1 (via shift_typing_gen_l1_m + wrapper) ***
+  ***    - subst_typing_gen_l1 (via subst_typing_gen_l1_m + wrapper) ***
+  ***    - typing_preserves_length_l1, output_shape_at_l1,           ***
+  ***      loc_retype_at_R_l1 all generalised to m-polymorphic       ***
   ***                                                                ***
   ***  Residual admits (L2-β follow-up):                             ***
   ***    1. region_shrink_preserves_typing_l1_gen — list-vs-multiset ***
@@ -21,9 +23,8 @@
   ***    2. region_liveness_at_split_l1_gen — 1 narrow admit in the  ***
   ***       T_Region_Active_L1 [r = rv] sub-case (genuinely false    ***
   ***       per documented counterexample ERegion rv (EI32 5))       ***
-  ***    3. subst_typing_gen_l1 — needs modality-polymorphic         ***
-  ***       generalisation (next L2-β PR)                            ***
-  ***    4. preservation_l1 — depends on (3) + lambda-rigidity gap   ***
+  ***    3. preservation_l1 — capstone; depends on closing (1)+(2)   ***
+  ***       under L2 dispatch + lambda-rigidity gap resolution       ***
   ***                                                                ***
   ***  DO NOT close them by:                                         ***
   ***    - introducing new `Axiom` declarations                      ***
@@ -115,6 +116,7 @@ Import ListNotations.
 
 From Ephapax Require Import Syntax.
 From Ephapax Require Import Typing.
+From Ephapax Require Import Modality.
 From Ephapax Require Import TypingL1.
 From Ephapax Require Import Semantics.
 
@@ -434,20 +436,20 @@ Qed.
 (** Output-context lookup preserves type at the same index.
 
     L2-β restoration 2026-05-27: body ported from commit 56f592f.
-    Three new Affine-only constructors (T_Lam_L1_Affine,
-    T_Case_L1_Affine, T_If_L1_Affine) are auto-discharged because
-    induction on [|=L1] (= [has_type_l1 Linear]) produces no live
-    subgoals for them — their typing-rule conclusion has the wrong
-    modality index. The bullet structure therefore covers only the
-    7 mode-polymorphic compound cases. *)
+    Generalised in subst_typing_gen_l1 PR to modality-polymorphic
+    so sub-derivations at variable [m] from a polymorphic compound
+    rule (e.g. T_App_L1) can be threaded through. The body is
+    unchanged — every constructor's case discharges identically
+    regardless of modality; the explicit bullets cover the seven
+    compound cases that need IH composition. *)
 Lemma typing_preserves_bindings_l1 :
-  forall R G e T R' G',
-    R; G |=L1 e : T -| R' ; G' ->
+  forall m R G e T R' G',
+    has_type_l1 m R G e T R' G' ->
     forall i T0 u0,
       ctx_lookup G' i = Some (T0, u0) ->
       exists u1, ctx_lookup G i = Some (T0, u1).
 Proof.
-  intros R G e T R' G' Htype.
+  intros m R G e T R' G' Htype.
   induction Htype; intros idx Ty uf Hlk; simpl in *;
     try (eexists; exact Hlk);
     try (eapply IHHtype; exact Hlk).
@@ -554,17 +556,17 @@ Qed.
 
 (** Output context shape at arbitrary position. *)
 Lemma output_shape_at_l1 :
-  forall R Gin e T R' Gout k T1 u_in,
-    R; Gin |=L1 e : T -| R' ; Gout ->
+  forall m R Gin e T R' Gout k T1 u_in,
+    has_type_l1 m R Gin e T R' Gout ->
     nth_error Gin k = Some (T1, u_in) ->
     exists u_out, nth_error Gout k = Some (T1, u_out).
 Proof.
-  intros R Gin e T R' Gout k T1 u_in Htype Hin.
+  intros m R Gin e T R' Gout k T1 u_in Htype Hin.
   assert (Hlen := typing_preserves_length_l1 _ _ _ _ _ _ _ Htype).
   assert (Hlt: k < length Gout).
   { rewrite Hlen. apply nth_error_Some. congruence. }
   destruct (nth_error Gout k) as [[T1' u']|] eqn:E.
-  - destruct (typing_preserves_bindings_l1 _ _ _ _ _ _ Htype k T1' u') as [u1 Hu1].
+  - destruct (typing_preserves_bindings_l1 _ _ _ _ _ _ _ Htype k T1' u') as [u1 Hu1].
     { unfold ctx_lookup. exact E. }
     unfold ctx_lookup in Hu1. rewrite Hin in Hu1.
     assert (T1' = T1) by congruence. subst T1'.
@@ -830,7 +832,18 @@ Proof. intros. apply T_Loc_L1. assumption. Qed.
 
 (** Sound replacement for the deleted unsound axiom: typing [ELoc l r]
     at a region environment that contains [r] is direct from [T_Loc_L1].
-    The hypothesis [In r R_inner] is the substantive premise. *)
+    The hypothesis [In r R_inner] is the substantive premise.
+
+    L2-β: generalised to modality-polymorphic; [T_Loc_L1] is itself
+    m-polymorphic so the one-line proof is unchanged. The Linear
+    wrapper preserves the original signature for call sites that
+    still use the bare [|=L1] notation. *)
+Lemma loc_retype_at_R_l1_m :
+  forall (m : Modality) (R_inner : region_env) (G : ctx) (l : nat) (r : region_name),
+    In r R_inner ->
+    has_type_l1 m R_inner G (ELoc l r) (TString r) R_inner G.
+Proof. intros. apply T_Loc_L1. assumption. Qed.
+
 Lemma loc_retype_at_R_l1 :
   forall (R_inner : region_env) (G : ctx) (l : nat) (r : region_name),
     In r R_inner ->
@@ -975,17 +988,284 @@ Qed.
 (** Generalized substitution: at depth [k] for a linear value [v].
     Mirrors legacy [subst_typing_gen]. The only L1-specific gap is the
     need to retype [v = ELoc l r] at the inner region environment of
-    compound rules. Closed via [region_liveness_at_split_l1] +
-    [loc_retype_at_R_l1].
+    compound rules. Closed via [region_liveness_at_split_l1_gen] +
+    [loc_retype_at_R_l1_m].
 
-    L2-β follow-up (post-2026-05-27): pure bullet restoration is
-    insufficient — the lemma's goal mentions a specific modality
-    (Linear via [|=L1] notation), so [induction Htype] generalises
-    that index, leaving the IHs and sub-cases at variable [m].
-    Closure requires modality-polymorphic generalisation (mirror of
-    [shift_typing_gen_l1_m]'s shape) with extra care for
-    [T_Lam_L1_Affine]'s flexible body-output flag. Tracked as L2-β
-    follow-up #2 — separate PR. *)
+    L2-β follow-up #2 (closed): m-polymorphic generalisation
+    mirroring [shift_typing_gen_l1_m]. The substituted value's typing
+    [Hv_type] stays at the bare [|=L1] (Linear) — callers always have
+    a Linear v-typing — and is re-typed at the active modality [m]
+    via [loc_retype_at_R_l1_m] at each compound-rule split point.
+    The new mode-split constructors T_Lam_L1_Linear /
+    T_Lam_L1_Affine, T_Case_L1_Linear / T_Case_L1_Affine,
+    T_If_L1_Linear / T_If_L1_Affine each get their own bullet;
+    Affine cases mirror Linear because the substitution threading is
+    modality-independent (the Affine rules differ only in their
+    permitted output flags, which are quantified inside the rule and
+    transparent to the IH).
+
+    The Linear wrapper [subst_typing_gen_l1] below preserves the
+    original signature for [subst_preserves_typing_l1] and
+    [preservation_l1]. *)
+Lemma subst_typing_gen_l1_m :
+  forall m R Gin e T R' Gout,
+    has_type_l1 m R Gin e T R' Gout ->
+    forall k T1 v u_in,
+      nth_error Gin k = Some (T1, u_in) ->
+      is_value v ->
+      is_linear_ty T1 = true ->
+      R; remove_at k Gin |=L1 v : T1 -| R; remove_at k Gin ->
+      forall u_out,
+        nth_error Gout k = Some (T1, u_out) ->
+        has_type_l1 m R (remove_at k Gin) (subst k v e) T R' (remove_at k Gout).
+Proof.
+  intros m R Gin e T R' Gout Htype.
+  induction Htype; intros k0 Tsub vv u_in Hk_in Hval Hlin Hv_type u_out Hk_out; simpl.
+
+  (* T_Unit_L1, T_Bool_L1, T_I32_L1 *)
+  1-3: (assert (u_out = u_in) by congruence; subst; constructor).
+
+  (* T_Var_Lin_L1 *)
+  - destruct (Nat.eq_dec i k0) as [->|Hne].
+    + rewrite Nat.eqb_refl.
+      assert (T = Tsub /\ u_in = false) by (unfold ctx_lookup in H; split; congruence).
+      destruct H1 as [-> ->].
+      rewrite remove_at_mark_used_self.
+      (* Hv_type is at Linear; the current m may be anything. T_Loc_L1
+         is m-polymorphic so we re-build via [linear_value_is_loc_l1]
+         + [loc_retype_at_R_l1_m]. *)
+      destruct (linear_value_is_loc_l1 _ _ _ _ Hv_type Hval Hlin) as [lv [rv [-> [-> Hregv]]]].
+      apply loc_retype_at_R_l1_m. assumption.
+    + rewrite (proj2 (Nat.eqb_neq i k0) Hne).
+      destruct (Nat.ltb_spec k0 i) as [Hlt|Hge].
+      * assert (Hrw: remove_at k0 (ctx_mark_used G i) =
+                     ctx_mark_used (remove_at k0 G) (i - 1)).
+        { replace i with (S (i - 1)) at 1 by lia.
+          apply remove_at_ctx_mark_used_gt. lia. }
+        rewrite Hrw.
+        eapply T_Var_Lin_L1.
+        -- unfold ctx_lookup. rewrite nth_error_remove_at_ge by lia.
+           replace (S (i - 1)) with i by lia.
+           unfold ctx_lookup in H. exact H.
+        -- exact H0.
+      * assert (i < k0) by lia.
+        rewrite remove_at_ctx_mark_used_lt by lia.
+        eapply T_Var_Lin_L1.
+        -- unfold ctx_lookup. rewrite nth_error_remove_at_lt by lia.
+           unfold ctx_lookup in H. exact H.
+        -- exact H0.
+
+  (* T_Var_Unr_L1 *)
+  - destruct (Nat.eq_dec i k0) as [->|Hne].
+    + exfalso. unfold ctx_lookup in H. rewrite Hk_in in H.
+      injection H as <- <-. rewrite Hlin in H0. discriminate.
+    + rewrite (proj2 (Nat.eqb_neq i k0) Hne).
+      destruct (Nat.ltb_spec k0 i) as [Hlt|Hge].
+      * eapply T_Var_Unr_L1.
+        -- unfold ctx_lookup. rewrite nth_error_remove_at_ge by lia.
+           replace (S (i - 1)) with i by lia.
+           unfold ctx_lookup in H. exact H.
+        -- exact H0.
+      * assert (i < k0) by lia. eapply T_Var_Unr_L1.
+        -- unfold ctx_lookup. rewrite nth_error_remove_at_lt by lia.
+           unfold ctx_lookup in H. exact H.
+        -- exact H0.
+
+  (* T_Loc_L1 *)
+  - assert (u_out = u_in) by congruence; subst. constructor. assumption.
+  (* T_StringNew_L1 *)
+  - assert (u_out = u_in) by congruence; subst. constructor. assumption.
+
+  (* T_StringConcat_L1 *)
+  - destruct (output_shape_at_l1 _ _ _ _ _ _ _ _ _ _ Htype1 Hk_in) as [u_mid Hu_mid].
+    eapply T_StringConcat_L1.
+    + eapply IHHtype1; eassumption.
+    + destruct (linear_value_is_loc_l1 _ _ _ _ Hv_type Hval Hlin) as [lv [rv [-> [-> Hregv]]]].
+      eapply IHHtype2; try eassumption; try reflexivity.
+      apply loc_retype_at_R_l1_m.
+      eapply region_liveness_at_split_l1_gen; eassumption.
+
+  (* T_StringLen_L1 *)
+  - eapply T_StringLen_L1. eapply IHHtype; eassumption.
+
+  (* T_Let_L1 *)
+  - destruct (output_shape_at_l1 _ _ _ _ _ _ _ _ _ _ Htype1 Hk_in) as [u_mid Hu_mid].
+    eapply T_Let_L1.
+    + eapply IHHtype1; eassumption.
+    + destruct (linear_value_is_loc_l1 _ _ _ _ Hv_type Hval Hlin) as [lv [rv [-> [-> Hregv]]]].
+      eapply (IHHtype2 (S k0) (TString rv) (ELoc lv rv) u_mid);
+        simpl; try eassumption; try reflexivity.
+      apply loc_retype_at_R_l1_m.
+      eapply region_liveness_at_split_l1_gen; eassumption.
+
+  (* T_LetLin_L1 *)
+  - destruct (output_shape_at_l1 _ _ _ _ _ _ _ _ _ _ Htype1 Hk_in) as [u_mid Hu_mid].
+    eapply T_LetLin_L1; [exact H | |].
+    + eapply IHHtype1; eassumption.
+    + destruct (linear_value_is_loc_l1 _ _ _ _ Hv_type Hval Hlin) as [lv [rv [-> [-> Hregv]]]].
+      eapply (IHHtype2 (S k0) (TString rv) (ELoc lv rv) u_mid);
+        simpl; try eassumption; try reflexivity.
+      apply loc_retype_at_R_l1_m.
+      eapply region_liveness_at_split_l1_gen; eassumption.
+
+  (* T_Lam_L1_Linear: body's R = outer R; direct discharge via
+     [T_Loc_L1] + Hregv. *)
+  - assert (u_out = u_in) by congruence; subst.
+    eapply T_Lam_L1_Linear.
+    destruct (linear_value_is_loc_l1 _ _ _ _ Hv_type Hval Hlin) as [lv [rv [-> [-> Hregv]]]].
+    eapply (IHHtype (S k0) (TString rv) (ELoc lv rv) u_in);
+      simpl; try eassumption; try reflexivity.
+    apply loc_retype_at_R_l1_m. exact Hregv.
+
+  (* T_Lam_L1_Affine: same structure; the flexible body-output flag [u]
+     is the lambda's bound-variable use marker, orthogonal to the
+     substituted variable's flag at outer position [k0]. *)
+  - assert (u_out = u_in) by congruence; subst.
+    eapply T_Lam_L1_Affine.
+    destruct (linear_value_is_loc_l1 _ _ _ _ Hv_type Hval Hlin) as [lv [rv [-> [-> Hregv]]]].
+    eapply (IHHtype (S k0) (TString rv) (ELoc lv rv) u_in);
+      simpl; try eassumption; try reflexivity.
+    apply loc_retype_at_R_l1_m. exact Hregv.
+
+  (* T_App_L1 *)
+  - destruct (output_shape_at_l1 _ _ _ _ _ _ _ _ _ _ Htype1 Hk_in) as [u_mid Hu_mid].
+    eapply T_App_L1.
+    + eapply IHHtype1; eassumption.
+    + destruct (linear_value_is_loc_l1 _ _ _ _ Hv_type Hval Hlin) as [lv [rv [-> [-> Hregv]]]].
+      eapply IHHtype2; try eassumption; try reflexivity.
+      apply loc_retype_at_R_l1_m.
+      eapply region_liveness_at_split_l1_gen; eassumption.
+
+  (* T_Pair_L1 *)
+  - destruct (output_shape_at_l1 _ _ _ _ _ _ _ _ _ _ Htype1 Hk_in) as [u_mid Hu_mid].
+    eapply T_Pair_L1.
+    + eapply IHHtype1; eassumption.
+    + destruct (linear_value_is_loc_l1 _ _ _ _ Hv_type Hval Hlin) as [lv [rv [-> [-> Hregv]]]].
+      eapply IHHtype2; try eassumption; try reflexivity.
+      apply loc_retype_at_R_l1_m.
+      eapply region_liveness_at_split_l1_gen; eassumption.
+
+  (* T_Fst_L1 *)
+  - eapply T_Fst_L1; [eapply IHHtype; eassumption | assumption].
+
+  (* T_Snd_L1 *)
+  - eapply T_Snd_L1; [eapply IHHtype; eassumption | assumption].
+
+  (* T_Inl_L1 *)
+  - eapply T_Inl_L1. eapply IHHtype; eassumption.
+
+  (* T_Inr_L1 *)
+  - eapply T_Inr_L1. eapply IHHtype; eassumption.
+
+  (* T_Case_L1_Linear *)
+  - destruct (output_shape_at_l1 _ _ _ _ _ _ _ _ _ _ Htype1 Hk_in) as [u_mid Hu_mid].
+    eapply T_Case_L1_Linear.
+    + eapply IHHtype1; eassumption.
+    + destruct (linear_value_is_loc_l1 _ _ _ _ Hv_type Hval Hlin) as [lv [rv [-> [-> Hregv]]]].
+      eapply (IHHtype2 (S k0) (TString rv) (ELoc lv rv) u_mid);
+        simpl; try eassumption; try reflexivity.
+      apply loc_retype_at_R_l1_m.
+      eapply region_liveness_at_split_l1_gen; eassumption.
+    + destruct (linear_value_is_loc_l1 _ _ _ _ Hv_type Hval Hlin) as [lv [rv [-> [-> Hregv]]]].
+      eapply (IHHtype3 (S k0) (TString rv) (ELoc lv rv) u_mid);
+        simpl; try eassumption; try reflexivity.
+      apply loc_retype_at_R_l1_m.
+      eapply region_liveness_at_split_l1_gen; eassumption.
+
+  (* T_Case_L1_Affine: same shape — per-branch [u1, u2] are the
+     inner-bound variable's output flags, orthogonal to the
+     substituted variable's flag. *)
+  - destruct (output_shape_at_l1 _ _ _ _ _ _ _ _ _ _ Htype1 Hk_in) as [u_mid Hu_mid].
+    eapply T_Case_L1_Affine.
+    + eapply IHHtype1; eassumption.
+    + destruct (linear_value_is_loc_l1 _ _ _ _ Hv_type Hval Hlin) as [lv [rv [-> [-> Hregv]]]].
+      eapply (IHHtype2 (S k0) (TString rv) (ELoc lv rv) u_mid);
+        simpl; try eassumption; try reflexivity.
+      apply loc_retype_at_R_l1_m.
+      eapply region_liveness_at_split_l1_gen; eassumption.
+    + destruct (linear_value_is_loc_l1 _ _ _ _ Hv_type Hval Hlin) as [lv [rv [-> [-> Hregv]]]].
+      eapply (IHHtype3 (S k0) (TString rv) (ELoc lv rv) u_mid);
+        simpl; try eassumption; try reflexivity.
+      apply loc_retype_at_R_l1_m.
+      eapply region_liveness_at_split_l1_gen; eassumption.
+
+  (* T_If_L1_Linear *)
+  - destruct (output_shape_at_l1 _ _ _ _ _ _ _ _ _ _ Htype1 Hk_in) as [u_mid Hu_mid].
+    eapply T_If_L1_Linear.
+    + eapply IHHtype1; eassumption.
+    + destruct (linear_value_is_loc_l1 _ _ _ _ Hv_type Hval Hlin) as [lv [rv [-> [-> Hregv]]]].
+      eapply IHHtype2; try eassumption; try reflexivity.
+      apply loc_retype_at_R_l1_m.
+      eapply region_liveness_at_split_l1_gen; eassumption.
+    + destruct (linear_value_is_loc_l1 _ _ _ _ Hv_type Hval Hlin) as [lv [rv [-> [-> Hregv]]]].
+      eapply IHHtype3; try eassumption; try reflexivity.
+      apply loc_retype_at_R_l1_m.
+      eapply region_liveness_at_split_l1_gen; eassumption.
+
+  (* T_If_L1_Affine: same shape; branches agree on output structure
+     just as in the Linear case (the mode-split is on context
+     consumption, not on conditional symmetry). *)
+  - destruct (output_shape_at_l1 _ _ _ _ _ _ _ _ _ _ Htype1 Hk_in) as [u_mid Hu_mid].
+    eapply T_If_L1_Affine.
+    + eapply IHHtype1; eassumption.
+    + destruct (linear_value_is_loc_l1 _ _ _ _ Hv_type Hval Hlin) as [lv [rv [-> [-> Hregv]]]].
+      eapply IHHtype2; try eassumption; try reflexivity.
+      apply loc_retype_at_R_l1_m.
+      eapply region_liveness_at_split_l1_gen; eassumption.
+    + destruct (linear_value_is_loc_l1 _ _ _ _ Hv_type Hval Hlin) as [lv [rv [-> [-> Hregv]]]].
+      eapply IHHtype3; try eassumption; try reflexivity.
+      apply loc_retype_at_R_l1_m.
+      eapply region_liveness_at_split_l1_gen; eassumption.
+
+  (* T_Region_L1: body's R = [r :: R]; [In rv R] (from Hregv) lifts to
+     [In rv (r :: R)]. Direct discharge via [T_Loc_L1] — no axiom. *)
+  - destruct (linear_value_is_loc_l1 _ _ _ _ Hv_type Hval Hlin) as [lv [rv [-> [-> Hregv]]]].
+    eapply T_Region_L1; [exact H | exact H0 | exact H1 |].
+    eapply IHHtype; try eassumption; try reflexivity.
+    apply loc_retype_at_R_l1_m. right; exact Hregv.
+
+  (* T_Region_Active_L1: body's R = outer R, so Hv_type re-uses unchanged. *)
+  - destruct (linear_value_is_loc_l1 _ _ _ _ Hv_type Hval Hlin) as [lv [rv [-> [-> Hregv]]]].
+    eapply T_Region_Active_L1; [exact H | exact H0 | exact H1 |].
+    eapply IHHtype; try eassumption; try reflexivity.
+
+  (* T_Borrow_L1: EBorrow (EVar i) *)
+  - destruct (Nat.eq_dec i k0) as [->|Hne].
+    + simpl. rewrite Nat.eqb_refl.
+      assert (T = Tsub) by (unfold ctx_lookup in H; congruence); subst T.
+      assert (u_out = u_in) by congruence; subst.
+      (* The substituted-in value is at Linear; re-construct
+         [T_Borrow_Val_L1] using the polymorphic [T_Loc_L1] via
+         [loc_retype_at_R_l1_m]. *)
+      destruct (linear_value_is_loc_l1 _ _ _ _ Hv_type Hval Hlin) as [lv [rv [-> [-> Hregv]]]].
+      eapply T_Borrow_Val_L1; [constructor|].
+      apply loc_retype_at_R_l1_m. exact Hregv.
+    + simpl. rewrite (proj2 (Nat.eqb_neq i k0) Hne).
+      assert (u_out = u_in) by congruence; subst.
+      destruct (Nat.ltb_spec k0 i) as [Hlt|Hge].
+      * eapply T_Borrow_L1. unfold ctx_lookup.
+        rewrite nth_error_remove_at_ge by lia.
+        replace (S (i - 1)) with i by lia.
+        unfold ctx_lookup in H. exact H.
+      * assert (i < k0) by lia. eapply T_Borrow_L1. unfold ctx_lookup.
+        rewrite nth_error_remove_at_lt by lia.
+        unfold ctx_lookup in H. exact H.
+
+  (* T_Borrow_Val_L1 *)
+  - assert (u_out = u_in) by congruence; subst.
+    eapply T_Borrow_Val_L1.
+    + apply subst_preserves_value. assumption.
+    + eapply IHHtype; eassumption.
+
+  (* T_Drop_L1 *)
+  - eapply T_Drop_L1; [exact H |]. eapply IHHtype; eassumption.
+
+  (* T_Copy_L1 *)
+  - eapply T_Copy_L1; [exact H |]. eapply IHHtype; eassumption.
+Qed.
+
+(** Linear-specialised wrapper preserving the original signature for
+    [subst_preserves_typing_l1] and [preservation_l1]. *)
 Lemma subst_typing_gen_l1 :
   forall R Gin e T R' Gout,
     R; Gin |=L1 e : T -| R'; Gout ->
@@ -998,8 +1278,9 @@ Lemma subst_typing_gen_l1 :
         nth_error Gout k = Some (T1, u_out) ->
         R; remove_at k Gin |=L1 subst k v e : T -| R'; remove_at k Gout.
 Proof.
-  (* L2-β follow-up #2: needs modality-polymorphic generalisation. *)
-Admitted.
+  intros R Gin e T R' Gout Htype k T1 v u_in Hk_in Hval Hlin Hv_type u_out Hk_out.
+  eapply subst_typing_gen_l1_m; eassumption.
+Qed.
 
 (** Substitution preserves the L1 typing — the version used by
     [preservation_l1]. Statement strengthened (see header comment)

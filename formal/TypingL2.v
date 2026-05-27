@@ -76,12 +76,18 @@ From Ephapax Require Import Syntax Typing TypingL1 Modality.
     A single constructor that lifts any L1 derivation into either
     mode. Future PRs add mode-specific rules. *)
 
+(** After L2.A (TypingL1 itself takes Modality), has_type_l2 is a
+    thin wrapper that just re-indexes the L1 modality at the L2
+    level. This keeps the L2 layer's distinct identity for future
+    L3 (echo) and L4 (dyadic) extensions while delegating all rule
+    semantics to has_type_l1. *)
+
 Inductive has_type_l2
   : Modality ->
     region_env -> ctx -> expr -> ty -> region_env -> ctx -> Type :=
   | L2_lift_l1 :
       forall m R G e T R' G',
-        TypingL1.has_type_l1 R G e T R' G' ->
+        TypingL1.has_type_l1 m R G e T R' G' ->
         has_type_l2 m R G e T R' G'.
 
 (** Notation following the Agda upstream [_;_⊢_ℓ_:_-|_;_]. *)
@@ -98,13 +104,13 @@ Notation "R ';' G '|=L2(' m ')' e ':' T '-|' R' ';' G'" :=
 
 Definition lift_l1_to_linear
   {R G e T R' G'}
-  (H : TypingL1.has_type_l1 R G e T R' G') :
+  (H : TypingL1.has_type_l1 Linear R G e T R' G') :
   has_type_l2 Linear R G e T R' G' :=
   L2_lift_l1 Linear R G e T R' G' H.
 
 Definition lift_l1_to_affine
   {R G e T R' G'}
-  (H : TypingL1.has_type_l1 R G e T R' G') :
+  (H : TypingL1.has_type_l1 Affine R G e T R' G') :
   has_type_l2 Affine R G e T R' G' :=
   L2_lift_l1 Affine R G e T R' G' H.
 
@@ -115,7 +121,7 @@ Definition lift_l1_to_affine
 Definition project_l2_to_l1
   {m R G e T R' G'}
   (H : has_type_l2 m R G e T R' G') :
-  TypingL1.has_type_l1 R G e T R' G' :=
+  TypingL1.has_type_l1 m R G e T R' G' :=
   match H with
   | L2_lift_l1 _ _ _ _ _ _ _ H1 => H1
   end.
@@ -137,6 +143,7 @@ Theorem weaken_modality :
 Proof.
   intros R G e T R' G' H.
   apply lift_l1_to_affine.
+  apply TypingL1.linear_to_affine.
   exact (project_l2_to_l1 H).
 Qed.
 

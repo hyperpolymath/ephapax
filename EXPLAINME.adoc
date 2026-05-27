@@ -151,64 +151,69 @@ Test `test_region_string_allocation` verifies in-region allocation.
 
 === Coq (`formal/`)
 
-The Coq operational semantics is a small-step substitution-based
-calculus over the Tofte-Talpin region-linear type system.
+[IMPORTANT]
+.Post-counterexample 2026-05-26 — read this before any older proof claim
+====
+The legacy preservation theorem in `formal/Semantics.v` is **provably
+false**. `formal/Counterexample.v` (5 Qed lemmas) demonstrates a
+configuration that types under the legacy judgment, steps via the
+operational semantics, and lands at an untypable post-state. The
+`Admitted.` on `Theorem preservation` is correct — no proof closes it.
 
-[cols="3,1,2"]
+The post-discovery work is the **four-layer principled redesign**
+documented in `formal/PRESERVATION-DESIGN.md`, where preservation is
+*re-derived per layer* from explicit invariants. Any earlier-in-this-
+README counts of "910 → 22 → 12 open goals" are archaeology, not
+instructions. See `STATUS.adoc` for the past/present/future map.
+====
+
+The Coq formalisation is now layered. Each layer has its own
+judgment, its own invariants, and its own per-layer preservation
+theorem.
+
+[cols="3,1,3"]
 |===
-| Theorem | Status | Where
+| Component | Status | Where
 
-| `no_leaks`
-| ✅ Qed
-| `formal/Semantics.v`
+| Counterexample regression (5 Qed)
+| ✅ Pinned
+| `formal/Counterexample.v` — `bad_input_untypable_l1` Qed under both modes
 
-| `subst_preserves_typing`
-| ✅ Qed
-| `formal/Semantics.v` (line 2808)
+| L1 judgment (`has_type_l1`)
+| ✅ 100% (2 Qed, 0 admits)
+| `formal/TypingL1.v` — modality-indexed, R-threaded
 
-| `typing_ctx_transfer`
-| ✅ Qed
-| `formal/Semantics.v`
+| L1 semantics
+| 🟡 15 Qed, 9 admits (L2-integration debt)
+| `formal/Semantics_L1.v` — 9 admits are bullet-structure rewrites for new Affine-only constructors, *not* legacy patching
 
-| `region_env_perm_typing`, `region_add_typing`, `region_shrink_preserves_typing`
-| ✅ Qed
-| `formal/Semantics.v` (lines 2960, 3042, 3107)
+| L2 modality (`Modality.v`)
+| ✅ Core landed (1 Qed, 0 axioms)
+| `formal/Modality.v` + `m : Modality` in `has_type_l1`. PRs #176 + #177. `linear_to_affine` Qed with zero axioms.
 
-| **`preservation`**
-| 🟡 Admitted
-| `formal/Semantics.v` (Theorem at line 3207). **12 open goals** as of 2026-05-21 (was 910). See ROADMAP §"Preservation closure plan" + `formal/PRESERVATION-HANDOFF.md`.
+| L3 echo / residue calculus
+| ✅ 12 Qed, 0 admits (calculus); ⏳ integration pending
+| `formal/Echo.v` — one type former (fiber `Echo f y := Σ x. f x ≡ y`) + degrade map + no-section-collapse-to-residue proof. Not yet wired into `has_type_l1` or step rules.
+
+| L4 dyadic interaction
+| 🔲 Not started
+| Design in `formal/PRESERVATION-DESIGN.md §7`.
+
+| Legacy `Theorem preservation` (`formal/Semantics.v`)
+| 🛑 Provably false (Admitted)
+| Pinned by `Counterexample.v`. **Do not attempt closure.** Archaeology.
 |===
 
-The `preservation` reduction story is recent and load-bearing:
-
-* **910 → 29 goals** via the standard preservation pattern
-  (`remember (mu, R, e) as cfg eqn:Hcfg` + `inversion Hcfg; subst`
-  inside each case). Lands as PR #102 (2026-05-20). 97% reduction.
-* **29 → 22 goals** via `revert mu R e mu' R' e' Hcfg Hcfg'` before
-  `induction Hstep`, so each case's IH carries clean universal
-  quantification over the inner step's config rather than the
-  inconsistent outer-cfg equation. Lands as PR #106.
-* **22 → 12 goals** via per-case manual proofs using the new
-  `step_R_eq_or_touches_region` region-invariance lemma (PR #114
-  for the lemma, PR #116 for the 10 case closures: β-reduction,
-  value-step, and atomic cases like `S_Let_Val`, `S_App_Fun`,
-  `S_If_True/False`, `S_Fst`, `S_Snd`, `S_Case_Inl/Inr`, `S_Copy`).
-* **Phase 1 scaffold landed** (PR #121): `step_output_context_eq`
-  (Lemma B) stated with induction-on-step skeleton. Per-case
-  discharges are the next session's substantive work.
-* The remaining 12 are 11 congruence cases blocked on Lemma B
-  (linearity-context drift between IH's output context and
-  sibling's pre-context) + 1 `S_Region_Step + T_Region_Active`
-  case blocked on the documented region-env weakening lemma for
-  non-values.
-
-The canonical closure path is **`ROADMAP.adoc` §"Preservation
-closure plan"** — 5 phases, ~3 sessions of focused work.
-
-An earlier in-file comment (corrected by PR #92, 2026-05-20) claimed
-preservation was Qed-closed on 2026-04-27. That claim was
-unsubstantiated — `coqc` 8.18.0 rejected the proof script. The
-chain above is the honest closure work in progress.
+What's done = `Modality.linear_to_affine` (Linear ⇒ Affine weakening,
+zero axioms), the L1 judgment, L3 fiber + degrade calculus, and the
+counterexample regression witness. What's todo = close the 9
+Semantics_L1 admits (L2-integration debt), wire L3 into the typing
+judgment + step rules, then state per-layer preservation. What's
+banned = closing the legacy theorem, adding new `Axiom` declarations
+to discharge L1/L2 gaps, conflating `ephapax-affine` (this repo's
+sublanguage) with `AffineScript` (a separate language at
+`hyperpolymath/affinescript`). Full per-sublanguage breakdown in
+`PROOF-NEEDS.md`.
 
 === Idris2 (`idris2/src/Ephapax/` + `src/formal/`)
 

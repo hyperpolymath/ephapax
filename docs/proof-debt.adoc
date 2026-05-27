@@ -149,21 +149,70 @@ for refutation budgets (`docs/proof-debt.adoc` §(b) in that repo).
   close — namely the affine side, which needs L2 + the weakening
   lemma).
 
+=== `formal/Semantics_L1.v` — in-flight L1 admits (post-#176 L2 hybrid)
+
+After the L2 hybrid landing (#176), main's `Semantics_L1.v` carries
+the following escape-hatch sites. All are tracked, structurally
+diagnosed, and sequenced under the four-layer redesign plan.
+
+NOTE: line numbers are point-in-time and may shift with subsequent
+edits. The substring match is `file:line`; entries below cover the
+current positions on main.
+
+* **`formal/Semantics_L1.v:343`** — `Admitted.` capping one of the
+  region-shrink helpers (T_Region_Active_L1 shadowed case at the
+  list-vs-multiset boundary). Three documented closure approaches
+  in-file.
+* **`formal/Semantics_L1.v:400`** — `Admitted.` (related
+  region-shrink admit; same structural class as L343).
+* **`formal/Semantics_L1.v:412`** — `Admitted.` (related).
+* **`formal/Semantics_L1.v:520`** — `Admitted.` (related).
+* **`formal/Semantics_L1.v:608`** — `Axiom region_liveness_at_split_l1`.
+  Documented in-file as universally false; the residual obstacle is
+  T_Region_Active_L1 with binder=rv. Three closure paths documented:
+  (i) restate with `no_region_active_pop_of rv e` side condition,
+  (ii) multi-set `region_env`, (iii) weaker contextual signature.
+  L1.G follow-up converts this to a Lemma + 1 narrow admit (per
+  PR #178 / its main re-port).
+* **`formal/Semantics_L1.v:632`** — `Admitted.` capping
+  `preservation_l1` (related to L1.G's gap above; L2-gated per
+  §5.1 — closes once L2 Phase 2's effect-typed `TFun` lands).
+* **`formal/Semantics_L1.v:703`** — `admit.` inside `preservation_l1`
+  for one of the lambda-rigidity admits (S_App_Step2 / S_Pair_Step2
+  per §4.8 + §5.1).
+* **`formal/Semantics_L1.v:704`** — `Admitted.` capping
+  `preservation_l1` (same lambda-rigidity gap).
+
+All are tracked in the L1 closure plan and sequenced under the
+four-layer redesign. None are soundness-relevant in the legacy
+`Semantics.v`; they live entirely on the L1 redesign side.
+
+=== `formal/Echo.v` — L3 layer K dependency CLOSED 2026-05-27
+
+PR #173 (design branch) / its main re-port discharged the
+`Eqdep.Eq_rect_eq` (K / UIP) dependency in `mode_le_trans` +
+`degrade_mode_comp` via the motive-trick K-free template from
+`formal/Modality.v`. **All Echo.v lemmas are now closed under the
+global context** — zero K, zero UIP, zero axioms. Entry kept here
+for historical visibility; no current escape hatch in `Echo.v`.
+
 == What this repo does *not* establish today
 
 Per `formal/PRESERVATION-DESIGN.md` §12.15.4, even after the in-flight
 L1 work lands, the following remain open and are tracked here so
 downstream consumers do not overclaim:
 
-* The `ephapax-affine` sublanguage is not separately mechanised.
-  Rust `LinearChecker` and `AffineChecker` are independent
-  (behavioural tests only); the Coq judgment covers a single
-  judgment resembling linear discipline. The Linear ⇒ Affine lemma
-  is L2 work, not L1.
-* No mechanised correspondence between the Rust checkers and the Coq
-  judgment.
-* L3 `formal/Echo.v` does not exist; the theory lives upstream at
-  `hyperpolymath/echo-types`.
+* The `ephapax-affine` sublanguage's mechanisation in `formal/`
+  exists (post-#176: `has_type_l1` carries the modality parameter,
+  `linear_to_affine : has_type_l1 Linear ... → has_type_l1 Affine ...`
+  is Qed, mode-specific T_Lam_L1_*, T_Case_L1_*, T_If_L1_* land).
+  The Rust `AffineChecker` is independent (behavioural tests only);
+  no mechanised correspondence between the Rust checkers and the
+  Coq judgment.
+* L3 `formal/Echo.v` mechanises the residue type former layer per
+  PRESERVATION-DESIGN.md §6 (Mode, LEcho, weaken, EchoR + headline
+  `no_section_collapse_to_residue`). Type-former integration into
+  Syntax.v / Typing.v / Semantics.v is forward-looking.
 * L4 mode-elaboration soundness is a research track, not scheduled.
 
 Per the policy schema, these are *plan items* rather than (d) DEBT

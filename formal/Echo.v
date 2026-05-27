@@ -61,26 +61,23 @@
     satisfies all three constraints. This file does not introduce
     contradictions with them. *)
 
-(** ** Proof-debt note (axiom dependencies)
+(** ** K-freedom
 
-    Two lemmas in this file ([mode_le_trans] and [degrade_mode_comp])
-    use [dependent destruction] from [Coq.Program.Equality] to
-    discriminate impossible cases on the indexed inductive
-    [mode_le]. This pulls in Coq's standard [eq_rect_eq] (K / UIP)
-    axiom.
+    Every Qed/Definition in this file is closed under the global
+    context — zero axioms, zero K, zero UIP. The earlier L3 Phase 1
+    version (PR #166) used [dependent destruction] for
+    [mode_le_trans] + [degrade_mode_comp], pulling in
+    [Eqdep.Eq_rect_eq.eq_rect_eq] (K / UIP). This file's discharge of
+    that proof-debt mirrors the K-free template established in
+    [Modality.v]'s [modality_le_trans]: a raw dependent match with a
+    "motive trick" that returns [True] for impossible constructor /
+    index combinations and the genuine target type for the reachable
+    cases.
 
-    The Agda upstream ([EchoLinear.agda]) is [--safe --without-K]
-    and discharges these cases without K. The rest of the Ephapax
-    Coq codebase (per [Print Assumptions] on [value_R_G_preserving_l1],
-    [subst_preserves_typing_l1]) is also K-free.
-
-    A follow-up slice should rewrite [mode_le_trans] and
-    [degrade_mode_comp] using raw dependent pattern matching with
-    motive tricks to be K-free, aligning with the Agda upstream and
-    the rest of the Coq codebase. Tracked as L3.K proof-debt. *)
+    Aligns with the Agda upstream's [--safe --without-K] discipline
+    and with the rest of the Ephapax Coq codebase. *)
 
 Require Import Coq.Bool.Bool.
-Require Import Coq.Program.Equality.
 
 (** ===== Modes =====
 
@@ -110,20 +107,45 @@ Inductive mode_le : Mode -> Mode -> Type :=
 Lemma mode_le_refl : forall m, mode_le m m.
 Proof. intros [|]; constructor. Qed.
 
+(** Helper: when the first mode is [Affine], the second mode is also
+    [Affine] (the only [mode_le] constructor whose first index is
+    [Affine] is [Affine_le_Affine]). K-free via a motive trick on
+    the constructor's sort indices.
+
+    Mirrors [Modality.v]'s [modality_le_affine_first]. *)
+
+Definition mode_le_affine_first
+  (m2 : Mode) (H : mode_le Affine m2) : m2 = Affine :=
+  match H in mode_le mA mB
+    return
+      (match mA return Prop with
+       | Affine => mB = Affine
+       | Linear => True
+       end)
+  with
+  | Linear_le_Linear => I
+  | Linear_le_Affine => I
+  | Affine_le_Affine => eq_refl
+  end.
+
 (** [Defined] (not [Qed]) so [mode_le_trans] is transparent and
-    [degrade_mode_comp] can [simpl] through its applications. Uses
-    [dependent destruction] (K-dependent) — see the proof-debt note
-    at the top of the file. *)
+    [degrade_mode_comp] can [simpl] through its applications. Built
+    by raw dependent pattern matching; K-free.
+
+    Mirrors [Modality.v]'s [modality_le_trans]. *)
 
 Definition mode_le_trans
   (m1 m2 m3 : Mode)
-  (H12 : mode_le m1 m2) (H23 : mode_le m2 m3) : mode_le m1 m3.
-Proof.
-  destruct H12.
-  - exact H23.
-  - dependent destruction H23. exact Linear_le_Affine.
-  - exact H23.
-Defined.
+  (H12 : mode_le m1 m2) : mode_le m2 m3 -> mode_le m1 m3 :=
+  match H12 in mode_le mA mB return mode_le mB m3 -> mode_le mA m3 with
+  | Linear_le_Linear => fun h => h
+  | Linear_le_Affine =>
+      fun h =>
+        eq_rect Affine (fun m => mode_le Linear m)
+                Linear_le_Affine m3
+                (eq_sym (mode_le_affine_first m3 h))
+  | Affine_le_Affine => fun h => h
+  end.
 
 (** Propositionality of the mode order. Each pair [(m1, m2)] has at
     most one inhabitant in [mode_le]. This is what lets us collapse
@@ -303,9 +325,21 @@ Lemma degrade_mode_comp :
 Proof.
   intros m1 m2 m3 p12 p23 e.
   destruct p12.
-  - reflexivity.
-  - dependent destruction p23. reflexivity.
-  - dependent destruction p23. reflexivity.
+  - (* p12 = Linear_le_Linear: both sides reduce to [degrade_mode p23 e]. *)
+    reflexivity.
+  - (* p12 = Linear_le_Affine, p23 : mode_le Affine m3.
+       Canonicalise m3 via [mode_le_affine_first], then collapse the two
+       possible derivations of [mode_le Affine Affine] using
+       [mode_le_prop]. K-free. *)
+    pose proof (mode_le_affine_first m3 p23) as Heq.
+    generalize dependent p23. rewrite Heq. intros p23.
+    rewrite (mode_le_prop _ _ p23 Affine_le_Affine).
+    reflexivity.
+  - (* p12 = Affine_le_Affine, p23 : mode_le Affine m3. Same shape. *)
+    pose proof (mode_le_affine_first m3 p23) as Heq.
+    generalize dependent p23. rewrite Heq. intros p23.
+    rewrite (mode_le_prop _ _ p23 Affine_le_Affine).
+    reflexivity.
 Qed.
 
 (** Free-factoring composition law: any direct ordering proof

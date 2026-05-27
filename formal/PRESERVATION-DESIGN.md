@@ -3,6 +3,35 @@
 
 # Preservation: principled redesign
 
+> # 🛑 CANONICAL — read before touching `formal/`
+>
+> Preservation in `formal/Semantics.v` is **provably false** —
+> verified by `formal/Counterexample.v` (three lemmas `Qed.`). It is
+> not closable by proof technique.
+>
+> The work is the **four-layer redesign in this document**. Do not:
+>
+> 1. attempt to close `Theorem preservation` in `Semantics.v`;
+> 2. add lemmas to `Semantics.v` aimed at that closure (Lemma B
+>    variants, region-weakening predicates, strengthened subst
+>    variants, `step_preserves_type_at_pre`-style helpers, etc.);
+> 3. close any residual axiom in `Semantics_L1.v` by ad-hoc side
+>    conditions or proof tricks — post-L2-hybrid (PRs #176 + #177)
+>    these closures are cross-layer, not single-layer;
+> 4. follow any pre-2026-05-26 "preservation closure plan" — those
+>    PRs (#92, #102, #104, #106, #114, #116, #117, #121, #146) are
+>    archaeology, not instructions.
+>
+> Anti-pattern detector: if a session is producing
+> `sibling-region-disjointness` side conditions, region-weakening
+> predicates indexed on syntactic shape, or admit-shuffling between
+> Semantics.v and a new lemma — escalate to a layer-design
+> discussion. The architecture is asking for an explicit invariant,
+> not a clever lemma.
+>
+> The owner-issued directive (2026-05-27) is captured in `CLAUDE.md`
+> at the repo root.
+
 Companion to `PRESERVATION-HANDOFF.md`. The handoff document is a
 diagnostic record of attempted proof-engineering. This document is the
 **design** rationale for the typing-layer change that the verified

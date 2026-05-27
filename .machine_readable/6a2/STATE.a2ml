@@ -6,51 +6,72 @@
 
 @state(version="2.0"):
 phase: "implementation"
-next_action: "Discharge ~8 per-goal cases in step_preserves_type_at_pre + ~11 in step_output_context_eq_at_pre (port from upstream's per-goal sections, ~2-3h each). Then re-attack preservation's 12 cascading goals using step_preserves_type + step_output_context_eq as oracles (~4-8h, may need region-env weakening for non-values)."
-last_action: "Path 3 (at-pre helper) landed 2026-05-26 eve. step_preserves_type AND step_output_context_eq both now Qed (was Admitted with 1 shared admit each at S_Region_Step r=r1 cross-case). Two new helper lemmas introduced (Admitted with most cases auto-closed by verbatim block copy). 4 proof commits + 1 doc commit pushed to lemma-b-phase2 (ephapax#146)."
-updated: 2026-05-26T19:00:00Z
+next_action: "Layered preservation work, NOT legacy patching. Per owner directive 2026-05-27 (see CLAUDE.md): do not attempt to close Theorem preservation in formal/Semantics.v (provably false via Counterexample.v); do not extend Semantics.v with closure-support lemmas (step_preserves_type_at_pre and similar are all in this anti-pattern class); do not close residual Semantics_L1.v axioms via ad-hoc proof tricks. Affirmative work: per-layer preservation derivation against the four-layer redesign in formal/PRESERVATION-DESIGN.md. L2 modality landed in-place (PRs #176 + #177); 6 L1 supporting lemmas regressed to Admitted post-L2-hybrid — bullet-rewrite needed for the 3 new Affine-only constructors of has_type_l1 in Semantics_L1.v."
+last_action: "Doc lockdown landed on main (PR TBD): CLAUDE.md adds owner-directive §, PRESERVATION-DESIGN.md + PRESERVATION-HANDOFF.md gain banners, ROADMAP.adoc §preservation-closure-plan obsoleted, this STATE.a2ml updated. The lockdown originated on the proof/l1-region-threading-design branch (PR #175 against that branch); replayed to main because the design branch is DIRTY+superseded by the L2 hybrid path (#176+#177). PR #153 to be closed as superseded."
+updated: 2026-05-27T11:30:00Z
+
+@directive(source="owner", date="2026-05-27", canonical="CLAUDE.md"):
+# Captured durable directive — preservation work is the four-layer redesign,
+# NOT closure of the legacy theorem. Pre-discovery patching paths are
+# closed.
+#
+# DO NOT:
+#   - close `Theorem preservation` in formal/Semantics.v (provably false)
+#   - extend Semantics.v with closure-support lemmas (Lemma B variants,
+#     step_preserves_type_at_pre, step_output_context_eq_at_pre,
+#     region_add_typing_for_non_values, strengthened subst variants)
+#   - close residual Semantics_L1.v axioms via proof tricks
+#   - follow any pre-2026-05-26 "preservation closure plan"
+#   - patch the legacy Typing.v judgment
+#
+# DO:
+#   - read formal/PRESERVATION-DESIGN.md first
+#   - work per-layer: preservation_l1, preservation_l2, etc.
+#   - escalate before patching when a side-condition is needed
+#
+# Anti-pattern detector: sibling-region-disjointness side conditions,
+# region-weakening predicates indexed on syntactic shape, admit-shuffling
+# between Semantics.v and a new lemma. Any of these → escalate.
+#
+# Companion memory: feedback_ephapax_no_patching_legacy_preservation.md
+@end
 
 @blockers:
-# Formal proofs NOT fully closed; current shape (verified by coqc 8.18 on
-# 2026-05-26 eve):
-#   - formal/Semantics.v `step_preserves_type` (line 4355): Qed ✓
-#   - formal/Semantics.v `step_output_context_eq` aka Lemma B: Qed ✓
-#   - formal/Semantics.v `step_preserves_type_at_pre` (NEW, line ~3625):
-#     Admitted with `all: admit.` catch-all. 27 of 35 cases closed via
-#     verbatim copy of step_preserves_type's tactic blocks (Cluster A+B).
-#     8 per-goal cases remaining: S_StringConcat_Step2, S_Let_Step,
-#     S_LetLin_Step, S_App_Step2, S_If_Step, S_Pair_Step1, S_Pair_Step2,
-#     S_Case_Step.
-#   - formal/Semantics.v `step_output_context_eq_at_pre` (NEW, line ~5698):
-#     Admitted with `all: admit.` catch-all. ~24-27 of 35 cases closed via
-#     verbatim copy. S_Region_Step block deliberately excluded (would
-#     self-reference). ~11 cases remaining.
-#   - formal/Semantics.v `preservation`: 12 cascading goals — SEPARATE
-#     structural problem (region-env weakening for non-values), NOT the
-#     shared admit closed by Path 3.
+# Layered work in progress; legacy preservation deliberately not addressed.
 #
-# Path 3 (at-pre helper) lands. Path 1 (mutual induction) and Path 2
-# (structural recursion via expr_free_of_region) both AVOIDED — Path 2
-# was blocked by counterexample, Path 1 would have been heavier refactor.
-# Path 3 wins by sidestepping the cross-case via shared-env framing.
+# Current state (verified by coqc 8.18 on main, post-#176/#177):
+#   - formal/Semantics.v `preservation`: Admitted — PROVABLY FALSE per
+#     Counterexample.v (three Qed lemmas). NOT to be closed.
+#   - formal/Semantics.v `step_preserves_type`, `step_output_context_eq`,
+#     and their at_pre helpers are Qed but support legacy-preservation
+#     closure attempts that are now ruled out. Retained for diagnostic
+#     value; no new lemmas in this class.
+#   - formal/Semantics_L1.v `preservation_l1`: in progress; 6 supporting
+#     lemmas regressed to Admitted post-L2-hybrid (PRs #176+#177).
+#     Bullet-structure rewrite needed for 3 new Affine-only constructors.
+#   - formal/TypingL1.v: now m-indexed (`has_type_l1 m R G e T R' G'`),
+#     `linear_to_affine` Qed zero axioms.
+#   - formal/Echo.v: K-free scaffold, no postulates, forward-looking
+#     (not yet wired into has_type_l1).
+#   - formal/Modality.v: thin-poset Linear ≤ Affine, all Qed.
 #
-# Other proof-debt items (out of standards#134 scope):
-#   - src/abi/Ephapax/ABI/Invariants.idr E1-E6: E1 (preservation) OWED;
-#     E2 (linear consumption) PARTIAL (head form discharged via
-#     splitLinearCoverage PR#85); E3 (region no-escape) PARTIAL (narrow
-#     form discharged via noEscapeTheorem); E4 (no-runtime-GC) OWED;
-#     E5 (WASM compilation) OWED; E6 (IR lowering) OWED.
-#   - 30 unsafe Rust blocks (was 49); concentrated in
-#     src/ephapax-runtime/src/{lib,list}.rs and src/ephapax-interp/src/lib.rs.
-#     Per-block contract audit out of scope for standards#134.
-# Estate proof-debt arm: standards#134 (OPEN; 4/5 sub-tasks DONE pre-2026-05-26).
+# Other proof-debt items (out of preservation scope):
+#   - src/abi/Ephapax/ABI/Invariants.idr E1-E6: E1 (preservation) OWED at
+#     the Idris2 layer too; E2/E3 PARTIAL; E4/E5/E6 OWED.
+#   - 30 unsafe Rust blocks; per-block contract audit out of scope.
 @end
 
 @artifacts:
-# Doc-only commits parked on `lemma-b-phase2` (PR ephapax#146):
-#   032e8ea - audit reconciliation (docs/reports/audit/audit-2026-05-26-standards-134-reconciliation.md)
-#   83e1e31 - handoff case-count correction (formal/PRESERVATION-HANDOFF.md)
-#   36ff88e - Option 2 obstacle + Path 1 pivot (docs/reports/audit/audit-2026-05-26-lemma-b-option-2-obstacle.md)
-# Plus this STATE update + session note (docs/sessions/SESSION-2026-05-26-lemma-b-pivot.adoc).
+# Layered files on main (post-L2-hybrid):
+#   formal/Counterexample.v   — 3 Qed lemmas; preservation FALSE
+#   formal/Echo.v             — L3 scaffold, K-free
+#   formal/Modality.v         — L2 thin poset, all Qed
+#   formal/TypingL1.v         — m-indexed has_type_l1 (post-#176)
+#   formal/Semantics_L1.v     — in progress; 6 supporting Admitted
+# Doc lockdown:
+#   CLAUDE.md                       — owner directive §
+#   formal/PRESERVATION-DESIGN.md   — CANONICAL banner
+#   formal/PRESERVATION-HANDOFF.md  — ARCHAEOLOGY ONLY banner
+#   ROADMAP.adoc                    — closure-plan section removed
 @end
 @end

@@ -56,7 +56,7 @@ For the architectural background see
 | L1 judgment indexed by modality `m : Modality` | `formal/TypingL1.v` | landed via PRs #176 + #177 |
 | L2 modality core (`Modality.v`, `linear_to_affine`) | `formal/Modality.v` | 1 Qed, zero axioms |
 | L3 calculus (echo / residue fiber + degrade + no-section proof) | `formal/Echo.v` | 12 Qed, 0 admits |
-| Linear-mode forward progress lemmas | `formal/Semantics_L1.v` | 25 Qed; 3 residual admits (L2-β follow-up) |
+| Linear-mode forward progress lemmas | `formal/Semantics_L1.v` | 23 Qed; 3 residual admits (L2-β follow-up) |
 | Counterexample regression witness | `formal/Counterexample.v` | 5 Qed (`bad_input_untypable_l1` proved under both modes) |
 | Operational checker (Rust, ephapax-linear sublanguage) | `ephapax-linear/src/linear.rs` | working — discharges resource-exact obligation |
 
@@ -68,7 +68,7 @@ For the architectural background see
 | Linear ⇒ Affine weakening | `formal/TypingL1.v` `linear_to_affine` | Qed, zero axioms |
 | Operational checker (Rust, ephapax-affine sublanguage) | `ephapax-linear/src/affine.rs` | working — permits weakening / graceful abandonment |
 | Affine-mode echo discipline (LEcho Affine = lowered triple) | `formal/Echo.v` (calculus) | calculus done; rule wiring pending |
-| Affine forward progress lemmas | `formal/Semantics_L1.v` | bullet-structure rewrites + subst_typing_gen_l1_m m-polymorphic generalisation landed 2026-05-27; remaining 3 admits are L2-β deeper-than-bullet debt (see §2) |
+| Affine forward progress lemmas | `formal/Semantics_L1.v` | bullet-structure rewrites + subst_typing_gen_l1_m + region_shrink_preserves_typing_l1_gen_m m-polymorphic generalisations landed 2026-05-27; remaining 3 admits are L2-β deeper-than-bullet debt (see §2) |
 
 ### Counterexample regression
 
@@ -90,7 +90,8 @@ For the architectural background see
 | ✅ Close 3 pure bullet-structure regressions (typing_preserves_bindings_l1, unrestricted_flag_unchanged_l1, shift_typing_gen_l1) | `formal/Semantics_L1.v` | done 2026-05-27 |
 | ✅ Generalise typing_preserves_length_l1 to modality-polymorphic | `formal/Semantics_L1.v` | done 2026-05-27 |
 | ✅ Generalise subst_typing_gen_l1 to modality-polymorphic + Linear wrapper (also generalised typing_preserves_bindings_l1, output_shape_at_l1, loc_retype_at_R_l1) | `formal/Semantics_L1.v` | done 2026-05-27 (L2-β follow-up #2) |
-| Close region_shrink_preserves_typing_l1_gen T_Region_Active_L1 case (list-vs-multiset bridge) | `formal/Semantics_L1.v` | structural; deeper than bullet-restoration |
+| ✅ Restore region_shrink_preserves_typing_l1_gen bullet structure via m-polymorphic helper (residual list-vs-multiset structural admit isolated to T_Region_Active_L1 shadowed case inside _gen_m) | `formal/Semantics_L1.v` | done 2026-05-27 (L2-β follow-up #3) |
+| Close T_Region_Active_L1 [rr = r] shadowed sub-case of region_shrink_preserves_typing_l1_gen_m (list-vs-multiset bridge — option (a) L1 perm lemma, (b) multiset reformulation, or (c) T_Region_*_L1 redesign per the case's own note) | `formal/Semantics_L1.v` | structural; non-trivial — investigation owed; lambda-body's shadowing internal ERegion is the obstacle |
 | State and prove `preservation_l1` for both modes | `formal/Semantics_L1.v` | depends on region_shrink + region_liveness narrow admit |
 
 ### Near-term (L3 wiring — design + mechanisation)
@@ -222,7 +223,7 @@ to the owner**:
 | `formal/Typing.v` (legacy) | n/a | 0 | 🛑 archaeology — `Counterexample.v` depends on falsity |
 | `formal/Counterexample.v` | **5** | 0 | ✅ pinned regression witness |
 | `formal/TypingL1.v` | **2** | 0 | ✅ active — L1 judgment, modality-indexed |
-| `formal/Semantics_L1.v` | **25** | **3** | ✅ active — bullet-structure regressions + subst_typing_gen_l1_m closed 2026-05-27; 3 residual admits are deeper L2-β debt (region_shrink T_Region_Active_L1 list-vs-multiset case, region_liveness_at_split narrow admit per ERegion counterexample, preservation_l1 cap) |
+| `formal/Semantics_L1.v` | **23** | **3** | ✅ active — bullet-structure regressions + subst_typing_gen_l1_m + region_shrink_preserves_typing_l1_gen_m closed 2026-05-27; 3 residual admits are deeper L2-β debt (region_shrink T_Region_Active_L1 list-vs-multiset case now isolated in _gen_m internal admit, region_liveness_at_split narrow admit per ERegion counterexample, preservation_l1 cap) |
 | `formal/Modality.v` | **1** | 0 | ✅ active — L2 core, zero axioms |
 | `formal/Echo.v` | **12** | 0 | ✅ active — L3 calculus, not yet wired into L1 |
 | `formal/TypingL2.v` | (wrapper) | (wrapper) | ✅ thin re-indexing through `TypingL1.has_type_l1` |

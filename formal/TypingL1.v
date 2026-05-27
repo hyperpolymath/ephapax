@@ -291,6 +291,25 @@ Inductive has_type_l1
       R ; G |=L1[m] e : T -| R' ; G' ->
       R ; G |=L1[m] ECopy e : TProd T T -| R' ; G'
 
+  (** ===== L3 — Echo / residue value typing =====
+
+      [T_Echo_L1] types the runtime [EEcho T v] residue at [TEcho T],
+      provided the witness [v] is itself a value typed at [T]. This
+      is the typing-side counterpart of the (forthcoming, slice 3b /
+      3c) step rules that emit echoes at irreversible boundaries:
+      [S_Region_Exit_Echo] and [S_Drop_Echo] will both produce
+      [EEcho T v_pre] residues which must be typable for preservation
+      to hold.
+
+      Modality-polymorphic: holds in both [Linear] and [Affine]. The
+      [is_value v] premise mirrors [T_Borrow_Val_L1] — echoes are
+      runtime-only values, not surface syntax. *)
+
+  | T_Echo_L1 : forall m R G v T,
+      is_value v ->
+      R ; G |=L1[m] v : T -| R ; G ->
+      R ; G |=L1[m] EEcho T v : TEcho T -| R ; G
+
   (** ===== L3 — Echo / residue observation =====
 
       [T_Observe_L1] discharges an echo by witnessing it. The rule is

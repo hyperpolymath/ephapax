@@ -188,11 +188,10 @@ Proof.
       inversion Hv.
     + (* T_Borrow_Val_L1 *)
       split; reflexivity.
-  - (* VEcho T v — no L1 typing rule produces EEcho yet (L3 wiring is
-       a separate slice; see PROOF-NEEDS.md §2). The hypothesis [Ht]
-       on [EEcho T v] is therefore vacuous: [inversion] discharges
-       all impossible constructor cases. *)
-    inversion Ht.
+  - (* VEcho T v — T_Echo_L1 (slice 3a) types this at [TEcho T]
+       with R_out = R and G_out = G by construction; both invariants
+       hold immediately. *)
+    inversion Ht; subst; split; reflexivity.
 Qed.
 
 (** ** Helper: region-environment shrinkage for value typings.
@@ -548,6 +547,11 @@ Proof.
     eapply T_Drop_L1; [exact H | eapply IHHt; auto].
   - (* T_Copy_L1 *)
     eapply T_Copy_L1; [exact H | eapply IHHt; auto].
+  - (* T_Echo_L1 — region shrink under an echo value preserves the
+     value structure (region-free witness implies a region-free echo). *)
+    eapply T_Echo_L1.
+    + exact H.
+    + eapply IHHt; auto.
   - (* T_Observe_L1 — region shrink commutes with the witness sub-expression *)
     eapply T_Observe_L1. eapply IHHt; auto.
 Admitted.
@@ -940,6 +944,12 @@ Proof.
   - eapply T_Drop_L1; [exact H |]. apply IHHtype. assumption.
   (* T_Copy_L1 *)
   - eapply T_Copy_L1; [exact H |]. apply IHHtype. assumption.
+  (* T_Echo_L1 — runtime echo value typing; shift commutes with the
+     witness sub-expression. The is_value premise is preserved by
+     [shift_preserves_value]. *)
+  - eapply T_Echo_L1.
+    + apply shift_preserves_value. exact H.
+    + apply IHHtype. assumption.
   (* T_Observe_L1 — shift commutes with the witness sub-expression *)
   - eapply T_Observe_L1. apply IHHtype. assumption.
 Qed.
@@ -1445,6 +1455,13 @@ Proof.
 
   (* T_Copy_L1 *)
   - eapply T_Copy_L1; [exact H |]. eapply IHHtype; eassumption.
+
+  (* T_Echo_L1 — substitution under an echo value: the witness is a
+     value, so [subst_preserves_value] preserves [is_value]. The
+     witness's typing is preserved by the IH. *)
+  - eapply T_Echo_L1.
+    + apply subst_preserves_value. assumption.
+    + eapply IHHtype; eassumption.
 
   (* T_Observe_L1 *)
   - eapply T_Observe_L1. eapply IHHtype; eassumption.

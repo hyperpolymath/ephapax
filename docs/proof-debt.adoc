@@ -1,0 +1,237 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 Jonathan D.A. Jewell (hyperpolymath)
+= Proof debt
+:policy: https://github.com/hyperpolymath/standards/blob/main/docs/TRUSTED-BASE-REDUCTION-POLICY.adoc
+:design: formal/PRESERVATION-DESIGN.md (on branch `proof/l1-region-threading-design`)
+:handoff: formal/PRESERVATION-HANDOFF.md
+:roadmap: ROADMAP.adoc § "Preservation closure plan"
+:counterexample: formal/Counterexample.v (on branch `proof/l1-region-threading-design`)
+
+Per link:{policy}[standards#203] (trusted-base reduction policy), every
+soundness-relevant escape hatch in this repo is classified below as one
+of: (a) DISCHARGED, (b) BUDGETED, (c) NECESSARY AXIOM, or (d) DEBT.
+Disposition (d) is the only category that should shrink over time.
+
+== (a) Discharged in this repo
+
+No outstanding entries — discharged proofs are removed from this list
+when they land. Recent discharges of note (kept here for one release
+cycle for visibility):
+
+* `formal/Semantics.v` `step_preserves_type` — Qed via Path 3 at-pre
+  helper (2026-05-26, PR #146).
+* `formal/Semantics.v` `step_output_context_eq` — Qed via Path 3
+  at-pre helper (2026-05-26, PR #146).
+* `formal/Semantics.v` `region_shrink_preserves_typing` — Qed
+  upstream of the at-pre helper.
+* `formal/Semantics.v` `region_env_perm_typing`,
+  `remove_first_then_cons_membership_eq` — Qed; plug-in lemmas for
+  the S_Region_Step cross-case collapse.
+
+== (b) Budgeted — tested with refutation budget
+
+No entries. The ephapax core (Coq `formal/` + Rust `ephapax-linear/`
++ Idris2 `src/formal/Ephapax/Formal/…/*.idr`) contains zero `unsafe`
+blocks, `unsafePerformIO`, `believe_me`, `assert_total`, or analogous
+escape hatches at soundness-relevant positions.
+
+* `src/formal/Ephapax/Formal/RegionLinear.idr:127` mentions
+  `believe_me` only in a documentation comment ("not `believe_me`")
+  asserting the absence of the escape hatch — this is a negation, not
+  a use.
+
+If future FFI / extraction work introduces a `TRUSTED:` entry, the
+`boj-server` backend-assurance harness is the reference implementation
+for refutation budgets (`docs/proof-debt.adoc` §(b) in that repo).
+
+== (c) Necessary axiom
+
+No entries. `formal/Semantics.v` contains zero Coq `Axiom`
+declarations.
+
+* The "Axiom cases" mentioned in comments at `formal/Semantics.v:8619`
+  and `formal/Semantics.v:9225` refer to the *axiomatic step rules*
+  `S_StringNew` / `S_StringConcat` (operational-semantics primitives
+  that produce `ELoc l r` and require explicit reconstruction in
+  preservation), not Coq `Axiom` declarations.
+
+== (d) DEBT — actively to be closed
+
+=== `formal/Semantics.v:9175` — `Admitted` `preservation`
+
+* **Owner**: @hyperpolymath
+* **Status**: 1 `Admitted` blocking 11 cascading sub-goals on `main`.
+  Reduced from 910 → 22 → 12 → 11 across PRs
+  https://github.com/hyperpolymath/ephapax/pull/92[#92],
+  https://github.com/hyperpolymath/ephapax/pull/102[#102],
+  https://github.com/hyperpolymath/ephapax/pull/106[#106],
+  https://github.com/hyperpolymath/ephapax/pull/114[#114],
+  https://github.com/hyperpolymath/ephapax/pull/116[#116], and
+  https://github.com/hyperpolymath/ephapax/pull/146[#146] (98.8 %
+  reduction).
+  See link:{handoff}[`formal/PRESERVATION-HANDOFF.md`] for the per-PR
+  diagnostic narrative.
+* **Load-bearing caveat**: the `preservation` theorem as stated on
+  `main` is *not just unproven — it is FALSE*.
+  link:{counterexample}[`formal/Counterexample.v`] on branch
+  `proof/l1-region-threading-design` exhibits a verified
+  counterexample (three lemmas `Qed`): an expression
+  `EPair (ERegion r1 (ELoc l0 r0)) (ELoc l1 r1)` that types at
+  `[r0; r1]`, single-steps under the current rules, and the resulting
+  expression does not type at any region environment derived from
+  `[r0]`. Sibling sub-expressions in compound forms (`T_Pair`,
+  `T_Let`, `T_App`, `T_StringConcat`, `T_If`, `T_Case`, …) share the
+  same region environment `R`; if one sibling exits a region the next
+  sibling depends on, the typing judgment has no place to record that
+  dependency. Closing the remaining 11 sub-goals on `main` is
+  therefore *not* the closure path.
+* **Plan**: the four-layer redesign at
+  link:{design}[`formal/PRESERVATION-DESIGN.md`] (branch
+  `proof/l1-region-threading-design`; owner interpretation B ratified
+  2026-05-26 — Echo as L3 residue, with interpretation A "Echo as
+  operational foundation" parked as a v2 research track in §12.16):
++
+--
+** **L1** — restate `has_type` to thread `R_in / R_out` the same way
+   the linearity context `G` is already threaded; reprove
+   preservation; `Counterexample.v` becomes a regression test.
+   In-flight on the design branch (PRs
+   https://github.com/hyperpolymath/ephapax/pull/155[#155],
+   https://github.com/hyperpolymath/ephapax/pull/157[#157],
+   https://github.com/hyperpolymath/ephapax/pull/158[#158],
+   https://github.com/hyperpolymath/ephapax/pull/159[#159],
+   https://github.com/hyperpolymath/ephapax/pull/160[#160],
+   https://github.com/hyperpolymath/ephapax/pull/161[#161],
+   https://github.com/hyperpolymath/ephapax/pull/162[#162],
+   https://github.com/hyperpolymath/ephapax/pull/163[#163]):
+   `Semantics_L1.v` skeleton + `preservation_l1` stated; 29/33
+   cases closed; region-env weakening + region-liveness invariant
+   landed; 4 admits surface a residual R-weakening gap; 2 of 6
+   weakening admits closed.
+** **L2** — modality parameter on `has_type` (`m ∈ {Linear,
+   Affine}`) + Linear ⇒ Affine weakening lemma. This introduces a
+   mechanised `ephapax-affine` judgment for the first time; without
+   L2, the affine sublanguage has only Rust `AffineChecker`
+   behavioural tests.
+** **L3** — `formal/Echo.v` (residue / proof-carrying region exit +
+   drop). Theory upstream at `~/developer/repos/echo-types/`.
+** **L4** — dyadic mode-elaboration soundness (research-tier, months+,
+   not in scope for the L1/L2/L3 chain).
+--
+* **Deadline**: INDEFINITE on `main` until PR
+  https://github.com/hyperpolymath/ephapax/pull/153[#153] (the design
+  + L1 rollup) merges. After #153 lands, L1 closure deadline becomes
+  2026-Q3 (3–6 weeks focused work per the design doc estimate).
+* **Cross-references**:
+  link:{roadmap}[`ROADMAP.adoc` § "Preservation closure plan"],
+  `formal/PRESERVATION-DESIGN.md` §12.15 (proof-debt status section),
+  `formal/PRESERVATION-DESIGN.md` §12.15.4 (what L1 does *not*
+  close — namely the affine side, which needs L2 + the weakening
+  lemma).
+
+=== `formal/Semantics_L1.v` — in-flight L1 admits + axiom + commented-marker positives
+
+The L1 design branch's `Semantics_L1.v` carries the following
+escape-hatch sites. All are tracked, structurally diagnosed, and
+sequenced under the four-layer redesign plan.
+
+* **`formal/Semantics_L1.v:48`** — *false-positive comment match*.
+  The trusted-base scanner sees the word "`Admitted`" inside a
+  docstring listing which proof helpers remain admitted. This is
+  a documentation comment, not a Coq `Admitted.` declaration.
+  Listed here for the scanner's substring match; no escape hatch
+  at this position.
+* **`formal/Semantics_L1.v:466`** — `admit.` inside
+  `region_shrink_preserves_typing_l1_gen` (T_Region_Active_L1
+  shadowed case). Blocked on a list-vs-multiset structural
+  mismatch with three documented closure approaches (lemma's
+  design note, lines 458-465).
+* **`formal/Semantics_L1.v:488`** — `Admitted.` capping the
+  `region_shrink_preserves_typing_l1_gen` lemma. Closes when its
+  one residual internal admit (above) closes.
+* **`formal/Semantics_L1.v:903`** — `Axiom region_liveness_at_split_l1`.
+  Documented in-file (lines 882-902) as understated: the universal
+  `forall e` form is not true, requires either statement
+  strengthening + 9-call-site propagation OR a global invariant via
+  approach (a) (strengthen `T_Var_Lin_L1`). Investigation 2026-05-27
+  concluded approach (c) is L2-gated via effect-typed `TFun`.
+* **`formal/Semantics_L1.v:1258`** — `admit.` for `S_StringConcat_Step2`
+  in `preservation_l1`. Needs a `step_pop_disjoint_from_type_l1`
+  lemma — tractable, deferred to L1.G slice.
+* **`formal/Semantics_L1.v:1344`** — `admit.` for `S_App_Step2` in
+  `preservation_l1`. Lambda-rigidity gap per
+  `PRESERVATION-DESIGN.md` §4.8 — explicitly L2/L3-gated.
+* **`formal/Semantics_L1.v:1385`** — `admit.` for `S_Pair_Step2` in
+  `preservation_l1`. Same lambda-rigidity gap as `S_App_Step2`.
+* **`formal/Semantics_L1.v:1515`** — `Admitted.` capping
+  `preservation_l1`. Closes when its three internal admits
+  (1258 / 1344 / 1385) close — L2-gated.
+
+All eight sites are tracked in the L1 closure plan (PRs
+https://github.com/hyperpolymath/ephapax/pull/155[#155]–https://github.com/hyperpolymath/ephapax/pull/163[#163]).
+Closure is sequenced under the four-layer redesign and is
+explicitly NOT scheduled before
+https://github.com/hyperpolymath/ephapax/pull/153[#153] lands on
+`main`.
+
+=== `formal/Echo.v` — L3 layer's documented K dependency
+
+* **`formal/Echo.v` `mode_le_trans` + `degrade_mode_comp`** — pull
+  in Coq's standard `Eqdep.Eq_rect_eq.eq_rect_eq` (K / UIP) axiom
+  via `dependent destruction`. The Agda upstream
+  (`echo-types/proofs/agda/EchoLinear.agda`) is `--safe --without-K`;
+  the rest of the Ephapax Coq codebase is K-free. Tracked closure:
+  rewrite both with raw dependent pattern matching using motive
+  tricks (see `formal/Modality.v`'s `modality_le_trans` for the
+  K-free template). All other 10+ lemmas in `Echo.v` (including
+  the headline `no_section_collapse_to_residue`) are closed under
+  the global context — zero axioms.
+
+=== `idris2/src/Main.idr:21` — `%default partial`
+
+* `%default partial` at the top of the Idris2 driver permits
+  partial functions in the CLI shim. This file is the CLI entry
+  point and IO glue, not the verification kernel; partial functions
+  here cannot make the formal-side soundness arguments false. The
+  partiality is bounded by what `main` reaches via stdin / argv
+  parsing.
+* Closure path: switch to total functions for argv parsing + IO
+  shim. Tractable but not soundness-relevant — deprioritised relative
+  to the L1/L2 closure chain.
+
+== What this repo does *not* establish today
+
+Per `formal/PRESERVATION-DESIGN.md` §12.15.4, even after the in-flight
+L1 work lands, the following remain open and are tracked here so
+downstream consumers do not overclaim:
+
+* The `ephapax-affine` sublanguage is not separately mechanised.
+  Rust `LinearChecker` and `AffineChecker` are independent
+  (behavioural tests only); the Coq judgment covers a single
+  judgment resembling linear discipline. The Linear ⇒ Affine lemma
+  is L2 work, not L1.
+* No mechanised correspondence between the Rust checkers and the Coq
+  judgment.
+* L3 `formal/Echo.v` does not exist; the theory lives upstream at
+  `hyperpolymath/echo-types`.
+* L4 mode-elaboration soundness is a research track, not scheduled.
+
+Per the policy schema, these are *plan items* rather than (d) DEBT
+entries — they have no current escape-hatch site to point at; they
+are future judgments that have not yet been written. They are listed
+here so that any reader using this document to gauge ephapax
+soundness sees the full picture, not just the Admitted-marker count.
+
+== Cross-references
+
+* link:{policy}[standards#203] — trusted-base reduction policy
+  (canonical estate-wide definition)
+* link:{handoff}[`formal/PRESERVATION-HANDOFF.md`] — per-PR
+  diagnostic narrative for the `preservation` closure
+* link:{roadmap}[`ROADMAP.adoc` § "Preservation closure plan"] —
+  canonical 5-phase closure plan
+* `formal/PRESERVATION-DESIGN.md` (on branch
+  `proof/l1-region-threading-design`) — four-layer redesign
+* `feedback_ephapax_affine_proofs_not_done` (user auto-memory) —
+  recurring disambiguation: ephapax-affine ≠ AffineScript, and the
+  affine side is not mechanised in this repo

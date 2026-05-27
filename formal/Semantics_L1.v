@@ -602,14 +602,122 @@ Proof. intros. apply T_Loc_L1. assumption. Qed.
     the bound variable inside its body, but the body's typing flag
     transition is observable via [output_shape_at_l1] in the caller).
 
-    See header above for the three closure approaches. Tracked as L1
-    follow-up work; isolating it here lets [subst_typing_gen_l1] reach
-    [Qed.] without further axioms. *)
-Axiom region_liveness_at_split_l1 :
+    See header above for the three closure approaches.
+
+    === 2026-05-27 partial discharge: Axiom → Lemma with 1 narrow admit ===
+
+    [Axiom] is replaced with [Lemma .. Admitted.] below. The proof
+    body structurally encodes the case-by-case analysis the header
+    describes, generalised over the modality parameter [m] that
+    [has_type_l1] now carries (per PR #176's L2 hybrid):
+
+    - 25 base + compound cases close mechanically (R unchanged or
+      threaded through sub-derivations via IH). This includes the
+      mode-split T_Lam_L1_Linear / T_Lam_L1_Affine (both R-unchanged),
+      T_Case_L1_Linear / T_Case_L1_Affine, T_If_L1_Linear /
+      T_If_L1_Affine.
+    - T_Region_L1 (fresh binder, modality-polymorphic) closes via
+      [remove_first_L1_count_other]: [~ In r R ∧ In rv R] gives
+      [r ≠ rv], so the pop preserves rv.
+    - T_Region_Active_L1 (re-entry binder, modality-polymorphic):
+      * Sub-case [r ≠ rv]: same [remove_first_L1_count_other] argument.
+      * Sub-case [r = rv]: the GENUINELY-FALSE case. One [admit] sits
+        here, with the source-level counterexample
+        [ERegion rv (EI32 5)] at [R = [rv]]. The rule pops the only
+        [rv] from [R_body]; [In rv R = True] but [In rv R' = False].
+
+    This converts an opaque universal Axiom into a Lemma with one
+    explicitly-narrow admit. The remaining admit is a structural
+    obligation tied to a documented counterexample, addressable by
+    any of the three closure paths (i)/(ii)/(iii) above. Not a
+    soundness improvement (the lemma's statement is still false in
+    the one residual sub-case); a proof-debt transparency
+    improvement.
+
+    Refs PR #178 (design-branch original; superseded by main's
+    L2-hybrid #176). *)
+
+(** Generalised over the modality parameter [m]. The wrapper below
+    matches the original Linear-only Axiom signature for the
+    existing call sites in [subst_typing_gen_l1]. *)
+Lemma region_liveness_at_split_l1_gen :
+  forall m R G e T R' G' rv,
+    has_type_l1 m R G e T R' G' ->
+    In rv R ->
+    In rv R'.
+Proof.
+  intros m R G e T R' G' rv Ht.
+  induction Ht; intros Hin; try assumption.
+  (* Compound cases — thread rv through sub-derivations via IH. *)
+  - (* T_StringConcat_L1: R -> R1 -> R2 *)
+    apply IHHt2. apply IHHt1. assumption.
+  - (* T_StringLen_L1 *)
+    apply IHHt. assumption.
+  - (* T_Let_L1 *)
+    apply IHHt2. apply IHHt1. assumption.
+  - (* T_LetLin_L1 *)
+    apply IHHt2. apply IHHt1. assumption.
+  - (* T_App_L1 *)
+    apply IHHt2. apply IHHt1. assumption.
+  - (* T_Pair_L1 *)
+    apply IHHt2. apply IHHt1. assumption.
+  - (* T_Fst_L1 *)
+    apply IHHt. assumption.
+  - (* T_Snd_L1 *)
+    apply IHHt. assumption.
+  - (* T_Inl_L1 *)
+    apply IHHt. assumption.
+  - (* T_Inr_L1 *)
+    apply IHHt. assumption.
+  - (* T_Case_L1_Linear: R -> R1 -> R_final *)
+    apply IHHt2. apply IHHt1. assumption.
+  - (* T_Case_L1_Affine: same shape *)
+    apply IHHt2. apply IHHt1. assumption.
+  - (* T_If_L1_Linear: R -> R1 -> R2 *)
+    apply IHHt2. apply IHHt1. assumption.
+  - (* T_If_L1_Affine *)
+    apply IHHt2. apply IHHt1. assumption.
+  - (* T_Region_L1 (fresh): ~In r R + In rv R gives r ≠ rv;
+       remove_first_L1 preserves rv. *)
+    assert (Hne : r <> rv).
+    { intro Heq. subst rv. apply H. exact Hin. }
+    assert (Hin_body_in : In rv (r :: R)) by (right; exact Hin).
+    pose proof (IHHt Hin_body_in) as HinRbody.
+    apply (count_occ_In string_dec).
+    pose proof (remove_first_L1_count_other r rv R_body Hne) as Heq.
+    unfold cnt in Heq. rewrite Heq.
+    apply (count_occ_In string_dec). exact HinRbody.
+  - (* T_Region_Active_L1: two sub-cases r=rv / r ≠ rv *)
+    destruct (string_dec r rv) as [Heq|Hne].
+    + (* r = rv: GENUINELY FALSE. Counterexample at the source level:
+         ERegion rv (EI32 5) at R = [rv] — body R_body = [rv], pop
+         yields [], so In rv R = True but In rv R' = False. *)
+      admit.
+    + (* r ≠ rv: same shape as T_Region_L1. *)
+      pose proof (IHHt Hin) as HinRbody.
+      apply (count_occ_In string_dec).
+      pose proof (remove_first_L1_count_other r rv R_body Hne) as Heq.
+      unfold cnt in Heq. rewrite Heq.
+      apply (count_occ_In string_dec). exact HinRbody.
+  (* T_Borrow_L1, T_Borrow_Val_L1: R unchanged, auto-discharged by
+     [try assumption] above. *)
+  - (* T_Drop_L1 *)
+    apply IHHt. assumption.
+  - (* T_Copy_L1 *)
+    apply IHHt. assumption.
+Admitted.
+
+(** Linear-specialised wrapper matching the original Axiom signature
+    for the call sites in [subst_typing_gen_l1]. *)
+Lemma region_liveness_at_split_l1 :
   forall R G e T R' G' rv,
     R; G |=L1 e : T -| R'; G' ->
     In rv R ->
     In rv R'.
+Proof.
+  intros R G e T R' G' rv Ht.
+  eapply region_liveness_at_split_l1_gen. exact Ht.
+Qed.
 
 (** Generalized substitution: at depth [k] for a linear value [v].
     Mirrors legacy [subst_typing_gen]. The only L1-specific gap is the

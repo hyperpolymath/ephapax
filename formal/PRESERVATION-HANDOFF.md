@@ -2,15 +2,28 @@
 
 # Hand-off: closing `preservation` in `formal/Semantics.v`
 
+> **🟠 Superseded for the closure decision (2026-05-26).** The
+> verified counterexample at `formal/Counterexample.v` (three lemmas
+> `Qed`) shows preservation as currently stated is **false**, not
+> unproven. The canonical *design* for the fix is now
+> `formal/PRESERVATION-DESIGN.md` (four orthogonal layers; L1 region
+> capability threading is the preservation fix).
+>
+> This handoff document remains valid as a **diagnostic record** of
+> the attempted minimal-patch closure paths and what they hit. It is
+> no longer the design source.
+
 Diagnostic + remediation log. The proof is still `Admitted.`, but as
 of **2026-05-21** it's **down from 910 open goals to 12** via four
 landed PRs. This file tells whoever picks it up next exactly what's
 open and what the canonical closure path is.
 
-> **The canonical closure plan is now in `ROADMAP.adoc` §
-> "Preservation closure plan".** This file remains as the per-case
-> diagnostic record. Read ROADMAP first; come back here for case
-> detail.
+> **The canonical closure plan is now in `formal/PRESERVATION-DESIGN.md`**
+> (four-layer redesign; L1 region capability threading). The prior
+> "Preservation closure plan" in `ROADMAP.adoc` is superseded; this
+> file remains as the per-case diagnostic record. Read the design
+> doc first; come back here for case detail and the historical
+> closure-attempt log.
 
 ## State at a glance
 

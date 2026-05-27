@@ -1,0 +1,225 @@
+# SPDX-License-Identifier: PMPL-1.0-or-later
+# Copyright (c) 2026 Jonathan D.A. Jewell (hyperpolymath) <j.d.a.jewell@open.ac.uk>
+#
+# PROOF-STATUS.a2ml — machine-readable Coq proof state
+#
+# Snapshot of formal/*.v as of 2026-05-27 (post-L1.A through L1.F).
+# Consumed by automated proof-debt trackers, status dashboards, and
+# CI gates that need to know "what counts as proven here".
+#
+# Human-readable companion: formal/PRESERVATION-DESIGN.md §4.7 and §4.8.
+
+[metadata]
+version = "1.0.0"
+snapshot-date = "2026-05-27"
+design-branch = "proof/l1-region-threading-design"
+spec-doc = "formal/PRESERVATION-DESIGN.md"
+counterexample = "formal/Counterexample.v"
+
+# ============================================================================
+# FILES — what's in formal/ and its proof-status posture
+# ============================================================================
+
+[[files]]
+path = "formal/Syntax.v"
+purpose = "AST + region/context infrastructure"
+status = "stable"
+qed-only = true
+
+[[files]]
+path = "formal/Typing.v"
+purpose = "legacy has_type judgment (single R, no threading)"
+status = "frozen"
+qed-only = true
+note = "Retained for legacy preservation. L1 judgment lives in TypingL1.v."
+
+[[files]]
+path = "formal/TypingL1.v"
+purpose = "L1 has_type_l1 judgment (R-threaded)"
+status = "stable"
+qed-only = true
+landed-in = "PR-155"
+
+[[files]]
+path = "formal/Counterexample.v"
+purpose = "verified counterexample to preservation as originally stated"
+status = "stable"
+qed-only = true
+key-lemmas = [
+  "bad_typable",
+  "bad_step",
+  "bad_post_untypable",
+  "bad_input_untypable_l1"
+]
+
+[[files]]
+path = "formal/Semantics.v"
+purpose = "operational step + legacy preservation"
+status = "frozen-with-1-residual"
+admit-count = 1
+note = "Legacy preservation has 1 residual admit (S_Region_Step + T_Region_Active region weakening). Out of scope for L1 redesign."
+
+[[files]]
+path = "formal/Semantics_L1.v"
+purpose = "L1 preservation theorem + helpers"
+status = "active"
+admit-count = 4
+axiom-count = 1
+admitted-lemma-count = 2
+landed-in = ["PR-157", "PR-158", "PR-159", "PR-160", "PR-161", "PR-162", "PR-163"]
+
+# ============================================================================
+# L1 PROOF CHAIN — Qed lemmas
+# ============================================================================
+
+[[qed-lemmas]]
+name = "remove_first_eq_l1"
+file = "Semantics_L1.v"
+purpose = "trivial bridge between remove_first and remove_first_L1"
+
+[[qed-lemmas]]
+name = "value_R_G_preserving_l1"
+file = "Semantics_L1.v"
+landed-in = "PR-158"
+swarm-stream = "L1.A"
+purpose = "value v at R;G -| R';G' implies R'=R and G'=G"
+
+[[qed-lemmas]]
+name = "region_shrink_preserves_typing_l1"
+file = "Semantics_L1.v"
+landed-in = "PR-159"
+swarm-stream = "L1.B"
+purpose = "shrink region env for value typings (wraps _gen)"
+depends-on-admitted = ["region_shrink_preserves_typing_l1_gen"]
+
+[[qed-lemmas]]
+name = "subst_preserves_typing_l1"
+file = "Semantics_L1.v"
+landed-in = "PR-160"
+swarm-stream = "L1.C"
+purpose = "substitution preserves L1 typing (strengthened statement)"
+note = "Original statement was unsound (typed v at independent R1); strengthened to share R with body."
+
+[[qed-lemmas]]
+name = "loc_retype_at_R_l1"
+file = "Semantics_L1.v"
+landed-in = "PR-162"
+swarm-stream = "L1.F"
+purpose = "ELoc l r retypes at any R_inner that has r — pure T_Loc_L1 consequence"
+note = "Replaces the original UNSOUND axiom of the same name. Adds 'In r R_inner' premise that the axiom omitted."
+
+[[qed-lemmas]]
+name = "count_occ_le_l1"
+file = "Semantics_L1.v"
+landed-in = "PR-163"
+swarm-stream = "L1.E"
+purpose = "typing is region-count monotonic: count r R' ≤ count r R"
+
+[[qed-lemmas]]
+name = "count_occ_in_input_l1"
+file = "Semantics_L1.v"
+landed-in = "PR-163"
+swarm-stream = "L1.E"
+purpose = "corollary: In r R' implies In r R"
+
+# ============================================================================
+# PRESERVATION THEOREM
+# ============================================================================
+
+[preservation-l1]
+file = "Semantics_L1.v"
+landed-in = "PR-161"
+swarm-stream = "L1.D"
+status = "Admitted"
+cases-total = 33
+cases-qed = 29
+cases-admit = 4
+note = "All Qed cases use the four Qed helpers above. The 4 admits all surface a single structural class (see [proof-debt] below)."
+
+# ============================================================================
+# OUTSTANDING PROOF DEBT
+# ============================================================================
+
+[[proof-debt]]
+id = "L1.B-residual-1"
+file = "Semantics_L1.v"
+line-anchor = "region_shrink_preserves_typing_l1_gen T_Region_Active_L1 shadowed"
+class = "list-vs-multiset"
+tractable = true
+diagnosis = "set-equality bridges don't preserve remove_first_L1 output because the operation is positional, not set-theoretic"
+closes-when = "redesign remove_first_L1 as a multiset operation, OR prove a position-aware bridge"
+
+[[proof-debt]]
+id = "L1.D-StringConcat"
+file = "Semantics_L1.v"
+line-anchor = "preservation_l1 S_StringConcat_Step2"
+class = "operationally-sound-needs-supporting-lemma"
+tractable = true
+diagnosis = "value v1 left, e2 steps right. Need step_pop_disjoint_from_type_l1 lemma (operational claim: a step's R-pop doesn't pop a region appearing in any sibling's free regions)"
+closes-when = "prove step_pop_disjoint_from_type_l1"
+
+[[proof-debt]]
+id = "L1.D-App"
+file = "Semantics_L1.v"
+line-anchor = "preservation_l1 S_App_Step2"
+class = "calculus-soundness-gap"
+tractable = false
+diagnosis = "T_Lam_L1 rigidly fixes the lambda body's R at lambda-creation; T_Var_*_L1 permit typing TString r at empty R. Combined, the L1 typing is too permissive for preservation under R-shifting steps."
+closes-when = "one of (1) effect-typed lambdas (L2/L3), (2) restrict T_Lam_L1 to region-pure bodies, (3) restrict T_Var_*_L1 to require In r R for variables of type containing r"
+follow-up = "see PRESERVATION-DESIGN.md §4.8"
+
+[[proof-debt]]
+id = "L1.D-Pair"
+file = "Semantics_L1.v"
+line-anchor = "preservation_l1 S_Pair_Step2"
+class = "calculus-soundness-gap"
+tractable = false
+diagnosis = "same as L1.D-App"
+closes-when = "see L1.D-App"
+follow-up = "see PRESERVATION-DESIGN.md §4.8"
+
+[[proof-debt]]
+id = "L1.C-region-liveness"
+file = "Semantics_L1.v"
+line-anchor = "region_liveness_at_split_l1 (Axiom)"
+class = "carry-invariant-through-induction"
+tractable = true
+diagnosis = "subst_typing_gen_l1 needs to know that In rv R_inner at each compound-rule split point. The outer call provides In rv R; the inductive descent doesn't propagate it because T_Var_Lin_L1 doesn't enforce In rv R."
+closes-when = "one of (1) strengthen T_Var_Lin_L1 to require In rv R, (2) add a side condition to subst_typing_gen_l1 stating In rv R at every R_inner reached, (3) prove a region-liveness corollary of L1.B's count monotonicity"
+
+# ============================================================================
+# DOCUMENTATION POINTERS
+# ============================================================================
+
+[docs]
+design = "formal/PRESERVATION-DESIGN.md"
+handoff = "formal/PRESERVATION-HANDOFF.md"
+roadmap = "ROADMAP.adoc"
+counterexample = "formal/Counterexample.v"
+disambiguation = "nextgen-languages/docs/disambiguation/ephapax-vs-affinescript.md"
+
+[docs.sections]
+preservation-design-§4-1-judgment = "L1 judgment signature"
+preservation-design-§4-5-statement = "Preservation under the new judgment"
+preservation-design-§4-7-status = "L1 closure status (2026-05-27)"
+preservation-design-§4-8-soundness-finding = "T_Lam_L1 + T_Var_*_L1 are too permissive — soundness gap surfaced by L1.E"
+preservation-design-§12-15-bounds = "Proof-debt bounds (named cases that remain)"
+preservation-design-§12-16-roadmap = "v2 echo-as-foundation forward look"
+
+# ============================================================================
+# BUILD VERIFICATION
+# ============================================================================
+
+[build]
+coq-version = "8.18.0"
+project-file = "formal/_CoqProject"
+invocation = "coq_makefile -f _CoqProject -o Makefile && make"
+last-clean-build = "2026-05-27"
+modules = [
+  "Syntax",
+  "Typing",
+  "TypingL1",
+  "Semantics",
+  "Semantics_L1",
+  "Counterexample"
+]

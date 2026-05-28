@@ -1,0 +1,219 @@
+// SPDX-License-Identifier: PMPL-1.0-or-later
+// Copyright (c) 2026 Jonathan D.A. Jewell (hyperpolymath) <j.d.a.jewell@open.ac.uk>
+
+= ARG-PROFILE — Ephapax
+:toc: left
+:toclevels: 2
+
+[cols="1,3"]
+|===
+| Field | Value
+
+| Language | Ephapax (dyadic: `ephapax-linear` + `ephapax-affine` sublanguages)
+| Repository | https://github.com/hyperpolymath/ephapax
+| Current ARG Grade | *E*  (bare minimum: it qualifies as a language, runs core fragment, nobody outside maintainer uses it)
+| Assessed | 2026-05-28
+| Assessor | Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk>
+| ARG Spec Version | 1.0
+| FRG Profile | spec/FRG-PROFILE.adoc
+| TRG Profile | spec/TRG-PROFILE.adoc (TBD)
+|===
+
+== About this profile
+
+Ephapax is a research language targeting WebAssembly memory safety
+via dyadic linear/affine discipline. It is internally usable but has
+no external adoption. ARG = E (bare minimum), supported by a robust
+mathematical research narrative (FRG = D, headed for C) but lacking
+adoption surfaces.
+
+ARG = E. The full chain of axes:
+
+* ARG: E
+* TRG: TBD (likely D)
+* FRG: D (see `spec/FRG-PROFILE.adoc`)
+* CRG: TBD (worst-of any released component)
+* RSR: Compliant at TRG-D level
+
+Cross-axis rule: ARG ≤ TRG holds.
+
+== Grade rationale (evidence for E)
+
+[cols="2,1,4", options="header"]
+|===
+| Criterion | Met? | Evidence
+
+| *D1 — Landing page / README*
+| YES
+| `README.adoc` (top-level, comprehensive; includes disambiguation
+  from AffineScript per cross-repo discipline)
+
+| *D2 — Elevator pitch*
+| YES
+| README §1 "Once for all" — dyadic substructural discipline for
+  WebAssembly memory safety
+
+| *D3 — Provenance*
+| YES
+| Maintainer = Jonathan D.A. Jewell; project start 2025; current
+  version pre-alpha
+
+| *TRG ≥ E for front-end (F1-F4, F6-F7)*
+| YES (assumed)
+| Rust crate with parser, AST, basic diagnostics
+
+| *TRG ≥ E for one back-end (B1, B2, B6)*
+| PARTIAL
+| Typed-wasm target wired; codegen partial
+
+| *TRG ≥ E for stdlib (T8)*
+| NO
+| Stdlib minimal
+
+| *RSR-compliant at TRG-E*
+| YES
+| SPDX headers, CODE_OF_CONDUCT, CONTRIBUTING, recent admin-merge
+  sweep complete
+
+| *O1 — 5-minute hello-world*
+| NO
+| Demo path exists but not "clean install in 5 min" tested
+
+| *O2 — Tutorial covering distinctive features*
+| NO
+| Dyadic-modality discipline tutorial absent
+
+| *O3 — Playground*
+| NO
+|
+
+| *O4 — Cookbook in ≥ 2 substantive domains*
+| NO
+|
+
+| *R1 — Reference manual*
+| NO
+|
+
+| *R2 — Stdlib reference*
+| NO
+|
+
+| *R3 — Formal grammar*
+| YES (via formalisation)
+| `formal/Syntax.v` (informally also documented in README)
+
+| *R4 — Operational semantics*
+| YES (via formalisation)
+| `formal/Semantics_L1.v`; this is genuinely strong for ARG-E
+
+| *R5 — Stable error-code index*
+| NO
+|
+
+| *Community C1-C5*
+| PARTIAL
+| GitHub Issues active; CONTRIBUTING present; CoC present; no
+  external venue; ADR/RFC process implicit (PRESERVATION-DESIGN.md
+  is the canonical decision document, but not formalised as RFC)
+
+| *Distribution Δ1-Δ5*
+| MOSTLY NO
+| Tagged releases via git; no registry; no versioning policy
+  document; no SECURITY.md disclosure path documented
+
+| *Education E1-E4*
+| NO
+|
+
+| *Ecosystem X1-X4*
+| NO
+| Founder is sole maintainer
+
+| *Diversity metrics*
+| NO (E-permissive)
+|
+
+| *VeriSimDB attestation*
+| NO (E-permissive; required from C)
+|
+|===
+
+== Language-specific tightening
+
+For Ephapax, the following ARG tightening applies:
+
+* *Grade C tightening:* MUST have at least one external tutorial in
+  the dyadic-modality discipline written by someone other than the
+  maintainer.
+* *Grade B tightening:* MUST have at least 3 external users
+  successfully writing programs in the `ephapax-linear` sublanguage
+  (the strict core) — not just `ephapax-affine`.
+* *Grade A tightening:* The four-layer redesign (L1 regions / L2
+  modality / L3 echo / L4 dyadic) MUST be presented externally at a
+  type-theory venue with materials made publicly available.
+
+== What is NOT yet met (honest gaps)
+
+* No onboarding surface (no tutorial, no playground, no cookbook).
+* No reference manual or stdlib reference.
+* No external users.
+* No public discussion venue.
+* No registry presence.
+* No education materials.
+* The strong FRG/formalisation work has not translated into ARG
+  surfaces — adoption needs different artefacts than the
+  formalisation produces.
+
+== Path to next grade (D — toy-project usable)
+
+* TRG estate-wide at D.
+* Author 3 cookbook examples ≥ 100 LoC each in the `ephapax-linear`
+  sublanguage.
+* Write 5-minute hello-world tutorial.
+* Stand up CI for example programs.
+* Tag signed release artefact.
+* Recruit 2+ distinct external program authors.
+
+*Realistic timeline estimate:* 3-6 months — onboarding surface is
+the long pole. The formalisation work is *not* what gates ARG-D.
+
+== Path to grade beyond that (C — alpha gate)
+
+* Stand up browser playground (single-page-app with WASM execution).
+* Operational/denotational semantics document at R4 (the
+  PRESERVATION-DESIGN.md is the seed but needs a non-prover-reader
+  presentation).
+* Stable error-code index.
+* RFC process activated.
+* Wire VeriSimDB ingestion of ARG/FRG attestations.
+* 10 dogfood users meeting diversity-metrics.
+* 2 substantive domains, ≥ 3 cookbook examples each.
+
+== Demotion risk
+
+* *Lowest:* README and adoption claims drift such that D1/D2 no
+  longer ground — drops to X.
+* *Medium:* Maintainer absence past 6 months without delegation
+  signal — risks F.
+* *Catastrophic:* Public announcement that ephapax is superseded
+  without preserving evacuation path — drops to F.
+
+== Iteration history
+
+[cols="1,1,4", options="header"]
+|===
+| Date | Grade | Notes
+
+| 2026-05-28 | E | Initial ARG assessment. Strong FRG narrative, minimal adoption surface.
+|===
+
+== Review cycle
+
+* *Routine:* Reassess on every release cycle (per ARG §6).
+* *Immediate:* Reassess within 7 days of any demotion trigger.
+
+== Footer
+
+This profile is itself a VCL-total proposition. Its content is
+`DECLARE`'d to VeriSimDB on each commit (once ingestion wired).

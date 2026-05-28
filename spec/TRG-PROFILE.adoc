@@ -1,0 +1,239 @@
+// SPDX-License-Identifier: PMPL-1.0-or-later
+// Copyright (c) 2026 Jonathan D.A. Jewell (hyperpolymath) <j.d.a.jewell@open.ac.uk>
+
+= TRG-PROFILE — Ephapax
+:toc: left
+:toclevels: 2
+
+[cols="1,3"]
+|===
+| Field | Value
+
+| Language | Ephapax
+| Repository | https://github.com/hyperpolymath/ephapax
+| Current TRG Grade | *D*  (X \| F \| E \| D \| C \| B \| A)
+| Assessed | 2026-05-28
+| Assessor | Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk>
+| TRG Spec Version | 1.0
+| ARG Profile | spec/ARG-PROFILE.adoc
+| FRG Profile | spec/FRG-PROFILE.adoc
+| CRG Profile | spec/CRG-PROFILE.adoc
+|===
+
+== About this profile
+
+This profile applies the *TRG v1.0* baseline to Ephapax. The
+toolchain is unusually complete for a research language: a 14-crate
+Rust workspace covering lexer (logos), parser (chumsky), AST (core +
+surface), desugarer, type checker (159KB), IR, WASM codegen (195KB),
+interpreter, REPL (rustyline), LSP (tower-lsp), formatter, package
+manager, runtime (wasmtime), and 4-layer Coq formalisation in
+`formal/`. Most TRG MUST components are present and tested. The
+overall grade lands at *D* rather than C primarily because of three
+gating issues:
+
+* M3 *type-checker oracle* and M4 *proof dispatcher* are *both
+  ambiguous* for a verified language. The Coq formalisation in
+  `formal/` proves *properties of* the type system at L1-L4, but
+  does not act as an oracle that the Rust type checker dispatches
+  obligations to. Per TRG §3.2, this is an *implicit* implementation
+  of M3, not a discrete component — grade E at best for both.
+* T8 *standard library* is minimal (`ephapax-stdlib`: list ops,
+  `I32`, bool only).
+* No `audits/audit-<component>.md` per TRG §3 / §4.
+
+The chain of axes:
+
+* ARG: *E* (research artefact, narrow adopter base)
+* TRG: *D* (this profile)
+* FRG: *D* (active mechanised-proof line at `formal/`, multi-layer
+  redesign, counterexample-verified preservation invariants)
+* CRG: *D* (per spec/CRG-PROFILE.adoc; no published external
+  components yet, recommended demotion C→D per
+  `docs/governance/CRG-AUDIT-2026-04-18.adoc`)
+* RSR: assessed elsewhere
+
+Cross-axis rule: ARG ≤ TRG holds (TRG = D ≥ ARG = E).
+
+== Component grades
+
+The toolchain decomposes into components drawn from TRG §3. Each
+component is graded independently against the four-tier audit format
+of TRG §4 (Must / Should / Could / Aspirational → grades E / D / C / B).
+The overall TRG grade is the *worst* of any MUST component.
+
+=== Front-end (TRG §3.1)
+
+[cols="1,3,1,4", options="header"]
+|===
+| # | Component | Grade | Evidence
+
+| F1 | Grammar / Syntax        | *D*  | `spec/ephapax-v2-grammar.ebnf` (EBNF, draft) + `spec/SPEC.md`. CLI grammar tests `v2_grammar_phase_*.rs`. Draft status pulls grade off C.
+| F2 | Lexer / Tokeniser       | *C*  | `src/ephapax-lexer/src/lib.rs` (31KB, `logos`-based). Unit tests + full `TokenKind` enum coverage.
+| F3 | Parser                  | *C*  | `src/ephapax-parser/src/lib.rs` (87KB, `chumsky`). Unit tests + property tests + grammar phase tests.
+| F4 | AST                     | *C*  | `src/ephapax-syntax/src/lib.rs` (23KB, core AST) + `src/ephapax-surface/src/lib.rs` (18KB, surface AST). `src/ephapax-desugar/src/lib.rs` (71KB) lowers surface → core. All three with unit tests.
+| F5 | Macro expander          | N/A  | Ephapax has no macros.
+| F6 | Import resolver / Modules | *D* | `src/ephapax-cli/src/import_resolver.rs`. Embedded in CLI; not a separate auditable component.
+| F7 | Diagnostics / Errors    | *D*  | `src/ephapax-parser/src/error.rs` (LexerError, ParseError). CLI error reporting in `main.rs`. No published error-code index.
+|===
+
+=== Middle-end (TRG §3.2)
+
+[cols="1,3,1,4", options="header"]
+|===
+| # | Component | Grade | Evidence
+
+| M1 | Semantic analyser       | *D*  | `src/ephapax-analysis/src/lib.rs` (7KB). Basic tests; small surface relative to the type checker.
+| M2 | Type checker            | *B*  | `src/ephapax-typing/src/lib.rs` (~159KB). Bidirectional checker with linear + affine discipline. Extensive unit tests, contract tests (`invariant_*`), property tests. Heaviest single component in the codebase.
+| M3 | Type-checker oracle     | *E*  | Embedded in M2 (`check_*` functions). The Coq formalisation in `formal/` proves *properties of* the type system but is not invoked as an oracle by the Rust checker. Per TRG §3.2, this is an implicit M3 — grade E.
+| M4 | Proof dispatcher        | *E*  | No automated dispatcher from the Rust checker to the Coq proofs. Proofs are authored by hand; the design doctrine lives at `formal/PRESERVATION-DESIGN.md` and tracks the four-layer redesign. For a *verified* language this is the load-bearing gap.
+| M5 | Semantics document      | *C*  | `spec/SPEC.md` + `formal/PRESERVATION-DESIGN.md` (canonical doctrine, 4-layer architecture) + `formal/PRESERVATION-HANDOFF.md` + `formal/PHASE-D-REDESIGN.md` + `formal/L4-DYADIC.md`. Operational semantics in `Semantics.v`, `Semantics_L1.v`. Comprehensive but evolving.
+|===
+
+=== Back-end (TRG §3.3)
+
+[cols="1,3,1,4", options="header"]
+|===
+| # | Component | Grade | Evidence
+
+| B1 | Intermediate representation | *C*  | `src/ephapax-ir/src/lib.rs` (38KB). JSON serialisation in `src/ephapax-ir/src/json.rs`. Unit tests + JSON round-trip tests.
+| B2 | Code generator          | *C*  | `src/ephapax-wasm/src/lib.rs` (~195KB, WebAssembly encoder). `ownership.rs`, `debug.rs` accompanying modules. E2E WASM tests + contract tests (magic-byte validation).
+| B3 | Backend registry        | *D*  | Partial — currently only the `ephapax-wasm` backend exists; `ownership.rs` + `debug.rs` act as the cross-component registry surface.
+| B4 | Linker / JIT / eval     | *C*  | `src/ephapax-runtime/src/lib.rs` (~10KB, `wasmtime` integration). Runtime tests covering list operations.
+| B5 | ABI / FFI surface       | *D*  | `ExternItem`, `Visibility` in `src/ephapax-syntax/src/lib.rs`. Extern blocks in syntax. FFI parsing tests + ownership verification tests. Idris2 ABI surface (per estate convention) not yet declared.
+| B6 | Runtime                 | *D*  | `src/ephapax-runtime/src/lib.rs` + `src/ephapax-stdlib/src/lib.rs` (8KB). Minimal — list ops, `I32`, bool only.
+|===
+
+=== Tool surface (TRG §3.4)
+
+[cols="1,3,1,4", options="header"]
+|===
+| # | Component | Grade | Evidence
+
+| T1 | Compiler driver         | *C*  | `src/ephapax-cli/src/main.rs` (clap CLI; subcommands `check`, `compile`, `run`, `repl`). Contract, aspect, and E2E tests in `src/ephapax-cli/tests/`.
+| T2 | Interpreter             | *C*  | `src/ephapax-interp/src/lib.rs` (~68KB). Unit tests.
+| T3 | REPL                    | *D*  | `src/ephapax-repl/src/lib.rs` (~15KB, rustyline-based). Basic tests.
+| T4 | Formatter               | *D*  | `src/ephapax-tools/src/formatter.rs`. Unit tests.
+| T5 | LSP server              | *D*  | `src/ephapax-lsp/src/main.rs` (~34KB, tower-lsp; hover, goto, completions). Minimal inline tests; no LSP protocol coverage suite.
+| T6 | Debugger                | N/A  | Absent. SHOULD per TRG §3.4; not blocking grade D.
+| T7 | Package manager         | *D*  | `src/ephapax-package/src/{registry,manifest,resolver}.rs`. Tests for each.
+| T8 | Standard library        | *E*  | `src/ephapax-stdlib/src/lib.rs` (~8KB). Basic list ops, `I32`, `bool`. Minimal coverage.
+| T9 | Pipeline orchestrator   | *D*  | Implicit via CLI main orchestrating lex → parse → desugar → type-check → codegen. Covered by contract tests.
+|===
+
+== Language-specific tightening (this profile only)
+
+TRG §1.1 permits per-language tightening. For Ephapax, the
+following additional obligations apply at the stated grades:
+
+* *Grade D tightening:* The type checker MUST reject every linear-
+  discipline violation in the test corpus (currently in
+  `src/ephapax-typing/`). The `Counterexample.v` Qed result and the
+  L1 region-threading design MUST be in agreement with the Rust
+  checker's behaviour.
+* *Grade C tightening:* The four-layer formalisation (L1 regions /
+  L2 modality / L3 echo / L4 dyadic) MUST be fully connected to the
+  Rust type checker in at least one direction — either an oracle
+  bridge (Rust → Coq) or a refinement-checked extraction
+  (Coq → Rust). Closing M3 / M4 is the gate.
+* *Grade B tightening:* preservation_l1 / preservation_l2 /
+  preservation_l3 lemmas MUST be Qed (not Admitted) for the load-
+  bearing layer (currently L1 + L2 in flight per
+  `formal/PRESERVATION-DESIGN.md`).
+
+These tightenings are *additional* to the baseline — none of the
+baseline evidence is waived.
+
+== Canonical Proof Suite extension
+
+Ephapax is a verified-aspirational language. The Canonical Proof
+Suite extension lives at `formal/`:
+
+* L1 region-threading: `formal/TypingL1.v`, `formal/Semantics_L1.v`,
+  `formal/Counterexample.v` (preservation provably false for legacy
+  formulation — Qed)
+* L2 modality: `formal/TypingL2.v`, `formal/Modality.v`
+  (`linear_to_affine` Qed zero axioms; preservation_l1 stated
+  ∀modality, both branches currently Admitted)
+* L3 echo / residue: `formal/Echo.v` (scaffold)
+* L4 dyadic interaction: `formal/L4.v` (design only, not landed)
+
+Current proof debt is tracked in `PROOF-NEEDS.md` and the four-layer
+design doctrine at `formal/PRESERVATION-DESIGN.md`.
+
+== What is NOT yet met (honest gaps)
+
+Gating gaps for grade *C*:
+
+* *M3 oracle bridge*. Coq proofs are not connected to the Rust
+  type checker as a live oracle. The proofs cover properties of
+  the type system, not obligations dispatched at check time.
+* *M4 proof dispatcher*. No automated dispatcher from typechecker
+  to prover.
+* *T8 standard library expansion*. Current coverage is minimal
+  (list, `I32`, `bool`); grade C requires demonstrably useful
+  language usage which requires a richer stdlib.
+* *No `audits/audit-<component>.md` per TRG §3 + §4*. Per-component
+  audit format not yet adopted.
+
+== Path to next grade (*C*)
+
+* Land the L1 + L2 preservation lemmas as Qed (currently in flight
+  per `formal/PRESERVATION-DESIGN.md`). (~weeks — open mathematical
+  work)
+* Either: implement an oracle bridge that lets the Rust checker
+  *invoke* a Coq judgment via extracted code (closes M3); OR:
+  document the deliberate decoupling and accept M3 = E
+  permanently with a tightening that says "Ephapax's verification
+  story is property-based, not obligation-dispatching."
+* Expand `ephapax-stdlib` to cover `String`, `List`, `Option`,
+  `Result`, `Vec`, basic numerics. (~3-4 weeks)
+* Author per-component audits under `audits/`.
+
+*Realistic timeline estimate:* 2-4 months from current state.
+
+== Path to grade beyond that (*B*)
+
+* preservation_l1, preservation_l2, preservation_l3 all Qed.
+* `linear_to_affine` proven Qed at L2 (already done — confirm not
+  regressed).
+* External adoption: at least one published consumer of Ephapax
+  not maintained by the Ephapax team.
+* Published soundness theorem for the released verifier crate
+  (if and when it ships).
+
+== Demotion risk
+
+* *Lowest:* `ephapax-typing` contract tests regress.
+* *Medium:* L1 preservation work demoted from Qed to Admitted in
+  a load-bearing rule.
+* *Catastrophic:* `Counterexample.v` is found to invalidate not just
+  the legacy formulation but also L1 / L2 / L3 — would force
+  TRG demotion to X pending redesign.
+
+== Iteration history
+
+[cols="1,1,4", options="header"]
+|===
+| Date | Grade | Notes
+
+| 2026-05-28 | D | Initial TRG assessment per TRG v1.0. Gating items: M3 oracle implicit, M4 dispatcher absent, T8 stdlib minimal.
+|===
+
+== Review cycle
+
+* *Routine:* Reassess on every release cycle (per TRG §8).
+* *Immediate:* Reassess within 7 days of any MUST-component
+  regression or formal/ Qed-to-Admitted regression.
+* *VeriSimDB drift alert:* Reassess within 24 hours of any drift
+  alert.
+
+== Footer
+
+Run `just trg-badge` in this repo to generate the shields.io badge
+for the README.
+
+This profile is itself a VCL-total proposition. Its content is
+`DECLARE`'d to VeriSimDB on each commit. Drift between the claimed
+grade above and the underlying evidence surfaces as a grade-stale
+alert.

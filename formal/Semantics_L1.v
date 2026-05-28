@@ -473,6 +473,15 @@ Proof.
     apply T_Lam_L1_Linear. eapply IHHt; auto.
   - (* T_Lam_L1_Affine *)
     eapply T_Lam_L1_Affine. eapply IHHt; auto.
+  - (* T_Lam_L1_Linear_Eff — body's R_in is separate from outer R, but
+       the side condition [forall r, In r R -> In r R_in] survives
+       outer shrinkage (smaller outer R ⊆ original R ⊆ R_in). The body
+       typing at R_in is unchanged. *)
+    eapply T_Lam_L1_Linear_Eff; [|eassumption].
+    intros r0 Hin0. apply H. eapply remove_first_subset. exact Hin0.
+  - (* T_Lam_L1_Affine_Eff — same pattern. *)
+    eapply T_Lam_L1_Affine_Eff; [|eassumption].
+    intros r0 Hin0. apply H. eapply remove_first_subset. exact Hin0.
   - (* T_App_L1 *)
     destruct Hfree as [Hf1 Hf2].
     eapply T_App_L1; [eapply IHHt1; auto | eapply IHHt2; auto].
@@ -1002,6 +1011,13 @@ Proof.
   (* T_Lam_L1_Affine *)
   - assert (IH := IHHtype (S k) T_new ltac:(simpl; lia)).
     simpl in IH. eapply T_Lam_L1_Affine. exact IH.
+  (* T_Lam_L1_Linear_Eff — side condition + body via IH on (S k) shift.
+     The side condition is shift-invariant. *)
+  - assert (IH := IHHtype (S k) T_new ltac:(simpl; lia)).
+    simpl in IH. eapply T_Lam_L1_Linear_Eff; [exact H | exact IH].
+  (* T_Lam_L1_Affine_Eff — same. *)
+  - assert (IH := IHHtype (S k) T_new ltac:(simpl; lia)).
+    simpl in IH. eapply T_Lam_L1_Affine_Eff; [exact H | exact IH].
   (* T_App_L1 *)
   - eapply T_App_L1; [apply IHHtype1; assumption|].
     apply IHHtype2. assert (Hlen := typing_preserves_length_l1 _ _ _ _ _ _ _ Htype1). lia.
@@ -1458,6 +1474,25 @@ Proof.
     eapply (IHHtype (S k0) (TString rv) (ELoc lv rv) u_in);
       simpl; try eassumption; try reflexivity.
     apply loc_retype_at_R_l1_m. exact Hregv.
+
+  (* T_Lam_L1_Linear_Eff — body's R = R_in (separate from outer R), but
+     the side condition [H : forall r, In r R -> In r R_in] gives
+     In rv R_in from Hregv : In rv R. The body then types the
+     substituted location at R_in. *)
+  - assert (u_out = u_in) by congruence; subst.
+    eapply T_Lam_L1_Linear_Eff; [exact H |].
+    destruct (linear_value_is_loc_l1 _ _ _ _ Hv_type Hval Hlin) as [lv [rv [-> [-> Hregv]]]].
+    eapply (IHHtype (S k0) (TString rv) (ELoc lv rv) u_in);
+      simpl; try eassumption; try reflexivity.
+    apply loc_retype_at_R_l1_m. apply H. exact Hregv.
+
+  (* T_Lam_L1_Affine_Eff — same. *)
+  - assert (u_out = u_in) by congruence; subst.
+    eapply T_Lam_L1_Affine_Eff; [exact H |].
+    destruct (linear_value_is_loc_l1 _ _ _ _ Hv_type Hval Hlin) as [lv [rv [-> [-> Hregv]]]].
+    eapply (IHHtype (S k0) (TString rv) (ELoc lv rv) u_in);
+      simpl; try eassumption; try reflexivity.
+    apply loc_retype_at_R_l1_m. apply H. exact Hregv.
 
   (* T_App_L1 *)
   - destruct (output_shape_at_l1 _ _ _ _ _ _ _ _ _ _ Htype1 Hk_in) as [u_mid Hu_mid].

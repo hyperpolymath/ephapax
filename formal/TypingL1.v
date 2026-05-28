@@ -182,6 +182,52 @@ Inductive has_type_l1
       R ; ctx_extend G T1 |=L1[Affine] e : T2 -| R ; (T1, u) :: G ->
       R ; G               |=L1[Affine] ELam T1 e : TFun T1 T2 -| R ; G
 
+  (** ===== Phase D slice 2 — Effect-typed lambda rules =====
+
+      [T_Lam_L1_Linear_Eff] / [T_Lam_L1_Affine_Eff] parallel
+      [T_Lam_L1_Linear] / [T_Lam_L1_Affine] but record the body's
+      R-flow into the function type via [TFunEff T1 T2 R_in R_out]
+      (slice 1, PR #200; refined per [formal/PHASE-D-REDESIGN.md]).
+
+      **Design choice (2026-05-28 final):** the rule carries a
+      side condition [forall r, In r R -> In r R_in], i.e., the
+      body's input env [R_in] is a SUPERSET of the formation env
+      [R]. This makes:
+
+      * Substitution: any value at outer R has its region rv ∈ R;
+        side condition gives rv ∈ R_in, which is what the body
+        needs after substitution.
+      * Env-shrinkage lemmas: the type T = TFunEff T1 T2 R_in R_out
+        contains R_in (not the outer R). Shrinking outer R from R
+        to remove_first rr R preserves the side condition (smaller
+        R is still a subset of R_in).
+
+      Why not R_in = R (tighter)? That ties the type to the
+      formation env, breaking env-shrinkage lemmas (the type
+      changes when env shrinks). Why not R_in unconstrained? That
+      breaks substitution (the substituted value's region might
+      not be in R_in).
+
+      The R_in ⊇ R reading: "the body has access to AT LEAST the
+      formation regions, possibly more (declared up front)." Natural
+      and compositional. An explicit weakening for use at different
+      call-site Rs ships in slice 3 (T_App_L1_Eff).
+
+      Per the L3 wiring playbook (parallel-rule strategy): existing
+      [TFun]-typed programs continue to type via [T_Lam_L1_Linear] /
+      [T_Lam_L1_Affine] unchanged. New code uses these [_Eff] rules
+      to opt into effect-typed lambdas. *)
+
+  | T_Lam_L1_Linear_Eff : forall R G T1 T2 e R_in R_out,
+      (forall r, In r R -> In r R_in) ->
+      R_in ; ctx_extend G T1 |=L1[Linear] e : T2 -| R_out ; (T1, true) :: G ->
+      R ; G                  |=L1[Linear] ELam T1 e : TFunEff T1 T2 R_in R_out -| R ; G
+
+  | T_Lam_L1_Affine_Eff : forall R G T1 T2 e u R_in R_out,
+      (forall r, In r R -> In r R_in) ->
+      R_in ; ctx_extend G T1 |=L1[Affine] e : T2 -| R_out ; (T1, u) :: G ->
+      R ; G                  |=L1[Affine] ELam T1 e : TFunEff T1 T2 R_in R_out -| R ; G
+
   | T_App_L1 : forall m R R1 R2 G G' G'' e1 e2 T1 T2,
       R  ; G  |=L1[m] e1 : TFun T1 T2 -| R1 ; G' ->
       R1 ; G' |=L1[m] e2 : T1          -| R2 ; G'' ->

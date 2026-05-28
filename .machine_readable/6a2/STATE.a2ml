@@ -6,9 +6,9 @@
 
 @state(version="2.0"):
 phase: "implementation"
-next_action: "Phase B — TEcho linearity / observation discipline. Wire `is_linear_ty (TEcho T) = ...` in TypingL1.v so a Linear unobserved echo fails typing, then cascade through every `is_linear_ty T = true` premise site. Phase C (L1 structural list-vs-multiset bridge) and Phase D (L2 effect-typed TFun) follow, per the saved 4-phase plan (project_ephapax_post_slice4_plan in user auto-memory). All work is layered per CLAUDE.md owner directive 2026-05-27: no patching of legacy Semantics.v/Typing.v, no new Admitted/Axiom, no ad-hoc cross-layer reasoning to close L1 admits."
-last_action: "Phase A — L4 dyadic scaffold (docs only, no proof changes). Added formal/L4-DYADIC.md design page extracting PRESERVATION-DESIGN.md §7 + formal/L4.v with [ProgramMode] enum and [program_mode_to_modality] mapping to L2's [Modality]. Wired into _CoqProject; full-tree coqc 8.18.0 clean rebuild passes. Slice 4 capstone (preservation_l3) landed on main 2026-05-27 as PR #196."
-updated: 2026-05-28T08:25:00Z
+next_action: "Phase C — L1 structural list-vs-multiset bridge (1-2 PRs). Closes Semantics_L1.v structural admits at ~line 553/621 + 1 outer Admitted that depend on them. Bridge predicate choice (rotation vs permutation vs abstract multiset) is the first design decision. Branch: proof/phase-c-l1-multiset-bridge."
+last_action: "Phase A merged via PR #197 (d87b459) / Phase B Slice 1 DEFERRED 2026-05-28. Phase A (L4 dyadic scaffold) docs-only landed cleanly: formal/L4-DYADIC.md design page + formal/L4.v ProgramMode labelling discipline. Phase B Slice 1 (TEcho linearity wire) investigated and deferred until Phase D: adding `| TEcho _ => true` to is_linear_ty is structurally non-vacuous at L1 (EEcho values typed at TEcho via T_Echo_L1 refute linear_value_is_loc_l1's conclusion + break 9 call-sites in subst_typing_gen_l1_m). Owner chose option (c) defer; the wire will land naturally once Phase D reshapes the L1 substitution chain."
+updated: 2026-05-28T08:50:00Z
 
 @directive(source="owner", date="2026-05-27", canonical="CLAUDE.md"):
 # Captured durable directive — preservation work is the four-layer redesign,

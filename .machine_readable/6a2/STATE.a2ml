@@ -6,9 +6,9 @@
 
 @state(version="2.0"):
 phase: "implementation"
-next_action: "Layered preservation work, NOT legacy patching. Per owner directive 2026-05-27 (see CLAUDE.md): do not attempt to close Theorem preservation in formal/Semantics.v (provably false via Counterexample.v); do not extend Semantics.v with closure-support lemmas (step_preserves_type_at_pre and similar are all in this anti-pattern class); do not close residual Semantics_L1.v axioms via ad-hoc proof tricks. Affirmative work: per-layer preservation derivation against the four-layer redesign in formal/PRESERVATION-DESIGN.md. L2 modality landed in-place (PRs #176 + #177); 6 L1 supporting lemmas regressed to Admitted post-L2-hybrid — bullet-rewrite needed for the 3 new Affine-only constructors of has_type_l1 in Semantics_L1.v."
-last_action: "Doc lockdown landed on main (PR TBD): CLAUDE.md adds owner-directive §, PRESERVATION-DESIGN.md + PRESERVATION-HANDOFF.md gain banners, ROADMAP.adoc §preservation-closure-plan obsoleted, this STATE.a2ml updated. The lockdown originated on the proof/l1-region-threading-design branch (PR #175 against that branch); replayed to main because the design branch is DIRTY+superseded by the L2 hybrid path (#176+#177). PR #153 to be closed as superseded."
-updated: 2026-05-27T11:30:00Z
+next_action: "Phase B — TEcho linearity / observation discipline. Wire `is_linear_ty (TEcho T) = ...` in TypingL1.v so a Linear unobserved echo fails typing, then cascade through every `is_linear_ty T = true` premise site. Phase C (L1 structural list-vs-multiset bridge) and Phase D (L2 effect-typed TFun) follow, per the saved 4-phase plan (project_ephapax_post_slice4_plan in user auto-memory). All work is layered per CLAUDE.md owner directive 2026-05-27: no patching of legacy Semantics.v/Typing.v, no new Admitted/Axiom, no ad-hoc cross-layer reasoning to close L1 admits."
+last_action: "Phase A — L4 dyadic scaffold (docs only, no proof changes). Added formal/L4-DYADIC.md design page extracting PRESERVATION-DESIGN.md §7 + formal/L4.v with [ProgramMode] enum and [program_mode_to_modality] mapping to L2's [Modality]. Wired into _CoqProject; full-tree coqc 8.18.0 clean rebuild passes. Slice 4 capstone (preservation_l3) landed on main 2026-05-27 as PR #196."
+updated: 2026-05-28T08:25:00Z
 
 @directive(source="owner", date="2026-05-27", canonical="CLAUDE.md"):
 # Captured durable directive — preservation work is the four-layer redesign,
@@ -46,14 +46,20 @@ updated: 2026-05-27T11:30:00Z
 #     and their at_pre helpers are Qed but support legacy-preservation
 #     closure attempts that are now ruled out. Retained for diagnostic
 #     value; no new lemmas in this class.
-#   - formal/Semantics_L1.v `preservation_l1`: in progress; 6 supporting
-#     lemmas regressed to Admitted post-L2-hybrid (PRs #176+#177).
-#     Bullet-structure rewrite needed for 3 new Affine-only constructors.
-#   - formal/TypingL1.v: now m-indexed (`has_type_l1 m R G e T R' G'`),
-#     `linear_to_affine` Qed zero axioms.
-#   - formal/Echo.v: K-free scaffold, no postulates, forward-looking
-#     (not yet wired into has_type_l1).
+#   - formal/Semantics_L1.v `preservation_l1`: stated `forall m`; body
+#     Admitted (lambda-rigidity gap, closes at Phase D / L2 effect-typed
+#     TFun per PRESERVATION-DESIGN.md §5.1). 5 inner `admit.` cases
+#     (3 distinct structural blockers + 2 mechanical mirrors) covered
+#     by 3 outer Admitted markers. Zero new debt introduced post-L2.
+#   - formal/Semantics_L1.v `preservation_l3`: Qed, both modes, slice 4
+#     of L3 wiring landed 2026-05-27 (PR #196).
+#   - formal/TypingL1.v: m-indexed (`has_type_l1 m R G e T R' G'`),
+#     `linear_to_affine` Qed zero axioms; T_Echo_L1 / T_Observe_L1 +
+#     parallel T_*_Echo rules landed for L3 wiring.
+#   - formal/Echo.v: K-free L3 calculus, no postulates, 12 Qed.
 #   - formal/Modality.v: thin-poset Linear ≤ Affine, all Qed.
+#   - formal/L4.v: ProgramMode labelling discipline, Definitions only,
+#     no theorems. Phase A landed 2026-05-28.
 #
 # Other proof-debt items (out of preservation scope):
 #   - src/abi/Ephapax/ABI/Invariants.idr E1-E6: E1 (preservation) OWED at
@@ -62,12 +68,15 @@ updated: 2026-05-27T11:30:00Z
 @end
 
 @artifacts:
-# Layered files on main (post-L2-hybrid):
-#   formal/Counterexample.v   — 3 Qed lemmas; preservation FALSE
-#   formal/Echo.v             — L3 scaffold, K-free
+# Layered files on main (post-slice-4 + Phase A):
+#   formal/Counterexample.v   — 5 Qed lemmas; preservation FALSE
+#   formal/Echo.v             — L3 calculus, K-free, 12 Qed
 #   formal/Modality.v         — L2 thin poset, all Qed
-#   formal/TypingL1.v         — m-indexed has_type_l1 (post-#176)
-#   formal/Semantics_L1.v     — in progress; 6 supporting Admitted
+#   formal/TypingL1.v         — m-indexed has_type_l1 + Echo/Observe rules
+#   formal/Semantics_L1.v     — 26 Qed, 3 outer Admitted (5 inner admit.)
+#   formal/TypingL2.v         — thin wrapper through TypingL1.has_type_l1
+#   formal/L4.v               — ProgramMode labelling discipline (Phase A)
+#   formal/L4-DYADIC.md       — L4 design doc
 # Doc lockdown:
 #   CLAUDE.md                       — owner directive §
 #   formal/PRESERVATION-DESIGN.md   — CANONICAL banner

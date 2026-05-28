@@ -139,10 +139,49 @@ but threaded through R_in instead of outer R.
 | Slice | Scope | Status |
 |---|---|---|
 | 1 | TFunEff syntax (`Syntax.v` + `free_regions`) | ✅ MERGED PR #200 |
-| 2 (redesigned) | `T_Lam_L1_*_Eff` with side condition; cascade through 8 inductive lemmas in `Semantics_L1.v` | Pending implementation |
-| 3 | `T_App_L1_Eff` + `TFunEff_count_monotone` connection lemma | Pending |
+| 2 (redesigned) | `T_Lam_L1_*_Eff` with side condition `R ⊆ R_in`; cascade through 3 inductive lemmas in `Semantics_L1.v` | ✅ MERGED PR #204 |
+| 3 — first attempt | `T_App_L1_Eff` with explicit count-le premise | ⚠️ **REVERTED 2026-05-28** — see addendum below |
+| 3 — redesign | TBD — see addendum below | Pending |
 | 4 | `preservation_l1` lambda-rigidity closure (`Semantics_L1.v:1694`) | Pending |
 | 5 | Phase B Slice 1 (TEcho linearity wire) + Phase C (list-vs-multiset bridge) unlocks | Pending |
+
+## Slice 3 addendum — type-embedded R blocks env-shrinkage (2026-05-28)
+
+The first slice 3 attempt added the rule
+
+```coq
+| T_App_L1_Eff : forall m R R_pre G G' G'' e1 e2 T1 T2 R_in R_out,
+    R     ; G  |=L1[m] e1 : TFunEff T1 T2 R_in R_out -| R_pre ; G' ->
+    R_pre ; G' |=L1[m] e2 : T1                       -| R_in  ; G'' ->
+    (forall r, count_occ string_dec R_out r <= count_occ string_dec R_in r) ->
+    R     ; G  |=L1[m] EApp e1 e2 : T2 -| R_out ; G''
+```
+
+`count_occ_le_l1_m`'s case closed via the count-le premise + the IHs. `region_shrink_preserves_typing_l1_gen_m`'s case did NOT close, exposing the deeper structural issue.
+
+**The issue:** TFunEff embeds R_in / R_out in the type T. When the env-shrinkage lemma removes one occurrence of `rr` from the outer R, the rule's structure forces:
+
+* e1's TFunEff type is preserved (lemma signature: `T` unchanged).
+* e2's IH gives output `remove_first rr R_in` (shrunk version of e2's original output).
+* The rule's `R_in` premise is `R_in` (from e1's TFunEff, unchanged).
+
+These mismatch unless `rr ∉ R_in`. Similarly the lemma's expected output `remove_first rr R_out` vs the rule's output `R_out` requires `rr ∉ R_out`. The natural precondition `~ In rr (free_regions T)` would give both (`free_regions (TFunEff T1 T2 R_in R_out) ⊇ R_in ∪ R_out`).
+
+**Adding the precondition cascades:** the lemma's induction would need every sub-IH to also satisfy a type-precondition for the sub-expression's type. For `T_App_L1`, e2's type is `T1` (the argument type), which is NOT constrained by the parent's HnotT (parent only constrains `T2`, the return type). So `T_App_L1`'s case BREAKS under the strengthened precondition.
+
+Strengthening further (e.g., "no intermediate type contains `rr`") is not a clean Prop and would need a meta-condition over derivations.
+
+**Decision:** REVERT slice 3's `T_App_L1_Eff`. The rule is too tightly coupled to env-shrinkage with the current `region_shrink_preserves_typing_l1_gen_m` signature.
+
+**Future redesign options for slice 3:**
+
+1. **Lift env-shrinkage out of the lemma's general statement.** Split `region_shrink_preserves_typing_l1_gen_m` into (i) a value-restricted shape that handles TFunEff vacuously (no T_App in value derivations), and (ii) a non-value shape with TFunEff *explicitly forbidden* via a type-shape predicate. Application sites of `_gen_m` choose which version they need.
+2. **Make `T_App_L1_Eff`'s premise pass through an explicit "env-frame" rather than the function's R_in/R_out.** I.e., the rule says "given e1 typing at TFunEff with effect (R_in, R_out), and a frame Δ such that the call-site env is `Δ ∪ R_in`, the post-call env is `Δ ∪ R_out`." This decouples the embedded R from the call-site env. Bigger redesign.
+3. **Defer `T_App_L1_Eff` indefinitely.** Phase D's main payoff (closing lambda-rigidity at `Semantics_L1.v:1694`) doesn't strictly require `T_App_L1_Eff` if we can argue preservation for β-reduction on `T_Lam_L1_*_Eff`-typed lambdas via a different path. Investigation owed.
+
+The 2026-05-28 attempt's diff is preserved in git history (commit on the now-deleted branch); see `git log --all` for archaeology.
+
+**What slice 3 was supposed to unlock:** β-reduction for `T_Lam_L1_*_Eff`-typed lambdas (preservation_l1 case S_App_Fun) would use `T_App_L1_Eff`'s typing. Without `T_App_L1_Eff`, TFunEff lambdas can be *formed* but never *called* via has_type_l1 — slice 2's contribution is preserved but standalone (no programs exercise it yet).
 
 The strict-predicate reformulation (PR #201) is independent of these
 slices and already merged.

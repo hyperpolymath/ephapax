@@ -60,7 +60,28 @@ Inductive ty : Type :=
       Observation discipline is modality-dispatched at the typing-
       rule boundary, not encoded in the type — see
       [formal/PRESERVATION-DESIGN.md §6.3] and [formal/Echo.v]. *)
-  | TEcho   : ty -> ty.
+  | TEcho   : ty -> ty
+
+  (** L2 Phase 2 / Phase D slice 1 — Effect-typed function former.
+      [TFunEff T1 T2 R_in R_out] is the type of a function from [T1]
+      to [T2] whose body requires the region environment [R_in] on
+      entry and produces [R_out] on exit. The legacy [TFun T1 T2] is
+      preserved (per CLAUDE.md owner directive 2026-05-27 — its
+      falsity in conjunction with `preservation` is load-bearing for
+      `Counterexample.v`); new code uses [TFunEff] to expose lambda
+      bodies' R-flow at the type level.
+
+      Closes the structural-blocker root cause: at function-call
+      sites, the body's region requirements become visible to
+      preservation reasoning, unblocking the lambda-rigidity admit
+      at `Semantics_L1.v:1694` and naturally enabling
+      body-input-shrinkage for the Phase C list-vs-multiset bridge.
+
+      Slice 1 (this PR): syntax-only landing. Typing rules
+      (`T_Lam_L1_*_Eff` + `T_App_L1_Eff`) ship in slice 2. Per the
+      L3 wiring playbook (slices 1→4) this is the lightest landable
+      shape. *)
+  | TFunEff : ty -> ty -> list region_name -> list region_name -> ty.
 
 (** ** Expressions *)
 

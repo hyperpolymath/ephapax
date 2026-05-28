@@ -54,15 +54,20 @@ From Ephapax Require Import Syntax.
 
 Fixpoint free_regions (T : ty) : list region_name :=
   match T with
-  | TBase _          => []
-  | TString r        => [r]
-  | TRef _ T'        => free_regions T'
-  | TFun T1 T2       => free_regions T1 ++ free_regions T2
-  | TProd T1 T2      => free_regions T1 ++ free_regions T2
-  | TSum T1 T2       => free_regions T1 ++ free_regions T2
-  | TRegion r T'     => r :: free_regions T'
-  | TBorrow T'       => free_regions T'
-  | TEcho T'         => free_regions T'
+  | TBase _                  => []
+  | TString r                => [r]
+  | TRef _ T'                => free_regions T'
+  | TFun T1 T2               => free_regions T1 ++ free_regions T2
+  | TProd T1 T2              => free_regions T1 ++ free_regions T2
+  | TSum T1 T2               => free_regions T1 ++ free_regions T2
+  | TRegion r T'             => r :: free_regions T'
+  | TBorrow T'               => free_regions T'
+  | TEcho T'                 => free_regions T'
+  | TFunEff T1 T2 R_in R_out =>
+      (** Phase D slice 1: free regions of [TFunEff] include those of
+          the argument and return types AND the input/output region
+          environments that annotate the body's R-flow. *)
+      free_regions T1 ++ free_regions T2 ++ R_in ++ R_out
   end.
 
 (* Note: We don't need a separate determinism lemma for free_regions

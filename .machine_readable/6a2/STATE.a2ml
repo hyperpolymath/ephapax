@@ -6,9 +6,9 @@
 
 @state(version="2.0"):
 phase: "implementation"
-next_action: "Phase D slice 4+5 — state and prove `preservation_l2` over `has_type_l2` (now thickened with `T_App_L2_Eff` per PR #209). Two cases by structural induction on the L2 derivation: (1) `L2_lift_l1` case carries forward `preservation_l1`'s legacy `TFun` body-R-rigidity admit (slice 4b inherited debt — honest); (2) `T_App_L2_Eff` case (slice 4a, the new constructor) handles `EApp` step-cases — `S_App_Step1`/`S_App_Step2` reduce via IHs; β-reduction inverts e1 to obtain a `T_Lam_L1_*_Eff` lambda whose body lives at L1 via the side-condition guarantee `forall r, In r R -> In r R_in`. Anti-patterns to refuse (per CLAUDE.md owner directive): no `Admitted` to close `T_App_L2_Eff` cases; no touching `Semantics.v`/`Typing.v`/`Counterexample.v`; no re-attempt of option 4. Coqc 8.18.0 is the only authority."
-last_action: "Phase D slice 3 session 6 (2026-05-28): T_App_L2_Eff constructor implemented in formal/TypingL2.v (PR #209 MERGED at 2026-05-28T13:15:35Z, GPG-signed commit 11e8063, single-file diff +64/-15). Rule shape per session-5 sub-sub-addendum: `forall m R R1 G G' G'' e1 e2 T1 T2 R_in R_out, has_type_l2 m R G e1 (TFunEff T1 T2 R_in R_out) R1 G' -> has_type_l2 m R1 G' e2 T1 R_in G'' -> has_type_l2 m R G (EApp e1 e2) T2 R_out G''`. Two refactors forced by the new constructor: (a) `project_l2_to_l1` switched to option-return — T_App_L2_Eff cases have no L1 counterpart by design; (b) `weaken_modality` proof switched from project-and-lift-back to structural induction with `remember Linear as m` + `subst m'` per case. Coqc 8.18.0 full formal/ rebuild clean (10 .v files). `Print Assumptions weaken_modality` + `weaken_modality_le` + `weaken_modality_le_strict_is_weaken_modality` all → 'Closed under the global context'. Zero new admits/axioms. No legacy patching."
-updated: 2026-05-28T13:20:00Z
+next_action: "Phase D slice 4 next sub-slice — generalise `subst_typing_gen_l1_m` (`formal/Semantics_L1.v:1358`) to handle non-linear `T1`. The full `preservation_l2` over `has_type_l2` is blocked at the `T_App_L2_Eff` β-case (`S_App_Fun`) because that lemma's `is_linear_ty T1 = true` precondition doesn't hold for `TFunEff T1 T2 R_in R_out` lambdas with non-linear `T1` (`TUnit` / `TBool` / `TI32`). Approach: (a) read existing proof at Semantics_L1.v:1358-1656 (~300 lines, induction on Htype); (b) identify cases that use `is_linear_ty T1 = true` (primarily `T_Var_Lin_L1` via `flag_false_to_true_implies_linear_l1`); (c) ship a sibling lemma `subst_typing_gen_l1_m_nonlinear` rather than folding case-split into existing lemma (to avoid breaking 30+ Qed downstreams). Once this lands, the T_App_L2_Eff β-case in preservation_l2 closes via: inversion on has_type_l2 → L2_lift_l1 inner → T_Lam_L1_*_Eff inner → value_R_G_preserving_l1 on v2 → apply (general or non-linear) subst lemma → L2_lift_l1 wrap. Anti-patterns to refuse (per CLAUDE.md owner directive): no `Admitted` to close `T_App_L2_Eff` cases; no touching `Semantics.v`/`Typing.v`/`Counterexample.v`; no re-attempt of option 4; no side-conditions on `T_Lam_L1_*_Eff`/`T_App_L2_Eff` to dodge the substitution-lemma generality issue. Coqc 8.18.0 is the only authority."
+last_action: "Phase D slice 4 partial landing session 7 (2026-05-28): `preservation_l2_via_l1` + `preservation_l2_lift_case` corollary + comprehensive doc block landed in `formal/TypingL2.v` (PR #211 OPEN, auto-merge SQUASH armed at 2026-05-28T13:41:20Z, GPG-signed commit 1131141, single-file diff +109/-1). Theorem closes the `L2_lift_l1` case of `preservation_l2` by deferring to `Semantics_L1.preservation_l1` (legacy admit honestly carried forward via `Print Assumptions`). `T_App_L2_Eff` β-case escalated per owner directive §'DO escalate before patching' — `subst_typing_gen_l1_m`'s `is_linear_ty T1 = true` precondition blocks closure for non-linear lambda parameter types. Doc block in TypingL2.v specifies the full preservation_l2 goal, the planned structural-induction proof, and the next-slice infrastructure required (subst-lemma generalisation + has_type_l2 inversion principles + T_Lam_L1_*_Eff inversion). Coqc 8.18.0 clean across all 10 .v files. Zero new admits/axioms in TypingL2.v. `Semantics.v`/`Typing.v`/`Counterexample.v`/`Semantics_L1.v` untouched."
+updated: 2026-05-28T13:42:00Z
 
 @directive(source="owner", date="2026-05-27", canonical="CLAUDE.md"):
 # Captured durable directive — preservation work is the four-layer redesign,
@@ -60,11 +60,17 @@ updated: 2026-05-28T13:20:00Z
 #     requires TFun (not TFunEff), so TFunEff lambdas are inert at
 #     L1 — their elimination form lives at L2 via T_App_L2_Eff
 #     (PR #209, option 5a).
-#   - formal/TypingL2.v: post-#209 has TWO constructors —
+#   - formal/TypingL2.v: post-#209/#211 has TWO constructors —
 #     L2_lift_l1 (any L1 derivation) and T_App_L2_Eff (effect-typed
 #     application, Phase D slice 3). project_l2_to_l1 now
 #     option-returning; weaken_modality proof by structural
-#     induction. All Qed, zero axioms.
+#     induction. Post-#211: `preservation_l2_via_l1` +
+#     `preservation_l2_lift_case` corollary land the L2_lift_l1
+#     case of preservation_l2 (depends transparently on
+#     `Semantics_L1.preservation_l1` admit via Print Assumptions).
+#     Full preservation_l2 over has_type_l2 blocked at T_App_L2_Eff
+#     β-case on `subst_typing_gen_l1_m`'s linearity precondition.
+#     All Qed, zero new axioms in TypingL2.v.
 #   - formal/Echo.v: K-free L3 calculus, no postulates, 12 Qed.
 #   - formal/Modality.v: thin-poset Linear ≤ Affine, all Qed.
 #   - formal/L4.v: ProgramMode labelling discipline, Definitions only,
@@ -83,7 +89,8 @@ updated: 2026-05-28T13:20:00Z
 #   formal/Modality.v         — L2 thin poset, all Qed
 #   formal/TypingL1.v         — m-indexed has_type_l1 + Echo/Observe rules
 #   formal/Semantics_L1.v     — 26 Qed, 3 outer Admitted (5 inner admit.)
-#   formal/TypingL2.v         — L2_lift_l1 + T_App_L2_Eff (Phase D slice 3)
+#   formal/TypingL2.v         — L2_lift_l1 + T_App_L2_Eff +
+#                                preservation_l2_via_l1 (Phase D slice 4 partial)
 #   formal/L4.v               — ProgramMode labelling discipline (Phase A)
 #   formal/L4-DYADIC.md       — L4 design doc
 # Doc lockdown:

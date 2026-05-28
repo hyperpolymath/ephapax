@@ -187,6 +187,94 @@ Fixpoint expr_free_of_region (r : region_name) (e : expr) : Prop :=
   | EObserve e' => expr_free_of_region r e'
   end.
 
+(** ** Strict Region-Freedom (reformulation, closes blocker 5)
+
+    [expr_strictly_free_of_region r e] mirrors [expr_free_of_region]
+    EXCEPT in the [ERegion r' body] case, where it recurses
+    UNCONDITIONALLY (no shadow short-circuit on [r = r']).
+
+    Why a strict variant exists. The weak [expr_free_of_region]
+    short-circuits to [True] when [ERegion r' body] shadows [r]
+    (the [String.eqb r r'] guard). That weakness is sound for the
+    plain capability-list reading of [R], where a nested
+    [ERegion r ...] statically masks the outer [r] and the body
+    cannot "reach back." But under the L1 [T_Region_Active_L1]
+    judgment — and more sharply under L3 re-entry semantics —
+    a body can witness the outer [r] through count-monotonicity /
+    multiset accounting that the syntactic shadow does NOT
+    discharge. The audit (task #29, 2026-05-28, blocker 5) traced
+    one class of "predicate too weak" failures in the region-
+    shrinkage lemma family to exactly this short-circuit accepting
+    expressions whose body legitimately references the outer [r].
+
+    The strict variant is the conservative reading: an expression
+    is strictly free of [r] iff [r] never appears anywhere inside,
+    even under a same-named [ERegion r ...] shadow. It implies the
+    weak variant (see [expr_strictly_free_implies_free] below).
+
+    Scope. The strict predicate is intended to replace the weak one
+    in the L1 region-shrinkage lemma family
+    ([region_shrink_preserves_typing_l1_gen_m] and friends in
+    [Semantics_L1.v]) and downstream consumers
+    ([preservation_l3_region_active_echo]). The legacy step rules
+    [S_Region_Exit] / [S_Region_Exit_Echo] in [Semantics.v] still
+    emit the weak [expr_free_of_region] premise; migrating those
+    is a separate concern (legacy operational semantics) and may
+    or may not happen in this PR (see PR description for current
+    scope).
+
+    Note. The L1 shadowed-sub-case [admit] at
+    [Semantics_L1.v:553/621] is blocked by a list-vs-multiset
+    structural mismatch (Phase D work), NOT by predicate weakness.
+    Strengthening to [expr_strictly_free_of_region] does NOT close
+    those admits. *)
+
+Fixpoint expr_strictly_free_of_region (r : region_name) (e : expr) : Prop :=
+  match e with
+  | EUnit | EBool _ | EI32 _ | EVar _ => True
+  | EStringNew r' _ => r <> r'
+  | EStringConcat e1 e2 | ELet e1 e2 | ELetLin e1 e2
+  | EApp e1 e2 | EPair e1 e2 =>
+      expr_strictly_free_of_region r e1 /\ expr_strictly_free_of_region r e2
+  | EStringLen e' | EFst e' | ESnd e' | EInl _ e' | EInr _ e'
+  | EBorrow e' | EDeref e' | EDrop e' | ECopy e' | ELam _ e' =>
+      expr_strictly_free_of_region r e'
+  | EIf e1 e2 e3 | ECase e1 e2 e3 =>
+      expr_strictly_free_of_region r e1 /\ expr_strictly_free_of_region r e2
+      /\ expr_strictly_free_of_region r e3
+  (** The strictness difference: no [String.eqb] shadow short-circuit.
+      Always descend into the body. *)
+  | ERegion _ e' => expr_strictly_free_of_region r e'
+  | ELoc _ r' => r <> r'
+  | EEcho _ e' => expr_strictly_free_of_region r e'
+  | EObserve e' => expr_strictly_free_of_region r e'
+  end.
+
+(** [expr_strictly_free_of_region] strictly strengthens
+    [expr_free_of_region]: every strictly-free expression is also
+    weakly-free. The converse fails on (e.g.)
+    [ERegion r (EStringNew r _)] where the weak variant accepts
+    via shadow short-circuit but the strict variant rejects.
+
+    Proof. Structural induction. The only non-trivial case is
+    [ERegion r' body]: the weak version short-circuits to [True]
+    when [r = r'], which is implied by anything; the strict
+    version's recursive hypothesis discharges the weak version's
+    recursive case when [r <> r']. *)
+Lemma expr_strictly_free_implies_free :
+  forall r e, expr_strictly_free_of_region r e -> expr_free_of_region r e.
+Proof.
+  intros r e. induction e; simpl; intros H; try exact I; try assumption;
+    try (apply IHe; exact H);
+    try (destruct H as [H1 H2]; split; [apply IHe1 | apply IHe2]; assumption);
+    try (destruct H as [H1 [H2 H3]]; split;
+         [apply IHe1; assumption | split; [apply IHe2 | apply IHe3]; assumption]).
+  - (* ERegion r' e *)
+    destruct (String.eqb r r0) eqn:Heq.
+    + exact I.
+    + apply IHe; exact H.
+Qed.
+
 (** ** Typing Contexts (De Bruijn) *)
 
 (** A typing context is a list of (type, used?) pairs.

@@ -428,11 +428,21 @@ Qed.
     (analog of [region_env_perm_typing] and [region_add_typing])
     is needed to close it; bridging options are listed in the
     case's own comment. *)
+(** Migrated to [expr_strictly_free_of_region] as the precondition
+    (blocker 5 reformulation, 2026-05-28). The strict predicate gives
+    the body strictly MORE information than the weak one — in
+    particular, the [T_Region_*_L1] cases no longer rely on a
+    shadow-short-circuited [True] in the [rr = r] subcase. The
+    residual [admit] at the [T_Region_Active_L1] [rr = r] sub-case
+    is blocked by a list-vs-multiset structural mismatch (Phase D
+    work, NOT by predicate weakness — strengthening the predicate
+    does not close it). The [admit] remains; see the case's own
+    comment for resolution options. *)
 Lemma region_shrink_preserves_typing_l1_gen_m :
   forall m R G e T R' G',
     R ; G |=L1[m] e : T -| R' ; G' ->
     forall r,
-      expr_free_of_region r e ->
+      expr_strictly_free_of_region r e ->
       remove_first r R ; G |=L1[m] e : T -| remove_first r R' ; G'.
 Proof.
   intros m R G e T R' G' Ht.
@@ -532,7 +542,11 @@ Proof.
       * intro Hin. apply H. eapply remove_first_subset; exact Hin.
       * exact H0.
       * apply remove_first_preserves_other; [intro Hbad; apply Heq; exact Hbad | exact H1].
-      * specialize (IHHt rr Hfree).
+      * (* Strict-predicate migration: [Hfree] is uniformly the body's
+           strict-freedom (no conditional to discharge). Still need
+           [simpl in IHHt] to unfold [remove_first rr (r :: R)] into
+           [r :: remove_first rr R] via the [rr <> r] guard. *)
+        specialize (IHHt rr Hfree).
         simpl in IHHt.
         destruct (String.eqb rr r) eqn:Heq2.
         -- exfalso. apply String.eqb_eq in Heq2. apply Heq. exact Heq2.
@@ -601,7 +615,9 @@ Proof.
       * intro Hin. apply H. eapply remove_first_subset; exact Hin.
       * exact H0.
       * apply remove_first_preserves_other; [intro Hbad; apply Heq; exact Hbad | exact H1].
-      * specialize (IHHt rr Hfree).
+      * (* Strict-predicate migration: same as T_Region_L1 above —
+           [simpl in IHHt] still needed to unfold [remove_first]. *)
+        specialize (IHHt rr Hfree).
         simpl in IHHt.
         destruct (String.eqb rr r) eqn:Heq2.
         -- exfalso. apply String.eqb_eq in Heq2. apply Heq. exact Heq2.
@@ -656,7 +672,7 @@ Lemma region_shrink_preserves_typing_l1_gen :
   forall R G e T R' G',
     has_type_l1_linear R G e T R' G' ->
     forall r,
-      expr_free_of_region r e ->
+      expr_strictly_free_of_region r e ->
       has_type_l1_linear (remove_first r R) G e T (remove_first r R') G'.
 Proof.
   intros R G e T R' G' Ht r Hfree.
@@ -668,7 +684,7 @@ Lemma region_shrink_preserves_typing_l1 :
     is_value v ->
     has_type_l1_linear R G v T R' G' ->
     ~ In r (free_regions T) ->
-    expr_free_of_region r v ->
+    expr_strictly_free_of_region r v ->
     has_type_l1_linear (remove_first r R) G v T (remove_first r R') G'.
 Proof.
   intros R G v T R' G' r Hv Ht HnotT Hfree.
@@ -1741,15 +1757,23 @@ Admitted.
     Region shrinkage then provides the post-step witness typing
     at [remove_first r R], and [T_Echo_L1] wraps it. *)
 
+(** Strict-predicate migration (blocker 5, 2026-05-28): the
+    region-shrinkage helper this lemma calls now requires
+    [expr_strictly_free_of_region], so the corresponding premise
+    here is also tightened. The legacy step rules
+    [S_Region_Exit_Echo] in [Semantics.v] still emit the weak
+    [expr_free_of_region]; bridging the step-rule premise to the
+    L1 lemma precondition is a follow-up (legacy operational
+    semantics — see PR description). *)
 Lemma preservation_l3_region_active_echo :
   forall m R G r v T R_body G',
     (* T_Region_Active_L1_Echo premises *)
     In r R ->
     ~ In r (Typing.free_regions T) ->
     has_type_l1 m R G v T R_body G' ->
-    (* S_Region_Exit_Echo premises *)
+    (* S_Region_Exit_Echo premises (strict variant per blocker 5) *)
     is_value v ->
-    expr_free_of_region r v ->
+    expr_strictly_free_of_region r v ->
     (* Conclusion: post-step types at [TEcho T] *)
     has_type_l1 m (remove_first r R) G
       (EEcho T v) (TEcho T) (remove_first_L1 r R_body) G'.
@@ -1806,7 +1830,7 @@ Theorem preservation_l3 :
       ~ In r (Typing.free_regions T) ->
       has_type_l1 m R G v T R_body G' ->
       is_value v ->
-      expr_free_of_region r v ->
+      expr_strictly_free_of_region r v ->
       has_type_l1 m (remove_first r R) G
         (EEcho T v) (TEcho T) (remove_first_L1 r R_body) G')
   /\

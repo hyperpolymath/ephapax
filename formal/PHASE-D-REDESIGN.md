@@ -181,6 +181,117 @@ Strengthening further (e.g., "no intermediate type contains `rr`") is not a clea
 
 The 2026-05-28 attempt's diff is preserved in git history (commit on the now-deleted branch); see `git log --all` for archaeology.
 
+## Slice 3 sub-addendum — option 4 (meta-lemma) analysis (2026-05-28, session 4)
+
+The 2026-05-28 session 3 close-out flagged a fourth option not in the list above and tagged it "UNTRIED — most promising":
+
+> **Option 4 — Meta-lemma approach.** Strengthen `expr_strictly_free_of_region`'s `ELam` case to recurse into the type annotation:
+> ```coq
+> | ELam T body => ~ In r (Typing.free_regions T) /\ expr_strictly_free_of_region r body
+> ```
+> Add a context-freedom precondition `forall i T u, ctx_lookup G i = Some (T, u) -> ~ In r (free_regions T)` to `region_shrink_preserves_typing_l1_gen_m`. Then prove a meta-lemma `strict_free_implies_type_free` that derives `~ In rr (free_regions T)` from `expr_strictly_free_of_region rr e` + the typing derivation + context-freedom. The shrinkage lemma's `T_App_L1_Eff` case closes by applying the meta-lemma to e1's TFunEff type, extracting `~ In rr R_in` and `~ In rr R_out`, then mechanically matching the rule's premises with the env-shrunk IHs.
+
+Session 4 (this addendum) analysed option 4 in detail and **found it provably non-viable**. Recording the analysis here so that future sessions don't re-attempt it.
+
+### Why the meta-lemma fails at `T_Lam_L1_*_Eff`
+
+The proposed meta-lemma:
+
+```coq
+strict_free_implies_type_free :
+  forall rr e R G T R' G' m,
+    ctx_free_of rr G ->        (* context-freedom precondition *)
+    expr_strictly_free_of_region rr e ->
+    R ; G |=L1[m] e : T -| R' ; G' ->
+    ~ In rr (free_regions T)
+```
+
+would induct on the typing derivation. The `T_Lam_L1_Linear_Eff` case (the rule that landed in slice 2, `TypingL1.v:221-224`) has the shape:
+
+```coq
+| T_Lam_L1_Linear_Eff : forall R G T1 T2 e R_in R_out,
+    (forall r, In r R -> In r R_in) ->
+    R_in ; ctx_extend G T1 |=L1[Linear] e : T2 -| R_out ; (T1, true) :: G ->
+    R ; G                  |=L1[Linear] ELam T1 e : TFunEff T1 T2 R_in R_out -| R ; G
+```
+
+In the meta-lemma's induction at this case:
+
+* Expression: `ELam T1 body`.
+* Strengthened strict-free of `ELam T1 body` decomposes (per the proposed strengthening) to `~ In rr (free_regions T1) /\ expr_strictly_free_of_region rr body`.
+* Conclusion type: `TFunEff T1 T2 R_in R_out`. Its `free_regions` (per `Typing.v:55-71`, including the slice 1 case `TFunEff T1 T2 R_in R_out => free_regions T1 ++ free_regions T2 ++ R_in ++ R_out`) is the four-way concatenation.
+* The goal `~ In rr (free_regions (TFunEff T1 T2 R_in R_out))` decomposes into four conjuncts:
+  - `~ In rr (free_regions T1)` ← available from the strengthened strict-free hypothesis. ✓
+  - `~ In rr (free_regions T2)` ← available from the IH on `body` (typed at `T2` in the extended context, with the strengthened strict-free of `body`, and context-freedom of the extended `ctx_extend G T1` derivable from outer context-freedom + the first conjunct). ✓
+  - `~ In rr R_in` ← **NO SOURCE.**
+  - `~ In rr R_out` ← **NO SOURCE.**
+
+`R_in` and `R_out` are **free parameters of the rule**. They appear in the conclusion type but are not constrained by anything in the lambda's syntactic form. The rule's side condition `forall r, In r R -> In r R_in` is unidirectional (R ⊆ R_in), so it gives `In r R → In r R_in`, not `~ In r R_in → ~ In r R`. The body's typing premise (`R_in ; ... |- body : T2 -| R_out`) likewise constrains R_in/R_out only by what the body needs, not by what `rr` doesn't touch.
+
+In short: **the strengthened strict-free predicate covers syntactic occurrences of `rr` in `ELam T1 body` (which is just T1 and body), but cannot reach `R_in` and `R_out` because those live only in the *typing derivation*, not in the *expression*.**
+
+### Why this is the same impedance mismatch as the original slice 3 blocker
+
+The original slice 3 blocker (session 3, this document above) was: `region_shrink_preserves_typing_l1_gen_m`'s `T_App_L1_Eff` case couldn't close because the IH on `e2` gives `remove_first rr R_in` while the rule's premise demands `R_in`.
+
+The proposed fix via option 4 (meta-lemma) **relocates the same mismatch** to a different proof obligation: the meta-lemma's `T_Lam_L1_*_Eff` case can't close because `R_in`/`R_out` are syntax-invisible free parameters.
+
+The root cause is the same in both presentations: **the L1 vocabulary of `expr_strictly_free_of_region` cannot constrain the effect-typing annotations carried in `TFunEff`**, because effect annotations are a *typing* artifact, not a *syntactic* one.
+
+### Adjacent options also fail for the same reason
+
+Two repair attempts on option 4 also fail:
+
+1. **Require `R_in ⊆ free_regions T1 ∪ free_regions T2`** as an extra side condition on `T_Lam_L1_*_Eff`. This would let `~ In rr T1` + `~ In rr T2` (from strict-free + IH) imply `~ In rr R_in`. **Problem**: this over-constrains R_in. A lambda body that uses regions *not* in its parameter or return type (e.g., a lambda that allocates a transient region for its body's local work, drops it before returning) would no longer type — its R_in legitimately exceeds the type's free regions.
+2. **Require `R_in` to be minimal** (exactly the regions the body actually uses, derivable as a function of body syntax). **Problem**: this requires a "region inference" function that is decidable and structurally faithful. The current ephapax grammar doesn't expose enough structure at lambda formation to compute this; we'd need annotations or a fresh inference pass.
+
+Both repairs require slice 2's already-landed rule shape to change. Even granting the change, they trade off compositionality (call sites that wrap lambdas with extra-region preludes/postludes break under a minimal-R_in regime).
+
+### Implication for the slice 3 redesign
+
+Option 4 is removed from the candidate list. The remaining candidates are:
+
+1. **Split lemma** (option 1) — value-restricted vs non-value variants of `region_shrink_preserves_typing_l1_gen_m`. **Caveat surfaced in session 4**: the value-restricted variant's `T_Lam_L1_*` cases still recurse into non-value bodies via IH, so the non-value variant must exist and must handle `T_App_L1_Eff`. The split doesn't make `T_App_L1_Eff`'s case go away; it just moves it.
+2. **Env-frame Δ** (option 2) — restructure `T_App_L1_Eff`'s premise so the call-site env is `Δ ++ R_in` and the post-call env is `Δ ++ R_out`. **Caveat surfaced in session 4**: `remove_first` on `Δ ++ R_in` still removes from R_in if `rr ∈ R_in`. The frame Δ doesn't shield R_in from env shrinkage unless we further require `rr ∉ R_in`. The deeper fix is still needed.
+3. **Defer `T_App_L1_Eff` indefinitely** (option 3) — explicitly accept that TFunEff lambdas can be formed but never called via `has_type_l1`. **Status from session 3**: rejected because slice 4 (preservation_l1 lambda-rigidity closure) requires β-reduction typing for TFunEff lambdas. **Status from session 4**: re-examined and the rejection still holds, but with one nuance — preservation_l1's `S_App_Step2` case can be made vacuous for TFunEff function values *if* we can prove "an `EApp v1 e2` with `v1 : TFunEff T1 T2 R_in R_out` does not type via `has_type_l1`" as a meta-fact. This is true (no T_App rule produces a TFunEff conclusion at the function position), so option 3 is *partially* viable for slice 4: it closes lambda-rigidity for *uncallable* TFunEff lambdas. Slice 5's broader effect-typing work would still need T_App_L1_Eff or a successor.
+
+### Option 5 — level-split
+
+A new option surfaces from the session 4 analysis. The structural insight is that **T_App_L1_Eff is doing L2 work** (calling an effect-typed function is fundamentally a modality/effect operation, not a region operation), but it currently lives in L1 (`has_type_l1`). Move it to L2:
+
+* `has_type_l1` (L1) — knows `TFunEff` exists as a type former (slice 1, already landed) and can type lambdas at it (slice 2, already landed), but **does not provide an application rule for TFunEff**. EApp on a TFunEff function does not type at L1.
+* `has_type_l2` (L2) — wraps `has_type_l1` with a `T_App_L2_Eff` rule that handles application of TFunEff lambdas. The L2 judgment becomes the canonical home for effect-typed application.
+
+Properties:
+
+* `region_shrink_preserves_typing_l1_gen_m` only needs to handle the L1 judgment, where T_App_L1_Eff doesn't exist. Slice 3's blocker disappears at the L1 level.
+* `preservation_l1` lambda-rigidity closure (slice 4): TFunEff lambdas are still uncallable at L1, but L1 was never the right venue for their β-reduction. Lambda-rigidity at the L1 level closes for *legacy* lambdas via existing means; TFunEff lambdas are inert at L1, and inert values preserve trivially.
+* `preservation_l2`: a new theorem (slice 5 work) handles β-reduction for TFunEff lambdas under the L2 judgment. The L2 vocabulary can introduce effect-aware env-shrinkage lemmas designed for TFunEff from the start, without retrofitting an L1 lemma.
+
+Trade-off: option 5 splits T_Lam_L1_*_Eff (L1) from T_App_L2_Eff (L2). The introduction and elimination of TFunEff live at different layers. This is unusual for type formers but defensible because the introduction is "syntactically lambda-shaped" (an L1 syntactic form with extra type-level annotations) while elimination is "effect-semantic" (consuming the effect annotations meaningfully). The current `TypingL2.v` is described as a "thin wrapper through `TypingL1.has_type_l1`"; option 5 thickens it with at least the T_App_L2_Eff rule.
+
+### Recommendation for owner decision
+
+Session 4 cannot pick among options 1, 2, 3, and 5 without owner input — the choice is a layer-design decision, not a proof-tactics decision. Each option has a different downstream cost profile:
+
+| Option | Slice 3 cost | Slice 4 closure | Slice 5 unblock |
+|---|---|---|---|
+| 1 (split lemma) | High (rewrite `_gen_m`; non-value variant still blocked) | Partial | Unclear |
+| 2 (env-frame Δ) | Medium-high (`T_App_L1_Eff` redesign + cascade) | Should close | Unclear; might cascade-break Phase B Slice 1 |
+| 3 (defer) | Low (no code change) | Closes for legacy lambdas only | Blocked until 5 lands |
+| 5 (level-split) | Medium (new T_App_L2_Eff in `TypingL2.v`; thicken L2 wrapper) | Closes at L1 (TFunEff inert at L1) | Natural L2 venue for full effect typing |
+
+Per the CLAUDE.md owner directive "DO escalate before patching": this addendum **escalates the slice 3 redesign decision to the owner**. No code lands until the option is selected.
+
+### What does NOT change
+
+* PR #200 (TFunEff syntax) stays.
+* PR #201 (strict predicate, blocker 5 closure) stays.
+* PR #203 (this design memo) stays.
+* PR #204 (T_Lam_L1_*_Eff rules + R ⊆ R_in side condition cascade) stays.
+* PR #205 (slice 3 first attempt findings) stays.
+* Counterexample.v (legacy preservation is false) is untouched in all four options.
+
 **What slice 3 was supposed to unlock:** β-reduction for `T_Lam_L1_*_Eff`-typed lambdas (preservation_l1 case S_App_Fun) would use `T_App_L1_Eff`'s typing. Without `T_App_L1_Eff`, TFunEff lambdas can be *formed* but never *called* via has_type_l1 — slice 2's contribution is preserved but standalone (no programs exercise it yet).
 
 The strict-predicate reformulation (PR #201) is independent of these

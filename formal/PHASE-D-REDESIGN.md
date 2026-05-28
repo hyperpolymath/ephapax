@@ -371,3 +371,111 @@ the join sums.
 
 `perm_l1` is therefore unblocked at slice 5 (post-T_App_L1_Eff
 landing), not at slice 2.
+
+## Slice 3 sub-sub-addendum — option 5a picked, slice plan revised (2026-05-28, session 5)
+
+The owner picked **option 5a** (level-split, intro stays at L1, elim moves to L2) on 2026-05-28 after the session 4 analysis (slice 3 sub-addendum above) and a session 5 design-doc cross-check.
+
+### Why 5a is the right call — design-doc alignment
+
+`PRESERVATION-DESIGN.md` §5.1 lines 468-474 already endorse the L1-intro / L2-elim split explicitly:
+
+> **Why this isn't L1's job.** Effect-typed function types are a typing-layer property, not a region-layer property. Adding them to L1's unparameterised judgment would conflate the two. **L2 is the natural home**: the modality parameter is *already* a typing-layer decoration; the effect annotation rides alongside it. **After L2's effect-typed TFun lands, L1's gap closes by importation, not by re-deriving L1.**
+
+The doc consistently names the introduction rule `T_Lam_L1_Linear` / `T_Lam_L1_Affine` with the `_L1_` infix, confirming that intro lives in L1. Option 5a is therefore not an architectural departure — it returns the slice plan to the design-doc-prescribed line, which session 3's first slice-3 attempt (T_App_L1_Eff in `has_type_l1`) had deviated from.
+
+§10's implementation order ("each step's correctness is independent of the next") imposes no sequencing constraint that blocks 5a.
+
+### 5a vs 5b
+
+Two sub-variants of option 5 exist:
+
+| Sub-option | What | Disposition |
+|---|---|---|
+| **5a (picked)** | Intro stays at L1 via PR #204; elim adds `T_App_L2_Eff` to `has_type_l2`. | **Picked.** Smallest delta from current main. Design-doc-aligned. |
+| 5b | Retract PR #204's L1 intro landing; move both intro and elim into L2. | Discarded — retracts an already-merged PR for marginal architectural neatness; trades real churn for theoretical symmetry. |
+
+### What changes vs the original slice plan
+
+| Slice | Original plan | Option 5a revised plan |
+|---|---|---|
+| 1 | TFunEff syntax | Unchanged. ✅ MERGED PR #200 |
+| 2 | `T_Lam_L1_*_Eff` with R ⊆ R_in side condition | Unchanged — *but reframed as "inert introduction at L1"*. ✅ MERGED PR #204 |
+| 3 | `T_App_L1_Eff` in `has_type_l1` | **MOVED**: `T_App_L2_Eff` lands in `has_type_l2` (TypingL2.v) as a sibling of `L2_lift_l1`. |
+| 4 | `preservation_l1` lambda-rigidity closure | **SPLIT** into 4a (effect-typed path) + 4b (legacy path) — see below. |
+| 5 | Broader effect-typing + Phase B/C unblocks | Naturally hosted in L2 with effect-aware lemmas; `preservation_l2` is the new theorem target. |
+
+### Slice 4 split — what option 5a does and does not close at L1
+
+The session 4 addendum noted that under option 5a, "TFunEff lambdas are inert at L1, and inert values preserve trivially." A session 5 subagent verification confirmed this holds for *one of two* sub-cases inside `preservation_l1`'s `S_App_Step2`:
+
+- **Slice 4a — TFunEff lambdas (effect-typed path).** Under option 5a there is no `T_App_L1_Eff` rule, and the legacy `T_App_L1` at `TypingL1.v:231-234` requires `e1 : TFun T1 T2`, NOT `TFunEff`. No coercion bridge exists (`linear_to_affine` is structural; T_Var/T_Loc cannot hide TFunEff). Therefore any `EApp v1 e2` derivation at L1 with `v1` typed via `T_Lam_L1_*_Eff` is vacuous: no L1 derivation reaches this case. The corresponding sub-case in `preservation_l1` closes by inversion vacuity. **No new proof work needed.**
+
+- **Slice 4b — legacy `TFun` lambdas (body-R-rigidity path).** The legacy `T_Lam_L1_Linear` / `T_Lam_L1_Affine` rules at `TypingL1.v:177-184` still produce `TFun T1 T2`, and `T_App_L1` at `TypingL1.v:231-234` still accepts them. The body-R-rigidity gap documented in `Semantics_L1.v:1708-1713` *remains* for these lambdas under option 5a — option 5a's level-split does **not** add structural information that closes legacy `TFun` lambda-body preservation across an R-shift. **This sub-case stays gated.**
+
+Implication: `preservation_l1` as currently stated (over the whole `has_type_l1` judgment) cannot Qed under option 5a alone. The natural closure venue is `preservation_l2` — a new theorem stated over `has_type_l2`, where effect-typed paths are fully covered and legacy `TFun` paths are honestly carried forward via L1 importation (with the legacy body-R-rigidity admit recorded as inherited debt rather than concealed).
+
+### The T_App_L2_Eff rule design
+
+The L2 elimination rule mirrors `T_App_L1` but with effect threading through R_in/R_out:
+
+```coq
+| T_App_L2_Eff : forall m R R1 G G' G'' e1 e2 T1 T2 R_in R_out,
+    has_type_l2 m R  G  e1 (TFunEff T1 T2 R_in R_out) R1   G' ->
+    has_type_l2 m R1 G' e2 T1                        R_in G'' ->
+    has_type_l2 m R  G  (EApp e1 e2) T2              R_out G''
+```
+
+Reading: e1 produces an effect-typed lambda (consuming R → R1, where R1 is the intermediate env after e1's evaluation). e2 evaluates the argument, threading R1 → R_in (the lambda's input expectation). The lambda body then runs, consuming R_in and producing R_out. The whole `EApp` expression's output env is R_out.
+
+The e1 sub-derivation at type `TFunEff T1 T2 R_in R_out` lifts from an L1 derivation via `L2_lift_l1` (since `T_Lam_L1_*_Eff` rules are still the source of TFunEff typings — option 5a keeps intro at L1).
+
+**Side condition discharge**: PR #204's `(forall r, In r R -> In r R_in)` constraint (R ⊆ R_in on the lambda's input env) was the load-bearing invariant for slice 2's substitution closure. At elimination time (T_App_L2_Eff), this constraint flows naturally — the lambda was formed at R ⊆ R_in, and the call site supplies R_in directly via e2's output env. No new side condition is needed at elimination.
+
+### Implementation surface (verified by session 5 subagent audit)
+
+`formal/TypingL2.v` currently has a single constructor `L2_lift_l1` at lines 85-91 — a modality-indexed lift-only inductive ready for thickening. Adding `T_App_L2_Eff` as a sibling constructor (insertion point: after line 91) is additive and has zero downstream consumers in `formal/*.v` (only the file itself references `has_type_l2`). Existing utilities (`weaken_modality`, `weaken_modality_le`, `lift_l1_to_*`, `project_l2_to_l1`) continue to work — they bridge via `L2_lift_l1` for L1-derived facts and the new constructor adds an independent path for T_App_L2_Eff derivations.
+
+### Slice plan (post-option-5a)
+
+| Slice | Scope | Status |
+|---|---|---|
+| 1 | TFunEff syntax | ✅ MERGED PR #200 |
+| 2 | `T_Lam_L1_*_Eff` rules with R ⊆ R_in side condition | ✅ MERGED PR #204 |
+| 3 (option 5a) | `T_App_L2_Eff` in TypingL2.v as a sibling constructor to `L2_lift_l1` | **Next** |
+| 4a | TFunEff path inert-at-L1 (closes by inversion vacuity) | Bundled with slice 5 (`preservation_l2`) |
+| 4b | Legacy `TFun` body-R-rigidity at preservation_l1 | **Stays gated**; honest admit carried forward into `preservation_l2` via L1 importation |
+| 5 | `preservation_l2` (new theorem); broader effect-typing; Phase B/C unblocks | After slice 3 |
+
+### What does NOT change
+
+* PR #200 (TFunEff syntax) — unchanged.
+* PR #201 (strict predicate, blocker 5 closure) — unchanged.
+* PR #203 (Phase D memo) — unchanged.
+* PR #204 (T_Lam_L1_*_Eff rules) — unchanged. Reframed as "inert introduction at L1."
+* PR #205 (slice 3 first attempt findings) — unchanged (archaeology).
+* PR #207 (slice 3 sub-addendum, option 4 non-viability) — unchanged.
+* Counterexample.v — untouched.
+
+### Disposition of session 4's candidate matrix
+
+| Option | Disposition |
+|---|---|
+| 1 (split lemma) | Discarded — non-value variant still blocked per session 4 caveat. |
+| 2 (env-frame Δ) | Discarded — `remove_first` still cuts R_in per session 4 caveat. |
+| 3 (defer) | Discarded — punts the design question; slice 5 ends up needing option 5 anyway. |
+| 4 (meta-lemma) | Discarded — proved non-viable in session 4 sub-addendum (above). |
+| **5a (level-split, intro at L1, elim at L2)** | **Picked.** Smallest delta from current main. Design-doc-aligned. |
+| 5b (both intro and elim at L2) | Discarded — retracts PR #204's already-merged L1 landing; higher churn for marginal architectural neatness. |
+
+### Owner directive compliance
+
+Per CLAUDE.md owner directive 2026-05-27:
+
+* ✅ Zero new `Admitted.` or `Axiom.` declarations planned for slice 3.
+* ✅ No patching of `Semantics.v` `preservation` (provably false).
+* ✅ No patching of legacy `Typing.v` judgment.
+* ✅ `Counterexample.v` regression theorem untouched.
+* ✅ Honest accounting of the slice 4b gap (not closed by option 5a; carried forward into `preservation_l2`).
+* ✅ All commits GPG-signed.
+* ✅ Auto-merge ON for every PR.

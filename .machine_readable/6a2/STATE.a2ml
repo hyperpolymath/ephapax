@@ -7,7 +7,7 @@
 @state(version="2.0"):
 phase: "implementation"
 next_action: "Phase C — L1 structural list-vs-multiset bridge (1-2 PRs). Closes Semantics_L1.v structural admits at ~line 553/621 + 1 outer Admitted that depend on them. Bridge predicate choice (rotation vs permutation vs abstract multiset) is the first design decision. Branch: proof/phase-c-l1-multiset-bridge."
-last_action: "Phase A merged via PR #197 / Phase B Slice 1 DEFERRED 2026-05-28. Phase A (L4 dyadic scaffold) docs-only landed cleanly. Phase B Slice 1 (TEcho linearity wire) investigated and deferred until Phase D: adding `| TEcho _ => true` to is_linear_ty is structurally non-vacuous at L1 (EEcho values typed at TEcho via T_Echo_L1 refute linear_value_is_loc_l1's conclusion + break 9 call-sites in subst_typing_gen_l1_m). Owner chose option (c) defer; the wire will land naturally once Phase D reshapes the L1 substitution chain."
+last_action: "Phase A merged via PR #197 (d87b459) / Phase B Slice 1 DEFERRED 2026-05-28. Phase A (L4 dyadic scaffold) docs-only landed cleanly: formal/L4-DYADIC.md design page + formal/L4.v ProgramMode labelling discipline. Phase B Slice 1 (TEcho linearity wire) investigated and deferred until Phase D: adding `| TEcho _ => true` to is_linear_ty is structurally non-vacuous at L1 (EEcho values typed at TEcho via T_Echo_L1 refute linear_value_is_loc_l1's conclusion + break 9 call-sites in subst_typing_gen_l1_m). Owner chose option (c) defer; the wire will land naturally once Phase D reshapes the L1 substitution chain."
 updated: 2026-05-28T08:50:00Z
 
 @directive(source="owner", date="2026-05-27", canonical="CLAUDE.md"):
@@ -46,14 +46,20 @@ updated: 2026-05-28T08:50:00Z
 #     and their at_pre helpers are Qed but support legacy-preservation
 #     closure attempts that are now ruled out. Retained for diagnostic
 #     value; no new lemmas in this class.
-#   - formal/Semantics_L1.v `preservation_l1`: in progress; 6 supporting
-#     lemmas regressed to Admitted post-L2-hybrid (PRs #176+#177).
-#     Bullet-structure rewrite needed for 3 new Affine-only constructors.
-#   - formal/TypingL1.v: now m-indexed (`has_type_l1 m R G e T R' G'`),
-#     `linear_to_affine` Qed zero axioms.
-#   - formal/Echo.v: K-free scaffold, no postulates, forward-looking
-#     (not yet wired into has_type_l1).
+#   - formal/Semantics_L1.v `preservation_l1`: stated `forall m`; body
+#     Admitted (lambda-rigidity gap, closes at Phase D / L2 effect-typed
+#     TFun per PRESERVATION-DESIGN.md §5.1). 5 inner `admit.` cases
+#     (3 distinct structural blockers + 2 mechanical mirrors) covered
+#     by 3 outer Admitted markers. Zero new debt introduced post-L2.
+#   - formal/Semantics_L1.v `preservation_l3`: Qed, both modes, slice 4
+#     of L3 wiring landed 2026-05-27 (PR #196).
+#   - formal/TypingL1.v: m-indexed (`has_type_l1 m R G e T R' G'`),
+#     `linear_to_affine` Qed zero axioms; T_Echo_L1 / T_Observe_L1 +
+#     parallel T_*_Echo rules landed for L3 wiring.
+#   - formal/Echo.v: K-free L3 calculus, no postulates, 12 Qed.
 #   - formal/Modality.v: thin-poset Linear ≤ Affine, all Qed.
+#   - formal/L4.v: ProgramMode labelling discipline, Definitions only,
+#     no theorems. Phase A landed 2026-05-28.
 #
 # Other proof-debt items (out of preservation scope):
 #   - src/abi/Ephapax/ABI/Invariants.idr E1-E6: E1 (preservation) OWED at
@@ -62,12 +68,15 @@ updated: 2026-05-28T08:50:00Z
 @end
 
 @artifacts:
-# Layered files on main (post-L2-hybrid):
-#   formal/Counterexample.v   — 3 Qed lemmas; preservation FALSE
-#   formal/Echo.v             — L3 scaffold, K-free
+# Layered files on main (post-slice-4 + Phase A):
+#   formal/Counterexample.v   — 5 Qed lemmas; preservation FALSE
+#   formal/Echo.v             — L3 calculus, K-free, 12 Qed
 #   formal/Modality.v         — L2 thin poset, all Qed
-#   formal/TypingL1.v         — m-indexed has_type_l1 (post-#176)
-#   formal/Semantics_L1.v     — in progress; 6 supporting Admitted
+#   formal/TypingL1.v         — m-indexed has_type_l1 + Echo/Observe rules
+#   formal/Semantics_L1.v     — 26 Qed, 3 outer Admitted (5 inner admit.)
+#   formal/TypingL2.v         — thin wrapper through TypingL1.has_type_l1
+#   formal/L4.v               — ProgramMode labelling discipline (Phase A)
+#   formal/L4-DYADIC.md       — L4 design doc
 # Doc lockdown:
 #   CLAUDE.md                       — owner directive §
 #   formal/PRESERVATION-DESIGN.md   — CANONICAL banner

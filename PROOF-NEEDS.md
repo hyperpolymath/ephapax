@@ -111,11 +111,24 @@ enters the typing rules" and (for the diagram) in §6 (to be added).
 | ~~Thread `G` (echo context) alongside `R` (region context) through compound rules~~ | ~~New context parameter on every L1 compound rule~~ | **OBSOLETE 2026-05-27**: under the owner-approved parallel-rules design (slices 3a–3c), echoes are values of type `TEcho T` that flow through the existing `ctx` G. No separate echo-context parameter is needed. |
 | ✅ State and prove `preservation_l3` | Per-layer preservation theorem against the L3 invariants for the new echo-emitting step rules + echo-typed paths | done 2026-05-27 (L3 wiring slice 4 — capstone). Two per-case Qed lemmas (`preservation_l3_region_active_echo` for `S_Region_Exit_Echo` × `T_Region_Active_L1_Echo`, and `preservation_l3_drop_echo` for `S_Drop_Echo` × `T_Drop_L1_Echo`) plus an umbrella `preservation_l3` (their conjunction, Qed). Zero new admits or axioms. Per-case alignment forced by `T_Echo_L1`'s witness-type premise; non-deterministic crossover cases are non-preserving by design (typing derivation pins the path). Conditionally Qed under the pre-existing `region_shrink_preserves_typing_l1_gen_m` L1 structural admit per PRESERVATION-DESIGN.md §5.1. |
 
-### Mid-term (L4 — not started)
+### Mid-term (L4 — scaffold landed 2026-05-28)
 
 L4 covers dyadic interaction semantics (mother–child distinction).
-Design lives in `formal/PRESERVATION-DESIGN.md §7`. No file, no mechanisation
-yet. To be approached only after L3 wiring lands.
+Per `formal/PRESERVATION-DESIGN.md §7`, L4 is "not a separate proof
+layer. It is a labelling discipline at the program / module level...
+No proofs change."
+
+Phase A scaffold landed 2026-05-28:
+
+| Item | File | Status |
+|---|---|---|
+| ✅ L4 design page | `formal/L4-DYADIC.md` | done — extracts + extends design doc §7 |
+| ✅ Labelling enum `ProgramMode` + `program_mode_to_modality` mapping to L2 | `formal/L4.v` | done — Definitions only, no theorems, no admit, no axiom |
+
+Future L4 work (post-Phase D, optional): surface-syntax wiring in
+the borrow checker so `#![ephapax_linear]` / `#![ephapax_affine]` /
+`#![module_boundary_mix]` parse and select the L2 modality. This is
+implementation, not proof debt.
 
 ### Value-prop directions (committed and speculative)
 
@@ -218,7 +231,7 @@ to the owner**:
 
 ## §4. Counts + file-by-file map
 
-### Per-file Qed / Admitted summary (as of 2026-05-27)
+### Per-file Qed / Admitted summary (as of 2026-05-28)
 
 | File | Qed | Admitted | Disposition |
 |---|---:|---:|---|
@@ -230,6 +243,7 @@ to the owner**:
 | `formal/Modality.v` | **1** | 0 | ✅ active — L2 core, zero axioms |
 | `formal/Echo.v` | **12** | 0 | ✅ active — L3 calculus, not yet wired into L1 |
 | `formal/TypingL2.v` | (wrapper) | (wrapper) | ✅ thin re-indexing through `TypingL1.has_type_l1` |
+| `formal/L4.v` | (Definitions only) | 0 | ✅ active — L4 labelling discipline, no theorems (Phase A landed 2026-05-28) |
 | `src/abi/Ephapax/…` (Idris2) | n/a | n/a | ✅ active — ABI, Region linearity, no `believe_me` / `sorry` / `assert_total` |
 
 ### Seam audit (slice 4, 2026-05-27): every admit/axiom classified

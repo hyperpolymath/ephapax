@@ -19,12 +19,14 @@
     Per design-doc §5 and the same "first slice" framing used for
     L3 (#166), this PR ships:
 
-    - The [has_type_l2] inductive shape — currently with a single
-      [L2_lift_l1] constructor that lifts any L1 derivation into the
-      L2 judgment at either mode. This is sound: per §5's
-      preservation table, "[Affine derivations are L1-safe by
-      weakening]" and Linear derivations are precisely the strict
-      L1 derivations.
+    - The [has_type_l2] inductive shape — with [L2_lift_l1] (lifts
+      any L1 derivation into the L2 judgment at either mode) and
+      [T_App_L2_Eff] (effect-typed application; the elimination form
+      of [TFunEff] lambdas, moved out of L1 per option 5a / Phase D
+      slice 3 / [PHASE-D-REDESIGN.md] slice 3 sub-sub-addendum). The
+      L2_lift_l1 case is sound: per §5's preservation table,
+      "[Affine derivations are L1-safe by weakening]" and Linear
+      derivations are precisely the strict L1 derivations.
 
     - [weaken_modality] — the headline §5 lemma, Qed. In this
       skeleton the proof is a single induction; future PRs will add
@@ -88,7 +90,29 @@ Inductive has_type_l2
   | L2_lift_l1 :
       forall m R G e T R' G',
         TypingL1.has_type_l1 m R G e T R' G' ->
-        has_type_l2 m R G e T R' G'.
+        has_type_l2 m R G e T R' G'
+  (** [T_App_L2_Eff] — effect-typed application (Phase D slice 3,
+      option 5a). The elimination form for [TFunEff] lambdas. Lives
+      at L2 because effect-typed application is an effect-semantic
+      operation (consuming [R_in / R_out] annotations meaningfully)
+      and the canonical home for it is the typing-layer judgment per
+      [PRESERVATION-DESIGN.md] §5.1.
+
+      Threading: [e1] produces an effect-typed lambda value at
+      ([R → R1]). [e2] evaluates the argument, threading
+      [R1 → R_in] (the lambda's declared input env). The body runs
+      [R_in → R_out] per the type, so the whole [EApp] consumes
+      [R → R_out].
+
+      Side condition: none at elimination. The intro side condition
+      [(forall r, In r R -> In r R_in)] (T_Lam_L1_*_Eff slice 2)
+      already ensures formation-time region availability; at the
+      call site [e2] supplies [R_in] explicitly via its output env. *)
+  | T_App_L2_Eff :
+      forall m R R1 G G' G'' e1 e2 T1 T2 R_in R_out,
+        has_type_l2 m R  G  e1 (TFunEff T1 T2 R_in R_out) R1   G' ->
+        has_type_l2 m R1 G' e2 T1                         R_in G'' ->
+        has_type_l2 m R  G  (EApp e1 e2) T2               R_out G''.
 
 (** Notation following the Agda upstream [_;_⊢_ℓ_:_-|_;_]. *)
 
@@ -114,16 +138,27 @@ Definition lift_l1_to_affine
   has_type_l2 Affine R G e T R' G' :=
   L2_lift_l1 Affine R G e T R' G' H.
 
-(** Projection: extract the underlying L1 derivation from an L2 one.
-    Witnesses that the L2 skeleton is a strict extension — no
-    information loss vs L1. *)
+(** Partial projection: extract the underlying L1 derivation from
+    an L2 one when (and only when) the L2 derivation is a lift.
+
+    Post-slice-3 (option 5a), [has_type_l2] also carries
+    [T_App_L2_Eff], which has no L1 counterpart — effect-typed
+    application is L2-only by design. The projection is therefore
+    [option]-valued: [Some H1] for [L2_lift_l1] cases, [None] for
+    the [T_App_L2_Eff] case.
+
+    Callers that previously assumed totality (e.g. the old
+    [weaken_modality] proof) must instead do structural induction
+    on the L2 derivation; see [weaken_modality] below for the
+    updated pattern. *)
 
 Definition project_l2_to_l1
   {m R G e T R' G'}
   (H : has_type_l2 m R G e T R' G') :
-  TypingL1.has_type_l1 m R G e T R' G' :=
+  option (TypingL1.has_type_l1 m R G e T R' G') :=
   match H with
-  | L2_lift_l1 _ _ _ _ _ _ _ H1 => H1
+  | L2_lift_l1 _ _ _ _ _ _ _ H1 => Some H1
+  | T_App_L2_Eff _ _ _ _ _ _ _ _ _ _ _ _ _ _ => None
   end.
 
 (** ===== Headline §5 lemma: Linear ⇒ Affine weakening =====
@@ -136,15 +171,29 @@ Definition project_l2_to_l1
     one constructor case; future mode-specific constructors will
     introduce mode-switch cases. *)
 
+(** Post-slice-3 (option 5a), the proof is by structural induction
+    on the L2 derivation. The [L2_lift_l1] case lifts via
+    [linear_to_affine]; the [T_App_L2_Eff] case weakens the two
+    sub-derivations recursively and reconstructs by [T_App_L2_Eff]
+    at [Affine]. *)
+
 Theorem weaken_modality :
   forall {R G e T R' G'},
     has_type_l2 Linear R G e T R' G' ->
     has_type_l2 Affine R G e T R' G'.
 Proof.
   intros R G e T R' G' H.
-  apply lift_l1_to_affine.
-  apply TypingL1.linear_to_affine.
-  exact (project_l2_to_l1 H).
+  remember Linear as m eqn:Hm.
+  induction H as
+    [ m' R0 G0 e0 T0 R0' G0' H1
+    | m' R0 R1 G0 G0' G0'' e1 e2 T1 T2 R_in R_out He1 IHe1 He2 IHe2 ];
+    subst m'.
+  - apply lift_l1_to_affine.
+    apply TypingL1.linear_to_affine.
+    exact H1.
+  - eapply T_App_L2_Eff.
+    + apply IHe1; reflexivity.
+    + apply IHe2; reflexivity.
 Qed.
 
 (** Idempotence at [Affine]: an Affine derivation re-weakened to

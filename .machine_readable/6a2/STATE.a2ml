@@ -6,9 +6,9 @@
 
 @state(version="2.0"):
 phase: "implementation"
-next_action: "Layered preservation work, NOT legacy patching. Per owner directive 2026-05-27 (see CLAUDE.md): do not attempt to close Theorem preservation in formal/Semantics.v (provably false via Counterexample.v); do not extend Semantics.v with closure-support lemmas (step_preserves_type_at_pre and similar are all in this anti-pattern class); do not close residual Semantics_L1.v axioms via ad-hoc proof tricks. Affirmative work: per-layer preservation derivation against the four-layer redesign in formal/PRESERVATION-DESIGN.md. L2 modality landed in-place (PRs #176 + #177); 6 L1 supporting lemmas regressed to Admitted post-L2-hybrid — bullet-rewrite needed for the 3 new Affine-only constructors of has_type_l1 in Semantics_L1.v."
-last_action: "Doc lockdown landed on main (PR TBD): CLAUDE.md adds owner-directive §, PRESERVATION-DESIGN.md + PRESERVATION-HANDOFF.md gain banners, ROADMAP.adoc §preservation-closure-plan obsoleted, this STATE.a2ml updated. The lockdown originated on the proof/l1-region-threading-design branch (PR #175 against that branch); replayed to main because the design branch is DIRTY+superseded by the L2 hybrid path (#176+#177). PR #153 to be closed as superseded."
-updated: 2026-05-27T11:30:00Z
+next_action: "Phase C — L1 structural list-vs-multiset bridge (1-2 PRs). Closes Semantics_L1.v structural admits at ~line 553/621 + 1 outer Admitted that depend on them. Bridge predicate choice (rotation vs permutation vs abstract multiset) is the first design decision. Branch: proof/phase-c-l1-multiset-bridge."
+last_action: "Phase A merged via PR #197 / Phase B Slice 1 DEFERRED 2026-05-28. Phase A (L4 dyadic scaffold) docs-only landed cleanly. Phase B Slice 1 (TEcho linearity wire) investigated and deferred until Phase D: adding `| TEcho _ => true` to is_linear_ty is structurally non-vacuous at L1 (EEcho values typed at TEcho via T_Echo_L1 refute linear_value_is_loc_l1's conclusion + break 9 call-sites in subst_typing_gen_l1_m). Owner chose option (c) defer; the wire will land naturally once Phase D reshapes the L1 substitution chain."
+updated: 2026-05-28T08:50:00Z
 
 @directive(source="owner", date="2026-05-27", canonical="CLAUDE.md"):
 # Captured durable directive — preservation work is the four-layer redesign,

@@ -479,6 +479,21 @@ typed lambdas are introduced". The Linear ⇒ Affine weakening
 (`linear_to_affine` Qed, PR #176) is independent of this dependency
 and already ships.
 
+**Phase D — current refinement (2026-05-28).** Slice 1 (TFunEff
+syntax) landed via PR #200. An implementation attempt for slice 2
+(`T_Lam_L1_*_Eff` typing rules) surfaced a substitution-lemma
+structural gap: the substituted value's region (`In rv R`, outer)
+does not connect to the lambda body's input env (`R_in`,
+independent), so `subst_typing_gen_l1_m` cannot close its new
+case without an additional invariant. The refinement adds a side
+condition to `T_Lam_L1_*_Eff` requiring
+`forall r, In r (free_regions T1) -> In r R_in`, which ties the
+bound variable's regions to the body's input environment and
+makes substitution well-defined. See
+[`PHASE-D-REDESIGN.md`](PHASE-D-REDESIGN.md) for the full memo
+including the revised slice plan, lemma-cascade audit, and
+owner-directive compliance check.
+
 ---
 
 ## 6. Layer 3 — Echo / residue, in design

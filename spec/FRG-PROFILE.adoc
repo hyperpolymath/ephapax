@@ -1,0 +1,268 @@
+// SPDX-License-Identifier: PMPL-1.0-or-later
+// Copyright (c) 2026 Jonathan D.A. Jewell (hyperpolymath) <j.d.a.jewell@open.ac.uk>
+
+= FRG-PROFILE — Ephapax
+:toc: left
+:toclevels: 2
+
+[cols="1,3"]
+|===
+| Field | Value
+
+| Language | Ephapax (dyadic: `ephapax-linear` + `ephapax-affine` sublanguages)
+| Repository | https://github.com/hyperpolymath/ephapax
+| Current FRG Grade | *D*  (preservation stated; admits explicitly tracked; layered redesign committed)
+| Assessed | 2026-05-28
+| Assessor | Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk>
+| FRG Spec Version | 1.0
+| ARG Profile | spec/ARG-PROFILE.adoc
+| TRG Profile | spec/TRG-PROFILE.adoc (TBD)
+| Formalisation Directory | `formal/`
+| Qualifying Prover(s) | Rocq (Coq)
+|===
+
+== About this profile
+
+Ephapax has reached FRG-D: preservation/progress theorems stated,
+operational semantics formalised, layered redesign committed
+(`formal/PRESERVATION-DESIGN.md`), open obligations enumerated in
+`PROOF-NEEDS.md` and tracked in `formal/PROOF-STATUS.a2ml`. The
+language *was* FRG-F for the period during which
+`formal/Counterexample.v` had `Qed`'d a refutation of the original
+preservation statement without a redesign commitment; the F-grade
+was *evacuated* on 2026-05-27 by the owner directive locking in the
+four-layer redesign as canonical (legacy `Theorem preservation` in
+`Semantics.v` is now archaeology per the lockdown banner).
+
+FRG = D. The full chain of axes:
+
+* FRG: D
+* ARG: E (see `spec/ARG-PROFILE.adoc`)
+* TRG: TBD (likely D — toolchain still pre-alpha)
+* CRG: TBD (formal/ component is its own grade)
+* RSR: Compliant at TRG-D level
+
+Cross-axis rule: ARG-A requires FRG ≥ B (ephapax does not currently
+target ARG-A).
+
+== Declared TypeLL level
+
+* *TypeLL level claimed:* L7 (Linear types — `ephapax-linear`
+  sublanguage's QTT q=1 discipline)
+* *Evidence:* `formal/TypingL1.v` (region-threaded typing judgment),
+  `formal/Modality.v` (`linear_to_affine` Qed, zero axioms;
+  PRs #176 + #177 merged 2026-05-27)
+* *Levels not yet claimed:*
+  - L8 (Session types) — no session-state machinery in calculus
+  - L9 (Effect/Modal/Proof-carrying) — partially present (modality
+    L2 landed), but full effect-typed TFun is open (`post-slice-4`
+    sequence D)
+  - L10 (QTT cross-cutting) — not started
+
+== Grade rationale (evidence for D)
+
+[cols="2,1,4", options="header"]
+|===
+| Criterion | Met? | Evidence
+
+| *M1 — Abstract syntax formalised*
+| YES
+| `formal/Syntax.v` — full AST including dyadic-modality constructors
+
+| *M2 — Typing judgment formalised*
+| YES
+| `formal/Typing.v` (legacy, archaeology); `formal/TypingL1.v`
+  (canonical, region-threaded); `formal/TypingL2.v` (modality
+  layer skeleton; merged via #168)
+
+| *M3 — Operational or denotational semantics formalised*
+| YES
+| `formal/Semantics.v` (legacy archaeology with provably-false
+  preservation); `formal/Semantics_L1.v` (canonical, currently
+  with 3 Admitted supporting lemmas regressed during L2-β bullet
+  rewrite — recoverable from commit 56f592f)
+
+| *M4 — Preservation theorem stated*
+| YES
+| `formal/Semantics_L1.v` `Theorem preservation_l1` (stated
+  `forall m`, both branches currently Admitted post-L2-β)
+
+| *M5 — Progress theorem stated*
+| YES
+| Standard formulation present in `formal/`
+
+| *P1 — Preservation closed (0 admits, 0 axioms, 0 sorries)*
+| NO
+| 4 Admitted + 1 region-liveness Axiom currently outstanding (per
+  PRs #92/#102/#106/#114/#116 narrative; legacy `Semantics.v`
+  preservation NOT to be closed — provably false). The canonical
+  closure path is per-layer derivation, not single-layer patch.
+
+| *P2 — Progress closed*
+| PARTIAL
+| Stated; closure tracked alongside preservation
+
+| *P3 — Counterexample regression suite (≥ 3 Qed lemmas)*
+| YES
+| `formal/Counterexample.v` — three lemmas all `Qed`'d, establishing
+  that the original preservation statement is FALSE. The canonical
+  example for FRG §6.5.
+
+| *P4 — Layered orthogonal decomposition*
+| YES
+| `formal/PRESERVATION-DESIGN.md` four-layer redesign (L1 regions /
+  L2 modality / L3 echo / L4 dyadic). L1 + L2 landed; L3 scaffold
+  in via #166/#167; L4 docs-only PR queued.
+
+| *V1 — Single qualifying prover*
+| YES
+| Rocq (Coq)
+
+| *V2 — Cross-prover replication ≥ 2*
+| NO
+| Single-prover only
+
+| *V3 — Cross-prover replication ≥ 3*
+| NO
+|
+
+| *V4 — Echidna integrated in CI as required gate*
+| NO
+| Echidna integration not yet wired
+
+| *TypeLL L1-L6*
+| YES (L1-L6)
+| Structural (L1-L2), schema (L3 via TypingL1.v region binders),
+  type compatibility (L4), nullability N/A (no NULL in ephapax),
+  injection-resistance via region capability discipline (L6)
+
+| *TypeLL L7 (Linear types)*
+| YES
+| `ephapax-linear` sublanguage via Modality.v `linear_to_affine`
+  Qed
+
+| *TypeLL L8-L10*
+| NO
+|
+
+| *B0 — Zero banned constructs in proof tree*
+| NO (D-permissive)
+| 4 tracked Admitted in Semantics_L1.v + 1 Axiom; each enumerated
+  in PROOF-NEEDS.md with discharge plan; FRG-D permits tracked
+  admits.
+
+| *B1 — CI banned-construct lint active*
+| PARTIAL
+| Coq build CI runs; admit-count check exists in workflow but
+  does not yet block merge for new admits.
+
+| *Operational equivalence O1*
+| NO
+| Implementation Rust crate exists; not yet differentially-tested
+  against formal judgment
+
+| *VeriSimDB attestation*
+| NO (D-permissive)
+| Required from grade C; not yet wired
+
+|===
+
+== Open proof obligations
+
+* *Tracked admits:* 4 in `formal/Semantics_L1.v` (regressed during
+  L2-β bullet-structure rewrite; orig bodies at commit `56f592f`)
+* *Tracked axioms:* 1 (`region_liveness_at_split_l1` — cross-layer
+  gap that closes at L2 per `PRESERVATION-DESIGN.md §5.1`; owner
+  directive 2026-05-27 forbids closing via proof tricks)
+* *PROOF-NEEDS.md:* `PROOF-NEEDS.md` (top-level)
+* *PROOF-STATUS.a2ml:* `formal/PROOF-STATUS.a2ml`
+
+== Language-specific tightening
+
+For Ephapax, the following FRG tightening applies:
+
+* *Grade C tightening:* Preservation closed *per layer*
+  (`preservation_l1`, `preservation_l2`, `preservation_l3`), with
+  cross-layer composition closed under explicit invariants — *not*
+  via patched single-layer admits in legacy `Semantics.v`. The
+  owner directive 2026-05-27 forbids the legacy-patching anti-pattern.
+* *Grade B tightening:* L4 dyadic-modality layer landed (currently
+  docs-only PR queued in `post-slice-4` plan A).
+* *Grade A tightening:* Cross-prover replication MUST include Lean
+  4 mechanisation of the four-layer architecture, not just the
+  central preservation theorem.
+
+== What is NOT yet met (honest gaps)
+
+* *P1 / P2 not closed*: 4 Admitted + 1 Axiom outstanding. Closing
+  these is gated on the L1/L2/L3 per-layer derivation work (see
+  `project_ephapax_post_slice4_plan.md` in author's session memory).
+* *No cross-prover replication.* Rocq only.
+* *Echidna not wired into CI.*
+* *No reference implementation alongside the Rust production
+  implementation.*
+* *No differential testing.*
+* *Implementation type checker not tested against formal judgment.*
+
+== Path to next grade (C — preservation closed)
+
+* Close 4 Admitted in Semantics_L1.v (recoverable from commit 56f592f
+  + bullet-structure rewrite for 3 new Affine-only constructors).
+* Close `region_liveness_at_split_l1` Axiom via L2 mechanism per
+  PRESERVATION-DESIGN.md §5.1 (NOT via proof tricks — owner directive).
+* Close `preservation_l1` both branches under `forall m`.
+* Close `preservation_l2` per modality layer.
+* Stand up PROOF-STATUS.a2ml grade-attestation block.
+* Wire CI banned-construct lint to BLOCK merge on new admits.
+
+*Realistic timeline estimate:* 2-4 months given sequential per-layer
+work (sequence A → B → C → D in `project_ephapax_post_slice4_plan`).
+
+== Path to grade beyond that (B — layered + cross-prover)
+
+* Land L3 echo + L4 dyadic layers as named composition (currently
+  scaffolded).
+* Counterexample regression suite formal CI step (currently the
+  Counterexample.v file exists; not yet a "regression" in the
+  CI sense).
+* Replicate central preservation in Lean 4.
+* External (non-collaborator) single-party review of the four-layer
+  formalisation.
+
+== Demotion risk
+
+* *Lowest:* Adding a 5th Admitted to formal/ — drops to E (or
+  arguably remains D if still tracked).
+* *Medium:* Removing the four-layer redesign commitment without
+  replacement — drops to F (the very state ephapax evacuated on
+  2026-05-27).
+* *Catastrophic:* Adding a new `Qed`'d counterexample to a
+  *currently-claimed* (post-redesign) theorem without redesign
+  amendment — drops to F.
+
+== Iteration history
+
+[cols="1,1,4", options="header"]
+|===
+| Date | Grade | Notes
+
+| 2026-03-28 | F | Original `Semantics.v` `Theorem preservation` stated, `Counterexample.v` `Qed`'d refutation present, NO redesign committed. FRG-F by §4.2 definition.
+| 2026-05-27 | D | Owner directive lockdown of four-layer redesign as canonical; legacy preservation marked archaeology; F evacuated.
+| 2026-05-28 | D | Initial FRG assessment. Tracked admits = 4 + 1 Axiom.
+|===
+
+== Review cycle
+
+* *Routine:* Reassess on every release cycle.
+* *Immediate:* Reassess within 7 days of any demotion trigger.
+* *VeriSimDB drift alert:* Reassess within 24 hours of any drift alert.
+* *New admit detection:* CI lint introducing a new banned-construct
+  / Admitted triggers immediate reassessment.
+
+== Footer
+
+Run `just frg-badge` to generate the shields.io badge for the README.
+
+This profile is itself a VCL-total proposition. Its content is
+`DECLARE`'d to VeriSimDB on each commit (once ingestion wired —
+currently pending).

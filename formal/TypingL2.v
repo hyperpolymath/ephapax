@@ -71,7 +71,7 @@
       [T_Lam_*_L2]. L2 Phase 2 + L3 Phase 3 jointly close the L1
       gap. *)
 
-From Ephapax Require Import Syntax Typing TypingL1 Modality.
+From Ephapax Require Import Syntax Typing TypingL1 Modality Semantics Semantics_L1.
 
 (** ===== The L2 judgment (skeleton) =====
 
@@ -244,3 +244,111 @@ Lemma weaken_modality_le_strict_is_weaken_modality :
   forall {R G e T R' G'} (H : has_type_l2 Linear R G e T R' G'),
     weaken_modality_le Linear_le_Affine H = weaken_modality H.
 Proof. reflexivity. Qed.
+
+(** ===== Preservation at L2 (Phase D slice 4 — partial landing) =====
+
+    The full statement we want:
+
+      [Theorem preservation_l2 :
+         forall m mu R e mu' R' e',
+           step (mu, R, e) (mu', R', e') ->
+           forall G T R_final G',
+             has_type_l2 m R G e T R_final G' ->
+             has_type_l2 m R' G e' T R_final G'.]
+
+    Structural induction on the L2 derivation has two cases:
+
+    - [L2_lift_l1] case: defer to [Semantics_L1.preservation_l1].
+      Honest carry-forward of slice 4b legacy debt — [preservation_l1]
+      is itself [Admitted] (lambda-rigidity gap for legacy [TFun]
+      lambdas, [Semantics_L1.v:1708-1713]). This case introduces no
+      new admit; it transparently surfaces the existing L1 admit
+      through [Print Assumptions].
+
+    - [T_App_L2_Eff] case: case-analysis on [step]:
+      * [S_App_Step1] (e1 reduces): close via IH on e1's L2
+        sub-derivation; reconstruct via [T_App_L2_Eff].
+      * [S_App_Step2] (e2 reduces): close via IH on e2's L2
+        sub-derivation; reconstruct via [T_App_L2_Eff].
+      * [S_App_Fun] (β-reduction): the load-bearing case. After
+        inverting [has_type_l2 m R G (ELam T1 ebody)
+        (TFunEff T1 T2 R_in R_out) R1 G'] through [L2_lift_l1] and
+        [T_Lam_L1_*_Eff], and after applying [value_R_G_preserving_l1]
+        to v2 to force [R_in = R] (and [G'' = G]), the residual
+        obligation is L1-substitution at index 0:
+
+          [has_type_l1 m R G (subst 0 v2 ebody) T2 R_out G]
+
+        from the body typing [has_type_l1 m R (T1, false)::G ebody
+        T2 R_out (T1, true)::G] and the argument typing
+        [has_type_l1 m R G v2 T1 R G].
+
+        This is exactly the signature of [subst_typing_gen_l1_m]
+        ([Semantics_L1.v:1358]) — EXCEPT that lemma carries an
+        [is_linear_ty T1 = true] precondition that does not hold in
+        general (the lambda parameter type [T1] can be [TUnit],
+        [TBool], [TI32], etc. for which [is_linear_ty] returns
+        [false]).
+
+        Per CLAUDE.md owner directive 2026-05-27 §"DO escalate
+        before patching", the proper response is to surface this
+        as a layer-design item, not to bolt on an ad-hoc fix.
+
+    ===== What this slice ships =====
+
+    [preservation_l2_via_l1] — the L2_lift_l1 case in standalone
+    form. Provable from [preservation_l1] without touching the
+    T_App_L2_Eff case. This is the largest fragment of
+    preservation_l2 that lands cleanly under the current
+    substitution-lemma generality.
+
+    ===== Next-slice infrastructure required =====
+
+    To close the full [preservation_l2] over [has_type_l2]:
+
+    1. **Generalize [subst_typing_gen_l1_m]** (or provide a sibling
+       lemma) to handle non-linear [T1] — substitution for
+       non-linear parameter types in the lambda-binding position.
+       Sits in [Semantics_L1.v] but is NEW infrastructure, not
+       legacy patching.
+
+    2. **Inversion principles for [has_type_l2] on [EApp]**: a
+       lemma stating that any [has_type_l2] derivation of
+       [EApp e1 e2] at type [T2] decomposes into the [T_App_L2_Eff]
+       premises (or [L2_lift_l1] wrapping [T_App_L1] for the
+       [TFun] path). Coq's [inversion] tactic should produce this
+       directly; if it gets stuck on dependent-typing constraints,
+       a manual inversion lemma helps.
+
+    3. **Inversion on [T_Lam_L1_*_Eff]** to extract the body
+       typing at [R_in]. Mechanical via [inversion] on the L1
+       derivation.
+
+    Once (1) lands, (2) and (3) compose into the full
+    [preservation_l2] proof body. *)
+
+Theorem preservation_l2_via_l1 :
+  forall m mu R e mu' R' e',
+    step (mu, R, e) (mu', R', e') ->
+    forall G T R_final G',
+      TypingL1.has_type_l1 m R G e T R_final G' ->
+      has_type_l2 m R' G e' T R_final G'.
+Proof.
+  intros m mu R e mu' R' e' Hstep G T R_final G' Ht.
+  apply L2_lift_l1.
+  eapply Semantics_L1.preservation_l1; eassumption.
+Qed.
+
+(** Corollary: the L2_lift_l1 case of [preservation_l2] over the
+    full [has_type_l2] judgment is direct from
+    [preservation_l2_via_l1] by destructuring the lift. *)
+
+Corollary preservation_l2_lift_case :
+  forall m mu R e mu' R' e',
+    step (mu, R, e) (mu', R', e') ->
+    forall G T R_final G' (H1 : TypingL1.has_type_l1 m R G e T R_final G'),
+      has_type_l2 m R' G e' T R_final G'.
+Proof.
+  intros m mu R e mu' R' e' Hstep G T R_final G' H1.
+  eapply preservation_l2_via_l1; eassumption.
+Qed.

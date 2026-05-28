@@ -6,9 +6,9 @@
 
 @state(version="2.0"):
 phase: "implementation"
-next_action: "Phase D slice 3 implementation under option 5a (level-split, intro at L1, elim at L2). Owner picked option 5a 2026-05-28 session 5 after design-doc §5.1 cross-check confirmed alignment with the canonical 'L2 is the natural home for effect-typed TFun' line (PRESERVATION-DESIGN.md lines 468-474). Next concrete code work: add `T_App_L2_Eff` constructor to `has_type_l2` in formal/TypingL2.v as a sibling of `L2_lift_l1` (insertion point after line 91), with premise structure threading R_in/R_out per PHASE-D-REDESIGN.md slice 3 sub-sub-addendum (session 5). Slice 4 split into 4a (TFunEff path closes by inversion vacuity — T_App_L1 requires TFun not TFunEff, no L1 derivation reaches the case) and 4b (legacy TFun body-R-rigidity stays gated; honest admit carried into preservation_l2 via L1 importation). Slice 5 lands new theorem `preservation_l2` over `has_type_l2`."
-last_action: "Phase D slice 3 session 5 (2026-05-28): owner picked option 5a after three subagents converged on viability — TypingL2.v audit confirms thin lift-only inductive ready for thickening with T_App_L2_Eff (sibling to L2_lift_l1, zero downstream breakage in formal/*.v); slice 4 verification confirms TFunEff lambdas have no L1 application derivation path (T_App_L1 at TypingL1.v:231-234 requires TFun not TFunEff, no coercion bridge via linear_to_affine/T_Var/T_Loc, so inert-at-L1 closure works by inversion vacuity for effect-typed path); design-doc §5.1 cross-check confirms option 5a aligns with the canonical L1-intro/L2-elim split documented at PRESERVATION-DESIGN.md lines 468-474. PHASE-D-REDESIGN.md updated with slice 3 sub-sub-addendum documenting option 5a decision, slice 4 split into 4a/4b, T_App_L2_Eff rule sketch with side-condition flow analysis, and slice plan revision. Slice 4b admit honestly recorded as inherited debt to be carried forward into preservation_l2 — option 5a is NOT a closure of preservation_l1, it is a redirection of effect-typed paths to preservation_l2."
-updated: 2026-05-28T19:30:00Z
+next_action: "Phase D slice 4+5 — state and prove `preservation_l2` over `has_type_l2` (now thickened with `T_App_L2_Eff` per PR #209). Two cases by structural induction on the L2 derivation: (1) `L2_lift_l1` case carries forward `preservation_l1`'s legacy `TFun` body-R-rigidity admit (slice 4b inherited debt — honest); (2) `T_App_L2_Eff` case (slice 4a, the new constructor) handles `EApp` step-cases — `S_App_Step1`/`S_App_Step2` reduce via IHs; β-reduction inverts e1 to obtain a `T_Lam_L1_*_Eff` lambda whose body lives at L1 via the side-condition guarantee `forall r, In r R -> In r R_in`. Anti-patterns to refuse (per CLAUDE.md owner directive): no `Admitted` to close `T_App_L2_Eff` cases; no touching `Semantics.v`/`Typing.v`/`Counterexample.v`; no re-attempt of option 4. Coqc 8.18.0 is the only authority."
+last_action: "Phase D slice 3 session 6 (2026-05-28): T_App_L2_Eff constructor implemented in formal/TypingL2.v (PR #209 MERGED at 2026-05-28T13:15:35Z, GPG-signed commit 11e8063, single-file diff +64/-15). Rule shape per session-5 sub-sub-addendum: `forall m R R1 G G' G'' e1 e2 T1 T2 R_in R_out, has_type_l2 m R G e1 (TFunEff T1 T2 R_in R_out) R1 G' -> has_type_l2 m R1 G' e2 T1 R_in G'' -> has_type_l2 m R G (EApp e1 e2) T2 R_out G''`. Two refactors forced by the new constructor: (a) `project_l2_to_l1` switched to option-return — T_App_L2_Eff cases have no L1 counterpart by design; (b) `weaken_modality` proof switched from project-and-lift-back to structural induction with `remember Linear as m` + `subst m'` per case. Coqc 8.18.0 full formal/ rebuild clean (10 .v files). `Print Assumptions weaken_modality` + `weaken_modality_le` + `weaken_modality_le_strict_is_weaken_modality` all → 'Closed under the global context'. Zero new admits/axioms. No legacy patching."
+updated: 2026-05-28T13:20:00Z
 
 @directive(source="owner", date="2026-05-27", canonical="CLAUDE.md"):
 # Captured durable directive — preservation work is the four-layer redesign,
@@ -55,7 +55,16 @@ updated: 2026-05-28T19:30:00Z
 #     of L3 wiring landed 2026-05-27 (PR #196).
 #   - formal/TypingL1.v: m-indexed (`has_type_l1 m R G e T R' G'`),
 #     `linear_to_affine` Qed zero axioms; T_Echo_L1 / T_Observe_L1 +
-#     parallel T_*_Echo rules landed for L3 wiring.
+#     parallel T_*_Echo rules landed for L3 wiring;
+#     T_Lam_L1_*_Eff (slice 2) produce TFunEff lambdas; T_App_L1
+#     requires TFun (not TFunEff), so TFunEff lambdas are inert at
+#     L1 — their elimination form lives at L2 via T_App_L2_Eff
+#     (PR #209, option 5a).
+#   - formal/TypingL2.v: post-#209 has TWO constructors —
+#     L2_lift_l1 (any L1 derivation) and T_App_L2_Eff (effect-typed
+#     application, Phase D slice 3). project_l2_to_l1 now
+#     option-returning; weaken_modality proof by structural
+#     induction. All Qed, zero axioms.
 #   - formal/Echo.v: K-free L3 calculus, no postulates, 12 Qed.
 #   - formal/Modality.v: thin-poset Linear ≤ Affine, all Qed.
 #   - formal/L4.v: ProgramMode labelling discipline, Definitions only,
@@ -74,7 +83,7 @@ updated: 2026-05-28T19:30:00Z
 #   formal/Modality.v         — L2 thin poset, all Qed
 #   formal/TypingL1.v         — m-indexed has_type_l1 + Echo/Observe rules
 #   formal/Semantics_L1.v     — 26 Qed, 3 outer Admitted (5 inner admit.)
-#   formal/TypingL2.v         — thin wrapper through TypingL1.has_type_l1
+#   formal/TypingL2.v         — L2_lift_l1 + T_App_L2_Eff (Phase D slice 3)
 #   formal/L4.v               — ProgramMode labelling discipline (Phase A)
 #   formal/L4-DYADIC.md       — L4 design doc
 # Doc lockdown:

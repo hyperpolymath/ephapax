@@ -1197,13 +1197,13 @@ Proof. intros. apply T_Loc_L1. assumption. Qed.
     [has_type_l1] judgment carrying the modality parameter [m]. It
     does not extend or patch [Semantics.v]. *)
 Lemma ground_nonlinear_retype_l1_m :
-  forall (m : Modality) (R R' : region_env) (G : ctx) (v : expr) (T : ty),
+  forall (m m' : Modality) (R R' : region_env) (G G' : ctx) (v : expr) (T : ty),
     is_value v ->
     is_ground_nonlinear_ty T = true ->
     has_type_l1 m R G v T R G ->
-    has_type_l1 m R' G v T R' G.
+    has_type_l1 m' R' G' v T R' G'.
 Proof.
-  intros m R R' G v T Hval Hgrd Ht.
+  intros m m' R R' G G' v T Hval Hgrd Ht.
   destruct Hval as
     [ | b | n
     | T0 e0 | v1 v2 Hv1 Hv2
@@ -1215,6 +1215,37 @@ Proof.
   - (* v = EUnit, T = TBase TUnit *) apply T_Unit_L1.
   - (* v = EBool b, T = TBase TBool *) apply T_Bool_L1.
   - (* v = EI32 n, T = TBase TI32 *) apply T_I32_L1.
+Qed.
+
+(** Ground non-linear values are closed terms — they contain no
+    de Bruijn variables, so de Bruijn [shift] is the identity on them.
+
+    Used by [subst_typing_gen_l1_m_ground_nonlinear] under term-binder
+    cases (T_Let_L1, T_LetLin_L1, the four T_Lam_L1 lambda rules, and
+    the two T_Case_L1 case rules), where the operational substitution
+    introduces a [shift 0 1 vv] around the substituted value when
+    descending through a binder. For ground non-linear [vv]
+    (EUnit / EBool b / EI32 n) the shift is definitionally the
+    identity; this lemma packages that observation so the rewrite can
+    fire after canonical-form extraction.
+
+    Refs [formal/SUBST-LEMMA-GENERALIZATION-DESIGN.md] Phase 2. *)
+Lemma ground_nonlinear_value_shift_id_l1 :
+  forall m R G v T c d,
+    is_value v ->
+    is_ground_nonlinear_ty T = true ->
+    has_type_l1 m R G v T R G ->
+    shift c d v = v.
+Proof.
+  intros m R G v T c d Hval Hgrd Ht.
+  destruct Hval as
+    [ | b | n
+    | T0 e0 | v1 v2 Hv1 Hv2
+    | T0 v0 Hv0 | T0 v0 Hv0
+    | l r
+    | v0 Hv0
+    | T0 v0 Hv0 ];
+    inversion Ht; subst; try discriminate Hgrd; reflexivity.
 Qed.
 
 (** Narrower axiom (region-liveness at compound-rule split points).
@@ -1687,6 +1718,292 @@ Proof.
   (* T_Echo_L1 — substitution under an echo value: the witness is a
      value, so [subst_preserves_value] preserves [is_value]. The
      witness's typing is preserved by the IH. *)
+  - eapply T_Echo_L1.
+    + apply subst_preserves_value. assumption.
+    + eapply IHHtype; eassumption.
+
+  (* T_Observe_L1 *)
+  - eapply T_Observe_L1. eapply IHHtype; eassumption.
+Qed.
+
+(** Parallel substitution lemma for ground non-linear [T1].
+
+    Phase D slice 4 Phase 2 per [formal/SUBST-LEMMA-GENERALIZATION-DESIGN.md].
+    Mirrors [subst_typing_gen_l1_m] structurally; the case-internal
+    reasoning differs in three places:
+
+    - [T_Var_Lin_L1] with [i = k0]: the rule's [is_linear_ty T = true]
+      premise contradicts [Hgrd : is_ground_nonlinear_ty Tsub = true]
+      (since [is_ground_nonlinear_ty Tsub = true ->
+      is_linear_ty Tsub = false] by inspection). Discharged via
+      [exfalso].
+    - [T_Var_Unr_L1] with [i = k0]: CONSTRUCTIVE here (the symmetric
+      case in the linear lemma is the exfalso branch). The substituted
+      value [vv] typed at [Linear] is lifted to the active modality [m]
+      via [ground_nonlinear_retype_l1_m] (Phase 1).
+    - Compound rules: [ground_nonlinear_retype_l1_m] replaces the
+      [linear_value_is_loc_l1] + [loc_retype_at_R_l1_m] +
+      [region_liveness_at_split_l1_gen] pipeline. The retype takes any
+      [R'], so no liveness side-condition is required.
+
+    Ships as a SIBLING lemma rather than folding case-split into the
+    existing [subst_typing_gen_l1_m] to preserve the ~30 [Qed]
+    downstreams. *)
+Lemma subst_typing_gen_l1_m_ground_nonlinear :
+  forall m R Gin e T R' Gout,
+    has_type_l1 m R Gin e T R' Gout ->
+    forall k T1 v u_in,
+      nth_error Gin k = Some (T1, u_in) ->
+      is_value v ->
+      is_ground_nonlinear_ty T1 = true ->
+      R; remove_at k Gin |=L1 v : T1 -| R; remove_at k Gin ->
+      forall u_out,
+        nth_error Gout k = Some (T1, u_out) ->
+        has_type_l1 m R (remove_at k Gin) (subst k v e) T R' (remove_at k Gout).
+Proof.
+  intros m R Gin e T R' Gout Htype.
+  induction Htype; intros k0 Tsub vv u_in Hk_in Hval Hgrd Hv_type u_out Hk_out; simpl.
+
+  (* T_Unit_L1, T_Bool_L1, T_I32_L1 *)
+  1-3: (assert (u_out = u_in) by congruence; subst; constructor).
+
+  (* T_Var_Lin_L1 *)
+  - destruct (Nat.eq_dec i k0) as [->|Hne].
+    + (* i = k0: rule's [is_linear_ty T = true] contradicts
+         [is_ground_nonlinear_ty Tsub = true] *)
+      exfalso.
+      assert (T = Tsub) by (unfold ctx_lookup in H; congruence). subst T.
+      destruct Tsub as [b| | | | | | | | |]; try discriminate Hgrd.
+      destruct b; try discriminate Hgrd; discriminate H0.
+    + rewrite (proj2 (Nat.eqb_neq i k0) Hne).
+      destruct (Nat.ltb_spec k0 i) as [Hlt|Hge].
+      * assert (Hrw: remove_at k0 (ctx_mark_used G i) =
+                     ctx_mark_used (remove_at k0 G) (i - 1)).
+        { replace i with (S (i - 1)) at 1 by lia.
+          apply remove_at_ctx_mark_used_gt. lia. }
+        rewrite Hrw.
+        eapply T_Var_Lin_L1.
+        -- unfold ctx_lookup. rewrite nth_error_remove_at_ge by lia.
+           replace (S (i - 1)) with i by lia.
+           unfold ctx_lookup in H. exact H.
+        -- exact H0.
+      * assert (i < k0) by lia.
+        rewrite remove_at_ctx_mark_used_lt by lia.
+        eapply T_Var_Lin_L1.
+        -- unfold ctx_lookup. rewrite nth_error_remove_at_lt by lia.
+           unfold ctx_lookup in H. exact H.
+        -- exact H0.
+
+  (* T_Var_Unr_L1 *)
+  - destruct (Nat.eq_dec i k0) as [->|Hne].
+    + (* i = k0: CONSTRUCTIVE case for ground non-linear substitution.
+         Rule output context equals input — no marking. *)
+      rewrite Nat.eqb_refl.
+      assert (T = Tsub) by (unfold ctx_lookup in H; congruence). subst T.
+      assert (u_out = u_in) by congruence; subst u_out.
+      eapply ground_nonlinear_retype_l1_m; eauto.
+    + rewrite (proj2 (Nat.eqb_neq i k0) Hne).
+      destruct (Nat.ltb_spec k0 i) as [Hlt|Hge].
+      * eapply T_Var_Unr_L1.
+        -- unfold ctx_lookup. rewrite nth_error_remove_at_ge by lia.
+           replace (S (i - 1)) with i by lia.
+           unfold ctx_lookup in H. exact H.
+        -- exact H0.
+      * assert (i < k0) by lia. eapply T_Var_Unr_L1.
+        -- unfold ctx_lookup. rewrite nth_error_remove_at_lt by lia.
+           unfold ctx_lookup in H. exact H.
+        -- exact H0.
+
+  (* T_Loc_L1 *)
+  - assert (u_out = u_in) by congruence; subst. constructor. assumption.
+  (* T_StringNew_L1 *)
+  - assert (u_out = u_in) by congruence; subst. constructor. assumption.
+
+  (* T_StringConcat_L1 *)
+  - destruct (output_shape_at_l1 _ _ _ _ _ _ _ _ _ _ Htype1 Hk_in) as [u_mid Hu_mid].
+    eapply T_StringConcat_L1.
+    + eapply IHHtype1; eassumption.
+    + eapply IHHtype2; try eassumption; try reflexivity.
+      eapply ground_nonlinear_retype_l1_m; eauto.
+
+  (* T_StringLen_L1 *)
+  - eapply T_StringLen_L1. eapply IHHtype; eassumption.
+
+  (* T_Let_L1 *)
+  - destruct (output_shape_at_l1 _ _ _ _ _ _ _ _ _ _ Htype1 Hk_in) as [u_mid Hu_mid].
+    eapply T_Let_L1.
+    + eapply IHHtype1; eassumption.
+    + rewrite (ground_nonlinear_value_shift_id_l1 _ _ _ _ _ 0 1 Hval Hgrd Hv_type).
+      eapply (IHHtype2 (S k0) Tsub vv u_mid);
+        simpl; try eassumption; try reflexivity.
+      eapply ground_nonlinear_retype_l1_m; eassumption.
+
+  (* T_LetLin_L1 *)
+  - destruct (output_shape_at_l1 _ _ _ _ _ _ _ _ _ _ Htype1 Hk_in) as [u_mid Hu_mid].
+    eapply T_LetLin_L1; [exact H | |].
+    + eapply IHHtype1; eassumption.
+    + rewrite (ground_nonlinear_value_shift_id_l1 _ _ _ _ _ 0 1 Hval Hgrd Hv_type).
+      eapply (IHHtype2 (S k0) Tsub vv u_mid);
+        simpl; try eassumption; try reflexivity.
+      eapply ground_nonlinear_retype_l1_m; eassumption.
+
+  (* T_Lam_L1_Linear: body's R = outer R; ground value retypes trivially. *)
+  - assert (u_out = u_in) by congruence; subst.
+    eapply T_Lam_L1_Linear.
+    rewrite (ground_nonlinear_value_shift_id_l1 _ _ _ _ _ 0 1 Hval Hgrd Hv_type).
+    eapply (IHHtype (S k0) Tsub vv u_in);
+      simpl; try eassumption; try reflexivity.
+    eapply ground_nonlinear_retype_l1_m; eassumption.
+
+  (* T_Lam_L1_Affine *)
+  - assert (u_out = u_in) by congruence; subst.
+    eapply T_Lam_L1_Affine.
+    rewrite (ground_nonlinear_value_shift_id_l1 _ _ _ _ _ 0 1 Hval Hgrd Hv_type).
+    eapply (IHHtype (S k0) Tsub vv u_in);
+      simpl; try eassumption; try reflexivity.
+    eapply ground_nonlinear_retype_l1_m; eassumption.
+
+  (* T_Lam_L1_Linear_Eff — body's R = R_in (independent of outer R);
+     ground value retypes to ANY R, so no [R -> R_in] side-condition
+     is needed. *)
+  - assert (u_out = u_in) by congruence; subst.
+    eapply T_Lam_L1_Linear_Eff; [exact H |].
+    rewrite (ground_nonlinear_value_shift_id_l1 _ _ _ _ _ 0 1 Hval Hgrd Hv_type).
+    eapply (IHHtype (S k0) Tsub vv u_in);
+      simpl; try eassumption; try reflexivity.
+    eapply ground_nonlinear_retype_l1_m; eassumption.
+
+  (* T_Lam_L1_Affine_Eff *)
+  - assert (u_out = u_in) by congruence; subst.
+    eapply T_Lam_L1_Affine_Eff; [exact H |].
+    rewrite (ground_nonlinear_value_shift_id_l1 _ _ _ _ _ 0 1 Hval Hgrd Hv_type).
+    eapply (IHHtype (S k0) Tsub vv u_in);
+      simpl; try eassumption; try reflexivity.
+    eapply ground_nonlinear_retype_l1_m; eassumption.
+
+  (* T_App_L1 *)
+  - destruct (output_shape_at_l1 _ _ _ _ _ _ _ _ _ _ Htype1 Hk_in) as [u_mid Hu_mid].
+    eapply T_App_L1.
+    + eapply IHHtype1; eassumption.
+    + eapply IHHtype2; try eassumption; try reflexivity.
+      eapply ground_nonlinear_retype_l1_m; eauto.
+
+  (* T_Pair_L1 *)
+  - destruct (output_shape_at_l1 _ _ _ _ _ _ _ _ _ _ Htype1 Hk_in) as [u_mid Hu_mid].
+    eapply T_Pair_L1.
+    + eapply IHHtype1; eassumption.
+    + eapply IHHtype2; try eassumption; try reflexivity.
+      eapply ground_nonlinear_retype_l1_m; eauto.
+
+  (* T_Fst_L1 *)
+  - eapply T_Fst_L1; [eapply IHHtype; eassumption | assumption].
+
+  (* T_Snd_L1 *)
+  - eapply T_Snd_L1; [eapply IHHtype; eassumption | assumption].
+
+  (* T_Inl_L1 *)
+  - eapply T_Inl_L1. eapply IHHtype; eassumption.
+
+  (* T_Inr_L1 *)
+  - eapply T_Inr_L1. eapply IHHtype; eassumption.
+
+  (* T_Case_L1_Linear *)
+  - destruct (output_shape_at_l1 _ _ _ _ _ _ _ _ _ _ Htype1 Hk_in) as [u_mid Hu_mid].
+    eapply T_Case_L1_Linear.
+    + eapply IHHtype1; eassumption.
+    + rewrite (ground_nonlinear_value_shift_id_l1 _ _ _ _ _ 0 1 Hval Hgrd Hv_type).
+      eapply (IHHtype2 (S k0) Tsub vv u_mid);
+        simpl; try eassumption; try reflexivity.
+      eapply ground_nonlinear_retype_l1_m; eassumption.
+    + rewrite (ground_nonlinear_value_shift_id_l1 _ _ _ _ _ 0 1 Hval Hgrd Hv_type).
+      eapply (IHHtype3 (S k0) Tsub vv u_mid);
+        simpl; try eassumption; try reflexivity.
+      eapply ground_nonlinear_retype_l1_m; eassumption.
+
+  (* T_Case_L1_Affine *)
+  - destruct (output_shape_at_l1 _ _ _ _ _ _ _ _ _ _ Htype1 Hk_in) as [u_mid Hu_mid].
+    eapply T_Case_L1_Affine.
+    + eapply IHHtype1; eassumption.
+    + rewrite (ground_nonlinear_value_shift_id_l1 _ _ _ _ _ 0 1 Hval Hgrd Hv_type).
+      eapply (IHHtype2 (S k0) Tsub vv u_mid);
+        simpl; try eassumption; try reflexivity.
+      eapply ground_nonlinear_retype_l1_m; eassumption.
+    + rewrite (ground_nonlinear_value_shift_id_l1 _ _ _ _ _ 0 1 Hval Hgrd Hv_type).
+      eapply (IHHtype3 (S k0) Tsub vv u_mid);
+        simpl; try eassumption; try reflexivity.
+      eapply ground_nonlinear_retype_l1_m; eassumption.
+
+  (* T_If_L1_Linear *)
+  - destruct (output_shape_at_l1 _ _ _ _ _ _ _ _ _ _ Htype1 Hk_in) as [u_mid Hu_mid].
+    eapply T_If_L1_Linear.
+    + eapply IHHtype1; eassumption.
+    + eapply IHHtype2; try eassumption; try reflexivity.
+      eapply ground_nonlinear_retype_l1_m; eauto.
+    + eapply IHHtype3; try eassumption; try reflexivity.
+      eapply ground_nonlinear_retype_l1_m; eauto.
+
+  (* T_If_L1_Affine *)
+  - destruct (output_shape_at_l1 _ _ _ _ _ _ _ _ _ _ Htype1 Hk_in) as [u_mid Hu_mid].
+    eapply T_If_L1_Affine.
+    + eapply IHHtype1; eassumption.
+    + eapply IHHtype2; try eassumption; try reflexivity.
+      eapply ground_nonlinear_retype_l1_m; eauto.
+    + eapply IHHtype3; try eassumption; try reflexivity.
+      eapply ground_nonlinear_retype_l1_m; eauto.
+
+  (* T_Region_L1: body's R = [r :: R]; ground retypes trivially. *)
+  - eapply T_Region_L1; [exact H | exact H0 | exact H1 |].
+    eapply IHHtype; try eassumption; try reflexivity.
+    eapply ground_nonlinear_retype_l1_m; eauto.
+
+  (* T_Region_Active_L1 *)
+  - eapply T_Region_Active_L1; [exact H | exact H0 | exact H1 |].
+    eapply IHHtype; try eassumption; try reflexivity.
+
+  (* T_Region_L1_Echo *)
+  - eapply T_Region_L1_Echo; [exact H | exact H0 | exact H1 |].
+    eapply IHHtype; try eassumption; try reflexivity.
+    eapply ground_nonlinear_retype_l1_m; eauto.
+
+  (* T_Region_Active_L1_Echo *)
+  - eapply T_Region_Active_L1_Echo; [exact H | exact H0 | exact H1 |].
+    eapply IHHtype; try eassumption; try reflexivity.
+
+  (* T_Borrow_L1: EBorrow (EVar i) *)
+  - destruct (Nat.eq_dec i k0) as [->|Hne].
+    + simpl. rewrite Nat.eqb_refl.
+      assert (T = Tsub) by (unfold ctx_lookup in H; congruence); subst T.
+      assert (u_out = u_in) by congruence; subst.
+      eapply T_Borrow_Val_L1.
+      * (* vv is a ground value, hence a value *) assumption.
+      * eapply ground_nonlinear_retype_l1_m; eauto.
+    + simpl. rewrite (proj2 (Nat.eqb_neq i k0) Hne).
+      assert (u_out = u_in) by congruence; subst.
+      destruct (Nat.ltb_spec k0 i) as [Hlt|Hge].
+      * eapply T_Borrow_L1. unfold ctx_lookup.
+        rewrite nth_error_remove_at_ge by lia.
+        replace (S (i - 1)) with i by lia.
+        unfold ctx_lookup in H. exact H.
+      * assert (i < k0) by lia. eapply T_Borrow_L1. unfold ctx_lookup.
+        rewrite nth_error_remove_at_lt by lia.
+        unfold ctx_lookup in H. exact H.
+
+  (* T_Borrow_Val_L1 *)
+  - assert (u_out = u_in) by congruence; subst.
+    eapply T_Borrow_Val_L1.
+    + apply subst_preserves_value. assumption.
+    + eapply IHHtype; eassumption.
+
+  (* T_Drop_L1 *)
+  - eapply T_Drop_L1; [exact H |]. eapply IHHtype; eassumption.
+
+  (* T_Drop_L1_Echo *)
+  - eapply T_Drop_L1_Echo; [exact H |]. eapply IHHtype; eassumption.
+
+  (* T_Copy_L1 *)
+  - eapply T_Copy_L1; [exact H |]. eapply IHHtype; eassumption.
+
+  (* T_Echo_L1 *)
   - eapply T_Echo_L1.
     + apply subst_preserves_value. assumption.
     + eapply IHHtype; eassumption.

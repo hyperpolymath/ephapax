@@ -142,6 +142,34 @@ Estimated ~250-300 lines, paralleling the existing proof.
 
 Add a retype lemma for TFunEff lambdas (under R' ⊆ R_in side condition). Extend the substitution lemma to cover `T1 = TFunEff …` lambdas as substituends. This is the case actually needed for higher-order β-reductions where the lambda parameter is itself a function type.
 
+#### Phase 3b addendum (2026-05-30) — option (a) precondition is insufficient
+
+The originally-proposed option (a) precondition
+
+```coq
+(forall r, In r (regions_introduced_by e) -> In r R_in_v)
+```
+
+is **insufficient** for the planned `subst_typing_gen_l1_m_tfuneff` lemma. Filed as ephapax issue #235.
+
+**Why**: the substitution lemma recurses into inner lambda bodies (mirroring Phase 2 lines 1929-1942). At inner `T_Lam_L1_*_Eff` cases, the body sub-derivation is typed at the lambda's declared `R_in_inner`, which is **type-level** (lives in `TFunEff T1 T2 R_in_inner R_out_inner`), not syntactic. `regions_introduced_by(e)` only collects `ERegion` subterms' first-argument names; `R_in_inner` is invisible to it.
+
+`tfuneff_lambda_retype_l1_m` (the retype lemma shipped in PR #224) requires `R' ⊆ R_in_v`. To retype the substituee at `R_in_inner` we'd need `R_in_inner ⊆ R_in_v`. Nothing in option (a) provides this.
+
+Phase 2's `subst_typing_gen_l1_m_ground_nonlinear` (the sibling lemma at lines 1812-2073) dodges this via `ground_nonlinear_retype_l1_m`, which is fully `(m, R, G)`-polymorphic. Phase 3b has no analogous escape hatch.
+
+**Three resolution options for owner**:
+
+1. **Strengthen the precondition to a type-level over-approximation**. Define a helper that walks `ELam T body` extracting `R_in` from `T` when `T = TFunEff _ _ R_in _`. **Blocker**: `ELam` syntax carries the *parameter* type, not the function type — `R_in` is determined by typing, not syntax. Without an annotation extension to `ELam`, this helper can't be defined as a syntactic Fixpoint.
+
+2. **Semantic precondition over the derivation**. Quantify over sub-derivations of `Htype`: `forall R'_in appearing in Htype, R'_in ⊆ R_in_v`. Clean meaning, awkward in Coq (inductive predicate over derivations or fixpoint indexed by depth).
+
+3. **Restrict scope — Phase 3b leaf-only**. Add an inductive predicate `lambda_free e` (or `tfuneff_lambda_free e`) and condition the lemma on it. Unblocks the **immediate** consumer (preservation_l2 β-case for TFunEff arguments whose ambient `ebody` uses ERegion but not nested function abstractions). Recursive case rides Phase 5's compound-value redesign.
+
+**Recommendation**: option (3) as the tactical landing for Phase 3b. The substantive Phase 5 redesign can subsume option (1) or (2) at its leisure.
+
+Phase 3b implementation **does not start** until owner picks a resolution.
+
 ### Phase 4: close `preservation_l2` β-case using Phases 1-3
 
 With the substitution machinery in place, the T_App_L2_Eff β-case in `preservation_l2` closes by:

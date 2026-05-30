@@ -1798,6 +1798,91 @@ Proof.
   apply closed_below_shift_id. exact Hclos.
 Qed.
 
+(** Combined R + G poly retype for closed TFunEff lambda values.
+
+    Mirrors Phase 2's [ground_nonlinear_retype_l1_m] (full (R, G)
+    polymorphism) for the closed TFunEff substituent of Phase 3b
+    Stage 1b. The R-component requires the side condition
+    [(forall r, In r R' -> In r R_in)] mirroring
+    [tfuneff_lambda_retype_l1_m]'s constraint — closed TFunEff
+    values' typing demands the new R fit within the lambda's
+    declared input env.
+
+    Used by [subst_typing_gen_l1_m_tfuneff]'s compound-rule cases
+    where the substituent must retype at a sub-derivation's (R, G)
+    pair (e.g., post-e1 R1 / G_mid in [T_Let_L1] / [T_StringConcat_L1] /
+    [T_App_L1] / etc.). The R' ⊆ R_in obligation is derivable at
+    the call site from [count_occ_le_l1_m] (sub-derivation's R is
+    a subset of the outer R) chained with the lambda formation
+    rule's own R ⊆ R_in side condition (extracted from the original
+    [Hv_type] via [value_TFunEff_R_subset_R_in_l1_m]). *)
+Lemma closed_value_typing_RG_poly_l1_m :
+  forall m R R' G G' v T1 T2 R_in R_out,
+    is_value v ->
+    expr_closed_below 0 v = true ->
+    has_type_l1 m R G v (TFunEff T1 T2 R_in R_out) R G ->
+    (forall r, In r R' -> In r R_in) ->
+    has_type_l1 m R' G' v (TFunEff T1 T2 R_in R_out) R' G'.
+Proof.
+  intros m R R' G G' v T1 T2 R_in R_out Hval Hclos Ht HR'.
+  (* First retype at any G' with the original R. *)
+  pose proof (closed_value_typing_G_poly_l1_m _ _ _ G' _ _ _ _ _ Hval Hclos Ht) as Ht'.
+  (* Then retype the R via tfuneff_lambda_retype_l1_m. *)
+  eapply tfuneff_lambda_retype_l1_m; eassumption.
+Qed.
+
+(** Extract [R ⊆ R_in] from a TFunEff value's typing.
+
+    A TFunEff lambda value's typing fires via [T_Lam_L1_Linear_Eff]
+    or [T_Lam_L1_Affine_Eff], both of which carry the formation
+    side condition [(forall r, In r R -> In r R_in)]. This lemma
+    surfaces that side condition from any TFunEff value typing,
+    enabling the [closed_value_typing_RG_poly_l1_m] R-discharge
+    at call sites. *)
+Lemma value_TFunEff_R_subset_R_in_l1_m :
+  forall m R G v T1 T2 R_in R_out,
+    is_value v ->
+    has_type_l1 m R G v (TFunEff T1 T2 R_in R_out) R G ->
+    forall r, In r R -> In r R_in.
+Proof.
+  intros m R G v T1 T2 R_in R_out Hval Ht.
+  destruct Hval as
+    [ | b | n
+    | T0 e0 | v1 v2 Hv1 Hv2
+    | T0 v0 Hv0 | T0 v0 Hv0
+    | l r0
+    | v0 Hv0
+    | T0 v0 Hv0 ];
+    inversion Ht; subst; assumption.
+Qed.
+
+(** Chained helper: a sub-derivation's threaded R is contained in
+    the substituent value's declared input env [R_in].
+
+    Packages the chain (sub-derivation R ⊆ outer R) + (outer R ⊆
+    R_in via the substituent's formation side condition) used at
+    every compound-rule call site of [subst_typing_gen_l1_m_tfuneff].
+
+    The substituent [v] is a TFunEff value typed at outer R; the
+    sub-derivation [He] threads R → R1 inside the outer expression
+    [e]. By [count_occ_le_l1_m] R1 ⊆ R; by
+    [value_TFunEff_R_subset_R_in_l1_m] R ⊆ R_in; transitively
+    R1 ⊆ R_in. *)
+Lemma sub_R_in_R_in_via_value_l1_m :
+  forall m R G_e e T R1 G_e' G_v v T1 T2 R_in R_out,
+    has_type_l1 m R G_e e T R1 G_e' ->
+    is_value v ->
+    has_type_l1 m R G_v v (TFunEff T1 T2 R_in R_out) R G_v ->
+    forall r, In r R1 -> In r R_in.
+Proof.
+  intros m R G_e e T R1 G_e' G_v v T1 T2 R_in R_out He Hval Hv r Hr.
+  eapply value_TFunEff_R_subset_R_in_l1_m; [exact Hval | exact Hv |].
+  apply (count_occ_In string_dec).
+  pose proof (count_occ_le_l1_m _ _ _ _ _ _ _ He r) as Hle.
+  apply (count_occ_In string_dec) in Hr.
+  unfold cnt in Hle. lia.
+Qed.
+
 (** Narrower axiom (region-liveness at compound-rule split points).
 
     Given a well-typed sub-derivation [R; G |=L1 e1 : T1 -| R1; G']
@@ -2527,6 +2612,401 @@ Proof.
       eapply T_Borrow_Val_L1.
       * (* vv is a ground value, hence a value *) assumption.
       * eapply ground_nonlinear_retype_l1_m; eauto.
+    + simpl. rewrite (proj2 (Nat.eqb_neq i k0) Hne).
+      assert (u_out = u_in) by congruence; subst.
+      destruct (Nat.ltb_spec k0 i) as [Hlt|Hge].
+      * eapply T_Borrow_L1. unfold ctx_lookup.
+        rewrite nth_error_remove_at_ge by lia.
+        replace (S (i - 1)) with i by lia.
+        unfold ctx_lookup in H. exact H.
+      * assert (i < k0) by lia. eapply T_Borrow_L1. unfold ctx_lookup.
+        rewrite nth_error_remove_at_lt by lia.
+        unfold ctx_lookup in H. exact H.
+
+  (* T_Borrow_Val_L1 *)
+  - assert (u_out = u_in) by congruence; subst.
+    eapply T_Borrow_Val_L1.
+    + apply subst_preserves_value. assumption.
+    + eapply IHHtype; eassumption.
+
+  (* T_Drop_L1 *)
+  - eapply T_Drop_L1; [exact H |]. eapply IHHtype; eassumption.
+
+  (* T_Drop_L1_Echo *)
+  - eapply T_Drop_L1_Echo; [exact H |]. eapply IHHtype; eassumption.
+
+  (* T_Copy_L1 *)
+  - eapply T_Copy_L1; [exact H |]. eapply IHHtype; eassumption.
+
+  (* T_Echo_L1 *)
+  - eapply T_Echo_L1.
+    + apply subst_preserves_value. assumption.
+    + eapply IHHtype; eassumption.
+
+  (* T_Observe_L1 *)
+  - eapply T_Observe_L1. eapply IHHtype; eassumption.
+Qed.
+
+(** ===== Phase 3b Stage 1b — substitution lemma for closed TFunEff
+    substituents in leaf-only outer expressions =====
+
+    Mirrors [subst_typing_gen_l1_m_ground_nonlinear] (Phase 2,
+    lines 1812-2073 above) with two structural swaps:
+
+    - Phase 2's [ground_nonlinear_retype_l1_m] (full (R, G)-poly
+      retype for ground non-linear values) is replaced by
+      [closed_value_typing_G_poly_l1_m] (G-poly retype for closed
+      TFunEff lambda values). The R parameter stays fixed at the
+      substitutent's R; only G changes through compound rule
+      threading. The R-restriction is acceptable because at the
+      call site [preservation_l2_app_eff_beta_tfuneff_l1] the
+      [value_R_G_preserving_l1] collapse forces R_in = R1 = R.
+
+    - Phase 2's [ground_nonlinear_value_shift_id_l1] is replaced
+      by [closed_value_shift_id_l1_m]. Both reduce [shift 0 d v]
+      to [v]: Phase 2 via the typing witness of ground-non-linear
+      shape; Phase 3b via the syntactic closure check.
+
+    Three additional preconditions threaded through the induction:
+
+    - [tfuneff_lambda_free e = true] (P1): the OUTER expression is
+      leaf-only with respect to TFunEff-typed lambdas. Inner
+      [T_Lam_L1_*] cases [discriminate] off this; inner
+      [T_Lam_L1_*_Eff] cases likewise. Compound rules andb-split
+      the predicate across sub-derivations.
+
+    - [(forall r, In r (regions_introduced_by e) -> In r R_in_v)]
+      (P2): every region introduced syntactically in [e] is
+      visible in the substituent's declared input env. Per
+      [regions_introduced_by]'s monotonicity through compound
+      forms, P2 propagates to sub-derivations via list-append
+      reasoning.
+
+    - [expr_closed_below 0 v = true] (P3): the substituent is
+      closed. Powers both the G-poly retype and the shift-identity
+      lemma above. Naturally satisfied at the
+      [preservation_l2_app_eff_beta_tfuneff_l1] call site (v is
+      the operational β-redex argument, typed at the lambda's
+      formation context).
+
+    Inner [T_Lam_L1_*_Eff] cases discharge via P1 ([tfuneff_lambda_free
+    (ELam _ _) = false]); the non-effect [T_Lam_L1_Linear] /
+    [T_Lam_L1_Affine] cases discharge identically.
+
+    Stage 1 of the four-stage Phase 3b resolution plan (#235):
+    issue #239 (Stage 1) / #240 (Stage 2 ELam annotation) / #241
+    (Stage 3 relaxed Phase 3b + CPS) / #242 (Stage 4 unconditional
+    preservation_l2). Stage 2-4 progressively remove preconditions
+    P1, P2, P3; Stage 1 ships the leaf-only with-closure variant.
+
+    Owner-directive compliance (CLAUDE.md 2026-05-27):
+    - ✅ Strictly NEW infrastructure orthogonal to legacy.
+    - ✅ No touch to Semantics.v / Typing.v / Counterexample.v.
+    - ✅ No new Axiom / Admitted; no closure of residual
+      Semantics_L1.v admits.
+
+    Refs [formal/SUBST-LEMMA-GENERALIZATION-DESIGN.md] Phase 3b
+    Stage 1b, ephapax issue #249. *)
+Lemma subst_typing_gen_l1_m_tfuneff :
+  forall m R Gin e T R' Gout,
+    has_type_l1 m R Gin e T R' Gout ->
+    forall k Ta Tb R_in_v R_out_v v u_in,
+      nth_error Gin k = Some (TFunEff Ta Tb R_in_v R_out_v, u_in) ->
+      is_value v ->
+      tfuneff_lambda_free e = true ->
+      (forall r, In r (regions_introduced_by e) -> In r R_in_v) ->
+      expr_closed_below 0 v = true ->
+      has_type_l1 m R (remove_at k Gin) v
+                  (TFunEff Ta Tb R_in_v R_out_v) R (remove_at k Gin) ->
+      forall u_out,
+        nth_error Gout k = Some (TFunEff Ta Tb R_in_v R_out_v, u_out) ->
+        has_type_l1 m R (remove_at k Gin) (subst k v e) T R' (remove_at k Gout).
+Proof.
+  intros m R Gin e T R' Gout Htype.
+  induction Htype; intros k0 Ta Tb R_in_v R_out_v vv u_in
+                          Hk_in Hval Hflam Hreg Hclos Hv_type u_out Hk_out; simpl in *.
+
+  (* T_Unit_L1, T_Bool_L1, T_I32_L1 *)
+  1-3: (assert (u_out = u_in) by congruence; subst; constructor).
+
+  (* T_Var_Lin_L1 *)
+  - destruct (Nat.eq_dec i k0) as [->|Hne].
+    + (* i = k0: rule's [is_linear_ty T = true] contradicts
+         [is_linear_ty (TFunEff ...) = false] *)
+      exfalso.
+      assert (T = TFunEff Ta Tb R_in_v R_out_v)
+        by (unfold ctx_lookup in H; congruence).
+      subst T. simpl in H0. discriminate H0.
+    + rewrite (proj2 (Nat.eqb_neq i k0) Hne).
+      destruct (Nat.ltb_spec k0 i) as [Hlt|Hge].
+      * assert (Hrw: remove_at k0 (ctx_mark_used G i) =
+                     ctx_mark_used (remove_at k0 G) (i - 1)).
+        { replace i with (S (i - 1)) at 1 by lia.
+          apply remove_at_ctx_mark_used_gt. lia. }
+        rewrite Hrw.
+        eapply T_Var_Lin_L1.
+        -- unfold ctx_lookup. rewrite nth_error_remove_at_ge by lia.
+           replace (S (i - 1)) with i by lia.
+           unfold ctx_lookup in H. exact H.
+        -- exact H0.
+      * assert (i < k0) by lia.
+        rewrite remove_at_ctx_mark_used_lt by lia.
+        eapply T_Var_Lin_L1.
+        -- unfold ctx_lookup. rewrite nth_error_remove_at_lt by lia.
+           unfold ctx_lookup in H. exact H.
+        -- exact H0.
+
+  (* T_Var_Unr_L1 *)
+  - destruct (Nat.eq_dec i k0) as [->|Hne].
+    + (* i = k0: CONSTRUCTIVE case. Substituent's TFunEff typing is
+         re-derived at the rule's output context = G via
+         closed_value_typing_G_poly_l1_m. *)
+      rewrite Nat.eqb_refl.
+      assert (T = TFunEff Ta Tb R_in_v R_out_v)
+        by (unfold ctx_lookup in H; congruence).
+      subst T.
+      assert (u_out = u_in) by congruence; subst u_out.
+      exact Hv_type.
+    + rewrite (proj2 (Nat.eqb_neq i k0) Hne).
+      destruct (Nat.ltb_spec k0 i) as [Hlt|Hge].
+      * eapply T_Var_Unr_L1.
+        -- unfold ctx_lookup. rewrite nth_error_remove_at_ge by lia.
+           replace (S (i - 1)) with i by lia.
+           unfold ctx_lookup in H. exact H.
+        -- exact H0.
+      * assert (i < k0) by lia. eapply T_Var_Unr_L1.
+        -- unfold ctx_lookup. rewrite nth_error_remove_at_lt by lia.
+           unfold ctx_lookup in H. exact H.
+        -- exact H0.
+
+  (* T_Loc_L1 *)
+  - assert (u_out = u_in) by congruence; subst. constructor. assumption.
+  (* T_StringNew_L1 *)
+  - assert (u_out = u_in) by congruence; subst. constructor. assumption.
+
+  (* T_StringConcat_L1 *)
+  - destruct (output_shape_at_l1 _ _ _ _ _ _ _ _ _ _ Htype1 Hk_in) as [u_mid Hu_mid].
+    apply andb_prop in Hflam as [Hf1 Hf2].
+    eapply T_StringConcat_L1.
+    + eapply IHHtype1; try eassumption.
+      intros rr Hrr. apply Hreg. apply in_app_iff. left. exact Hrr.
+    + eapply IHHtype2; try eassumption; try reflexivity.
+      * intros rr Hrr. apply Hreg. apply in_app_iff. right. exact Hrr.
+      * eapply closed_value_typing_RG_poly_l1_m;
+          [exact Hval | exact Hclos | exact Hv_type |].
+        eapply sub_R_in_R_in_via_value_l1_m; [exact Htype1 | exact Hval | exact Hv_type].
+
+  (* T_StringLen_L1 *)
+  - eapply T_StringLen_L1. eapply IHHtype; eassumption.
+
+  (* T_Let_L1 *)
+  - destruct (output_shape_at_l1 _ _ _ _ _ _ _ _ _ _ Htype1 Hk_in) as [u_mid Hu_mid].
+    apply andb_prop in Hflam as [Hf1 Hf2].
+    eapply T_Let_L1.
+    + eapply IHHtype1; try eassumption.
+      intros rr Hrr. apply Hreg. apply in_app_iff. left. exact Hrr.
+    + rewrite (closed_value_shift_id_l1_m vv 1 Hclos).
+      eapply (IHHtype2 (S k0) Ta Tb R_in_v R_out_v vv u_mid);
+        simpl; try eassumption; try reflexivity.
+      * intros rr Hrr. apply Hreg. apply in_app_iff. right. exact Hrr.
+      * eapply closed_value_typing_RG_poly_l1_m;
+          [exact Hval | exact Hclos | exact Hv_type |].
+        eapply sub_R_in_R_in_via_value_l1_m; [exact Htype1 | exact Hval | exact Hv_type].
+
+  (* T_LetLin_L1 *)
+  - destruct (output_shape_at_l1 _ _ _ _ _ _ _ _ _ _ Htype1 Hk_in) as [u_mid Hu_mid].
+    apply andb_prop in Hflam as [Hf1 Hf2].
+    eapply T_LetLin_L1; [exact H | |].
+    + eapply IHHtype1; try eassumption.
+      intros rr Hrr. apply Hreg. apply in_app_iff. left. exact Hrr.
+    + rewrite (closed_value_shift_id_l1_m vv 1 Hclos).
+      eapply (IHHtype2 (S k0) Ta Tb R_in_v R_out_v vv u_mid);
+        simpl; try eassumption; try reflexivity.
+      * intros rr Hrr. apply Hreg. apply in_app_iff. right. exact Hrr.
+      * eapply closed_value_typing_RG_poly_l1_m;
+          [exact Hval | exact Hclos | exact Hv_type |].
+        eapply sub_R_in_R_in_via_value_l1_m; [exact Htype1 | exact Hval | exact Hv_type].
+
+  (* T_Lam_L1_Linear: P1 excludes — tfuneff_lambda_free (ELam _ _) = false. *)
+  - discriminate Hflam.
+
+  (* T_Lam_L1_Affine: same *)
+  - discriminate Hflam.
+
+  (* T_Lam_L1_Linear_Eff: same *)
+  - discriminate Hflam.
+
+  (* T_Lam_L1_Affine_Eff: same *)
+  - discriminate Hflam.
+
+  (* T_App_L1 *)
+  - destruct (output_shape_at_l1 _ _ _ _ _ _ _ _ _ _ Htype1 Hk_in) as [u_mid Hu_mid].
+    apply andb_prop in Hflam as [Hf1 Hf2].
+    eapply T_App_L1.
+    + eapply IHHtype1; try eassumption.
+      intros rr Hrr. apply Hreg. apply in_app_iff. left. exact Hrr.
+    + eapply IHHtype2; try eassumption; try reflexivity.
+      * intros rr Hrr. apply Hreg. apply in_app_iff. right. exact Hrr.
+      * eapply closed_value_typing_RG_poly_l1_m;
+          [exact Hval | exact Hclos | exact Hv_type |].
+        eapply sub_R_in_R_in_via_value_l1_m; [exact Htype1 | exact Hval | exact Hv_type].
+
+  (* T_Pair_L1 *)
+  - destruct (output_shape_at_l1 _ _ _ _ _ _ _ _ _ _ Htype1 Hk_in) as [u_mid Hu_mid].
+    apply andb_prop in Hflam as [Hf1 Hf2].
+    eapply T_Pair_L1.
+    + eapply IHHtype1; try eassumption.
+      intros rr Hrr. apply Hreg. apply in_app_iff. left. exact Hrr.
+    + eapply IHHtype2; try eassumption; try reflexivity.
+      * intros rr Hrr. apply Hreg. apply in_app_iff. right. exact Hrr.
+      * eapply closed_value_typing_RG_poly_l1_m;
+          [exact Hval | exact Hclos | exact Hv_type |].
+        eapply sub_R_in_R_in_via_value_l1_m; [exact Htype1 | exact Hval | exact Hv_type].
+
+  (* T_Fst_L1 *)
+  - eapply T_Fst_L1; [eapply IHHtype; eassumption | assumption].
+
+  (* T_Snd_L1 *)
+  - eapply T_Snd_L1; [eapply IHHtype; eassumption | assumption].
+
+  (* T_Inl_L1 *)
+  - eapply T_Inl_L1. eapply IHHtype; eassumption.
+
+  (* T_Inr_L1 *)
+  - eapply T_Inr_L1. eapply IHHtype; eassumption.
+
+  (* T_Case_L1_Linear *)
+  - destruct (output_shape_at_l1 _ _ _ _ _ _ _ _ _ _ Htype1 Hk_in) as [u_mid Hu_mid].
+    apply andb_prop in Hflam as [Hf01 Hf2].
+    apply andb_prop in Hf01 as [Hf0 Hf1].
+    eapply T_Case_L1_Linear.
+    + eapply IHHtype1; try eassumption.
+      intros rr Hrr. apply Hreg. apply in_app_iff. left. exact Hrr.
+    + rewrite (closed_value_shift_id_l1_m vv 1 Hclos).
+      eapply (IHHtype2 (S k0) Ta Tb R_in_v R_out_v vv u_mid);
+        simpl; try eassumption; try reflexivity.
+      * intros rr Hrr. apply Hreg. apply in_app_iff. right.
+        apply in_app_iff. left. exact Hrr.
+      * eapply closed_value_typing_RG_poly_l1_m;
+          [exact Hval | exact Hclos | exact Hv_type |].
+        eapply sub_R_in_R_in_via_value_l1_m; [exact Htype1 | exact Hval | exact Hv_type].
+    + rewrite (closed_value_shift_id_l1_m vv 1 Hclos).
+      eapply (IHHtype3 (S k0) Ta Tb R_in_v R_out_v vv u_mid);
+        simpl; try eassumption; try reflexivity.
+      * intros rr Hrr. apply Hreg. apply in_app_iff. right.
+        apply in_app_iff. right. exact Hrr.
+      * eapply closed_value_typing_RG_poly_l1_m;
+          [exact Hval | exact Hclos | exact Hv_type |].
+        eapply sub_R_in_R_in_via_value_l1_m; [exact Htype1 | exact Hval | exact Hv_type].
+
+  (* T_Case_L1_Affine *)
+  - destruct (output_shape_at_l1 _ _ _ _ _ _ _ _ _ _ Htype1 Hk_in) as [u_mid Hu_mid].
+    apply andb_prop in Hflam as [Hf01 Hf2].
+    apply andb_prop in Hf01 as [Hf0 Hf1].
+    eapply T_Case_L1_Affine.
+    + eapply IHHtype1; try eassumption.
+      intros rr Hrr. apply Hreg. apply in_app_iff. left. exact Hrr.
+    + rewrite (closed_value_shift_id_l1_m vv 1 Hclos).
+      eapply (IHHtype2 (S k0) Ta Tb R_in_v R_out_v vv u_mid);
+        simpl; try eassumption; try reflexivity.
+      * intros rr Hrr. apply Hreg. apply in_app_iff. right.
+        apply in_app_iff. left. exact Hrr.
+      * eapply closed_value_typing_RG_poly_l1_m;
+          [exact Hval | exact Hclos | exact Hv_type |].
+        eapply sub_R_in_R_in_via_value_l1_m; [exact Htype1 | exact Hval | exact Hv_type].
+    + rewrite (closed_value_shift_id_l1_m vv 1 Hclos).
+      eapply (IHHtype3 (S k0) Ta Tb R_in_v R_out_v vv u_mid);
+        simpl; try eassumption; try reflexivity.
+      * intros rr Hrr. apply Hreg. apply in_app_iff. right.
+        apply in_app_iff. right. exact Hrr.
+      * eapply closed_value_typing_RG_poly_l1_m;
+          [exact Hval | exact Hclos | exact Hv_type |].
+        eapply sub_R_in_R_in_via_value_l1_m; [exact Htype1 | exact Hval | exact Hv_type].
+
+  (* T_If_L1_Linear *)
+  - destruct (output_shape_at_l1 _ _ _ _ _ _ _ _ _ _ Htype1 Hk_in) as [u_mid Hu_mid].
+    apply andb_prop in Hflam as [Hf12 Hf3].
+    apply andb_prop in Hf12 as [Hf1 Hf2].
+    eapply T_If_L1_Linear.
+    + eapply IHHtype1; try eassumption.
+      intros rr Hrr. apply Hreg. apply in_app_iff. left. exact Hrr.
+    + eapply IHHtype2; try eassumption; try reflexivity.
+      * intros rr Hrr. apply Hreg. apply in_app_iff. right.
+        apply in_app_iff. left. exact Hrr.
+      * eapply closed_value_typing_RG_poly_l1_m;
+          [exact Hval | exact Hclos | exact Hv_type |].
+        eapply sub_R_in_R_in_via_value_l1_m; [exact Htype1 | exact Hval | exact Hv_type].
+    + eapply IHHtype3; try eassumption; try reflexivity.
+      * intros rr Hrr. apply Hreg. apply in_app_iff. right.
+        apply in_app_iff. right. exact Hrr.
+      * eapply closed_value_typing_RG_poly_l1_m;
+          [exact Hval | exact Hclos | exact Hv_type |].
+        eapply sub_R_in_R_in_via_value_l1_m; [exact Htype1 | exact Hval | exact Hv_type].
+
+  (* T_If_L1_Affine *)
+  - destruct (output_shape_at_l1 _ _ _ _ _ _ _ _ _ _ Htype1 Hk_in) as [u_mid Hu_mid].
+    apply andb_prop in Hflam as [Hf12 Hf3].
+    apply andb_prop in Hf12 as [Hf1 Hf2].
+    eapply T_If_L1_Affine.
+    + eapply IHHtype1; try eassumption.
+      intros rr Hrr. apply Hreg. apply in_app_iff. left. exact Hrr.
+    + eapply IHHtype2; try eassumption; try reflexivity.
+      * intros rr Hrr. apply Hreg. apply in_app_iff. right.
+        apply in_app_iff. left. exact Hrr.
+      * eapply closed_value_typing_RG_poly_l1_m;
+          [exact Hval | exact Hclos | exact Hv_type |].
+        eapply sub_R_in_R_in_via_value_l1_m; [exact Htype1 | exact Hval | exact Hv_type].
+    + eapply IHHtype3; try eassumption; try reflexivity.
+      * intros rr Hrr. apply Hreg. apply in_app_iff. right.
+        apply in_app_iff. right. exact Hrr.
+      * eapply closed_value_typing_RG_poly_l1_m;
+          [exact Hval | exact Hclos | exact Hv_type |].
+        eapply sub_R_in_R_in_via_value_l1_m; [exact Htype1 | exact Hval | exact Hv_type].
+
+  (* T_Region_L1: body's R = [r :: R]; P2 gives [r ∈ R_in_v] (since r
+     is the FIRST element of regions_introduced_by (ERegion r e)) and
+     Hv_type's inversion gives R ⊆ R_in_v; combined, (r :: R) ⊆ R_in_v. *)
+  - eapply T_Region_L1; [exact H | exact H0 | exact H1 |].
+    eapply IHHtype; try eassumption; try reflexivity.
+    + intros r' Hr'. apply Hreg. right. exact Hr'.
+    + eapply closed_value_typing_RG_poly_l1_m;
+        [exact Hval | exact Hclos | exact Hv_type |].
+      intros r' Hr'. destruct Hr' as [-> | HrR].
+      * apply Hreg. left. reflexivity.
+      * eapply value_TFunEff_R_subset_R_in_l1_m;
+          [exact Hval | exact Hv_type | exact HrR].
+
+  (* T_Region_Active_L1: body's R = outer R, no retype needed. *)
+  - eapply T_Region_Active_L1; [exact H | exact H0 | exact H1 |].
+    eapply IHHtype; try eassumption; try reflexivity.
+    intros r' Hr'. apply Hreg. right. exact Hr'.
+
+  (* T_Region_L1_Echo *)
+  - eapply T_Region_L1_Echo; [exact H | exact H0 | exact H1 |].
+    eapply IHHtype; try eassumption; try reflexivity.
+    + intros r' Hr'. apply Hreg. right. exact Hr'.
+    + eapply closed_value_typing_RG_poly_l1_m;
+        [exact Hval | exact Hclos | exact Hv_type |].
+      intros r' Hr'. destruct Hr' as [-> | HrR].
+      * apply Hreg. left. reflexivity.
+      * eapply value_TFunEff_R_subset_R_in_l1_m;
+          [exact Hval | exact Hv_type | exact HrR].
+
+  (* T_Region_Active_L1_Echo *)
+  - eapply T_Region_Active_L1_Echo; [exact H | exact H0 | exact H1 |].
+    eapply IHHtype; try eassumption; try reflexivity.
+    intros r' Hr'. apply Hreg. right. exact Hr'.
+
+  (* T_Borrow_L1: EBorrow (EVar i) — if i = k0, substitute as EBorrow vv. *)
+  - destruct (Nat.eq_dec i k0) as [->|Hne].
+    + simpl. rewrite Nat.eqb_refl.
+      assert (T = TFunEff Ta Tb R_in_v R_out_v)
+        by (unfold ctx_lookup in H; congruence).
+      subst T.
+      assert (u_out = u_in) by congruence; subst.
+      eapply T_Borrow_Val_L1.
+      * assumption.
+      * exact Hv_type.
     + simpl. rewrite (proj2 (Nat.eqb_neq i k0) Hne).
       assert (u_out = u_in) by congruence; subst.
       destruct (Nat.ltb_spec k0 i) as [Hlt|Hge].

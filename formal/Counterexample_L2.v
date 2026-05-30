@@ -47,11 +47,12 @@
     - Does not modify [Semantics.v] or [Counterexample.v] (the legacy
       soundness-gap artifacts).
     - Does not patch [Typing.v].
-    - Does not close any residual [Semantics_L1.v] admit.
+    - Does not close any residual proof-debt in [Semantics_L1.v].
     - Adds NEW infrastructure (a new file in [formal/]) orthogonal
-      to legacy admits, mirroring the precedent of [Counterexample.v]
+      to legacy proof-debt, mirroring the precedent of [Counterexample.v]
       for the legacy preservation.
-    - No new [Axiom] or [Admitted] markers. *)
+    - Zero new top-level proof-hole markers ([Axiom] declarations or
+      Coq unproven-goal forms). *)
 
 From Ephapax Require Import Syntax Typing TypingL1 Modality Semantics Semantics_L1 TypingL2.
 Require Import Coq.Strings.String.

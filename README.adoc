@@ -63,7 +63,9 @@ link:formal/PRESERVATION-DESIGN.md[`formal/PRESERVATION-DESIGN.md`]
 Quick read: **L1** (region capabilities) substantially complete;
 **L2** (Linear/Affine modality) core landed with zero axioms; **L3**
 (echo / residue) calculus done locally, integration into the typing
-judgment is the next-block work; **L4** (dyadic mode) not started.
+judgment is the next-block work; **L4** (dyadic mode) mechanical
+scaffold landed (`formal/L4.v` — definitions only by design; no proof
+obligations).
 ====
 
 Ephapax is a research language for **principled handling of
@@ -100,15 +102,19 @@ Ephapax is a programming language with:
 |===
 | Property | What this means
 
-| **Dyadic discipline**
+| **Dyadic discipline (L2)**
 | Each binding is *either* affine (`let` — used at most once,
   weakening allowed) *or* linear (`let!` — used exactly once,
-  weakening forbidden). Type checker enforces.
+  weakening forbidden). Type checker enforces. See "The four layers"
+  below for how this composes with L1/L3/L4.
 
-| **Region-based memory**
-| Allocations live in named regions (`region r: ...`); when the
-  region's scope ends, the runtime bulk-frees every resource in it.
-  No allocator overhead per object; no per-object frees.
+| **Region-based memory (L1)**
+| Allocations live in named regions (`region r: ...`). The type
+  system threads a region-capability environment through every
+  expression so a sibling cannot read from a region another sibling
+  has just exited. When a region's scope ends, the runtime bulk-frees
+  every resource in it. No allocator overhead per object; no
+  per-object frees.
 
 | **Second-class borrows**
 | `&x` gives temporary access without consuming `x`. Borrows cannot
@@ -126,6 +132,57 @@ Ephapax is a programming language with:
 | Region exits do the bulk deallocation. No tracing collector, no
   reference counting, no allocator-per-object metadata.
 |===
+
+== The four layers
+
+Ephapax composes four orthogonal disciplines. Each is a thin-poset
+refinement, so they compose without coherence obligations
+(https://github.com/hyperpolymath/echo-types[echo-types] supplies the
+recipe).
+
+[cols="1,3"]
+|===
+| Layer | What it enforces
+
+| **L1 — Region capabilities**
+| Every live region is tracked in an input/output environment threaded
+  through every expression. A region cannot be referenced after a
+  sibling has exited it. Soundness proof in `formal/TypingL1.v` +
+  `formal/Semantics_L1.v`.
+
+| **L2 — Structural discipline (linear ↔ affine)**
+| The *modality* of the surrounding program decides whether linear
+  bindings must be consumed (Linear: ephapax-linear) or may be dropped
+  (Affine: ephapax-affine). Same syntax, same semantics — different
+  admissible derivations. Linear ⊆ Affine, proved by `linear_to_affine`
+  Qed in `formal/Modality.v`.
+
+| **L3 — Irreversibility residue (Echo)**
+| Operations that erase information (region exit, drop) produce
+  proof-relevant residue — `Echo f y := Σ A (λ x → f x ≡ y)`. In
+  Linear mode the residue must be observed; in Affine mode it may be
+  silently lowered. Calculus mechanised in `formal/Echo.v`;
+  integration into the typing judgment is the next-block work.
+
+| **L4 — Dyadic interaction mode**
+| A project-level declaration of which side of the dyad the program
+  speaks from (`ephapax_linear` / `ephapax_affine` /
+  `module_boundary_mix`). Selects the L2 modality and the L3
+  observation discipline. No proof obligations of its own — mechanical
+  scaffold in `formal/L4.v` carries definitions only by design.
+|===
+
+.Soundness story
+****
+The four-layer separation is *not* decorative — it exists because the
+original "linear+affine + regions" framing admitted a verified
+counterexample to preservation (see `formal/Counterexample.v` and
+`formal/PRESERVATION-DESIGN.md`). The four-layer redesign restores
+soundness by making each discipline's invariants explicit and
+orthogonal: preservation is *re-derived per layer* from explicit
+invariants rather than forced through a single judgment that hides
+them.
+****
 
 == Three superpowers
 

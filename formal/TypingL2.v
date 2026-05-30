@@ -71,6 +71,9 @@
       [T_Lam_*_L2]. L2 Phase 2 + L3 Phase 3 jointly close the L1
       gap. *)
 
+Require Import Coq.Lists.List.
+Import ListNotations.
+
 From Ephapax Require Import Syntax Typing TypingL1 Modality Semantics Semantics_L1.
 
 (** ===== The L2 judgment (skeleton) =====
@@ -351,4 +354,140 @@ Corollary preservation_l2_lift_case :
 Proof.
   intros m mu R e mu' R' e' Hstep G T R_final G' H1.
   eapply preservation_l2_via_l1; eassumption.
+Qed.
+
+(** ===== Phase D slice 4 Phase 4a — β-case closure for linear T1 =====
+
+    The [T_App_L2_Eff] β-case (S_App_Fun step) closes for linear [T1]
+    via the existing m-indexed substitution lemma
+    [subst_typing_gen_l1_m]. This slice ships pure new infrastructure
+    orthogonal to the legacy admits; it does not patch [Semantics.v],
+    [Typing.v], [Counterexample.v], or close any residual
+    [Semantics_L1.v] marker.
+
+    Structure:
+
+    - [preservation_l2_app_eff_beta_linear_l1] — the L1-level kernel.
+      Takes the inverted T_App_L2_Eff premises (a lambda formed at
+      [TFunEff] + a value argument typed at [T1]) and produces the
+      post-β L1 typing of [subst 0 v2 ebody]. Two structural reductions
+      inside: inversion on the lambda derivation forces [T_Lam_L1_*_Eff]
+      (the only formation rules producing [TFunEff] types), exposing
+      the body typing at [R_in]; [value_R_G_preserving_l1] on the
+      argument forces [R_in = R1 = R] and [G'' = G' = G], collapsing
+      the threaded environments to a uniform [R / G] triple. Then
+      [subst_typing_gen_l1_m] at [k = 0] fires with [is_linear_ty T1].
+
+    - [preservation_l2_app_eff_beta_linear] — the L2 wrapper. Inverts
+      both [has_type_l2] hypotheses through [L2_lift_l1] (the
+      [T_App_L2_Eff] cases discriminate: the lambda's head is [ELam]
+      not [EApp], and the argument is a value so it cannot be [EApp]),
+      then defers to the L1 kernel and re-lifts via [L2_lift_l1].
+
+    Phase 4 follow-ons (not in this PR):
+    - 4b: ground-non-linear [T1] via Phase 2's
+      [subst_typing_gen_l1_m_ground_nonlinear].
+    - 4c: [TFunEff] non-linear [T1] — blocked on Phase 3b
+      (issue #225, the substitution-lemma extension for [TFunEff]
+      lambdas as substituends).
+    - 4d: compound non-linear (EPair / EInl / EInr / EEcho) deferred
+      to Phase 5.
+
+    These three helpers compose with [preservation_l2_via_l1] (the
+    L2_lift_l1 case) toward eventual closure of [preservation_l2]
+    over the full [has_type_l2] judgment. *)
+
+(** Auxiliary: m-polymorphic retype for linear values. Linear values
+    at L1 are exactly locations (per [Semantics_L1.linear_value_is_loc_l1]),
+    and [T_Loc_L1] is m-polymorphic; the value retypes at any [m']
+    without further structure. Local to this file because the only
+    consumer is the Affine branch of
+    [preservation_l2_app_eff_beta_linear_l1] (the subst lemma's
+    [|=L1] premise is Linear-mode-only). *)
+
+Lemma linear_value_retype_l1_m :
+  forall m m' R G v T,
+    TypingL1.has_type_l1 m R G v T R G ->
+    is_value v ->
+    is_linear_ty T = true ->
+    TypingL1.has_type_l1 m' R G v T R G.
+Proof.
+  intros m m' R G v T Htype Hval Hlin.
+  destruct Hval as
+    [ | b | n
+    | T0 e0 | v1 v2 Hv1 Hv2
+    | T0 v0 Hv0 | T0 v0 Hv0
+    | l r
+    | v0 Hv0
+    | T0 v0 Hv0 ];
+    inversion Htype; subst; try discriminate Hlin.
+  apply T_Loc_L1; assumption.
+Qed.
+
+Lemma preservation_l2_app_eff_beta_linear_l1 :
+  forall m R R1 G G' G'' v2 T1 T2 R_in R_out ebody,
+    is_value v2 ->
+    is_linear_ty T1 = true ->
+    TypingL1.has_type_l1 m R  G  (ELam T1 ebody)
+                                 (TFunEff T1 T2 R_in R_out) R1 G' ->
+    TypingL1.has_type_l1 m R1 G' v2 T1 R_in G'' ->
+    TypingL1.has_type_l1 m R  G  (subst 0 v2 ebody) T2 R_out G''.
+Proof.
+  intros m R R1 G G' G'' v2 T1 T2 R_in R_out ebody Hval Hlin Hlam Harg.
+  inversion Hlam; subst.
+  - (* T_Lam_L1_Linear_Eff: body at R_in / (T1,false)::G'' → R_out / (T1,true)::G''
+       (R and G eliminated by inversion equalities; R_in and G'' remain. Use
+       raw cons (not [ctx_extend]) in the [with] clause so unification of
+       [remove_at 0 Gin = G''] does not stall on δ-unfolding.) *)
+    destruct (value_R_G_preserving_l1 _ _ _ _ _ _ _ Hval Harg) as [<- <-].
+    eapply subst_typing_gen_l1_m with
+      (k := 0) (u_in := false)
+      (Gin := (T1, false) :: G'')
+      (Gout := (T1, true) :: G'').
+    + (* body typing: H10 has [ctx_extend G'' T1] which is δ-equal to [(T1,false)::G''] *)
+      unfold ctx_extend in *. eassumption.
+    + reflexivity.
+    + exact Hval.
+    + exact Hlin.
+    + exact Harg.
+    + reflexivity.
+  - (* T_Lam_L1_Affine_Eff: body output is [(T1, u) :: G''] for some [u]
+       introduced by inversion. The subst lemma's [|=L1] premise is
+       Linear-mode-only, so Harg (Affine-typed) is re-derived at Linear
+       via [linear_value_retype_l1_m]. *)
+    destruct (value_R_G_preserving_l1 _ _ _ _ _ _ _ Hval Harg) as [<- <-].
+    eapply subst_typing_gen_l1_m with
+      (k := 0) (u_in := false)
+      (Gin := (T1, false) :: G'')
+      (Gout := (T1, _) :: G'').
+    + unfold ctx_extend in *. eassumption.
+    + reflexivity.
+    + exact Hval.
+    + exact Hlin.
+    + apply (linear_value_retype_l1_m Affine Linear); assumption.
+    + reflexivity.
+Qed.
+
+Lemma preservation_l2_app_eff_beta_linear :
+  forall m R R1 G G' G'' v2 T1 T2 R_in R_out ebody,
+    is_value v2 ->
+    is_linear_ty T1 = true ->
+    has_type_l2 m R  G  (ELam T1 ebody)
+                        (TFunEff T1 T2 R_in R_out) R1 G' ->
+    has_type_l2 m R1 G' v2 T1 R_in G'' ->
+    has_type_l2 m R  G  (subst 0 v2 ebody) T2 R_out G''.
+Proof.
+  intros m R R1 G G' G'' v2 T1 T2 R_in R_out ebody Hval Hlin Hlam Harg.
+  (* Lambda inversion: [T_App_L2_Eff]'s expression is [EApp _ _],
+     not [ELam _ _], so it discriminates; only [L2_lift_l1] remains. *)
+  inversion Hlam as [m0 R0 G0 e0 T0 R0' G0' Hlam_l1 | ]; subst.
+  (* Argument inversion: [v2] is a value, so the [T_App_L2_Eff] case
+     would force [v2 = EApp _ _], contradicting [Hval]. *)
+  inversion Harg as [m0' R0'' G0'' e0' T0' R0''' G0''' Harg_l1 | ]; subst.
+  - apply L2_lift_l1.
+    eapply preservation_l2_app_eff_beta_linear_l1; eassumption.
+  - (* T_App_L2_Eff case for Harg forces v2 = EApp _ _ but Hval : is_value v2.
+       [exfalso] switches to Prop so the Prop-elim of Hval (is_value : ... -> Prop)
+       into the Type-sorted has_type_l2 goal is allowed. *)
+    exfalso. inversion Hval.
 Qed.

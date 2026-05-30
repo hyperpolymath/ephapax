@@ -48,6 +48,14 @@ jobs:
     # `make` semantics — "what the maintainer's machine has".
     container:
       image: coqorg/coq:8.18
+      # actions/checkout's post-step writes to /__w/_temp/_runner_file_commands
+      # via Node fs.writeFileSync. The coqorg/coq image defaults to the
+      # non-root `coq` user (UID 1000), but the runner mounts /__w as the
+      # host runner user — EACCES until checkout's saveState. Running the
+      # container as root keeps the workspace-shared paths writable while
+      # leaving the in-container build untouched (root in container is
+      # still mapped to the runner host's runner user, not host-root).
+      options: --user root
 
     steps:
       - name: Checkout repository

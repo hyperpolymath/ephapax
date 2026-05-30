@@ -14,6 +14,8 @@ language combining:
 
 The dyadic principle: both disciplines coexist at per-binding granularity.
 
+Ephapax's type system has four orthogonal disciplines: **L1** region capabilities, **L2** structural modality (linear/affine), **L3** irreversibility residue (Echo Types — planned), and **L4** dyadic interaction mode (project-level declaration). This specification is normative for L1 and L2 and forward-looking for L3 and L4. See [`docs/vision/EPHAPAX-VISION.adoc`](../docs/vision/EPHAPAX-VISION.adoc) for the dyad framing and [`formal/PRESERVATION-DESIGN.md`](../formal/PRESERVATION-DESIGN.md) for the per-layer design.
+
 ---
 
 # PART 1: LEXICAL GRAMMAR

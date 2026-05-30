@@ -13,6 +13,8 @@
 
 Ephapax (from Greek ἐφάπαξ, "once for all") is a programming language with a linear type system designed for safe memory management targeting WebAssembly.
 
+Ephapax's type system has four orthogonal disciplines: **L1** region capabilities, **L2** structural modality (linear/affine), **L3** irreversibility residue (Echo Types — planned), and **L4** dyadic interaction mode (project-level declaration). This specification is normative for L1 and L2 and forward-looking for L3 and L4. See [`docs/vision/EPHAPAX-VISION.adoc`](../docs/vision/EPHAPAX-VISION.adoc) for the dyad framing and [`formal/PRESERVATION-DESIGN.md`](../formal/PRESERVATION-DESIGN.md) for the per-layer design.
+
 ### 1.2 Design Goals
 
 1. **Memory Safety**: Prevent use-after-free, double-free, and memory leaks

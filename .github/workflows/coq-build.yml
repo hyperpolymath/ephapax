@@ -14,9 +14,10 @@
 # `coq_makefile`-driven compilation of `formal/_CoqProject` fails
 # here BEFORE the admin-merge button is reachable for the auto-bot.
 #
-# The job also `Print Assumptions`-checks the load-bearing top-level
-# theorem `preservation_l2_via_l1` (TypingL2.v) so any new `Admitted.`
-# / `Axiom` slippage shows up as a diff in the workflow output.
+# The job also `Print Assumptions`-checks the four Phase D top-level
+# results (preservation_l1 at L1; preservation_l2_via_l1 plus the two
+# β-case lemmas at L2) so any new `Admitted.` / `Axiom` slippage shows
+# up as a diff in the workflow output.
 
 name: Coq Build (formal/)
 
@@ -77,12 +78,23 @@ jobs:
           coq_makefile -f _CoqProject -o build.mk
           make -f build.mk
 
-      - name: Print Assumptions of load-bearing theorem
+      - name: Print Assumptions of Phase D theorems
         working-directory: formal
         run: |
           # Surfaces any new Admitted / Axiom additions feeding into
-          # preservation_l2_via_l1 (Phase D top-level result). A diff
-          # in this output between PRs is the canonical "did this PR
-          # introduce a new admit" signal.
-          echo 'From Ephapax Require Import TypingL2. Print Assumptions preservation_l2_via_l1.' \
-            | coqtop -R . Ephapax 2>&1 | tail -40
+          # the four Phase D top-level results. A diff in this output
+          # between PRs is the canonical "did this PR introduce a new
+          # admit" signal.
+          #   preservation_l1                                (Semantics_L1.v)
+          #   preservation_l2_via_l1                         (TypingL2.v)
+          #   preservation_l2_app_eff_beta_linear            (TypingL2.v, #228)
+          #   preservation_l2_app_eff_beta_ground_nonlinear  (TypingL2.v, #233)
+          # Single coqtop session amortises ML startup across four prints.
+          coqtop -R . Ephapax 2>&1 <<'EOF' | tail -160
+          From Ephapax Require Import Semantics_L1.
+          From Ephapax Require Import TypingL2.
+          Print Assumptions preservation_l1.
+          Print Assumptions preservation_l2_via_l1.
+          Print Assumptions preservation_l2_app_eff_beta_linear.
+          Print Assumptions preservation_l2_app_eff_beta_ground_nonlinear.
+          EOF

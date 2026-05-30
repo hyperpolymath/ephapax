@@ -142,6 +142,62 @@ Estimated ~250-300 lines, paralleling the existing proof.
 
 Add a retype lemma for TFunEff lambdas (under R' ⊆ R_in side condition). Extend the substitution lemma to cover `T1 = TFunEff …` lambdas as substituends. This is the case actually needed for higher-order β-reductions where the lambda parameter is itself a function type.
 
+#### Phase 3b addendum (2026-05-30) — option (a) precondition is insufficient
+
+The originally-proposed option (a) precondition
+
+```coq
+(forall r, In r (regions_introduced_by e) -> In r R_in_v)
+```
+
+is **insufficient** for the planned `subst_typing_gen_l1_m_tfuneff` lemma. Filed as ephapax issue #235.
+
+**Why**: the substitution lemma recurses into inner lambda bodies (mirroring Phase 2 lines 1929-1942). At inner `T_Lam_L1_*_Eff` cases, the body sub-derivation is typed at the lambda's declared `R_in_inner`, which is **type-level** (lives in `TFunEff T1 T2 R_in_inner R_out_inner`), not syntactic. `regions_introduced_by(e)` only collects `ERegion` subterms' first-argument names; `R_in_inner` is invisible to it.
+
+`tfuneff_lambda_retype_l1_m` (the retype lemma shipped in PR #224) requires `R' ⊆ R_in_v`. To retype the substituee at `R_in_inner` we'd need `R_in_inner ⊆ R_in_v`. Nothing in option (a) provides this.
+
+Phase 2's `subst_typing_gen_l1_m_ground_nonlinear` (the sibling lemma at lines 1812-2073) dodges this via `ground_nonlinear_retype_l1_m`, which is fully `(m, R, G)`-polymorphic. Phase 3b has no analogous escape hatch.
+
+**Three resolution options for owner**:
+
+1. **Strengthen the precondition to a type-level over-approximation**. Define a helper that walks `ELam T body` extracting `R_in` from `T` when `T = TFunEff _ _ R_in _`. **Blocker**: `ELam` syntax carries the *parameter* type, not the function type — `R_in` is determined by typing, not syntax. Without an annotation extension to `ELam`, this helper can't be defined as a syntactic Fixpoint.
+
+2. **Semantic precondition over the derivation**. Quantify over sub-derivations of `Htype`: `forall R'_in appearing in Htype, R'_in ⊆ R_in_v`. Clean meaning, awkward in Coq (inductive predicate over derivations or fixpoint indexed by depth).
+
+3. **Restrict scope — Phase 3b leaf-only**. Add an inductive predicate `lambda_free e` (or `tfuneff_lambda_free e`) and condition the lemma on it. Unblocks the **immediate** consumer (preservation_l2 β-case for TFunEff arguments whose ambient `ebody` uses ERegion but not nested function abstractions). Recursive case rides Phase 5's compound-value redesign.
+
+**Recommendation**: option (3) as the tactical landing for Phase 3b. The substantive Phase 5 redesign can subsume option (1) or (2) at its leisure.
+
+Phase 3b implementation **does not start** until owner picks a resolution.
+
+#### Phase 3b resolution (2026-05-30 PM, owner-approved) — 4-stage staged plan
+
+The three-option framing above is **superseded** by a staged plan that captures the value of each "Interesting" angle without committing to any single option's downsides. Filed as ephapax issues #239 (Stage 1) / #240 (Stage 2) / #241 (Stage 3) / #242 (Stage 4) under parent #235.
+
+| Stage | Scope | Captures value of |
+|---|---|---|
+| **Stage 1 — immediate (#239)** | Leaf-only Phase 3b via `tfuneff_lambda_free` + `Counterexample_L2_nested.v` + 2-condition `preservation_l2`. | Option (3) — principled deferral, honest 2-condition statement. |
+| **Stage 2 — parallel L4 track (#240)** | `ELam T_param R_in R_out body` annotation extension. AST + typing rule + cascading inversion patterns. | Option (1) — L4 alignment "type-level → program-level commitments". |
+| **Stage 3 — post-Stage-2 (#241)** | Relaxed Phase 3b via `declared_lambda_r_ins ⊆ R_in_v` + **CPS-form** v-typing argument. Nested-condition collapses. | Option (2) — higher-order proof style enters the codebase. |
+| **Stage 4 — Phase 5 (#242)** | Compound non-linear values + region-substitution machinery + **unconditional** `preservation_l2`. | The final destination — last soundness condition closes. |
+
+**Why staging captures all the value**:
+
+- **Stage 1's 2-condition statement is delivered correctness, not a placeholder.** Each condition has a mechanised counterexample (`Counterexample_L2.v` for the fresh-region gap, the new `Counterexample_L2_nested.v` for the nested-lambda gap).
+- **Stage 2 ships independently** of Phase 3b — it's L4's own work (program-level commitments) that Phase 3b free-rides on at Stage 3.
+- **Stage 3 introduces CPS proof style** at exactly the point where it's strictly necessary (relaxed Phase 3b's inner `T_Lam_L1_*_Eff` cases must retype v at arbitrary `R_in_inner`'s) — not over-engineered for Stage 1.
+- **Stage 4 inherits the CPS precedent** from Stage 3 and closes the last soundness condition. `preservation_l2` Qed over `has_type_l2`.
+
+**Why this beats single-option commitments**:
+
+- (1) alone forces the AST migration before unblocking preservation_l2's β-case.
+- (2) alone introduces an inductive-over-derivations predicate with no other use in the codebase.
+- (3) alone ends with a conditional preservation_l2 forever (no path to unconditional).
+
+The staged plan: (3) ships today's value, (1) lands L4's value at L4's timeline, (2)'s value is harvested at exactly the point CPS is necessary, (4) reaches unconditional preservation_l2 as the natural sum of (1) + (2) + (3) applied in sequence.
+
+**Sequencing**: Stage 1 implementation green-lit. Stages 2-4 tracked. Stage 3 blocked on Stage 2; Stage 4 blocked on Stage 3; Stage 2 independent of Stage 1.
+
 ### Phase 4: close `preservation_l2` β-case using Phases 1-3
 
 With the substitution machinery in place, the T_App_L2_Eff β-case in `preservation_l2` closes by:

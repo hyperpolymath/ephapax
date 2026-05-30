@@ -1308,6 +1308,79 @@ Proof.
     inversion Ht; subst; try discriminate Hgrd; reflexivity.
 Qed.
 
+(** TFunEff lambda retype lemma — Phase D slice 4 Phase 3 per
+    [formal/SUBST-LEMMA-GENERALIZATION-DESIGN.md].
+
+    A [TFunEff]-typed lambda value [ELam T0 e] is formed by either
+    [T_Lam_L1_Linear_Eff] or [T_Lam_L1_Affine_Eff] (per
+    [formal/TypingL1.v]). Both rules carry the side condition
+    [forall r, In r R -> In r R_in] at the formation env [R], and
+    type the body [e] at the BODY env [R_in] (which is part of the
+    function type [TFunEff T1 T2 R_in R_out]).
+
+    The body's typing is therefore INDEPENDENT of the outer formation
+    env [R]. Re-applying the formation rule at any [R'] satisfying the
+    rule's side condition [forall r, In r R' -> In r R_in] re-derives
+    the lambda's typing at [R'] — the body typing carries over
+    unchanged.
+
+    Contrast with [ground_nonlinear_retype_l1_m] (Phase 1), which
+    retypes EUnit / EBool / EI32 across ANY [R'] without a side
+    condition (those values have no R-dependent body).
+
+    Non-ELam value forms (EUnit, EBool, EI32, EPair, EInl, EInr, ELoc,
+    EBorrow, EEcho) do not type at [TFunEff …] (their typing rules
+    produce different type shapes). Inversion closes those cases via
+    [discriminate] on the type-equation residue.
+
+    For ELam at [TFunEff …], inversion of [Ht] yields one of four
+    [T_Lam_L1_*] constructors. The two non-Eff constructors
+    ([T_Lam_L1_Linear], [T_Lam_L1_Affine]) produce [TFun T1 T2]
+    (no R_in / R_out fields), so the type-equation residue
+    [TFun … = TFunEff …] discriminates. The two Eff constructors
+    fire constructively, with re-application supplying the new R'
+    and the supplied side condition [Hsub].
+
+    Note on modality monomorphism: unlike
+    [ground_nonlinear_retype_l1_m] (which is [m -> m']-polymorphic
+    via the modality-independence of ground constructors), this
+    lemma is [m]-monomorphic. A TFunEff lambda formed via
+    [T_Lam_L1_Linear_Eff] (mode Linear) cannot be directly re-derived
+    via [T_Lam_L1_Affine_Eff] (mode Affine) without lifting the body
+    typing across the [Linear -> Affine] modality bridge (which is
+    [linear_to_affine] in [TypingL2.v], but that operates on full
+    derivations not under retype). Phase 3 does not require cross-mode
+    retype — the Phase 4 [T_App_L2_Eff] β-case uses a single fixed [m]
+    throughout. Cross-modality TFunEff retype, if ever needed, would
+    layer [linear_to_affine] over this lemma.
+
+    Orthogonal to legacy [preservation] in [Semantics.v]: this lemma
+    adds NEW infrastructure constrained to the post-redesign
+    [has_type_l1] judgment carrying the modality parameter [m]. It
+    does not extend or patch [Semantics.v]. *)
+Lemma tfuneff_lambda_retype_l1_m :
+  forall (m : Modality) (R R' : region_env) (G : ctx) (v : expr)
+         (T1 T2 : ty) (R_in R_out : region_env),
+    is_value v ->
+    (forall r, In r R' -> In r R_in) ->
+    has_type_l1 m R G v (TFunEff T1 T2 R_in R_out) R G ->
+    has_type_l1 m R' G v (TFunEff T1 T2 R_in R_out) R' G.
+Proof.
+  intros m R R' G v T1 T2 R_in R_out Hval Hsub Ht.
+  destruct Hval as
+    [ | b | n
+    | T0 e0 | v1 v2 Hv1 Hv2
+    | T0 v0 Hv0 | T0 v0 Hv0
+    | l r
+    | v0 Hv0
+    | T0 v0 Hv0 ];
+    inversion Ht; subst; try discriminate.
+  - (* v = ELam T0 e0, T_Lam_L1_Linear_Eff *)
+    eapply T_Lam_L1_Linear_Eff; [exact Hsub | eassumption].
+  - (* v = ELam T0 e0, T_Lam_L1_Affine_Eff *)
+    eapply T_Lam_L1_Affine_Eff; [exact Hsub | eassumption].
+Qed.
+
 (** Narrower axiom (region-liveness at compound-rule split points).
 
     Given a well-typed sub-derivation [R; G |=L1 e1 : T1 -| R1; G']

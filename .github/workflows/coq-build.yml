@@ -18,19 +18,26 @@
 # results (preservation_l1 at L1; preservation_l2_via_l1 plus the two
 # β-case lemmas at L2) so any new `Admitted.` / `Axiom` slippage shows
 # up as a diff in the workflow output.
+#
+# **Why an aggregator gate?** The `coq-build` job is path-filtered: it
+# only does real work when `formal/**` or this workflow file changes.
+# But path-filtered workflows that don't trigger leave required status
+# checks "expected but not reported" — which would block unrelated PRs
+# from merging once this check is in the Base ruleset (#244). Solution:
+# a single `coq-build-gate` job that ALWAYS runs and aggregates. The
+# ruleset requires only the gate. The gate reports:
+#   - SUCCESS immediately if no formal-relevant paths changed.
+#   - SUCCESS if `coq-build` succeeded on a relevant change.
+#   - FAILURE if `coq-build` failed.
+#
+# Prior-art (same pattern): panic-attack#90.
 
 name: Coq Build (formal/)
 
 on:
   pull_request:
-    paths:
-      - 'formal/**'
-      - '.github/workflows/coq-build.yml'
   push:
     branches: [main]
-    paths:
-      - 'formal/**'
-      - '.github/workflows/coq-build.yml'
 
 permissions:
   contents: read
@@ -40,8 +47,42 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  detect-relevant-changes:
+    name: detect-relevant-changes
+    runs-on: ubuntu-latest
+    outputs:
+      relevant: ${{ steps.f.outputs.relevant }}
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+        with:
+          fetch-depth: 2
+      - id: f
+        name: Detect formal-relevant paths
+        run: |
+          set -euo pipefail
+          BASE="${{ github.event.pull_request.base.sha || github.event.before }}"
+          if [[ -z "$BASE" || "$BASE" == "0000000000000000000000000000000000000000" ]]; then
+            # First push or detached state — be safe and run the full gate.
+            echo "relevant=true" >> "$GITHUB_OUTPUT"
+            echo "detect: BASE missing/zero — treating as relevant"
+            exit 0
+          fi
+          git fetch origin "$BASE" --depth=1 2>/dev/null || true
+          CHANGED=$(git diff --name-only "$BASE" HEAD || true)
+          echo "Changed files:"
+          echo "$CHANGED"
+          if echo "$CHANGED" | grep -qE '^(formal/|\.github/workflows/coq-build\.yml$)'; then
+            echo "relevant=true" >> "$GITHUB_OUTPUT"
+            echo "detect: formal-relevant paths changed — running gate"
+          else
+            echo "relevant=false" >> "$GITHUB_OUTPUT"
+            echo "detect: no formal-relevant paths — gate skipped via if-guard"
+          fi
+
   coq-build:
     name: Coq build — formal/_CoqProject
+    needs: detect-relevant-changes
+    if: needs.detect-relevant-changes.outputs.relevant == 'true'
     runs-on: ubuntu-latest
     # coq:8.18 matches the toolchain pinned by formal/Justfile and the
     # local developer setup. Pin to a digest later once a stable
@@ -98,3 +139,40 @@ jobs:
           Print Assumptions preservation_l2_app_eff_beta_linear.
           Print Assumptions preservation_l2_app_eff_beta_ground_nonlinear.
           EOF
+
+  # Always-on aggregator. This is the ONLY job listed in the Base ruleset's
+  # required_status_checks rule (#244). If detect-relevant-changes determined
+  # nothing in this PR touches formal-relevant paths, the gate passes
+  # immediately (the underlying `coq-build` job skips via its `if:` guard).
+  # If a relevant change is present, the gate inspects `coq-build.result` and
+  # only passes when it returned `success`.
+  coq-build-gate:
+    name: coq-build-gate
+    needs: [detect-relevant-changes, coq-build]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Aggregate coq-build results
+        env:
+          RELEVANT: ${{ needs.detect-relevant-changes.outputs.relevant }}
+          R_DETECT: ${{ needs.detect-relevant-changes.result }}
+          R_BUILD: ${{ needs.coq-build.result }}
+        run: |
+          set -euo pipefail
+          echo "detect-relevant-changes.outputs.relevant=$RELEVANT"
+          echo "detect-relevant-changes.result=$R_DETECT"
+          echo "coq-build.result=$R_BUILD"
+          if [[ "$RELEVANT" != "true" ]]; then
+            echo "coq-build-gate: SKIP (no formal-relevant paths changed) → PASS"
+            exit 0
+          fi
+          # If detect itself failed, we never confirmed relevance — fail safe.
+          if [[ "$R_DETECT" != "success" ]]; then
+            echo "coq-build-gate: detect-relevant-changes did not succeed → FAIL"
+            exit 1
+          fi
+          if [[ "$R_BUILD" != "success" ]]; then
+            echo "coq-build-gate: coq-build did not succeed (got '$R_BUILD') → FAIL"
+            exit 1
+          fi
+          echo "coq-build-gate: coq-build green → PASS"

@@ -18,6 +18,60 @@ Ephapax is an early-development linear-type language implemented across
 IR, two-phase pipeline, Zig FFI, and conformance test suite are
 complete. Type checker and WASM code generation are in progress.
 
+== Four-layer redesign (2026-05-26 → )
+
+The verified preservation counterexample
+(`formal/Counterexample.v`, three `Qed` lemmas) closed the original
+preservation closure plan as unreachable in the legacy single-layer
+typing judgment. The new plan separates four orthogonal layers; each
+is implemented in sequence and preservation is *re-derived per
+layer* from explicit invariants.
+
+. *L1 — Region capability threading*
++
+- Restate the typing judgment to thread `R_in / R_out` (the
+  region-capability environment) through every compound rule.
+- Land in `formal/TypingL1.v` + `formal/Semantics_L1.v` against
+  `Counterexample.v` as a regression oracle.
+- Status: judgment landed, `m`-indexed post-L2-hybrid; 9 L1
+  supporting-lemma admits remain as L2-integration debt.
+
+. *L2 — Modality parameter*
++
+- Promote the per-type `is_linear_ty` predicate to a judgment
+  parameter `m : Modality`.
+- Mechanise `linear_to_affine : Linear ≤ Affine` as a single
+  induction.
+- Status: landed in-place via PRs #176 + #177; `linear_to_affine`
+  Qed with zero axioms.
+
+. *L3 — Echo residue*
++
+- `formal/Echo.v` mirrors `echo-types/proofs/agda/Echo.agda`. The
+  L3 calculus (modes, `LEcho`, `weaken`, `degrade_mode`) is
+  mechanised locally.
+- Next: introduce `TEcho ⟨op⟩` + the `T_Observe` rule into the
+  typing judgment; modify `S_Region_Exit` and `S_Drop` to produce
+  residue values.
+- Status: K-free scaffold landed via #166/#167/#173; typing-rule
+  integration is the next-block work.
+
+. *L4 — Mode declaration*
++
+- Project-level metadata (`Cargo.toml` or `ephapax.toml`). Type
+  checker reads the declaration and selects the L2 modality.
+- No proof obligations of its own — see `formal/L4-DYADIC.md`.
+- Status: mechanical scaffold landed in `formal/L4.v`
+  (`ProgramMode` + `program_mode_to_modality`); surface syntax
+  not yet wired into the parser.
+
+The previous *Preservation closure plan* section is **archived** —
+see `formal/PRESERVATION-HANDOFF.md` for the historical record. PRs
+#92 / #102 / #104 / #106 / #114 / #116 / #117 / #121 / #146 are
+pre-discovery; treat them as archaeology, not instructions.
+
+Canonical design source: `formal/PRESERVATION-DESIGN.md`.
+
 == Formal-proof status
 
 === Coq (`formal/`)

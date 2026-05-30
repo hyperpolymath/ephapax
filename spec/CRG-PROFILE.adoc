@@ -184,7 +184,9 @@ stated grades:
   the design doctrine at `formal/PRESERVATION-DESIGN.md`.
 * *Grade C tightening:* `ephapax-wasm` MUST have a published
   conformance report against the typed-wasm carrier ABI surface
-  (currently being drafted at typed-wasm#76).
+  (typed-wasm proposals 0001 + 0002 reached `[accepted]` 2026-05-30
+  and were promoted to typed-wasm ADR-0002 + ADR-0003; ephapax
+  conformance report is the downstream follow-up).
 * *Grade B tightening:* At least one workspace crate MUST be
   published to crates.io with a v1.0 release and external-consumer
   evidence.

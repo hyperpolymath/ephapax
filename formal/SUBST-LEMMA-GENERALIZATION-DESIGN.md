@@ -198,6 +198,21 @@ The staged plan: (3) ships today's value, (1) lands L4's value at L4's timeline,
 
 **Sequencing**: Stage 1 implementation green-lit. Stages 2-4 tracked. Stage 3 blocked on Stage 2; Stage 4 blocked on Stage 3; Stage 2 independent of Stage 1.
 
+#### Phase 3b Stage 1a (2026-05-30 PM, landed) — split from Stage 1
+
+Stage 1's deliverables split into two slices for shipping cadence:
+
+**Stage 1a (this PR, landed)** — Infrastructure + soundness-gap witness:
+- `tfuneff_lambda_free : expr -> bool` Fixpoint in `formal/Syntax.v`. Conservative leaf-only predicate: `false` on every `ELam`, `true` elsewhere; propagates compositionally through compound forms via `andb`.
+- `formal/Counterexample_L2_nested.v` — three `Qed` lemmas (`e_before_typed`, `e_step`, `e_after_untypable`) mechanising the nested-TFunEff soundness gap. Configuration: `outer = ELam T_v (ELam (TBase TUnit) (EVar 1))` with inner `R_in_inner = [r2]`; `v = ELam TUnit EUnit` at `TFunEff TUnit TUnit [] []`. Post-β `e_after = ELam TUnit v` cannot retype the body at `[r2] ⊄ [] = R_in_v`. Sibling artifact to `Counterexample_L2.v`: together the two files justify the **two-condition** preservation_l2 statement Stage 1 ships (P1 = `tfuneff_lambda_free ebody`, P2 = `regions_introduced_by ebody ⊆ R_in_v`).
+- Wired into `_CoqProject` after `Counterexample_L2.v`.
+- Zero new admits / axioms (Print Assumptions: all three lemmas Closed under the global context).
+
+**Stage 1b (follow-up issue, deferred)** — Substitution lemma + preservation wrapper:
+- `subst_typing_gen_l1_m_tfuneff` Qed in `formal/Semantics_L1.v` mirroring `subst_typing_gen_l1_m_ground_nonlinear` (~300 lines); inner `T_Lam_L1_*_Eff` cases exfalso via `tfuneff_lambda_free`; direct (P1, P2) hypothesis form.
+- `preservation_l2_app_eff_beta_tfuneff_l1` + L2 wrapper Qed in `formal/TypingL2.v`.
+- The structural blocker requiring deferral: the substitution lemma's compound rule cases (T_Let_L1, T_LetLin_L1, T_Case_L1_*) need to retype the substituent value `v` at a different G (post-e1 used-flag updates). Phase 2's analog uses `ground_nonlinear_retype_l1_m` (R-poly AND G-poly); Phase 3b's `tfuneff_lambda_retype_l1_m` preserves G. The Stage 1b machinery needs EITHER (a) a closed-value G-polymorphism helper (`closed_value_typing_G_poly_l1_m` — provable via inversion on T_Lam_L1_*_Eff formation rules but lengthy), OR (b) a G-flag-polymorphic retype variant. Either path is its own sub-deliverable.
+
 ### Phase 4: close `preservation_l2` β-case using Phases 1-3
 
 With the substitution machinery in place, the T_App_L2_Eff β-case in `preservation_l2` closes by:

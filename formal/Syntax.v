@@ -516,6 +516,43 @@ Fixpoint regions_introduced_by (e : expr) : list region_name :=
   | ERegion r e' => r :: regions_introduced_by e'
   end.
 
+(** Syntactic predicate: the expression contains no [ELam] subterm.
+
+    Used by Phase D slice 4 Phase 3b Stage 1's substitution lemma
+    [subst_typing_gen_l1_m_tfuneff] to exfalso-eliminate the inner
+    [T_Lam_L1_Linear_Eff] / [T_Lam_L1_Affine_Eff] cases. The principle
+    is "leaf-only": Stage 1's lemma only fires when the substituee
+    body has no inner lambdas, so the conditional [R_in_inner ⊆ R_in_v]
+    obligation that Stage 3 (CPS) and Stage 2 (annotated ELam) address
+    cannot arise.
+
+    A [TFunEff] lambda is, in the current AST, indistinguishable from
+    a [TFun] lambda at the [ELam] node (the type annotation slot carries
+    only the parameter type, not the function type). Hence the predicate
+    is conservatively false on EVERY [ELam], not only TFunEff-typed
+    ones. Stage 2 (#240) reshapes [ELam] to carry [R_in] / [R_out] and
+    refines this predicate to TFunEff-specific.
+
+    Refs [formal/SUBST-LEMMA-GENERALIZATION-DESIGN.md] Phase 3b Stage 1
+    and ephapax issue #239. *)
+Fixpoint tfuneff_lambda_free (e : expr) : bool :=
+  match e with
+  | EUnit | EBool _ | EI32 _ | EVar _
+  | EStringNew _ _ | ELoc _ _ => true
+  | EStringConcat e1 e2 | ELet e1 e2 | ELetLin e1 e2
+  | EApp e1 e2 | EPair e1 e2 =>
+      andb (tfuneff_lambda_free e1) (tfuneff_lambda_free e2)
+  | EStringLen e' | EFst e' | ESnd e'
+  | EBorrow e' | EDeref e' | EDrop e' | ECopy e' | EObserve e' =>
+      tfuneff_lambda_free e'
+  | EInl _ e' | EInr _ e' | EEcho _ e' | ERegion _ e' =>
+      tfuneff_lambda_free e'
+  | EIf e1 e2 e3 | ECase e1 e2 e3 =>
+      andb (andb (tfuneff_lambda_free e1) (tfuneff_lambda_free e2))
+           (tfuneff_lambda_free e3)
+  | ELam _ _ => false
+  end.
+
 (** Check if all linear variables in context have been used *)
 Fixpoint ctx_all_linear_used (G : ctx) : Prop :=
   match G with

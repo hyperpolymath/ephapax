@@ -491,3 +491,86 @@ Proof.
        into the Type-sorted has_type_l2 goal is allowed. *)
     exfalso. inversion Hval.
 Qed.
+
+(** Phase D slice 4 Phase 4b — preservation_l2 β-case closure for
+    ground-non-linear T1.
+
+    Mirrors [preservation_l2_app_eff_beta_linear] (PR #228) but uses
+    Phase 2's [Semantics_L1.subst_typing_gen_l1_m_ground_nonlinear]
+    for the L1 substitution step. Covers T1 ∈ { TBase TUnit,
+    TBase TBool, TBase TI32 } — ground values whose typing is
+    R-irrelevant and modality-polymorphic, so they bridge across the
+    Linear-only [|=L1] premise of the Phase 2 lemma via
+    [ground_nonlinear_retype_l1_m] (Phase 1).
+
+    Combined with PR #228's [preservation_l2_app_eff_beta_linear],
+    this closes the [T_App_L2_Eff] β-case for T1 ∈ { linear,
+    ground-non-linear }. Phase 4c (TFunEff T1) and Phase 4d
+    (compound non-linear) remain open — see issue #225 / Phase 5
+    respectively.
+
+    Refs [formal/SUBST-LEMMA-GENERALIZATION-DESIGN.md] Phase 4,
+    [PRESERVATION-DESIGN.md §5.1]. *)
+
+Lemma preservation_l2_app_eff_beta_ground_nonlinear_l1 :
+  forall m R R1 G G' G'' v2 T1 T2 R_in R_out ebody,
+    is_value v2 ->
+    is_ground_nonlinear_ty T1 = true ->
+    TypingL1.has_type_l1 m R  G  (ELam T1 ebody)
+                                 (TFunEff T1 T2 R_in R_out) R1 G' ->
+    TypingL1.has_type_l1 m R1 G' v2 T1 R_in G'' ->
+    TypingL1.has_type_l1 m R  G  (subst 0 v2 ebody) T2 R_out G''.
+Proof.
+  intros m R R1 G G' G'' v2 T1 T2 R_in R_out ebody Hval Hgrd Hlam Harg.
+  inversion Hlam; subst.
+  - (* T_Lam_L1_Linear_Eff: m = Linear; body at R_in / (T1,false)::G'' →
+       R_out / (T1,true)::G''. Harg : has_type_l1 Linear R G v2 T1 R G
+       (after value_R_G_preserving_l1). Matches Phase 2's [|=L1]
+       premise directly. *)
+    destruct (value_R_G_preserving_l1 _ _ _ _ _ _ _ Hval Harg) as [<- <-].
+    eapply subst_typing_gen_l1_m_ground_nonlinear with
+      (k := 0) (u_in := false)
+      (Gin := (T1, false) :: G'')
+      (Gout := (T1, true) :: G'').
+    + unfold ctx_extend in *. eassumption.
+    + reflexivity.
+    + exact Hval.
+    + exact Hgrd.
+    + exact Harg.
+    + reflexivity.
+  - (* T_Lam_L1_Affine_Eff: m = Affine; bridge Harg (Affine) to Linear
+       via [ground_nonlinear_retype_l1_m] (cross-modality at same R). *)
+    destruct (value_R_G_preserving_l1 _ _ _ _ _ _ _ Hval Harg) as [<- <-].
+    eapply subst_typing_gen_l1_m_ground_nonlinear with
+      (k := 0) (u_in := false)
+      (Gin := (T1, false) :: G'')
+      (Gout := (T1, _) :: G'').
+    + unfold ctx_extend in *. eassumption.
+    + reflexivity.
+    + exact Hval.
+    + exact Hgrd.
+    + eapply ground_nonlinear_retype_l1_m;
+        [exact Hval | exact Hgrd | exact Harg].
+    + reflexivity.
+Qed.
+
+Lemma preservation_l2_app_eff_beta_ground_nonlinear :
+  forall m R R1 G G' G'' v2 T1 T2 R_in R_out ebody,
+    is_value v2 ->
+    is_ground_nonlinear_ty T1 = true ->
+    has_type_l2 m R  G  (ELam T1 ebody)
+                        (TFunEff T1 T2 R_in R_out) R1 G' ->
+    has_type_l2 m R1 G' v2 T1 R_in G'' ->
+    has_type_l2 m R  G  (subst 0 v2 ebody) T2 R_out G''.
+Proof.
+  intros m R R1 G G' G'' v2 T1 T2 R_in R_out ebody Hval Hgrd Hlam Harg.
+  (* Lambda inversion: only [L2_lift_l1] survives ([T_App_L2_Eff]'s
+     expression is [EApp _ _], not [ELam _ _]). *)
+  inversion Hlam as [m0 R0 G0 e0 T0 R0' G0' Hlam_l1 | ]; subst.
+  (* Argument inversion: [v2] is a value, so the [T_App_L2_Eff] case
+     would force [v2 = EApp _ _], contradicting [Hval]. *)
+  inversion Harg as [m0' R0'' G0'' e0' T0' R0''' G0''' Harg_l1 | ]; subst.
+  - apply L2_lift_l1.
+    eapply preservation_l2_app_eff_beta_ground_nonlinear_l1; eassumption.
+  - exfalso. inversion Hval.
+Qed.

@@ -472,6 +472,22 @@ Definition is_ground_nonlinear_ty (T : ty) : bool :=
   | _ => false
   end.
 
+(** Check if a type is an effect-typed function type [TFunEff _ _ _ _].
+    Values at these types are TFunEff lambdas whose body is typed at a
+    fixed [R_in] (independent of the formation env [R]); a retype across
+    [R -> R'] is conditionally valid under the side condition
+    [forall r, In r R' -> In r R_in] (the same side condition the
+    [T_Lam_L1_*_Eff] formation rules require).
+
+    Introduced for [Semantics_L1.tfuneff_lambda_retype_l1_m] and the
+    Phase D slice 4 non-linear substitution-lemma generalisation
+    (formal/SUBST-LEMMA-GENERALIZATION-DESIGN.md Phase 3). *)
+Definition is_tfuneff_ty (T : ty) : bool :=
+  match T with
+  | TFunEff _ _ _ _ => true
+  | _ => false
+  end.
+
 (** Check if all linear variables in context have been used *)
 Fixpoint ctx_all_linear_used (G : ctx) : Prop :=
   match G with

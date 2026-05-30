@@ -114,7 +114,7 @@ impl EscapeAnalysis {
                 Self::analyze_expr(inner, escaping, in_escaping_context);
             }
 
-            ExprKind::Borrow(inner) => {
+            ExprKind::Borrow { inner, .. } => {
                 Self::analyze_expr(inner, escaping, in_escaping_context);
             }
 

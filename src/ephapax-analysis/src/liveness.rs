@@ -128,7 +128,7 @@ impl LivenessAnalysis {
 
             ExprKind::Drop(inner)
             | ExprKind::Copy(inner)
-            | ExprKind::Borrow(inner)
+            | ExprKind::Borrow { inner, .. }
             | ExprKind::Deref(inner)
             | ExprKind::Fst(inner)
             | ExprKind::Snd(inner)

@@ -701,7 +701,7 @@ fn format_ty(ty: &Ty) -> String {
         Ty::Ref { inner, .. } => format!("Ref({})", format_ty(inner)),
         Ty::String(region) => format!("String@{}", region),
         Ty::Region { name, inner } => format!("Region({}, {})", name, format_ty(inner)),
-        Ty::Borrow(inner) => format!("&{}", format_ty(inner)),
+        Ty::Borrow { inner, mutable } => format!("&{}{}", if *mutable { "mut " } else { "" }, format_ty(inner)),
         Ty::Var(name) => name.to_string(),
         Ty::ForAll { var, body } => format!("forall {}. {}", var, format_ty(body)),
         Ty::Unif(id) => format!("?{}", id),
@@ -847,7 +847,7 @@ fn find_let_binding_span(expr: &Expr, target: &str) -> Option<Span> {
         | ExprKind::Inr { value: inner, .. }
         | ExprKind::Drop(inner)
         | ExprKind::Copy(inner)
-        | ExprKind::Borrow(inner)
+        | ExprKind::Borrow { inner, .. }
         | ExprKind::Deref(inner)
         | ExprKind::UnaryOp { operand: inner, .. }
         | ExprKind::StringLen(inner) => find_let_binding_span(inner, target),

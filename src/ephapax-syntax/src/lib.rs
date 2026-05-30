@@ -83,8 +83,10 @@ pub enum Ty {
     /// Region-scoped type
     Region { name: RegionName, inner: Box<Ty> },
 
-    /// Second-class borrow &T
-    Borrow(Box<Ty>),
+    /// Second-class borrow `&T` (shared) or `&mut T` (exclusive).
+    /// `mutable: true` corresponds to `&mut T`; emitted as `ExclBorrow`
+    /// in `typedwasm.ownership` (L7 aliasing enforcement).
+    Borrow { inner: Box<Ty>, mutable: bool },
 
     /// Type variable (for polymorphism)
     Var(SmolStr),
@@ -135,7 +137,7 @@ impl Ty {
             Ty::Prod { left, right } | Ty::Sum { left, right } => {
                 left.references_region(region) || right.references_region(region)
             }
-            Ty::Borrow(inner) => inner.references_region(region),
+            Ty::Borrow { inner, .. } => inner.references_region(region),
             Ty::List(inner) => inner.references_region(region),
             Ty::Tuple(elements) => elements.iter().any(|t| t.references_region(region)),
             Ty::ForAll { body, .. } => body.references_region(region),
@@ -194,7 +196,10 @@ impl Ty {
                 name: name.clone(),
                 inner: Box::new(inner.subst_var(var, replacement)),
             },
-            Ty::Borrow(inner) => Ty::Borrow(Box::new(inner.subst_var(var, replacement))),
+            Ty::Borrow { inner, mutable } => Ty::Borrow {
+                inner: Box::new(inner.subst_var(var, replacement)),
+                mutable: *mutable,
+            },
             Ty::Effectful { param, ret, effects } => Ty::Effectful {
                 param: Box::new(param.subst_var(var, replacement)),
                 ret: Box::new(ret.subst_var(var, replacement)),
@@ -219,7 +224,7 @@ impl Ty {
             }
             Ty::Ref { inner, .. }
             | Ty::Region { inner, .. }
-            | Ty::Borrow(inner)
+            | Ty::Borrow { inner, .. }
             | Ty::List(inner)
             | Ty::ForAll { body: inner, .. } => inner.contains_unif(id),
             Ty::Effectful { param, ret, .. } => {
@@ -260,7 +265,10 @@ impl Ty {
                 name: name.clone(),
                 inner: Box::new(inner.resolve(solutions)),
             },
-            Ty::Borrow(inner) => Ty::Borrow(Box::new(inner.resolve(solutions))),
+            Ty::Borrow { inner, mutable } => Ty::Borrow {
+                inner: Box::new(inner.resolve(solutions)),
+                mutable: *mutable,
+            },
             Ty::ForAll { var, body } => Ty::ForAll {
                 var: var.clone(),
                 body: Box::new(body.resolve(solutions)),
@@ -505,8 +513,10 @@ pub enum ExprKind {
     Region { name: RegionName, body: Box<Expr> },
 
     // ===== Borrowing =====
-    /// Create borrow: &e
-    Borrow(Box<Expr>),
+    /// Create borrow: `&e` (shared) or `&mut e` (exclusive).
+    /// `mutable: true` requires an `&mut T` parameter type and produces
+    /// an `ExclBorrow` ownership classification at codegen.
+    Borrow { inner: Box<Expr>, mutable: bool },
 
     /// Dereference: *e
     Deref(Box<Expr>),

@@ -288,7 +288,7 @@ impl LinearChecker {
             }
 
             // --- Borrow/Deref: walk inner ---
-            ExprKind::Borrow(inner) | ExprKind::Deref(inner) => {
+            ExprKind::Borrow { inner, .. } | ExprKind::Deref(inner) => {
                 self.walk_expr(inner);
             }
 

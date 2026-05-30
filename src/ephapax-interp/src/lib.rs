@@ -213,7 +213,7 @@ impl Value {
                 param: Box::new(param_ty.clone()),
                 ret: Box::new(Ty::Base(BaseTy::Unit)), // Unknown without evaluation
             },
-            Value::Borrow(inner) => Ty::Borrow(Box::new(inner.to_type())),
+            Value::Borrow(inner) => Ty::Borrow { inner: Box::new(inner.to_type()), mutable: false },
         }
     }
 }
@@ -436,7 +436,7 @@ impl Interpreter {
                 else_branch,
             } => self.eval_if(cond, then_branch, else_branch),
             ExprKind::Region { name, body } => self.eval_region(name, body),
-            ExprKind::Borrow(inner) => self.eval_borrow(inner),
+            ExprKind::Borrow { inner, .. } => self.eval_borrow(inner),
             ExprKind::Deref(inner) => self.eval_deref(inner),
             ExprKind::Drop(inner) => self.eval_drop(inner),
             ExprKind::Copy(inner) => self.eval_copy(inner),

@@ -145,7 +145,9 @@ unit_ty = { "()" }
 
 string_ty = { "String" ~ ("@" ~ identifier)? }
 
-borrow_ty = { "&" ~ type_atom }
+borrow_ty = { "&" ~ mut_marker? ~ type_atom }
+
+mut_marker = @{ "mut" ~ !(ASCII_ALPHANUMERIC | "_") }
 
 list_ty = { "[" ~ ty ~ "]" }
 
@@ -402,7 +404,7 @@ expr_list = { expression ~ ("," ~ expression)* }
 inl_expr = { "inl" ~ "[" ~ ty ~ "]" ~ "(" ~ expression ~ ")" }
 inr_expr = { "inr" ~ "[" ~ ty ~ "]" ~ "(" ~ expression ~ ")" }
 
-borrow_expr = { "&" ~ unary_expr }
+borrow_expr = { "&" ~ mut_marker? ~ unary_expr }
 
 fst_expr = { "fst" ~ "(" ~ expression ~ ")" }
 snd_expr = { "snd" ~ "(" ~ expression ~ ")" }
@@ -451,7 +453,7 @@ keyword_boundary = {
     | "region" | "case" | "of" | "inl" | "inr" | "end"
     | "fst" | "snd" | "drop" | "copy" | "type" | "data" | "match"
     | "extern"
-    | "true" | "false" | "pub" | "import" | "module" | "linear"
+    | "true" | "false" | "pub" | "import" | "module" | "linear" | "mut"
     | "perform" | "handle" | "with" | "return" | "resume" | "once" | "multi"
     | "Bool" | "I32" | "I64" | "F32" | "F64" | "String"
     ) ~ !(ASCII_ALPHANUMERIC | "_")
@@ -462,7 +464,7 @@ keyword = {
     | "region" | "case" | "of" | "inl" | "inr" | "end"
     | "fst" | "snd" | "drop" | "copy" | "type" | "data" | "match"
     | "extern"
-    | "true" | "false" | "pub" | "import" | "module" | "linear"
+    | "true" | "false" | "pub" | "import" | "module" | "linear" | "mut"
     | "perform" | "handle" | "with" | "return" | "resume" | "once" | "multi"
     | "Bool" | "I32" | "I64" | "F32" | "F64" | "String"
 }

@@ -1308,6 +1308,496 @@ Proof.
     inversion Ht; subst; try discriminate Hgrd; reflexivity.
 Qed.
 
+(** ===== Phase 3b Stage 1b — closed-value G-polymorphism machinery =====
+
+    Phase 2's [ground_nonlinear_retype_l1_m] gives a fully (R, G)-poly
+    retype for ground non-linear values because such values contain no
+    de Bruijn indices — their typing is structurally independent of G.
+
+    Phase 3b's [tfuneff_lambda_retype_l1_m] (PR #224) handles TFunEff
+    lambda values but is R-polymorphic AND G-preserving (the body's
+    typing may legitimately reference outer G). This leaves a G-mismatch
+    gap when the substitution lemma's compound-rule cases need to retype
+    the substituent at a post-e1 G.
+
+    Resolution (path (i), elegance + correctness > workload): for
+    *closed* substituent values, G is genuinely irrelevant — the
+    lambda's body contains no free variables that reach into the outer
+    G beyond position 0 (the bound variable). The body-transfer lemma
+    below makes this structural fact mechanised; the closed-value
+    G-poly helper uses it via inversion on [T_Lam_L1_*_Eff].
+
+    Lemmas (in order):
+    - [closed_below_k_typing_outer_tail_irrelevant_l1_m] — the
+      body-transfer core: closed-below-k terms' typing depends only on
+      G's first k positions, with the outer tail entirely irrelevant.
+      Structural induction on the typing derivation; ~25 typing-rule
+      cases.
+    - [closed_value_typing_G_poly_l1_m] — the consumer-facing helper:
+      closed TFunEff values retype at ANY G (per "state what's
+      actually true").
+    - [closed_value_shift_id_l1_m] — companion: closed values' shift
+      is identity. Specializes [closed_below_shift_id] from Syntax.v
+      for the value-shaped callers in the subst lemma's binder
+      cases.
+
+    Refs [formal/SUBST-LEMMA-GENERALIZATION-DESIGN.md] Phase 3b
+    Stage 1b, ephapax issue #249. *)
+
+(** Body-transfer core: for terms closed below depth k, the typing
+    derivation depends only on the first k positions of the input
+    context. Splitting G as [G_head ++ G_tail] with [length G_head = k],
+    the tail is structurally irrelevant — the term re-types under any
+    [G_tail_new], producing an output of the same split shape with the
+    head transformed identically and the tail copied through. *)
+Lemma closed_below_k_typing_outer_tail_irrelevant_l1_m :
+  forall m R G e T R' G_out,
+    has_type_l1 m R G e T R' G_out ->
+    forall k G_head G_tail,
+      G = G_head ++ G_tail ->
+      length G_head = k ->
+      expr_closed_below k e = true ->
+      exists G_head_out,
+        G_out = G_head_out ++ G_tail /\
+        length G_head_out = k /\
+        forall G_tail_new,
+          has_type_l1 m R (G_head ++ G_tail_new) e T R' (G_head_out ++ G_tail_new).
+Proof.
+  intros m R G e T R' G_out Htype.
+  induction Htype; intros k G_head G_tail Hsplit Hlen Hc; subst G.
+
+  - (* T_Unit_L1 *)
+    exists G_head. split; [reflexivity | split; [exact Hlen | intros; constructor]].
+
+  - (* T_Bool_L1 *)
+    exists G_head. split; [reflexivity | split; [exact Hlen | intros; constructor]].
+
+  - (* T_I32_L1 *)
+    exists G_head. split; [reflexivity | split; [exact Hlen | intros; constructor]].
+
+  - (* T_Var_Lin_L1: ctx_lookup G i = Some (T, false), output ctx_mark_used G i. *)
+    simpl in Hc. apply Nat.ltb_lt in Hc. rewrite <- Hlen in Hc.
+    exists (ctx_mark_used G_head i). split; [|split].
+    + apply ctx_mark_used_app_lt. lia.
+    + rewrite ctx_mark_used_length. exact Hlen.
+    + intros G_tail_new.
+      rewrite <- (ctx_mark_used_app_lt G_head G_tail_new i ltac:(lia)).
+      eapply T_Var_Lin_L1; [|exact H0].
+      unfold ctx_lookup in *.
+      rewrite nth_error_app1 by lia.
+      rewrite nth_error_app1 in H by lia.
+      exact H.
+
+  - (* T_Var_Unr_L1: G unchanged. *)
+    simpl in Hc. apply Nat.ltb_lt in Hc.
+    exists G_head. split; [reflexivity | split; [solve [exact Hlen | exact Hlen_h | exact Hlen_mid | exact Hlen_out | exact Hlen' | simpl in *; lia] |]].
+    intros G_tail_new.
+    eapply T_Var_Unr_L1; [|exact H0].
+    unfold ctx_lookup in *.
+    rewrite nth_error_app1 by lia.
+    rewrite nth_error_app1 in H by lia.
+    exact H.
+
+  - (* T_Loc_L1: G unchanged, no var ref. *)
+    exists G_head. split; [reflexivity | split; [solve [exact Hlen | exact Hlen_h | exact Hlen_mid | exact Hlen_out | exact Hlen' | simpl in *; lia] |]].
+    intros. eapply T_Loc_L1. exact H.
+
+  - (* T_StringNew_L1 *)
+    exists G_head. split; [reflexivity | split; [solve [exact Hlen | exact Hlen_h | exact Hlen_mid | exact Hlen_out | exact Hlen' | simpl in *; lia] |]].
+    intros. eapply T_StringNew_L1. exact H.
+
+  - (* T_StringConcat_L1: e1 then e2, both at depth k. *)
+    simpl in Hc. apply andb_prop in Hc as [H1 H2].
+    destruct (IHHtype1 k G_head G_tail eq_refl Hlen H1) as [G_mid_h [-> [Hlen_mid IH1]]].
+    destruct (IHHtype2 k G_mid_h G_tail eq_refl Hlen_mid H2) as [G_out_h [-> [Hlen_out IH2]]].
+    exists G_out_h. split; [reflexivity | split; [solve [exact Hlen | exact Hlen_h | exact Hlen_mid | exact Hlen_out | exact Hlen' | simpl in *; lia] |]].
+    intros G_tail_new.
+    eapply T_StringConcat_L1.
+    + apply IH1.
+    + apply IH2.
+
+  - (* T_StringLen_L1: single sub-derivation on EBorrow e. *)
+    simpl in Hc.
+    assert (Hbe : expr_closed_below k (EBorrow e) = true) by exact Hc.
+    destruct (IHHtype k G_head G_tail eq_refl Hlen Hbe) as [G_h [-> [Hlen_h IH1]]].
+    exists G_h. split; [reflexivity | split; [solve [exact Hlen | exact Hlen_h | exact Hlen_mid | exact Hlen_out | exact Hlen' | simpl in *; lia] |]].
+    intros G_tail_new. eapply T_StringLen_L1. apply IH1.
+
+  - (* T_Let_L1: e1 at depth k, e2 at depth S k (binder). *)
+    simpl in Hc. apply andb_prop in Hc as [H1 H2].
+    destruct (IHHtype1 k G_head G_tail eq_refl Hlen H1) as [G_mid_h [-> [Hlen_mid IH1]]].
+    assert (Hsplit2 : ctx_extend (G_mid_h ++ G_tail) T1 = ((T1, false) :: G_mid_h) ++ G_tail).
+    { unfold ctx_extend. reflexivity. }
+    assert (Hlen2 : length ((T1, false) :: G_mid_h) = S k) by (simpl; lia).
+    destruct (IHHtype2 (S k) ((T1, false) :: G_mid_h) G_tail Hsplit2 Hlen2 H2)
+      as [G_e2h [Heq2 [Hlen_e2 IH2]]].
+    (* G_e2h has length S k and prepended at the conclusion equals (T1, true) :: G''.
+       So G_e2h = (T1, true) :: tail of G_e2h. *)
+    destruct G_e2h as [|[T1' u_e2] G_e2h_tl]; [simpl in Hlen_e2; lia|].
+    simpl in Heq2. inversion Heq2; subst.
+    exists G_e2h_tl. split; [reflexivity | split; [solve [exact Hlen | exact Hlen_h | exact Hlen_mid | exact Hlen_out | exact Hlen' | simpl in *; lia] |]].
+    intros G_tail_new.
+    eapply T_Let_L1; [apply IH1 | unfold ctx_extend; apply (IH2 G_tail_new)].
+
+  - (* T_LetLin_L1: same shape as T_Let_L1 + is_linear_ty T1 = true. *)
+    simpl in Hc. apply andb_prop in Hc as [H1 H2].
+    destruct (IHHtype1 k G_head G_tail eq_refl Hlen H1) as [G_mid_h [-> [Hlen_mid IH1]]].
+    assert (Hsplit2 : ctx_extend (G_mid_h ++ G_tail) T1 = ((T1, false) :: G_mid_h) ++ G_tail).
+    { unfold ctx_extend. reflexivity. }
+    assert (Hlen2 : length ((T1, false) :: G_mid_h) = S k) by (simpl; lia).
+    destruct (IHHtype2 (S k) ((T1, false) :: G_mid_h) G_tail Hsplit2 Hlen2 H2)
+      as [G_e2h [Heq2 [Hlen_e2 IH2]]].
+    destruct G_e2h as [|[T1' u_e2] G_e2h_tl]; [simpl in Hlen_e2; lia|].
+    simpl in Heq2. inversion Heq2; subst.
+    exists G_e2h_tl. split; [reflexivity | split; [solve [exact Hlen | exact Hlen_h | exact Hlen_mid | exact Hlen_out | exact Hlen' | simpl in *; lia] |]].
+    intros G_tail_new.
+    eapply T_LetLin_L1; [exact H | apply IH1 | unfold ctx_extend; apply (IH2 G_tail_new)].
+
+  - (* T_Lam_L1_Linear: body at S k, conclusion preserves outer G. *)
+    simpl in Hc.
+    assert (Hsplit_b : ctx_extend (G_head ++ G_tail) T1 = ((T1, false) :: G_head) ++ G_tail).
+    { unfold ctx_extend. reflexivity. }
+    assert (Hlen_b : length ((T1, false) :: G_head) = S k) by (simpl; lia).
+    destruct (IHHtype (S k) ((T1, false) :: G_head) G_tail Hsplit_b Hlen_b Hc)
+      as [G_bh [Heq_b [Hlen_bh IH_b]]].
+    destruct G_bh as [|[T1' u_b] G_bh_tl]; [simpl in Hlen_bh; lia|].
+    simpl in Heq_b.
+    injection Heq_b as Heq_T Heq_u Heq_tail.
+    apply app_inv_tail in Heq_tail. subst T1' u_b G_bh_tl.
+    exists G_head. split; [reflexivity | split; [exact Hlen |]].
+    intros G_tail_new.
+    eapply T_Lam_L1_Linear. unfold ctx_extend. apply IH_b.
+
+  - (* T_Lam_L1_Affine: same as Linear with flexible u. *)
+    simpl in Hc.
+    assert (Hsplit_b : ctx_extend (G_head ++ G_tail) T1 = ((T1, false) :: G_head) ++ G_tail).
+    { unfold ctx_extend. reflexivity. }
+    assert (Hlen_b : length ((T1, false) :: G_head) = S k) by (simpl; lia).
+    destruct (IHHtype (S k) ((T1, false) :: G_head) G_tail Hsplit_b Hlen_b Hc)
+      as [G_bh [Heq_b [Hlen_bh IH_b]]].
+    destruct G_bh as [|[T1' u_b] G_bh_tl]; [simpl in Hlen_bh; lia|].
+    simpl in Heq_b.
+    injection Heq_b as Heq_T Heq_u Heq_tail.
+    apply app_inv_tail in Heq_tail. subst T1' u_b G_bh_tl.
+    exists G_head. split; [reflexivity | split; [exact Hlen |]].
+    intros G_tail_new.
+    eapply T_Lam_L1_Affine. unfold ctx_extend. apply IH_b.
+
+  - (* T_Lam_L1_Linear_Eff: body at R_in / S k, side condition forall r in R, r in R_in. *)
+    simpl in Hc.
+    assert (Hsplit_b : ctx_extend (G_head ++ G_tail) T1 = ((T1, false) :: G_head) ++ G_tail).
+    { unfold ctx_extend. reflexivity. }
+    assert (Hlen_b : length ((T1, false) :: G_head) = S k) by (simpl; lia).
+    destruct (IHHtype (S k) ((T1, false) :: G_head) G_tail Hsplit_b Hlen_b Hc)
+      as [G_bh [Heq_b [Hlen_bh IH_b]]].
+    destruct G_bh as [|[T1' u_b] G_bh_tl]; [simpl in Hlen_bh; lia|].
+    simpl in Heq_b.
+    injection Heq_b as Heq_T Heq_u Heq_tail.
+    apply app_inv_tail in Heq_tail. subst T1' u_b G_bh_tl.
+    exists G_head. split; [reflexivity | split; [exact Hlen |]].
+    intros G_tail_new.
+    eapply T_Lam_L1_Linear_Eff; [exact H | unfold ctx_extend; apply IH_b].
+
+  - (* T_Lam_L1_Affine_Eff: same as Linear_Eff with flexible u. *)
+    simpl in Hc.
+    assert (Hsplit_b : ctx_extend (G_head ++ G_tail) T1 = ((T1, false) :: G_head) ++ G_tail).
+    { unfold ctx_extend. reflexivity. }
+    assert (Hlen_b : length ((T1, false) :: G_head) = S k) by (simpl; lia).
+    destruct (IHHtype (S k) ((T1, false) :: G_head) G_tail Hsplit_b Hlen_b Hc)
+      as [G_bh [Heq_b [Hlen_bh IH_b]]].
+    destruct G_bh as [|[T1' u_b] G_bh_tl]; [simpl in Hlen_bh; lia|].
+    simpl in Heq_b.
+    injection Heq_b as Heq_T Heq_u Heq_tail.
+    apply app_inv_tail in Heq_tail. subst T1' u_b G_bh_tl.
+    exists G_head. split; [reflexivity | split; [exact Hlen |]].
+    intros G_tail_new.
+    eapply T_Lam_L1_Affine_Eff; [exact H | unfold ctx_extend; apply IH_b].
+
+  - (* T_App_L1: two sub-derivations e1, e2 at depth k. *)
+    simpl in Hc. apply andb_prop in Hc as [H1 H2].
+    destruct (IHHtype1 k G_head G_tail eq_refl Hlen H1) as [G_mid_h [-> [Hlen_mid IH1]]].
+    destruct (IHHtype2 k G_mid_h G_tail eq_refl Hlen_mid H2) as [G_out_h [-> [Hlen_out IH2]]].
+    exists G_out_h. split; [reflexivity | split; [solve [exact Hlen | exact Hlen_h | exact Hlen_mid | exact Hlen_out | exact Hlen' | simpl in *; lia] |]].
+    intros G_tail_new.
+    eapply T_App_L1; [apply IH1 | apply IH2].
+
+  - (* T_Pair_L1 *)
+    simpl in Hc. apply andb_prop in Hc as [H1 H2].
+    destruct (IHHtype1 k G_head G_tail eq_refl Hlen H1) as [G_mid_h [-> [Hlen_mid IH1]]].
+    destruct (IHHtype2 k G_mid_h G_tail eq_refl Hlen_mid H2) as [G_out_h [-> [Hlen_out IH2]]].
+    exists G_out_h. split; [reflexivity | split; [solve [exact Hlen | exact Hlen_h | exact Hlen_mid | exact Hlen_out | exact Hlen' | simpl in *; lia] |]].
+    intros G_tail_new.
+    eapply T_Pair_L1; [apply IH1 | apply IH2].
+
+  - (* T_Fst_L1 *)
+    simpl in Hc.
+    destruct (IHHtype k G_head G_tail eq_refl Hlen Hc) as [G_h [-> [Hlen_h IH1]]].
+    exists G_h. split; [reflexivity | split; [solve [exact Hlen | exact Hlen_h | exact Hlen_mid | exact Hlen_out | exact Hlen' | simpl in *; lia] |]].
+    intros G_tail_new. eapply T_Fst_L1; [apply IH1 | exact H].
+
+  - (* T_Snd_L1 *)
+    simpl in Hc.
+    destruct (IHHtype k G_head G_tail eq_refl Hlen Hc) as [G_h [-> [Hlen_h IH1]]].
+    exists G_h. split; [reflexivity | split; [solve [exact Hlen | exact Hlen_h | exact Hlen_mid | exact Hlen_out | exact Hlen' | simpl in *; lia] |]].
+    intros G_tail_new. eapply T_Snd_L1; [apply IH1 | exact H].
+
+  - (* T_Inl_L1 *)
+    simpl in Hc.
+    destruct (IHHtype k G_head G_tail eq_refl Hlen Hc) as [G_h [-> [Hlen_h IH1]]].
+    exists G_h. split; [reflexivity | split; [solve [exact Hlen | exact Hlen_h | exact Hlen_mid | exact Hlen_out | exact Hlen' | simpl in *; lia] |]].
+    intros G_tail_new. eapply T_Inl_L1. apply IH1.
+
+  - (* T_Inr_L1 *)
+    simpl in Hc.
+    destruct (IHHtype k G_head G_tail eq_refl Hlen Hc) as [G_h [-> [Hlen_h IH1]]].
+    exists G_h. split; [reflexivity | split; [solve [exact Hlen | exact Hlen_h | exact Hlen_mid | exact Hlen_out | exact Hlen' | simpl in *; lia] |]].
+    intros G_tail_new. eapply T_Inr_L1. apply IH1.
+
+  - (* T_Case_L1_Linear: scrutinee at k, both branches at S k, must agree on G_final. *)
+    simpl in Hc. apply andb_prop in Hc as [Hc01 Hc2].
+    apply andb_prop in Hc01 as [Hc0 Hc1].
+    destruct (IHHtype1 k G_head G_tail eq_refl Hlen Hc0) as [G'h [-> [Hlen' IH0]]].
+    assert (Hsplit_e1 : ctx_extend (G'h ++ G_tail) T1 = ((T1, false) :: G'h) ++ G_tail).
+    { unfold ctx_extend. reflexivity. }
+    assert (Hsplit_e2 : ctx_extend (G'h ++ G_tail) T2 = ((T2, false) :: G'h) ++ G_tail).
+    { unfold ctx_extend. reflexivity. }
+    assert (Hlen_e : length ((T1, false) :: G'h) = S k) by (simpl; lia).
+    assert (Hlen_e2 : length ((T2, false) :: G'h) = S k) by (simpl; lia).
+    destruct (IHHtype2 (S k) ((T1, false) :: G'h) G_tail Hsplit_e1 Hlen_e Hc1)
+      as [G_e1h [Heq_e1 [Hlen_e1h IH1]]].
+    destruct (IHHtype3 (S k) ((T2, false) :: G'h) G_tail Hsplit_e2 Hlen_e2 Hc2)
+      as [G_e2h [Heq_e2 [Hlen_e2h IH2]]].
+    destruct G_e1h as [|[T1' u1] G_e1h_tl]; [simpl in Hlen_e1h; lia|].
+    destruct G_e2h as [|[T2' u2] G_e2h_tl]; [simpl in Hlen_e2h; lia|].
+    simpl in Heq_e1, Heq_e2.
+    injection Heq_e1 as Heq_T1 Heq_u1 Heq_final1.
+    injection Heq_e2 as Heq_T2 Heq_u2 Heq_final2.
+    subst T1' u1 T2' u2.
+    (* Both branches forced G_final_outer = G_e1h_tl ++ G_tail = G_e2h_tl ++ G_tail.
+       By app injectivity on equal-length tails, G_e1h_tl = G_e2h_tl. *)
+    assert (Hlen_inner_eq : length G_e1h_tl = length G_e2h_tl)
+      by (simpl in Hlen_e1h, Hlen_e2h; lia).
+    pose proof (app_inv_tail _ G_e1h_tl G_e2h_tl
+      (eq_trans (eq_sym Heq_final1) Heq_final2)) as Heq_tl.
+    subst G_e2h_tl. rewrite Heq_final1.
+    exists G_e1h_tl. split; [reflexivity | split; [solve [exact Hlen | exact Hlen_h | exact Hlen_mid | exact Hlen_out | exact Hlen' | simpl in *; lia] |]].
+    intros G_tail_new.
+      eapply T_Case_L1_Linear.
+      * apply (IH0 G_tail_new).
+      * unfold ctx_extend. apply (IH1 G_tail_new).
+      * unfold ctx_extend. apply (IH2 G_tail_new).
+
+  - (* T_Case_L1_Affine: same structure with flexible u1, u2. *)
+    simpl in Hc. apply andb_prop in Hc as [Hc01 Hc2].
+    apply andb_prop in Hc01 as [Hc0 Hc1].
+    destruct (IHHtype1 k G_head G_tail eq_refl Hlen Hc0) as [G'h [-> [Hlen' IH0]]].
+    assert (Hsplit_e1 : ctx_extend (G'h ++ G_tail) T1 = ((T1, false) :: G'h) ++ G_tail).
+    { unfold ctx_extend. reflexivity. }
+    assert (Hsplit_e2 : ctx_extend (G'h ++ G_tail) T2 = ((T2, false) :: G'h) ++ G_tail).
+    { unfold ctx_extend. reflexivity. }
+    assert (Hlen_e : length ((T1, false) :: G'h) = S k) by (simpl; lia).
+    assert (Hlen_e2 : length ((T2, false) :: G'h) = S k) by (simpl; lia).
+    destruct (IHHtype2 (S k) ((T1, false) :: G'h) G_tail Hsplit_e1 Hlen_e Hc1)
+      as [G_e1h [Heq_e1 [Hlen_e1h IH1]]].
+    destruct (IHHtype3 (S k) ((T2, false) :: G'h) G_tail Hsplit_e2 Hlen_e2 Hc2)
+      as [G_e2h [Heq_e2 [Hlen_e2h IH2]]].
+    destruct G_e1h as [|[T1' u1'] G_e1h_tl]; [simpl in Hlen_e1h; lia|].
+    destruct G_e2h as [|[T2' u2'] G_e2h_tl]; [simpl in Hlen_e2h; lia|].
+    simpl in Heq_e1, Heq_e2.
+    injection Heq_e1 as Heq_T1 Heq_u1 Heq_final1.
+    injection Heq_e2 as Heq_T2 Heq_u2 Heq_final2.
+    subst T1' u1' T2' u2'.
+    assert (Hlen_inner_eq : length G_e1h_tl = length G_e2h_tl)
+      by (simpl in Hlen_e1h, Hlen_e2h; lia).
+    pose proof (app_inv_tail _ G_e1h_tl G_e2h_tl
+      (eq_trans (eq_sym Heq_final1) Heq_final2)) as Heq_tl.
+    subst G_e2h_tl. rewrite Heq_final1.
+    exists G_e1h_tl. split; [reflexivity | split; [solve [exact Hlen | exact Hlen_h | exact Hlen_mid | exact Hlen_out | exact Hlen' | simpl in *; lia] |]].
+    intros G_tail_new.
+      eapply T_Case_L1_Affine.
+      * apply (IH0 G_tail_new).
+      * unfold ctx_extend. apply (IH1 G_tail_new).
+      * unfold ctx_extend. apply (IH2 G_tail_new).
+
+  - (* T_If_L1_Linear: e1, e2, e3 all at depth k (no binders). *)
+    simpl in Hc. apply andb_prop in Hc as [Hc12 Hc3].
+    apply andb_prop in Hc12 as [Hc1 Hc2].
+    destruct (IHHtype1 k G_head G_tail eq_refl Hlen Hc1) as [G_mid_h [-> [Hlen_mid IH1]]].
+    destruct (IHHtype2 k G_mid_h G_tail eq_refl Hlen_mid Hc2) as [G_out_h [-> [Hlen_out IH2]]].
+    destruct (IHHtype3 k G_mid_h G_tail eq_refl Hlen_mid Hc3)
+      as [G_out_h3 [Heq3 [Hlen_out3 IH3]]].
+    assert (Hlen_eq : length G_out_h = length G_out_h3) by lia.
+    pose proof (app_inv_tail _ G_out_h G_out_h3 Heq3) as Heq_h.
+    subst G_out_h3.
+    exists G_out_h. split; [reflexivity | split; [solve [exact Hlen | exact Hlen_h | exact Hlen_mid | exact Hlen_out | exact Hlen' | simpl in *; lia] |]].
+    intros G_tail_new.
+    eapply T_If_L1_Linear; [apply IH1 | apply IH2 | apply IH3].
+
+  - (* T_If_L1_Affine *)
+    simpl in Hc. apply andb_prop in Hc as [Hc12 Hc3].
+    apply andb_prop in Hc12 as [Hc1 Hc2].
+    destruct (IHHtype1 k G_head G_tail eq_refl Hlen Hc1) as [G_mid_h [-> [Hlen_mid IH1]]].
+    destruct (IHHtype2 k G_mid_h G_tail eq_refl Hlen_mid Hc2) as [G_out_h [-> [Hlen_out IH2]]].
+    destruct (IHHtype3 k G_mid_h G_tail eq_refl Hlen_mid Hc3)
+      as [G_out_h3 [Heq3 [Hlen_out3 IH3]]].
+    assert (Hlen_eq : length G_out_h = length G_out_h3) by lia.
+    pose proof (app_inv_tail _ G_out_h G_out_h3 Heq3) as Heq_h.
+    subst G_out_h3.
+    exists G_out_h. split; [reflexivity | split; [solve [exact Hlen | exact Hlen_h | exact Hlen_mid | exact Hlen_out | exact Hlen' | simpl in *; lia] |]].
+    intros G_tail_new.
+    eapply T_If_L1_Affine; [apply IH1 | apply IH2 | apply IH3].
+
+  - (* T_Region_L1: body at r::R / G, side conditions ~In r R / ~In r free_regions T / In r R_body. *)
+    simpl in Hc.
+    destruct (IHHtype k G_head G_tail eq_refl Hlen Hc) as [G_h [-> [Hlen_h IH1]]].
+    exists G_h. split; [reflexivity | split; [solve [exact Hlen | exact Hlen_h | exact Hlen_mid | exact Hlen_out | exact Hlen' | simpl in *; lia] |]].
+    intros G_tail_new. eapply T_Region_L1; eauto.
+
+  - (* T_Region_Active_L1 *)
+    simpl in Hc.
+    destruct (IHHtype k G_head G_tail eq_refl Hlen Hc) as [G_h [-> [Hlen_h IH1]]].
+    exists G_h. split; [reflexivity | split; [solve [exact Hlen | exact Hlen_h | exact Hlen_mid | exact Hlen_out | exact Hlen' | simpl in *; lia] |]].
+    intros G_tail_new. eapply T_Region_Active_L1; eauto.
+
+  - (* T_Region_L1_Echo *)
+    simpl in Hc.
+    destruct (IHHtype k G_head G_tail eq_refl Hlen Hc) as [G_h [-> [Hlen_h IH1]]].
+    exists G_h. split; [reflexivity | split; [solve [exact Hlen | exact Hlen_h | exact Hlen_mid | exact Hlen_out | exact Hlen' | simpl in *; lia] |]].
+    intros G_tail_new. eapply T_Region_L1_Echo; eauto.
+
+  - (* T_Region_Active_L1_Echo *)
+    simpl in Hc.
+    destruct (IHHtype k G_head G_tail eq_refl Hlen Hc) as [G_h [-> [Hlen_h IH1]]].
+    exists G_h. split; [reflexivity | split; [solve [exact Hlen | exact Hlen_h | exact Hlen_mid | exact Hlen_out | exact Hlen' | simpl in *; lia] |]].
+    intros G_tail_new. eapply T_Region_Active_L1_Echo; eauto.
+
+  - (* T_Borrow_L1: EBorrow (EVar i), G unchanged. *)
+    simpl in Hc. apply Nat.ltb_lt in Hc.
+    exists G_head. split; [reflexivity | split; [solve [exact Hlen | exact Hlen_h | exact Hlen_mid | exact Hlen_out | exact Hlen' | simpl in *; lia] |]].
+    intros G_tail_new.
+    eapply T_Borrow_L1.
+    unfold ctx_lookup in *.
+    rewrite nth_error_app1 by lia.
+    rewrite nth_error_app1 in H by lia.
+    exact H.
+
+  - (* T_Borrow_Val_L1: v value, G unchanged. IH gives v at G — G unchanged means G_h = G_head. *)
+    simpl in Hc.
+    destruct (IHHtype k G_head G_tail eq_refl Hlen Hc) as [G_h [Heq_h [Hlen_h IH1]]].
+    (* The rule's input = output = G_head ++ G_tail. So G_h ++ G_tail = G_head ++ G_tail. *)
+    pose proof (app_inv_tail _ G_h G_head (eq_sym Heq_h)) as ->.
+    exists G_head. split; [reflexivity | split; [solve [exact Hlen | exact Hlen_h | exact Hlen_mid | exact Hlen_out | exact Hlen' | simpl in *; lia] |]].
+    intros G_tail_new.
+    eapply T_Borrow_Val_L1; [exact H | apply IH1].
+
+  - (* T_Drop_L1 *)
+    simpl in Hc.
+    destruct (IHHtype k G_head G_tail eq_refl Hlen Hc) as [G_h [-> [Hlen_h IH1]]].
+    exists G_h. split; [reflexivity | split; [solve [exact Hlen | exact Hlen_h | exact Hlen_mid | exact Hlen_out | exact Hlen' | simpl in *; lia] |]].
+    intros G_tail_new. eapply T_Drop_L1; [exact H | apply IH1].
+
+  - (* T_Drop_L1_Echo *)
+    simpl in Hc.
+    destruct (IHHtype k G_head G_tail eq_refl Hlen Hc) as [G_h [-> [Hlen_h IH1]]].
+    exists G_h. split; [reflexivity | split; [solve [exact Hlen | exact Hlen_h | exact Hlen_mid | exact Hlen_out | exact Hlen' | simpl in *; lia] |]].
+    intros G_tail_new. eapply T_Drop_L1_Echo; [exact H | apply IH1].
+
+  - (* T_Copy_L1 *)
+    simpl in Hc.
+    destruct (IHHtype k G_head G_tail eq_refl Hlen Hc) as [G_h [-> [Hlen_h IH1]]].
+    exists G_h. split; [reflexivity | split; [solve [exact Hlen | exact Hlen_h | exact Hlen_mid | exact Hlen_out | exact Hlen' | simpl in *; lia] |]].
+    intros G_tail_new. eapply T_Copy_L1; [exact H | apply IH1].
+
+  - (* T_Echo_L1: v value, G unchanged. *)
+    simpl in Hc.
+    destruct (IHHtype k G_head G_tail eq_refl Hlen Hc) as [G_h [Heq_h [Hlen_h IH1]]].
+    pose proof (app_inv_tail _ G_h G_head (eq_sym Heq_h)) as ->.
+    exists G_head. split; [reflexivity | split; [solve [exact Hlen | exact Hlen_h | exact Hlen_mid | exact Hlen_out | exact Hlen' | simpl in *; lia] |]].
+    intros G_tail_new.
+    eapply T_Echo_L1; [exact H | apply IH1].
+
+  - (* T_Observe_L1 *)
+    simpl in Hc.
+    destruct (IHHtype k G_head G_tail eq_refl Hlen Hc) as [G_h [-> [Hlen_h IH1]]].
+    exists G_h. split; [reflexivity | split; [solve [exact Hlen | exact Hlen_h | exact Hlen_mid | exact Hlen_out | exact Hlen' | simpl in *; lia] |]].
+    intros G_tail_new. eapply T_Observe_L1; apply IH1.
+Qed.
+
+(** Closed TFunEff lambda values type at ANY G — for closed values, G
+    is genuinely irrelevant (not "G of matching length / matching
+    types" — actually irrelevant).
+
+    Used by Phase 3b Stage 1b's substitution lemma's compound-rule
+    cases (T_Let_L1, T_LetLin_L1, T_StringConcat_L1, T_App_L1,
+    T_Pair_L1, T_Case_L1_x, T_If_L1_x, T_Region_x) where the
+    substituent's required typing context shifts as the sub-derivations
+    progress. For closed v = ELam T0 ebody, the body's typing references
+    only position 0 (the bound variable); G's tail is structurally
+    inert via [closed_below_k_typing_outer_tail_irrelevant_l1_m] at
+    k=1, G_head = [(T0, false)], G_tail = G.
+
+    Stage 4 (#242) replaces the syntactic [expr_closed_below 0 v]
+    precondition with a typing-derived closure invariant; the proof
+    content of this lemma is reused as Stage 4's closure-discharge
+    kernel. *)
+Lemma closed_value_typing_G_poly_l1_m :
+  forall m R G G' v T1 T2 R_in R_out,
+    is_value v ->
+    expr_closed_below 0 v = true ->
+    has_type_l1 m R G v (TFunEff T1 T2 R_in R_out) R G ->
+    has_type_l1 m R G' v (TFunEff T1 T2 R_in R_out) R G'.
+Proof.
+  intros m R G G' v T1 T2 R_in R_out Hval Hclos Ht.
+  destruct Hval as
+    [ | b | n
+    | T0 e0 | v1 v2 Hv1 Hv2
+    | T0 v0 Hv0 | T0 v0 Hv0
+    | l r
+    | v0 Hv0
+    | T0 v0 Hv0 ];
+    inversion Ht; subst.
+  - (* v = ELam T0 e0, T_Lam_L1_Linear_Eff *)
+    simpl in Hclos.
+    assert (Hbody : has_type_l1 Linear R_in (ctx_extend G T1) e0 T2 R_out ((T1, true) :: G))
+      by eassumption.
+    pose proof (closed_below_k_typing_outer_tail_irrelevant_l1_m
+      Linear R_in (ctx_extend G T1) e0 T2 R_out ((T1, true) :: G) Hbody
+      1 [(T1, false)] G eq_refl eq_refl Hclos) as
+      [G_bh [Heq_b [Hlen_b IH_b]]].
+    destruct G_bh as [|[T1' u_b] [|x rest]]; simpl in Hlen_b; try lia.
+    simpl in Heq_b. inversion Heq_b; subst.
+    eapply T_Lam_L1_Linear_Eff; [eassumption | unfold ctx_extend; apply (IH_b G')].
+  - (* v = ELam T0 e0, T_Lam_L1_Affine_Eff *)
+    simpl in Hclos.
+    assert (Hbody : has_type_l1 Affine R_in (ctx_extend G T1) e0 T2 R_out ((T1, u) :: G))
+      by eassumption.
+    pose proof (closed_below_k_typing_outer_tail_irrelevant_l1_m
+      Affine R_in (ctx_extend G T1) e0 T2 R_out ((T1, u) :: G) Hbody
+      1 [(T1, false)] G eq_refl eq_refl Hclos) as
+      [G_bh [Heq_b [Hlen_b IH_b]]].
+    destruct G_bh as [|[T1' u_b] [|x rest]]; simpl in Hlen_b; try lia.
+    simpl in Heq_b. inversion Heq_b; subst.
+    eapply T_Lam_L1_Affine_Eff; [eassumption | unfold ctx_extend; apply (IH_b G')].
+Qed.
+
+(** Closed values are shift-invariant at cutoff 0.
+
+    Specialisation of [Syntax.closed_below_shift_id] for the
+    substitution lemma's binder cases (T_Let_L1, T_LetLin_L1, ELam,
+    T_Case_L1_x) where the operational [shift 0 d v] in [subst] must
+    reduce to [v] for the typing reconstruction to fire. [is_value]
+    is not used in the proof — closure is purely syntactic — but is
+    threaded in the signature to match the calling convention of
+    Phase 2's [ground_nonlinear_value_shift_id_l1]. *)
+Lemma closed_value_shift_id_l1_m :
+  forall v d,
+    expr_closed_below 0 v = true ->
+    shift 0 d v = v.
+Proof.
+  intros v d Hclos.
+  apply closed_below_shift_id. exact Hclos.
+Qed.
+
 (** Narrower axiom (region-liveness at compound-rule split points).
 
     Given a well-typed sub-derivation [R; G |=L1 e1 : T1 -| R1; G']

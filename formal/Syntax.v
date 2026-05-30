@@ -427,6 +427,22 @@ Proof.
     + apply IH. intro H. apply Hne. f_equal. exact H.
 Qed.
 
+(** [ctx_mark_used] commutes with context append when the marked
+    position lies within the head. Required by Phase 3b Stage 1b's
+    body-transfer lemma for the [T_Var_Lin_L1] case (the only typing
+    rule that changes G's flags). *)
+Lemma ctx_mark_used_app_lt :
+  forall (G_head G_tail : ctx) (i : nat),
+    i < List.length G_head ->
+    ctx_mark_used (G_head ++ G_tail) i = ctx_mark_used G_head i ++ G_tail.
+Proof.
+  induction G_head as [|[T0 u0] G_head' IH]; intros G_tail i Hlt; simpl in *.
+  - lia.
+  - destruct i.
+    + reflexivity.
+    + simpl. f_equal. apply IH. lia.
+Qed.
+
 (** flags_only_increase via projection: if flag is false in output, it was false in input *)
 (** Direct contradiction for the T_Let/T_LetLin/T_Case idx=0 case.
     Uses functional extraction to avoid option-pair discrimination. *)

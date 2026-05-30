@@ -1,0 +1,80 @@
+# SPDX-License-Identifier: PMPL-1.0-or-later
+# Copyright (c) 2026 Jonathan D.A. Jewell (hyperpolymath) <j.d.a.jewell@open.ac.uk>
+#
+# coq-build.yml — type-checks every module in `formal/` (Rocq/Coq).
+#
+# Standing directive [[feedback_proof_pr_build_oracle_is_only_truth]]:
+# for proof PRs, the toolchain build is the ONLY merge oracle. Until
+# this workflow existed, the rule relied entirely on human discipline
+# — admin-merge could and did land a broken main when PR #224
+# duplicated `tfuneff_lambda_retype_l1_m` and all 17 unrelated
+# governance/scanner checks went green (see #227, hotfix #226).
+#
+# This is now a HARD GATE: any PR (or push to main) that breaks
+# `coq_makefile`-driven compilation of `formal/_CoqProject` fails
+# here BEFORE the admin-merge button is reachable for the auto-bot.
+#
+# The job also `Print Assumptions`-checks the load-bearing top-level
+# theorem `preservation_l2_via_l1` (TypingL2.v) so any new `Admitted.`
+# / `Axiom` slippage shows up as a diff in the workflow output.
+
+name: Coq Build (formal/)
+
+on:
+  pull_request:
+    paths:
+      - 'formal/**'
+      - '.github/workflows/coq-build.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'formal/**'
+      - '.github/workflows/coq-build.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  coq-build:
+    name: Coq build — formal/_CoqProject
+    runs-on: ubuntu-latest
+    # coq:8.18 matches the toolchain pinned by formal/Justfile and the
+    # local developer setup. Pin to a digest later once a stable
+    # known-good image is decided on; for now the floating tag mirrors
+    # `make` semantics — "what the maintainer's machine has".
+    container:
+      image: coqorg/coq:8.18
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+
+      - name: Coq version (provenance)
+        run: |
+          coqc --version
+          coq_makefile --help 2>&1 | head -1 || true
+
+      - name: Build formal/ via coq_makefile (the merge-oracle command)
+        working-directory: formal
+        run: |
+          # Mirrors `formal/Justfile`'s `all` recipe:
+          #   coq_makefile -f _CoqProject -o build.mk
+          #   make -f build.mk
+          # (Plain `make` instead of `just` so we don't need `just` in
+          # the container — the recipe is two lines.)
+          coq_makefile -f _CoqProject -o build.mk
+          make -f build.mk
+
+      - name: Print Assumptions of load-bearing theorem
+        working-directory: formal
+        run: |
+          # Surfaces any new Admitted / Axiom additions feeding into
+          # preservation_l2_via_l1 (Phase D top-level result). A diff
+          # in this output between PRs is the canonical "did this PR
+          # introduce a new admit" signal.
+          echo 'From Ephapax Require Import TypingL2. Print Assumptions preservation_l2_via_l1.' \
+            | coqtop -R . Ephapax 2>&1 | tail -40

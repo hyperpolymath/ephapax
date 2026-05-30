@@ -170,6 +170,34 @@ Phase 2's `subst_typing_gen_l1_m_ground_nonlinear` (the sibling lemma at lines 1
 
 Phase 3b implementation **does not start** until owner picks a resolution.
 
+#### Phase 3b resolution (2026-05-30 PM, owner-approved) — 4-stage staged plan
+
+The three-option framing above is **superseded** by a staged plan that captures the value of each "Interesting" angle without committing to any single option's downsides. Filed as ephapax issues #239 (Stage 1) / #240 (Stage 2) / #241 (Stage 3) / #242 (Stage 4) under parent #235.
+
+| Stage | Scope | Captures value of |
+|---|---|---|
+| **Stage 1 — immediate (#239)** | Leaf-only Phase 3b via `tfuneff_lambda_free` + `Counterexample_L2_nested.v` + 2-condition `preservation_l2`. | Option (3) — principled deferral, honest 2-condition statement. |
+| **Stage 2 — parallel L4 track (#240)** | `ELam T_param R_in R_out body` annotation extension. AST + typing rule + cascading inversion patterns. | Option (1) — L4 alignment "type-level → program-level commitments". |
+| **Stage 3 — post-Stage-2 (#241)** | Relaxed Phase 3b via `declared_lambda_r_ins ⊆ R_in_v` + **CPS-form** v-typing argument. Nested-condition collapses. | Option (2) — higher-order proof style enters the codebase. |
+| **Stage 4 — Phase 5 (#242)** | Compound non-linear values + region-substitution machinery + **unconditional** `preservation_l2`. | The final destination — last soundness condition closes. |
+
+**Why staging captures all the value**:
+
+- **Stage 1's 2-condition statement is delivered correctness, not a placeholder.** Each condition has a mechanised counterexample (`Counterexample_L2.v` for the fresh-region gap, the new `Counterexample_L2_nested.v` for the nested-lambda gap).
+- **Stage 2 ships independently** of Phase 3b — it's L4's own work (program-level commitments) that Phase 3b free-rides on at Stage 3.
+- **Stage 3 introduces CPS proof style** at exactly the point where it's strictly necessary (relaxed Phase 3b's inner `T_Lam_L1_*_Eff` cases must retype v at arbitrary `R_in_inner`'s) — not over-engineered for Stage 1.
+- **Stage 4 inherits the CPS precedent** from Stage 3 and closes the last soundness condition. `preservation_l2` Qed over `has_type_l2`.
+
+**Why this beats single-option commitments**:
+
+- (1) alone forces the AST migration before unblocking preservation_l2's β-case.
+- (2) alone introduces an inductive-over-derivations predicate with no other use in the codebase.
+- (3) alone ends with a conditional preservation_l2 forever (no path to unconditional).
+
+The staged plan: (3) ships today's value, (1) lands L4's value at L4's timeline, (2)'s value is harvested at exactly the point CPS is necessary, (4) reaches unconditional preservation_l2 as the natural sum of (1) + (2) + (3) applied in sequence.
+
+**Sequencing**: Stage 1 implementation green-lit. Stages 2-4 tracked. Stage 3 blocked on Stage 2; Stage 4 blocked on Stage 3; Stage 2 independent of Stage 1.
+
 ### Phase 4: close `preservation_l2` β-case using Phases 1-3
 
 With the substitution machinery in place, the T_App_L2_Eff β-case in `preservation_l2` closes by:

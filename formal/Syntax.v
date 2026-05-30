@@ -455,6 +455,23 @@ Fixpoint is_linear_ty (T : ty) : bool :=
   | _ => false
   end.
 
+(** Check if a type is a ground non-linear base type — [TUnit], [TBool],
+    or [TI32]. Values at these types are R-irrelevant: their typing
+    derivations (via [T_Unit_L1] / [T_Bool_L1] / [T_I32_L1]) are
+    polymorphic in the region environment, so a retype across any
+    [R → R'] is constructively trivial.
+
+    Introduced for [Semantics_L1.ground_nonlinear_retype_l1_m] and the
+    Phase D slice 4 non-linear substitution-lemma generalisation
+    (formal/SUBST-LEMMA-GENERALIZATION-DESIGN.md Phase 1). *)
+Definition is_ground_nonlinear_ty (T : ty) : bool :=
+  match T with
+  | TBase TUnit => true
+  | TBase TBool => true
+  | TBase TI32  => true
+  | _ => false
+  end.
+
 (** Check if all linear variables in context have been used *)
 Fixpoint ctx_all_linear_used (G : ctx) : Prop :=
   match G with

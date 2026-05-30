@@ -1177,6 +1177,46 @@ Lemma loc_retype_at_R_l1 :
     R_inner; G |=L1 ELoc l r : TString r -| R_inner; G.
 Proof. intros. apply T_Loc_L1. assumption. Qed.
 
+(** Ground non-linear retype across any [R → R'].
+
+    For ground non-linear types ([TBase TUnit] / [TBase TBool] /
+    [TBase TI32]) the typing derivation of a value is uniquely
+    produced by [T_Unit_L1] / [T_Bool_L1] / [T_I32_L1], each of
+    which is polymorphic in the region environment. The retype is
+    therefore the trivial "invert and re-apply" pattern.
+
+    Used by the Phase D slice 4 non-linear substitution-lemma
+    generalisation: any β-reduction with [T1 ∈ {TBase TUnit,
+    TBase TBool, TBase TI32}] feeds a substituend whose typing
+    must be re-stated at sub-expression-internal region environments
+    inside [ebody]. See [formal/SUBST-LEMMA-GENERALIZATION-DESIGN.md]
+    Phase 1.
+
+    Orthogonal to legacy [preservation] in [Semantics.v]: this lemma
+    adds NEW infrastructure constrained to the post-redesign
+    [has_type_l1] judgment carrying the modality parameter [m]. It
+    does not extend or patch [Semantics.v]. *)
+Lemma ground_nonlinear_retype_l1_m :
+  forall (m : Modality) (R R' : region_env) (G : ctx) (v : expr) (T : ty),
+    is_value v ->
+    is_ground_nonlinear_ty T = true ->
+    has_type_l1 m R G v T R G ->
+    has_type_l1 m R' G v T R' G.
+Proof.
+  intros m R R' G v T Hval Hgrd Ht.
+  destruct Hval as
+    [ | b | n
+    | T0 e0 | v1 v2 Hv1 Hv2
+    | T0 v0 Hv0 | T0 v0 Hv0
+    | l r
+    | v0 Hv0
+    | T0 v0 Hv0 ];
+    inversion Ht; subst; try discriminate Hgrd.
+  - (* v = EUnit, T = TBase TUnit *) apply T_Unit_L1.
+  - (* v = EBool b, T = TBase TBool *) apply T_Bool_L1.
+  - (* v = EI32 n, T = TBase TI32 *) apply T_I32_L1.
+Qed.
+
 (** Narrower axiom (region-liveness at compound-rule split points).
 
     Given a well-typed sub-derivation [R; G |=L1 e1 : T1 -| R1; G']

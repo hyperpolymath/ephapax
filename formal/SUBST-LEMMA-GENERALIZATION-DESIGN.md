@@ -159,6 +159,50 @@ With the substitution machinery in place, the T_App_L2_Eff β-case in `preservat
 
 `EPair` / `EInl` / `EInr` / `EEcho` of non-linear components. Sub-component analysis. May require additional retype machinery. Realistically multiple sessions of work.
 
+## Phase 4c addendum (2026-05-30) — conditional preservation_l2 for TFunEff β
+
+Prototyping Phase 4c on paper (after Phase 4a / 4b landed at PRs #228 / #233) revealed a structural soundness gap that requires a **conditional** preservation_l2 statement for the TFunEff β-case. `formal/Counterexample_L2.v` mechanises the witness.
+
+### The obstacle (mechanised in `Counterexample_L2.v`)
+
+For any TFunEff lambda body that introduces a fresh region via `ERegion` AND references the substituted variable inside that region scope, β-reduction does **not** preserve typing:
+
+```
+T1_inner = TFunEff TUnit TUnit [] []                       (* substituee type, R_in_v = [] *)
+outer    = ELam T1_inner (ERegion r2 (EVar 0))             (* body introduces fresh r2 *)
+v2       = ELam TUnit EUnit                                (* a value of type T1_inner *)
+e_before = EApp outer v2     (* well-typed via T_App_L2_Eff at R = [] *)
+e_after  = ERegion r2 v2     (* β-result: subst 0 v2 (ERegion r2 (EVar 0)) *)
+```
+
+`e_before` types (Qed: `e_before_typed`); `e_step` reduces it to `e_after` (Qed: `e_step`); `e_after` does not type at the same outer type (Qed: `e_after_untypable`). The mechanism: T_Region_L1's `~ In r (free_regions T)` premise prevents the fresh `r` from being in `R_in_v` (since `R_in_v ⊆ free_regions(TFunEff)`). After β-substitution, the inner expression becomes a TFunEff value that must re-type at `r :: R`, requiring `r ∈ R_in_v` (false).
+
+### Resolution: Phase 4c ships **conditionally**
+
+Preservation_l2 for the T_App_L2_Eff β-case holds **only** for programs satisfying:
+
+```
+regions_introduced_by(ebody) ⊆ R_in_v
+```
+
+where `regions_introduced_by` is the `Fixpoint` already landed in `Syntax.v` (PR #230), `ebody` is the outer lambda's body, and `R_in_v` is the substituee's TFunEff input region env.
+
+The Phase 3b substitution lemma (`subst_typing_gen_l1_m_tfuneff`) ships with this precondition; the Phase 4c β-case wrapper propagates it. Programs not satisfying the precondition are a **documented soundness-gap subclass** — they witness the same fundamental "scoped resource cannot escape its scope" limitation that motivated the four-layer redesign in the first place.
+
+### Three resolution paths (broader than original (a)/(b)/(c) options)
+
+1. **Conditional preservation_l2 (recommended)**: Phase 3b lemma takes the precondition; Phase 4c β-case requires it; programs outside form a documented soundness-gap class. This is what `Counterexample_L2.v` justifies. Aligns with the legacy `Counterexample.v` precedent (preservation holds modulo a structural constraint that legitimate programs satisfy).
+2. **Region-polymorphic TFunEff**: change the type system so `TFunEff T1 T2 R_in R_out` permits implicit region extension at use sites. Major type-system change; defers to a future redesign.
+3. **L2 region-transfer combinator**: add an L2 typing rule that explicitly transfers a fresh region into a TFunEff lambda's R_in for the duration of a scope. Adds L2 expressiveness; defers to a future PR.
+
+### What ships in the Phase 4c PR
+
+- `formal/Counterexample_L2.v` — three Qed lemmas mechanising the soundness gap.
+- This addendum to `SUBST-LEMMA-GENERALIZATION-DESIGN.md`.
+- STATE.a2ml refresh to reflect the conditional path.
+
+Phase 3b implementation (the ~400-line `subst_typing_gen_l1_m_tfuneff` lemma body) and Phase 4c β-case wrapper remain follow-up work — but the design constraint they must satisfy is now mechanically witnessed.
+
 ## What this session ships
 
 This design document only. No code changes. STATE.a2ml shifts `next_action` to "Phase 1: implement `ground_nonlinear_retype_l1_m` per `formal/SUBST-LEMMA-GENERALIZATION-DESIGN.md`".

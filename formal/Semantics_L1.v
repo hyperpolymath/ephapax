@@ -1217,6 +1217,66 @@ Proof.
   - (* v = EI32 n, T = TBase TI32 *) apply T_I32_L1.
 Qed.
 
+(** TFunEff lambda retype across [R → R'] under [R' ⊆ R_in].
+
+    For values typed at [TFunEff T1 T2 R_in R_out], the lambda's body
+    is typed at [R_in] (carried in the type, independent of the outer
+    [R]). The outer [R] enters the typing rule only through the side
+    condition [forall r, In r R -> In r R_in]. Re-typing at any [R']
+    reduces to discharging the analogous side condition
+    [forall r, In r R' -> In r R_in].
+
+    Two value-shape × typing-rule cases survive [inversion]:
+    [T_Lam_L1_Linear_Eff] and [T_Lam_L1_Affine_Eff]. Both produce
+    [TFunEff …] in the conclusion; the legacy [T_Lam_L1_Linear] and
+    [T_Lam_L1_Affine] rules produce [TFun …] and are discharged
+    automatically by [inversion]'s constructor-conclusion equation.
+    Non-lambda value shapes ([EUnit] / [EBool] / [EI32] / [EPair] /
+    [EInl] / [EInr] / [ELoc] / [EBorrow] / [EEcho]) are typed at base /
+    product / sum / borrow / region / echo types — all distinct from
+    [TFunEff] — and discharge identically.
+
+    The modality [m] is preserved across the retype: [T_Lam_L1_*_Eff]'s
+    conclusion modality must match the body's typing modality, so
+    unlike [ground_nonlinear_retype_l1_m] we cannot vary [m]. The
+    context [G] is also preserved: the body is typed in [ctx_extend G T1]
+    and varying outer [G] would require analogous machinery for context
+    weakening that is out of scope here.
+
+    Used by Phase D slice 4 Phase 3b (subst-lemma extension to TFunEff
+    lambda substituends) — any β-reduction with [T1 = TFunEff …] feeds
+    a lambda whose typing must be re-stated at sub-expression-internal
+    region environments inside the substitution lemma's [ebody].
+
+    Refs [formal/SUBST-LEMMA-GENERALIZATION-DESIGN.md] Phase 3.
+
+    Orthogonal to legacy [preservation] in [Semantics.v]: this lemma
+    adds NEW infrastructure constrained to the post-redesign
+    [has_type_l1] judgment carrying the modality parameter [m]. It
+    does not extend or patch [Semantics.v]. *)
+Lemma tfuneff_lambda_retype_l1_m :
+  forall (m : Modality) (R R' : region_env) (G : ctx)
+         (v : expr) (T1 T2 : ty) (R_in R_out : region_env),
+    is_value v ->
+    has_type_l1 m R G v (TFunEff T1 T2 R_in R_out) R G ->
+    (forall r, In r R' -> In r R_in) ->
+    has_type_l1 m R' G v (TFunEff T1 T2 R_in R_out) R' G.
+Proof.
+  intros m R R' G v T1 T2 R_in R_out Hval Ht HR'.
+  destruct Hval as
+    [ | b | n
+    | T0 e0 | v1 v2 Hv1 Hv2
+    | T0 v0 Hv0 | T0 v0 Hv0
+    | l r
+    | v0 Hv0
+    | T0 v0 Hv0 ];
+    inversion Ht; subst.
+  - (* v = ELam T0 e0, T_Lam_L1_Linear_Eff *)
+    eapply T_Lam_L1_Linear_Eff; [exact HR' | eassumption].
+  - (* v = ELam T0 e0, T_Lam_L1_Affine_Eff *)
+    eapply T_Lam_L1_Affine_Eff; [exact HR' | eassumption].
+Qed.
+
 (** Ground non-linear values are closed terms — they contain no
     de Bruijn variables, so de Bruijn [shift] is the identity on them.
 

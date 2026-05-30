@@ -488,6 +488,34 @@ Definition is_tfuneff_ty (T : ty) : bool :=
   | _ => false
   end.
 
+(** Syntactic over-approximation of region names introduced via
+    [ERegion] subterms of an expression. Used by Phase 3b's TFunEff
+    substitution lemma to discharge the [r ∈ R_in_v] obligation
+    that arises in [T_Region_L1] cases — when the substituee body
+    introduces a region [r], retyping a TFunEff value at the extended
+    [r :: R] requires [r ∈ R_in_v] (the lambda's declared input env).
+
+    Refs [formal/SUBST-LEMMA-GENERALIZATION-DESIGN.md] Phase 3b option (a)
+    and ephapax issue #225. *)
+Fixpoint regions_introduced_by (e : expr) : list region_name :=
+  match e with
+  | EUnit | EBool _ | EI32 _ | EVar _
+  | EStringNew _ _ | ELoc _ _ => nil
+  | EStringConcat e1 e2 | ELet e1 e2 | ELetLin e1 e2
+  | EApp e1 e2 | EPair e1 e2 =>
+      regions_introduced_by e1 ++ regions_introduced_by e2
+  | EStringLen e' | EFst e' | ESnd e'
+  | EBorrow e' | EDeref e' | EDrop e' | ECopy e' | EObserve e' =>
+      regions_introduced_by e'
+  | ELam _ e' | EInl _ e' | EInr _ e' | EEcho _ e' =>
+      regions_introduced_by e'
+  | EIf e1 e2 e3 | ECase e1 e2 e3 =>
+      regions_introduced_by e1
+      ++ regions_introduced_by e2
+      ++ regions_introduced_by e3
+  | ERegion r e' => r :: regions_introduced_by e'
+  end.
+
 (** Check if all linear variables in context have been used *)
 Fixpoint ctx_all_linear_used (G : ctx) : Prop :=
   match G with

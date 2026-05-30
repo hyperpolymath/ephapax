@@ -263,12 +263,6 @@ const CLOSURE_SIZE: u32 = 8; // 2 x i32
 
 /// Code generator state.
 pub struct Codegen {
-    /// Current bump pointer for allocations (reserved for future interpreter use)
-    #[allow(dead_code)]
-    bump_ptr: u32,
-    /// Region stack for tracking active regions (reserved for future interpreter use)
-    #[allow(dead_code)]
-    region_stack: Vec<RegionInfo>,
     /// Generated WASM module
     module: WasmModule,
 
@@ -387,16 +381,6 @@ struct LambdaInfo {
     body: Expr,
 }
 
-#[derive(Debug, Clone)]
-struct RegionInfo {
-    /// Region name
-    #[allow(dead_code)]
-    name: String,
-    /// Start of region allocations
-    #[allow(dead_code)]
-    start_ptr: u32,
-}
-
 impl Default for Codegen {
     fn default() -> Self {
         Self::new()
@@ -407,8 +391,6 @@ impl Codegen {
     /// Create a new code generator
     pub fn new() -> Self {
         Self {
-            bump_ptr: REGION_HEADER_SIZE,
-            region_stack: Vec::new(),
             module: WasmModule::new(),
             locals: LocalTracker::default(),
             data_entries: Vec::new(),

@@ -239,7 +239,7 @@ impl AffineChecker {
                 self.ctx.exit_region();
             }
 
-            ExprKind::Borrow(inner) | ExprKind::Deref(inner) => {
+            ExprKind::Borrow { inner, .. } | ExprKind::Deref(inner) => {
                 self.walk_expr(inner);
             }
 

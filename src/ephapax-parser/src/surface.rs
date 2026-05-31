@@ -1490,14 +1490,23 @@ fn parse_atom_expr(pair: pest::iterators::Pair<Rule>) -> Result<SurfaceExpr, Par
         }
 
         Rule::borrow_expr => {
-            let inner_expr = parse_unary_expr(
-                inner
-                    .into_inner()
-                    .next()
-                    .ok_or_else(|| ParseError::missing("borrow"))?,
-            )?;
+            let mut children = inner.into_inner();
+            let first = children
+                .next()
+                .ok_or_else(|| ParseError::missing("borrow"))?;
+            let (mutable, operand_pair) = if first.as_rule() == Rule::mut_marker {
+                (
+                    true,
+                    children
+                        .next()
+                        .ok_or_else(|| ParseError::missing("borrow"))?,
+                )
+            } else {
+                (false, first)
+            };
+            let inner_expr = parse_unary_expr(operand_pair)?;
             Ok(SurfaceExpr::new(
-                SurfaceExprKind::Borrow(Box::new(inner_expr)),
+                SurfaceExprKind::Borrow { inner: Box::new(inner_expr), mutable },
                 span,
             ))
         }
@@ -1787,13 +1796,22 @@ fn parse_type_atom(pair: pest::iterators::Pair<Rule>) -> Result<SurfaceTy, Parse
             Ok(SurfaceTy::String(region))
         }
         Rule::borrow_ty => {
-            let inner_ty = parse_type_atom(
-                inner
-                    .into_inner()
-                    .next()
-                    .ok_or_else(|| ParseError::missing("borrow inner"))?,
-            )?;
-            Ok(SurfaceTy::Borrow(Box::new(inner_ty)))
+            let mut children = inner.into_inner();
+            let first = children
+                .next()
+                .ok_or_else(|| ParseError::missing("borrow inner"))?;
+            let (mutable, ty_pair) = if first.as_rule() == Rule::mut_marker {
+                (
+                    true,
+                    children
+                        .next()
+                        .ok_or_else(|| ParseError::missing("borrow inner"))?,
+                )
+            } else {
+                (false, first)
+            };
+            let inner_ty = parse_type_atom(ty_pair)?;
+            Ok(SurfaceTy::Borrow { inner: Box::new(inner_ty), mutable })
         }
         Rule::list_ty => {
             let elem_ty = parse_type(

@@ -91,8 +91,8 @@ pub enum SurfaceTy {
         inner: Box<SurfaceTy>,
     },
 
-    /// Second-class borrow &T
-    Borrow(Box<SurfaceTy>),
+    /// Second-class borrow `&T` (shared) or `&mut T` (exclusive).
+    Borrow { inner: Box<SurfaceTy>, mutable: bool },
 
     /// Type variable (bound by data declaration)
     Var(TyVar),
@@ -324,7 +324,7 @@ pub enum SurfaceExprKind {
         name: RegionName,
         body: Box<SurfaceExpr>,
     },
-    Borrow(Box<SurfaceExpr>),
+    Borrow { inner: Box<SurfaceExpr>, mutable: bool },
     Deref(Box<SurfaceExpr>),
     Drop(Box<SurfaceExpr>),
     Copy(Box<SurfaceExpr>),

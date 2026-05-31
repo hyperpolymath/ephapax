@@ -15,6 +15,7 @@
 Require Import Coq.Lists.List.
 Require Import Coq.Arith.Arith.
 Require Import Coq.Strings.String.
+Require Import Lia.
 Import ListNotations.
 
 (** ** Variables and Names *)
@@ -426,6 +427,22 @@ Proof.
     + apply IH. intro H. apply Hne. f_equal. exact H.
 Qed.
 
+(** [ctx_mark_used] commutes with context append when the marked
+    position lies within the head. Required by Phase 3b Stage 1b's
+    body-transfer lemma for the [T_Var_Lin_L1] case (the only typing
+    rule that changes G's flags). *)
+Lemma ctx_mark_used_app_lt :
+  forall (G_head G_tail : ctx) (i : nat),
+    i < List.length G_head ->
+    ctx_mark_used (G_head ++ G_tail) i = ctx_mark_used G_head i ++ G_tail.
+Proof.
+  induction G_head as [|[T0 u0] G_head' IH]; intros G_tail i Hlt; simpl in *.
+  - lia.
+  - destruct i.
+    + reflexivity.
+    + simpl. f_equal. apply IH. lia.
+Qed.
+
 (** flags_only_increase via projection: if flag is false in output, it was false in input *)
 (** Direct contradiction for the T_Let/T_LetLin/T_Case idx=0 case.
     Uses functional extraction to avoid option-pair discrimination. *)
@@ -553,6 +570,55 @@ Fixpoint tfuneff_lambda_free (e : expr) : bool :=
   | ELam _ _ => false
   end.
 
+(** Syntactic closure predicate: [expr_closed_below k e] holds when [e]
+    contains no free de Bruijn variable ≥ [k]. Variables < [k] are bound
+    by lambda/let/case binders introduced *above* the term.
+
+    Used by Phase 3b Stage 1b's TFunEff substitution lemma to permit
+    G-polymorphic retype of the substituent v: for [expr_closed_below 0
+    v] terms, the body of any TFunEff value [v = ELam T0 ebody] is
+    [expr_closed_below 1] — i.e., references only position 0 (the bound
+    variable). Outer context positions ≥ 1 are inert, which discharges
+    the G-mismatch in compound-rule cases of the substitution lemma.
+
+    Binder structure (mirrors [shift] / [subst] at lines 542-606):
+    - [ELam _ e0]:   e0 at S k (one binder).
+    - [ELet e1 e2]:  e1 at k, e2 at S k.
+    - [ELetLin e1 e2]: e1 at k, e2 at S k.
+    - [ECase e0 e1 e2]: e0 at k, e1 and e2 each at S k.
+    - All other forms: same k across sub-expressions.
+
+    [bool] target per Phase D's post-redesign style ([is_linear_ty],
+    [is_ground_nonlinear_ty], [tfuneff_lambda_free] are all bool). The
+    legacy [expr_free_of_region] / [expr_strictly_free_of_region] Prop
+    predicates are pre-redesign artefacts.
+
+    Refs [formal/SUBST-LEMMA-GENERALIZATION-DESIGN.md] Phase 3b Stage 1b
+    and ephapax issue #249. *)
+Fixpoint expr_closed_below (k : nat) (e : expr) : bool :=
+  match e with
+  | EUnit | EBool _ | EI32 _ => true
+  | EVar i => Nat.ltb i k
+  | EStringNew _ _ | ELoc _ _ => true
+  | EStringConcat e1 e2 | EApp e1 e2 | EPair e1 e2 =>
+      andb (expr_closed_below k e1) (expr_closed_below k e2)
+  | ELet e1 e2 | ELetLin e1 e2 =>
+      andb (expr_closed_below k e1) (expr_closed_below (S k) e2)
+  | EStringLen e' | EFst e' | ESnd e'
+  | EBorrow e' | EDeref e' | EDrop e' | ECopy e' | EObserve e' =>
+      expr_closed_below k e'
+  | EInl _ e' | EInr _ e' | EEcho _ e' | ERegion _ e' =>
+      expr_closed_below k e'
+  | EIf e1 e2 e3 =>
+      andb (andb (expr_closed_below k e1) (expr_closed_below k e2))
+           (expr_closed_below k e3)
+  | ECase e0 e1 e2 =>
+      andb (andb (expr_closed_below k e0)
+                 (expr_closed_below (S k) e1))
+           (expr_closed_below (S k) e2)
+  | ELam _ e' => expr_closed_below (S k) e'
+  end.
+
 (** Check if all linear variables in context have been used *)
 Fixpoint ctx_all_linear_used (G : ctx) : Prop :=
   match G with
@@ -647,6 +713,152 @@ Lemma shift_preserves_value :
   forall c d v, is_value v -> is_value (shift c d v).
 Proof.
   intros c d v Hv. induction Hv; simpl; try constructor; auto.
+Qed.
+
+(** Closed-below-c terms are shift-invariant at cutoff c.
+
+    The shift function increments free variables ≥ c. A term that is
+    [expr_closed_below c] has no such variables, so shift is the
+    identity. Companion to [shift_preserves_value] for the closure-
+    sensitive Phase 3b Stage 1b machinery: when substituting a closed
+    TFunEff value through a binder, the operational [shift 0 1 v] in
+    [subst]'s ELam/ELet/ELetLin/ECase cases reduces to [v] itself,
+    matching the syntactic shape needed by the substitution lemma's
+    recursive rebuild.
+
+    Proof: induction on [e] with c, d re-introduced after [induction]
+    to keep the IH polymorphic over c (the cutoff varies through
+    binders). *)
+Lemma closed_below_shift_id :
+  forall e c d, expr_closed_below c e = true -> shift c d e = e.
+Proof.
+  induction e; intros c d Hc; simpl in *; try reflexivity.
+  - (* EVar v: Hc : v <? c = true, so leb c v = false, shift returns
+       EVar v unchanged. *)
+    apply Nat.ltb_lt in Hc.
+    destruct (Nat.leb_spec c v) as [Hle|Hlt]; [lia | reflexivity].
+  - (* EStringConcat e1 e2 *)
+    apply andb_prop in Hc as [H1 H2].
+    f_equal; [apply IHe1 | apply IHe2]; assumption.
+  - (* EStringLen e' *)
+    f_equal. apply IHe. assumption.
+  - (* ELet e1 e2 — e1 at c, e2 at S c *)
+    apply andb_prop in Hc as [H1 H2].
+    f_equal; [apply IHe1 | apply IHe2]; assumption.
+  - (* ELetLin e1 e2 *)
+    apply andb_prop in Hc as [H1 H2].
+    f_equal; [apply IHe1 | apply IHe2]; assumption.
+  - (* EIf e1 e2 e3 *)
+    apply andb_prop in Hc as [H12 H3].
+    apply andb_prop in H12 as [H1 H2].
+    f_equal; [apply IHe1 | apply IHe2 | apply IHe3]; assumption.
+  - (* ELam T e' — e' at S c *)
+    f_equal. apply IHe. assumption.
+  - (* EApp e1 e2 *)
+    apply andb_prop in Hc as [H1 H2].
+    f_equal; [apply IHe1 | apply IHe2]; assumption.
+  - (* EPair e1 e2 *)
+    apply andb_prop in Hc as [H1 H2].
+    f_equal; [apply IHe1 | apply IHe2]; assumption.
+  - (* EFst *)
+    f_equal. apply IHe. assumption.
+  - (* ESnd *)
+    f_equal. apply IHe. assumption.
+  - (* EInl T e' *)
+    f_equal. apply IHe. assumption.
+  - (* EInr T e' *)
+    f_equal. apply IHe. assumption.
+  - (* ECase e0 e1 e2 — e0 at c, e1 and e2 at S c *)
+    apply andb_prop in Hc as [H01 H2].
+    apply andb_prop in H01 as [H0 H1].
+    f_equal; [apply IHe1 | apply IHe2 | apply IHe3]; assumption.
+  - (* ERegion *)
+    f_equal. apply IHe. assumption.
+  - (* EBorrow *)
+    f_equal. apply IHe. assumption.
+  - (* EDeref *)
+    f_equal. apply IHe. assumption.
+  - (* EDrop *)
+    f_equal. apply IHe. assumption.
+  - (* ECopy *)
+    f_equal. apply IHe. assumption.
+  - (* EEcho T e' *)
+    f_equal. apply IHe. assumption.
+  - (* EObserve *)
+    f_equal. apply IHe. assumption.
+Qed.
+
+(** Closure is preserved under shifting at any cutoff.
+
+    A term [e] that is closed below cutoff [c] remains closed below
+    cutoff [c + d] after shifting by d at any cutoff ≤ c. Useful when
+    propagating closure through binder traversals in the substitution
+    lemma's recursive calls.
+
+    Proof: induction on [e] with all parameters generalised. The
+    EVar case is the only non-trivial one — the others propagate
+    through structural recursion. *)
+Lemma expr_closed_below_shift_mono :
+  forall e c c' d,
+    c' <= c ->
+    expr_closed_below c e = true ->
+    expr_closed_below (c + d) (shift c' d e) = true.
+Proof.
+  induction e; intros cu cu' d Hle Hc; simpl in *; try reflexivity.
+  - (* EVar v *)
+    apply Nat.ltb_lt in Hc.
+    destruct (Nat.leb_spec cu' v) as [Hge|Hlt].
+    + (* cu' ≤ v: shift produces EVar (v + d); need v + d < cu + d *)
+      simpl. apply Nat.ltb_lt. lia.
+    + (* v < cu': shift unchanged; v < cu ≤ cu + d *)
+      simpl. apply Nat.ltb_lt. lia.
+  - (* EStringConcat *)
+    apply andb_prop in Hc as [H1 H2]. simpl.
+    rewrite IHe1 by assumption. rewrite IHe2 by assumption. reflexivity.
+  - (* EStringLen *)
+    apply IHe; assumption.
+  - (* ELet — e2 at S cu, with the shift cutoff also at S cu' *)
+    apply andb_prop in Hc as [H1 H2]. simpl.
+    rewrite IHe1 by assumption.
+    replace (S (cu + d)) with (S cu + d) by lia.
+    rewrite IHe2; [reflexivity | lia | assumption].
+  - (* ELetLin *)
+    apply andb_prop in Hc as [H1 H2]. simpl.
+    rewrite IHe1 by assumption.
+    replace (S (cu + d)) with (S cu + d) by lia.
+    rewrite IHe2; [reflexivity | lia | assumption].
+  - (* EIf *)
+    apply andb_prop in Hc as [H12 H3].
+    apply andb_prop in H12 as [H1 H2]. simpl.
+    rewrite IHe1, IHe2, IHe3 by assumption. reflexivity.
+  - (* ELam — e' at S cu *)
+    simpl.
+    replace (S (cu + d)) with (S cu + d) by lia.
+    apply IHe; [lia | assumption].
+  - (* EApp *)
+    apply andb_prop in Hc as [H1 H2]. simpl.
+    rewrite IHe1, IHe2 by assumption. reflexivity.
+  - (* EPair *)
+    apply andb_prop in Hc as [H1 H2]. simpl.
+    rewrite IHe1, IHe2 by assumption. reflexivity.
+  - (* EFst *) apply IHe; assumption.
+  - (* ESnd *) apply IHe; assumption.
+  - (* EInl *) apply IHe; assumption.
+  - (* EInr *) apply IHe; assumption.
+  - (* ECase *)
+    apply andb_prop in Hc as [H01 H2].
+    apply andb_prop in H01 as [H0 H1]. simpl.
+    rewrite IHe1 by assumption.
+    replace (S (cu + d)) with (S cu + d) by lia.
+    rewrite IHe2; [|lia|assumption].
+    rewrite IHe3; [reflexivity|lia|assumption].
+  - (* ERegion *) apply IHe; assumption.
+  - (* EBorrow *) apply IHe; assumption.
+  - (* EDeref *) apply IHe; assumption.
+  - (* EDrop *) apply IHe; assumption.
+  - (* ECopy *) apply IHe; assumption.
+  - (* EEcho *) apply IHe; assumption.
+  - (* EObserve *) apply IHe; assumption.
 Qed.
 
 (** ** Region Environment *)

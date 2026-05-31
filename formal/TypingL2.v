@@ -574,3 +574,122 @@ Proof.
     eapply preservation_l2_app_eff_beta_ground_nonlinear_l1; eassumption.
   - exfalso. inversion Hval.
 Qed.
+
+(** ===== Phase D slice 4 Phase 4c (Stage 1b) — β-case closure for
+    closed TFunEff substituents in leaf-only bodies ====================
+
+    Mirrors [preservation_l2_app_eff_beta_linear] (Phase 4a, PR #228)
+    and [preservation_l2_app_eff_beta_ground_nonlinear] (Phase 4b)
+    but uses [Semantics_L1.subst_typing_gen_l1_m_tfuneff] (Phase 3b
+    Stage 1b) for the L1 substitution step. Covers T1 = TFunEff Ta Tb
+    R_in_v R_out_v — TFunEff-typed function arguments.
+
+    Two-condition statement (per ephapax issue #239's owner-approved
+    Stage 1 framing + Stage 1b's path-(i) closure precondition):
+
+    - [tfuneff_lambda_free ebody = true] (P1): the OUTER lambda's body
+      [ebody] is leaf-only with respect to TFunEff-typed lambdas.
+      Stage 3 (#241) relaxes via CPS once [declared_lambda_r_ins ⊆
+      R_in_v] becomes derivable from typing.
+
+    - [(forall r, In r (regions_introduced_by ebody) -> In r R_in_v)]
+      (P2): every region introduced syntactically in [ebody] is
+      contained in the substituent's declared input env.
+      [Counterexample_L2.v] (PR #234) mechanises the soundness gap
+      this precondition rules out (fresh-region introduction
+      under a stale lambda capture).
+
+    - [expr_closed_below 0 v2 = true] (P3): the substituent is
+      closed. Stage 4 (#242) replaces with a typing-derived
+      closure invariant.
+
+    The mechanised soundness-gap witnesses for the conditional form
+    live in [Counterexample_L2.v] (fresh-region gap, the
+    counterexample to dropping P2) and [Counterexample_L2_nested.v]
+    (nested-lambda gap, the counterexample to dropping P1). The two
+    files together justify why Stage 1 ships the two-condition (plus
+    P3 closure) statement rather than an unconditional version —
+    Stage 4 (#242) achieves the unconditional form once the L4
+    annotation extension (#240) and CPS argument (#241) land.
+
+    Combined with PRs #228 (Phase 4a, linear T1) and #233 (Phase 4b,
+    ground-non-linear T1), this closes the [T_App_L2_Eff] β-case for
+    T1 ∈ {linear, ground-non-linear, TFunEff}. Phase 4d (compound
+    non-linear EPair / EInl / EInr / EEcho) remains open (Phase 5).
+
+    Refs [formal/SUBST-LEMMA-GENERALIZATION-DESIGN.md] Phase 3b
+    Stage 1b, [PRESERVATION-DESIGN.md §5.1], ephapax issue #249,
+    ephapax issue #239 (parent Stage 1), [Counterexample_L2.v] +
+    [Counterexample_L2_nested.v] (mechanised soundness-gap witnesses). *)
+
+Lemma preservation_l2_app_eff_beta_tfuneff_l1 :
+  forall m R R1 G G' G'' v2 Ta Tb R_in_v R_out_v T2 R_in R_out ebody,
+    is_value v2 ->
+    tfuneff_lambda_free ebody = true ->
+    (forall r, In r (regions_introduced_by ebody) -> In r R_in_v) ->
+    expr_closed_below 0 v2 = true ->
+    TypingL1.has_type_l1 m R  G  (ELam (TFunEff Ta Tb R_in_v R_out_v) ebody)
+                                 (TFunEff (TFunEff Ta Tb R_in_v R_out_v) T2 R_in R_out) R1 G' ->
+    TypingL1.has_type_l1 m R1 G' v2 (TFunEff Ta Tb R_in_v R_out_v) R_in G'' ->
+    TypingL1.has_type_l1 m R  G  (subst 0 v2 ebody) T2 R_out G''.
+Proof.
+  intros m R R1 G G' G'' v2 Ta Tb R_in_v R_out_v T2 R_in R_out ebody
+         Hval Hflam Hreg Hclos Hlam Harg.
+  inversion Hlam; subst.
+  - (* T_Lam_L1_Linear_Eff: body at R_in / (Tfun, false)::G''
+       → R_out / (Tfun, true)::G''. Use value_R_G_preserving on Harg
+       to collapse R_in = R1 = R and G'' = G' = G. *)
+    destruct (value_R_G_preserving_l1 _ _ _ _ _ _ _ Hval Harg) as [<- <-].
+    eapply subst_typing_gen_l1_m_tfuneff with
+      (k := 0) (u_in := false)
+      (Gin := (TFunEff Ta Tb R_in_v R_out_v, false) :: G'')
+      (Gout := (TFunEff Ta Tb R_in_v R_out_v, true) :: G'').
+    + unfold ctx_extend in *. eassumption.
+    + reflexivity.
+    + exact Hval.
+    + exact Hflam.
+    + exact Hreg.
+    + exact Hclos.
+    + exact Harg.
+    + reflexivity.
+  - (* T_Lam_L1_Affine_Eff: body output is [(Tfun, u) :: G''] for some [u]. *)
+    destruct (value_R_G_preserving_l1 _ _ _ _ _ _ _ Hval Harg) as [<- <-].
+    eapply subst_typing_gen_l1_m_tfuneff with
+      (k := 0) (u_in := false)
+      (Gin := (TFunEff Ta Tb R_in_v R_out_v, false) :: G'')
+      (Gout := (TFunEff Ta Tb R_in_v R_out_v, _) :: G'').
+    + unfold ctx_extend in *. eassumption.
+    + reflexivity.
+    + exact Hval.
+    + exact Hflam.
+    + exact Hreg.
+    + exact Hclos.
+    + exact Harg.
+    + reflexivity.
+Qed.
+
+(** L2-judgment wrapper for [preservation_l2_app_eff_beta_tfuneff_l1].
+
+    Inverts both [has_type_l2] hypotheses through [L2_lift_l1] (the
+    [T_App_L2_Eff] cases discriminate: the lambda's head is [ELam]
+    not [EApp], and the argument is a value so it cannot be [EApp]),
+    then defers to the L1 kernel and re-lifts via [L2_lift_l1]. *)
+Lemma preservation_l2_app_eff_beta_tfuneff :
+  forall m R R1 G G' G'' v2 Ta Tb R_in_v R_out_v T2 R_in R_out ebody,
+    is_value v2 ->
+    tfuneff_lambda_free ebody = true ->
+    (forall r, In r (regions_introduced_by ebody) -> In r R_in_v) ->
+    expr_closed_below 0 v2 = true ->
+    has_type_l2 m R  G  (ELam (TFunEff Ta Tb R_in_v R_out_v) ebody)
+                        (TFunEff (TFunEff Ta Tb R_in_v R_out_v) T2 R_in R_out) R1 G' ->
+    has_type_l2 m R1 G' v2 (TFunEff Ta Tb R_in_v R_out_v) R_in G'' ->
+    has_type_l2 m R  G  (subst 0 v2 ebody) T2 R_out G''.
+Proof.
+  intros m R R1 G G' G'' v2 Ta Tb R_in_v R_out_v T2 R_in R_out ebody
+         Hval Hflam Hreg Hclos Hlam Harg.
+  inversion Hlam as [m0 R0 G0 e0 T0 R0' G0' Hlam_l1 | ]; subst.
+  inversion Harg as [m0' R0'' G0'' e0' T0' R0''' G0''' Harg_l1 | ]; subst.
+  - apply L2_lift_l1.
+    eapply preservation_l2_app_eff_beta_tfuneff_l1; eassumption.
+  - exfalso. inversion Hval.
+Qed.

@@ -1,5 +1,7 @@
 <!-- SPDX-License-Identifier: PMPL-1.0-or-later -->
+<!-- SPDX-License-Identifier: MPL-2.0 -->
 <!-- Copyright (c) 2026 Jonathan D.A. Jewell (hyperpolymath) <j.d.a.jewell@open.ac.uk> -->
+<!-- Author: Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk> -->
 
 # CLAUDE.md — Ephapax repo agent guidance
 
@@ -36,7 +38,7 @@ https://github.com/hyperpolymath/nextgen-languages/blob/main/docs/disambiguation
 
 ## Machine-readable artefacts
 
-Structured project metadata lives in `.machine_readable/6a2/`:
+Structured project metadata lives in `.machine_readable/6a2/` (7 files):
 
 - `STATE.a2ml` — current project state and progress.
 - `META.a2ml` — architecture decisions and development practices.
@@ -44,6 +46,7 @@ Structured project metadata lives in `.machine_readable/6a2/`:
 - `AGENTIC.a2ml` — AI agent interaction patterns (also carries an `@disambiguation` block).
 - `NEUROSYM.a2ml` — neurosymbolic integration config.
 - `PLAYBOOK.a2ml` — operational runbook.
+- `ANCHOR.a2ml` — canonical authority and project recalibration trigger (template from `hyperpolymath/standards`); declares SSG / cartridge / parent-relationship metadata.
 
 ## The four orthogonal layers
 

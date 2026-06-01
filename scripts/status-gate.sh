@@ -20,7 +20,9 @@ extract_claim() {
   echo "$line" | grep -Eo '[0-9]+' | head -n 1
 }
 
-ROADMAP_PROOF_CLAIM="$(extract_claim "ROADMAP.adoc" "Coq admitted proofs remaining")"
+# Single-source claim: PROOF-NEEDS.md §4 carries the canonical
+# `Coq admitted proofs remaining: <n>` marker. ROADMAP.adoc no longer
+# duplicates this; see the per-file table + seam audit in PROOF-NEEDS.md.
 PROOF_NEEDS_CLAIM="$(extract_claim "PROOF-NEEDS.md" "Coq admitted proofs remaining")"
 TEST_NEEDS_CLAIM="$(extract_claim "TEST-NEEDS.md" "Documented all-target tests")"
 
@@ -29,10 +31,6 @@ ACTUAL_ADMITTED="$(
     | wc -l \
     | tr -d ' '
 )"
-
-if [ "$ROADMAP_PROOF_CLAIM" != "$ACTUAL_ADMITTED" ]; then
-  fail "ROADMAP.adoc claims ${ROADMAP_PROOF_CLAIM} admitted proofs, actual is ${ACTUAL_ADMITTED}"
-fi
 
 if [ "$PROOF_NEEDS_CLAIM" != "$ACTUAL_ADMITTED" ]; then
   fail "PROOF-NEEDS.md claims ${PROOF_NEEDS_CLAIM} admitted proofs, actual is ${ACTUAL_ADMITTED}"

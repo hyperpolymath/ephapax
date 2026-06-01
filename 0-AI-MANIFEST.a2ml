@@ -13,13 +13,14 @@ This is the AI manifest for **ephapax**. It declares:
 
 ### Machine-Readable Metadata: `.machine_readable/6a2/` ONLY
 
-These 6 A2ML files MUST exist in `.machine_readable/6a2/` directory ONLY:
+These 7 A2ML files MUST exist in `.machine_readable/6a2/` directory ONLY:
 1. **STATE.a2ml** - Project state, progress, blockers
 2. **META.a2ml** - Architecture decisions, governance
 3. **ECOSYSTEM.a2ml** - Position in ecosystem, relationships
 4. **AGENTIC.a2ml** - AI agent interaction patterns
 5. **NEUROSYM.a2ml** - Neurosymbolic integration config
 6. **PLAYBOOK.a2ml** - Operational runbook
+7. **ANCHOR.a2ml** - Canonical authority + project recalibration trigger (SSG / cartridge / parent-relationship metadata; template from `hyperpolymath/standards`)
 
 ## CORE INVARIANTS
 

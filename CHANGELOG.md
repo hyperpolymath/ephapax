@@ -1,9 +1,36 @@
-<!-- SPDX-License-Identifier: PMPL-1.0-or-later -->
+<!-- SPDX-License-Identifier: MPL-2.0 -->
+<!-- SPDX-FileCopyrightText: 2026 Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk> -->
 # Changelog
 
 All notable changes to Ephapax are documented here.
 
 ## [Unreleased]
+
+### Phase 3b Stage 1a + 1b — L2 effect-typed TFun + L3 wiring conditional preservation (2026-05-30 → 2026-05-31)
+
+- **Stage 1a (PR #252, merged 2026-05-30 17:42Z)**: `tfuneff_lambda_free`
+  + `Counterexample_L2_nested.v`. Admin-merged after local build oracle
+  GREEN with no axiom slippage (only the known-good
+  `region_liveness_at_split_l1_gen` axiom).
+- **Stage 1b (PR #253)**: L1/L2 plumbing for the effect-typed `TFun` track —
+  `expr_closed_below` + closure helpers (Syntax.v), body-transfer + closed-
+  value G-poly helpers, `subst_typing_gen_l1_m_tfuneff` Qed (zero axioms),
+  and `preservation_l2` β-case for closed `TFunEff` substituents. Builds
+  toward the unconditional `preservation_l2` track per
+  `PRESERVATION-DESIGN.md §12.x`.
+
+### L3 wiring + L4 Phase A scaffold (2026-05-27 → 2026-05-28)
+
+- **L3 wiring (slice 4, 2026-05-27)**: `preservation_l3_region_active_echo`,
+  `preservation_l3_drop_echo`, and the `preservation_l3` umbrella all Qed in
+  `formal/Semantics_L1.v` — each conditional on the
+  `region_shrink_preserves_typing_l1_gen_m` L1 structural admit. The
+  avoidable `T_Region_L1_Echo` mirror was closed in the same slice. Zero new
+  admits introduced.
+- **L4 Phase A scaffold (2026-05-28)**: `formal/L4.v` lands with `ProgramMode`
+  (`PModeLinear` / `PModeAffine` / `PModeBoundaryMix`) and
+  `program_mode_to_modality` round-trip. Definitions only by design — no
+  theorems, no admits, no axioms.
 
 ### Four-layer preservation redesign (2026-05-26 → 2026-05-27)
 
@@ -11,8 +38,9 @@ All notable changes to Ephapax are documented here.
   `proof/l1-region-threading-design`): introduces `has_type_l1` with
   R-threading in `formal/TypingL1.v`. Supporting lemmas in
   `formal/Semantics_L1.v`. Counterexample regression (`bad_input_untypable_l1`)
-  Qed in `formal/Counterexample.v`. `preservation_l1` Admitted with 4
-  residual admits in R-weakening territory.
+  Qed in `formal/Counterexample.v`. `preservation_l1` Admitted with 1
+  residual inner `admit.` covering App / Pair / StringConcat (lambda-
+  rigidity gap per `PRESERVATION-DESIGN.md §4.8`).
 - **L2 — Linear/Affine modality** (PR #176, this entry): `has_type_l1`
   carries `m : Modality` parameter so a single judgment specialises to
   ephapax-linear AND ephapax-affine. New `formal/Modality.v` with K-free

@@ -41,7 +41,7 @@ updated: 2026-05-30T20:00:00Z
 #
 # Current state (verified by coqc 8.18 on main, post-#176/#177):
 #   - formal/Semantics.v `preservation`: Admitted — PROVABLY FALSE per
-#     Counterexample.v (three Qed lemmas). NOT to be closed.
+#     Counterexample.v (five Qed lemmas). NOT to be closed.
 #   - formal/Semantics.v `step_preserves_type`, `step_output_context_eq`,
 #     and their at_pre helpers are Qed but support legacy-preservation
 #     closure attempts that are now ruled out. Retained for diagnostic

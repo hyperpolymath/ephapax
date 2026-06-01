@@ -1,4 +1,7 @@
-<!-- SPDX-License-Identifier: PMPL-1.0-or-later -->
+<!--
+SPDX-License-Identifier: MPL-2.0
+Copyright (c) Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk>
+-->
 <!-- SPDX-FileCopyrightText: 2026 Jonathan D.A. Jewell -->
 
 # Design: generalising `subst_typing_gen_l1_m` to non-linear `T1`
@@ -204,9 +207,9 @@ Stage 1's deliverables split into two slices for shipping cadence:
 
 **Stage 1a (this PR, landed)** — Infrastructure + soundness-gap witness:
 - `tfuneff_lambda_free : expr -> bool` Fixpoint in `formal/Syntax.v`. Conservative leaf-only predicate: `false` on every `ELam`, `true` elsewhere; propagates compositionally through compound forms via `andb`.
-- `formal/Counterexample_L2_nested.v` — three `Qed` lemmas (`e_before_typed`, `e_step`, `e_after_untypable`) mechanising the nested-TFunEff soundness gap. Configuration: `outer = ELam T_v (ELam (TBase TUnit) (EVar 1))` with inner `R_in_inner = [r2]`; `v = ELam TUnit EUnit` at `TFunEff TUnit TUnit [] []`. Post-β `e_after = ELam TUnit v` cannot retype the body at `[r2] ⊄ [] = R_in_v`. Sibling artifact to `Counterexample_L2.v`: together the two files justify the **two-condition** preservation_l2 statement Stage 1 ships (P1 = `tfuneff_lambda_free ebody`, P2 = `regions_introduced_by ebody ⊆ R_in_v`).
+- `formal/Counterexample_L2_nested.v` — five `Qed` lemmas (`v_typed_at_empty`, `outer_typed`, `e_before_typed`, `e_step`, `e_after_untypable`) mechanising the nested-TFunEff soundness gap. Configuration: `outer = ELam T_v (ELam (TBase TUnit) (EVar 1))` with inner `R_in_inner = [r2]`; `v = ELam TUnit EUnit` at `TFunEff TUnit TUnit [] []`. Post-β `e_after = ELam TUnit v` cannot retype the body at `[r2] ⊄ [] = R_in_v`. Sibling artifact to `Counterexample_L2.v`: together the two files justify the **two-condition** preservation_l2 statement Stage 1 ships (P1 = `tfuneff_lambda_free ebody`, P2 = `regions_introduced_by ebody ⊆ R_in_v`).
 - Wired into `_CoqProject` after `Counterexample_L2.v`.
-- Zero new admits / axioms (Print Assumptions: all three lemmas Closed under the global context).
+- Zero new admits / axioms (Print Assumptions: all five lemmas Closed under the global context).
 
 **Stage 1b (follow-up issue, deferred)** — Substitution lemma + preservation wrapper:
 - `subst_typing_gen_l1_m_tfuneff` Qed in `formal/Semantics_L1.v` mirroring `subst_typing_gen_l1_m_ground_nonlinear` (~300 lines); inner `T_Lam_L1_*_Eff` cases exfalso via `tfuneff_lambda_free`; direct (P1, P2) hypothesis form.
@@ -268,7 +271,7 @@ The Phase 3b substitution lemma (`subst_typing_gen_l1_m_tfuneff`) ships with thi
 
 ### What ships in the Phase 4c PR
 
-- `formal/Counterexample_L2.v` — three Qed lemmas mechanising the soundness gap.
+- `formal/Counterexample_L2.v` — five Qed lemmas mechanising the soundness gap.
 - This addendum to `SUBST-LEMMA-GENERALIZATION-DESIGN.md`.
 - STATE.a2ml refresh to reflect the conditional path.
 

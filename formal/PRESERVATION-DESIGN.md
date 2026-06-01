@@ -1,4 +1,7 @@
-<!-- SPDX-License-Identifier: PMPL-1.0-or-later -->
+<!--
+SPDX-License-Identifier: MPL-2.0
+Copyright (c) Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk>
+-->
 <!-- Copyright (c) 2026 Jonathan D.A. Jewell -->
 
 # Preservation: principled redesign
@@ -6,7 +9,7 @@
 > # 🛑 CANONICAL — read before touching `formal/`
 >
 > Preservation in `formal/Semantics.v` is **provably false** —
-> verified by `formal/Counterexample.v` (three lemmas `Qed.`). It is
+> verified by `formal/Counterexample.v` (five lemmas `Qed.`). It is
 > not closable by proof technique.
 >
 > The work is the **four-layer redesign in this document**. Do not:
@@ -35,7 +38,7 @@
 Companion to `PRESERVATION-HANDOFF.md`. The handoff document is a
 diagnostic record of attempted proof-engineering. This document is the
 **design** rationale for the typing-layer change that the verified
-counterexample (`Counterexample.v`, all three lemmas `Qed.`) now makes
+counterexample (`Counterexample.v`, all five lemmas `Qed.`) now makes
 unavoidable.
 
 The handoff's Option 3 ("type-system change") is here re-cast not as a
@@ -954,7 +957,7 @@ Add a new top-level section after "Claim: Region-Based Memory":
 environments through every compound typing rule. A sibling cannot
 reference a region a previous sibling has exited.
 
-* Counterexample at `formal/Counterexample.v` (all three lemmas
+* Counterexample at `formal/Counterexample.v` (all five lemmas
   `Qed`) demonstrates the soundness gap the threading fixes.
 * Design rationale at `formal/PRESERVATION-DESIGN.md §3-§4`.
 * Reference implementation: forthcoming — see `ROADMAP.adoc` for
@@ -1157,7 +1160,7 @@ that side condition *derivable*, not stated.
 ### Proof / theory
 
 - Verified counterexample to preservation in the current rules
-  (`formal/Counterexample.v` — three lemmas `Qed`). The
+  (`formal/Counterexample.v` — five lemmas `Qed`). The
   counterexample is the canonical regression test for the L1 fix.
 
 ### Docs
@@ -1316,7 +1319,7 @@ narrower than the target.
 | Mechanisation | Scope | Status |
 |---|---|---|
 | `formal/Semantics.v`, `formal/Typing.v`, `formal/Syntax.v` (Coq) | A **single** typing judgment `R; G ⊢ e : T -| G'` and its small-step operational semantics | Builds with `coqc 8.18.0` |
-| `formal/Counterexample.v` | A verified counterexample to preservation **as currently stated** | All three lemmas `Qed` |
+| `formal/Counterexample.v` | A verified counterexample to preservation **as currently stated** | All five lemmas `Qed` |
 | `preservation` theorem in `Semantics.v` | Soundness under the current single judgment | **`Admitted.`** — 11 cascading goals open (see `PRESERVATION-HANDOFF.md`) |
 | `src/abi/Ephapax/…/*.idr` (Idris2) | Selected structural-safety claims | Per file; see `idris2 --check` |
 

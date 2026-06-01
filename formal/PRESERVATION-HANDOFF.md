@@ -1,10 +1,13 @@
-<!-- SPDX-License-Identifier: PMPL-1.0-or-later -->
+<!--
+SPDX-License-Identifier: MPL-2.0
+Copyright (c) Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk>
+-->
 
 # Hand-off: closing `preservation` in `formal/Semantics.v`
 
 > # 🛑 ARCHAEOLOGY ONLY — do NOT follow the closure plans in this file
 >
-> The verified counterexample at `formal/Counterexample.v` (three
+> The verified counterexample at `formal/Counterexample.v` (five
 > lemmas `Qed.`) shows `Theorem preservation` in `formal/Semantics.v`
 > is **provably false**. The reduction-from-910-goals story below is
 > the **historical record** of attempts that, at the time, looked

@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: PMPL-1.0-or-later
+// SPDX-License-Identifier: MPL-2.0
+// Copyright (c) Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk>
 // SPDX-FileCopyrightText: 2026 Jonathan D.A. Jewell
 :toc: macro
 :toclevels: 2
@@ -21,7 +22,7 @@ complete. Type checker and WASM code generation are in progress.
 == Four-layer redesign (2026-05-26 → )
 
 The verified preservation counterexample
-(`formal/Counterexample.v`, three `Qed` lemmas) closed the original
+(`formal/Counterexample.v`, five `Qed` lemmas) closed the original
 preservation closure plan as unreachable in the legacy single-layer
 typing judgment. The new plan separates four orthogonal layers; each
 is implemented in sequence and preservation is *re-derived per
@@ -109,7 +110,7 @@ substitution semantics:
 
 | **`preservation`** (legacy)
 | 🔴 Admitted — **provably false**, do not attempt to close
-| `formal/Counterexample.v` exhibits three `Qed.` lemmas showing the theorem is genuinely false. The 11-goals story (PRs #92/#102/#104/#106/#114/#116/#117/#121/#146) is pre-discovery archaeology. The work is the **four-layer redesign** in `formal/PRESERVATION-DESIGN.md`, with preservation re-derived per-layer (`preservation_l1` in `Semantics_L1.v`, etc.). See `CLAUDE.md` at repo root for the owner directive (2026-05-27).
+| `formal/Counterexample.v` exhibits five `Qed.` lemmas showing the theorem is genuinely false (`bad_typable`, `bad_step`, `bad_post_untypable`, `t_loc_l1_R_preserving`, `bad_input_untypable_l1`). The 11-goals story (PRs #92/#102/#104/#106/#114/#116/#117/#121/#146) is pre-discovery archaeology. The work is the **four-layer redesign** in `formal/PRESERVATION-DESIGN.md`, with preservation re-derived per-layer (`preservation_l1` in `Semantics_L1.v`, etc.). See `CLAUDE.md` at repo root for the owner directive (2026-05-27).
 |===
 
 **Historical note**: an earlier in-file comment claimed `preservation`
@@ -206,20 +207,29 @@ All four headline theorems complete with **zero `believe_me` /
 * [x] Coq: `subst_preserves_typing` (Qed)
 * [ ] **Coq: re-derive preservation in the four-layer architecture**
       — `Theorem preservation` in `formal/Semantics.v` is **provably
-      false** (verified by `formal/Counterexample.v`, three lemmas
-      `Qed.`). The work is **not** to close that theorem; it is to
-      derive `preservation_l1` / `preservation_l2` / ... per-layer
-      in the redesigned architecture documented in
-      `formal/PRESERVATION-DESIGN.md`. Status:
-      - L1 (`Semantics_L1.v` `preservation_l1`): in progress;
+      false** (verified by `formal/Counterexample.v`, five `Qed`
+      lemmas). The work is **not** to close that theorem; it is to
+      derive `preservation_l1` / `preservation_l2` / `preservation_l3`
+      per-layer in the redesigned architecture documented in
+      `formal/PRESERVATION-DESIGN.md`. Status (2026-06-01):
+      - L1 (`Semantics_L1.v` `preservation_l1`): Admitted with 1 inner
+        `admit.` covering S_StringConcat/S_App/S_Pair Step2 cases
+        (lambda-rigidity gap closing via Phase 3b Stage 2+3+4);
       - L2 (in-place modality, PRs #176 + #177): `linear_to_affine`
-        Qed zero axioms; 6 L1 supporting lemmas regressed to
-        Admitted post-L2-hybrid, bullet-rewrite needed for the 3
-        new Affine-only constructors;
-      - L3 (`Echo.v`, K-free): forward-looking scaffold landed via
-        #166/#167/#173;
-      - L4: not started.
-      See also `CLAUDE.md` at repo root for the do/do-not directive.
+        Qed zero axioms; `preservation_l2_via_l1` Qed (conditional on
+        `preservation_l1`); 3 β-case lemmas Qed for ground non-linear,
+        Stage 1b TFunEff (conditional on side conditions), and Linear;
+        unconditional `preservation_l2` blocked on Phase 3b Stages 2/3/4
+        (#240/#241/#242);
+      - L3 (`Echo.v` + slice 4 wiring): `preservation_l3_region_active_echo`,
+        `preservation_l3_drop_echo`, and umbrella `preservation_l3` all
+        Qed (conditional on the `region_shrink_preserves_typing_l1_gen_m`
+        structural admit that itself closes at Phase D);
+      - L4 (`L4.v`): Phase A scaffold landed 2026-05-28 (Definitions
+        only — `PModeLinear` / `PModeAffine` / `PModeBoundaryMix` +
+        `program_mode_to_modality` round-trip).
+      See also `CLAUDE.md` at repo root and `PROOF-NEEDS.md` for the
+      complete picture.
 
 [#preservation-closure-plan]
 == Preservation: superseded by four-layer redesign
@@ -279,9 +289,16 @@ audio buffer management:
 
 == v1.0.0 — Production ready
 
-* [ ] **All Coq `Admitted` proofs closed in `formal/Semantics.v`**
-      (currently 1: `preservation` with 12 open goals; see
-      <<preservation-closure-plan,Preservation closure plan>>)
+* [ ] **Per-layer preservation theorems closed**: `preservation_l1`,
+      `preservation_l2` (unconditional, post-Phase-3b Stage 4), and
+      `preservation_l3` (umbrella) all `Qed.` in `formal/Semantics_L1.v`
+      with clean `Print Assumptions`. See `formal/PRESERVATION-DESIGN.md
+      §12` and Phase 3b Stages 2/3/4 (#240/#241/#242).
++
+NOTE: The legacy `Theorem preservation` in `formal/Semantics.v` is
+provably false (`formal/Counterexample.v`) and stays `Admitted.` by
+owner directive 2026-05-27. Closing it is NOT a v1.0 blocker — the
+four-layer redesign supersedes it.
 * [ ] Idris2 `Parse/Parser.idr` upgraded from `%default covering` to
       `%default total` (LL(k) fuel-refactor; deferred separate campaign)
 * [ ] Stable surface syntax (already locked, but confirm no changes needed)
@@ -303,8 +320,10 @@ audio buffer management:
 * link:EXPLAINME.adoc[EXPLAINME] — "show me the receipts" for the README's claims
 * link:PROOF-NEEDS.md[PROOF-NEEDS] — outstanding proof obligations + leverage
 * link:RUST-SPARK-STANCE.adoc[RUST-SPARK-STANCE] — comparison + interop notes
-* link:formal/PRESERVATION-HANDOFF.md[PRESERVATION-HANDOFF] — per-case Coq
-  preservation checklist (the 22 remaining goals)
+* link:formal/PRESERVATION-HANDOFF.md[PRESERVATION-HANDOFF] — *archaeology only*:
+  per-case Coq preservation checklist from the pre-discovery legacy-judgment
+  closure plan. Retained for historical context. Not actionable; see
+  `formal/PRESERVATION-DESIGN.md` for the four-layer redesign.
 * link:docs/vision/EPHAPAX-VISION.adoc[Vision document] — design rationale
 * link:docs/specs/DESIGN-DECISIONS.adoc[Design decisions] — 17 ADRs
 * link:docs/specs/LANGUAGE-COMPARISON.adoc[Language comparison] — vs 10 other languages

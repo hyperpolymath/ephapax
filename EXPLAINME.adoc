@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: PMPL-1.0-or-later
+// SPDX-License-Identifier: MPL-2.0
+// Copyright (c) Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk>
 = Ephapax — Show Me The Receipts
 :toc:
 :toclevels: 3
@@ -92,13 +93,14 @@ environments through every compound typing rule. A sibling cannot
 reference a region a previous sibling has exited — this is the
 soundness invariant the legacy judgment was missing.
 
-* Counterexample at `formal/Counterexample.v` (all three lemmas
+* Counterexample at `formal/Counterexample.v` (all five lemmas
   `Qed`) demonstrates the soundness gap the threading fixes.
 * The new `has_type_l1` judgment lives in `formal/TypingL1.v` and
   carries the R-threading directly. Step relation at
   `formal/Semantics_L1.v`.
 * Design rationale at `formal/PRESERVATION-DESIGN.md §3-§4`.
-* Status: judgment landed; 9 L1 supporting-lemma admits remain as
+* Status: judgment landed; 3 outer `Admitted.` markers covering 4 inner
+  `admit.` cases remain as
   L2-integration debt (tracked in `PROOF-NEEDS.md`).
 
 == Claim: Irreversibility residue is first-class (L3, planned)
@@ -364,8 +366,11 @@ total`.
 * `docs/specs/LANGUAGE-COMPARISON.adoc` — comparison against 10 languages
 * `docs/vision/EPHAPAX-VISION.adoc` — design rationale, why dyadic +
   regions + WASM
-* `formal/PRESERVATION-HANDOFF.md` — per-case checklist for the 22
-  remaining preservation goals
+* `formal/PRESERVATION-HANDOFF.md` — *archaeology only*: per-case
+  checklist from the pre-2026-05-26 legacy-judgment closure plan,
+  retained for historical context. The legacy `preservation` is
+  provably false; the path forward is the per-layer theorems documented
+  in `formal/PRESERVATION-DESIGN.md`.
 * `PROOF-NEEDS.md` — outstanding proof obligations + leverage
 
 == Questions?

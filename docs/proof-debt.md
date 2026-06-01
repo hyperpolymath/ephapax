@@ -1,16 +1,32 @@
 <!--
 SPDX-License-Identifier: MPL-2.0
+Copyright (c) Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk>
 SPDX-FileCopyrightText: 2026 Jonathan D.A. Jewell (hyperpolymath)
 -->
 
-# Proof Debt — ephapax
+# Proof Debt — ephapax (SUPERSEDED — archaeology only)
+
+> ## 🛑 SUPERSEDED
+>
+> This document was written against the pre-2026-05-26 legacy-judgment
+> closure plan and lists `step_preserves_type` / `step_output_context_eq` /
+> `preservation` as (d) DEBT with a 2026-09-01 deadline. That framing is
+> **banned** per owner directive 2026-05-27: the legacy
+> `Theorem preservation` in `formal/Semantics.v` is *provably false*
+> (`formal/Counterexample.v`, five `Qed` lemmas) and its `Admitted.`
+> is correct + durable.
+>
+> **Canonical proof-debt sources**:
+> - `PROOF-NEEDS.md` (root)
+> - `formal/PRESERVATION-DESIGN.md §12`
+> - `formal/PHASE-D-REDESIGN.md`
+>
+> Retained for traceability against the
+> [trusted-base-reduction policy](https://github.com/hyperpolymath/standards/blob/main/docs/TRUSTED-BASE-REDUCTION-POLICY.adoc)
+> (standards#203). The classification framework `(a)–(d)` is still
+> meaningful; the specific entries below are stale.
 
 **Schema**: [hyperpolymath/standards `TRUSTED-BASE-REDUCTION-POLICY.adoc`](https://github.com/hyperpolymath/standards/blob/main/docs/TRUSTED-BASE-REDUCTION-POLICY.adoc) (standards#203).
-
-This file enumerates every soundness-relevant escape hatch in the ephapax
-codebase and its disposition under the trusted-base policy. Markers without
-an entry below count as undocumented debt and will be flagged by
-`scripts/check-trusted-base.sh` once that lands.
 
 Markers in scope (from the 2026-05-26 estate proof-debt audit,
 standards#195):

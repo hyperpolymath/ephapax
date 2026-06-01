@@ -1,4 +1,7 @@
-<!-- SPDX-License-Identifier: PMPL-1.0-or-later -->
+<!--
+SPDX-License-Identifier: MPL-2.0
+Copyright (c) Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk>
+-->
 <!-- SPDX-FileCopyrightText: 2026 Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk> -->
 
 # Proof needs — Ephapax (linear + affine sublanguages)
@@ -56,7 +59,10 @@ For the architectural background see
 | L1 judgment indexed by modality `m : Modality` | `formal/TypingL1.v` | landed via PRs #176 + #177 |
 | L2 modality core (`Modality.v`, `linear_to_affine`) | `formal/Modality.v` | 1 Qed, zero axioms |
 | L3 calculus (echo / residue fiber + degrade + no-section proof) | `formal/Echo.v` | 12 Qed, 0 admits |
-| Linear-mode forward progress lemmas | `formal/Semantics_L1.v` | 26 Qed (incl. 3 new from L3 slice 4: `preservation_l3_region_active_echo` / `preservation_l3_drop_echo` / `preservation_l3` umbrella); 3 outer `Admitted.` markers cover 5 internal `admit.` cases — all pre-existing L1 structural debt OR true parallel mirrors |
+| Linear-mode forward progress lemmas | `formal/Semantics_L1.v` | 37 Qed; 3 outer `Admitted.` markers cover 5 internal `admit.` cases at current lines 576/646/1994/2014/3132. Phase 3b Stage 1a (#252, MERGED 2026-05-30: `tfuneff_lambda_free` + `Counterexample_L2_nested.v`) and Stage 1b (#253, MERGED 2026-05-31: closed-value substitution + `preservation_l2_app_eff_beta` β-case for TFunEff). Slice 4 L3 wiring delivered `preservation_l3_region_active_echo` / `preservation_l3_drop_echo` / `preservation_l3` umbrella. |
+| L2 β-case lemmas (Stage 1b) | `formal/TypingL2.v` | 10 Qed total: `weaken_modality` family (5), `preservation_l2_via_l1` (conditional on `preservation_l1`), `linear_value_retype_l1_m`, and 3 `preservation_l2_app_eff_beta_*` variants (Linear / ground_nonlinear / tfuneff conditional on Stage 1b side conditions P1+P2+P3). Stage 2/3/4 (#240/#241/#242) drop the conditions. |
+| L4 labelling scaffold (Phase A, 2026-05-28) | `formal/L4.v` | `ProgramMode` enum (`PModeLinear` / `PModeAffine` / `PModeBoundaryMix`) + `program_mode_to_modality` round-trip. Definitions only — no theorems, zero axioms. |
+| Counterexample_L2 regression witnesses (Phase 4c + 3b) | `formal/Counterexample_L2.v`, `formal/Counterexample_L2_nested.v` | 5 + 5 Qed pinning the Phase 4c (fresh-region scope crossing) and Phase 3b (nested TFunEff) soundness-gap classes |
 | Counterexample regression witness | `formal/Counterexample.v` | 5 Qed (`bad_input_untypable_l1` proved under both modes) |
 | Operational checker (Rust, ephapax-linear sublanguage) | `ephapax-linear/src/linear.rs` | working — discharges resource-exact obligation |
 
@@ -68,7 +74,7 @@ For the architectural background see
 | Linear ⇒ Affine weakening | `formal/TypingL1.v` `linear_to_affine` | Qed, zero axioms |
 | Operational checker (Rust, ephapax-affine sublanguage) | `ephapax-linear/src/affine.rs` | working — permits weakening / graceful abandonment |
 | Affine-mode echo discipline (LEcho Affine = lowered triple) | `formal/Echo.v` (calculus) | calculus done; rule wiring pending |
-| Affine forward progress lemmas | `formal/Semantics_L1.v` | bullet-structure rewrites + subst_typing_gen_l1_m + region_shrink_preserves_typing_l1_gen_m m-polymorphic generalisations landed 2026-05-27; remaining 3 admits are L2-β deeper-than-bullet debt (see §2) |
+| Affine forward progress lemmas | `formal/Semantics_L1.v` | bullet-structure rewrites + `subst_typing_gen_l1_m` + `region_shrink_preserves_typing_l1_gen_m` m-polymorphic generalisations landed 2026-05-27; Phase 3b Stage 1a + 1b landed 2026-05-30/31 via #252 + #253. Remaining admits are pre-existing L1 structural debt + one provably-false-as-stated sub-case (`Semantics_L1.v:1994` / mirror `:2014` — closure requires Phase D reformulation, not direct proof). See §4 seam audit. |
 
 ### Counterexample regression
 
@@ -233,45 +239,57 @@ to the owner**:
 
 ## §4. Counts + file-by-file map
 
-### Per-file Qed / Admitted summary (as of 2026-05-28)
+### Per-file Qed / Admitted summary (as of 2026-06-01)
 
 | File | Qed | Admitted | Disposition |
 |---|---:|---:|---|
-| `formal/Semantics.v` (legacy) | n/a | **3** | 🛑 archaeology — do not extend |
+| `formal/Semantics.v` (legacy) | n/a | **1** | 🛑 archaeology — single `Admitted.` at line 9257 (`Theorem preservation`, provably false); do not extend |
 | `formal/Typing.v` (legacy) | n/a | 0 | 🛑 archaeology — `Counterexample.v` depends on falsity |
-| `formal/Counterexample.v` | **5** | 0 | ✅ pinned regression witness |
+| `formal/Counterexample.v` | **5** | 0 | ✅ pinned regression witness (`bad_typable`, `bad_step`, `bad_post_untypable`, `t_loc_l1_R_preserving`, `bad_input_untypable_l1`) |
+| `formal/Counterexample_L2.v` | **5** | 0 | ✅ Phase 4c soundness-gap witness — fresh-region scope crossing (`v_typed_at_empty`, `outer_typed`, `e_before_typed`, `e_step`, `e_after_untypable`) |
+| `formal/Counterexample_L2_nested.v` | **5** | 0 | ✅ Phase 3b soundness-gap witness — nested TFunEff (analogue structure to `Counterexample_L2.v`) |
 | `formal/TypingL1.v` | **2** | 0 | ✅ active — L1 judgment, modality-indexed |
-| `formal/Semantics_L1.v` | **26** | **3** | ✅ active — bullet-structure regressions + subst_typing_gen_l1_m + region_shrink_preserves_typing_l1_gen_m closed 2026-05-27; 3 residual outer `Admitted.` markers cover 5 internal `admit.` cases — all pre-existing L1 structural debt OR true parallel mirrors (T_Region_Active_*_L1_Echo shadowed sub-cases mirror T_Region_Active_L1's debt; the avoidable T_Region_L1_Echo mirror was closed in slice 4). Slice 4 added 3 new Qed: `preservation_l3_region_active_echo`, `preservation_l3_drop_echo`, `preservation_l3` (umbrella). Zero new admits. |
-| `formal/Modality.v` | **1** | 0 | ✅ active — L2 core, zero axioms |
-| `formal/Echo.v` | **12** | 0 | ✅ active — L3 calculus, not yet wired into L1 |
-| `formal/TypingL2.v` | (wrapper) | (wrapper) | ✅ thin re-indexing through `TypingL1.has_type_l1` |
-| `formal/L4.v` | (Definitions only) | 0 | ✅ active — L4 labelling discipline, no theorems (Phase A landed 2026-05-28) |
-| `src/abi/Ephapax/…` (Idris2) | n/a | n/a | ✅ active — ABI, Region linearity, no `believe_me` / `sorry` / `assert_total` |
+| `formal/Semantics_L1.v` | **37+** | **3** | ✅ active — Phase 3b Stage 1a + 1b landed via PRs #252 + #253. 3 outer `Admitted.` markers cover 4 internal `admit.` cases. See seam audit below for current line numbers. |
+| `formal/Modality.v` | **1** | 0 | ✅ active — L2 core, zero axioms (`linear_to_affine`) |
+| `formal/Echo.v` | **12** | 0 | ✅ active — L3 calculus mechanised |
+| `formal/TypingL2.v` | **10** | 0 | ✅ active — `weaken_modality` (+ Affine_id + 3 `_le_*` variants), `preservation_l2_via_l1` (conditional on `preservation_l1`), `linear_value_retype_l1_m`, and 3 β-case lemmas (`preservation_l2_app_eff_beta_linear`, `_ground_nonlinear`, `_tfuneff` conditional on Stage 1b side conditions). NOT a wrapper. |
+| `formal/L4.v` | (Definitions only) | 0 | ✅ active — L4 labelling discipline (`PModeLinear` / `PModeAffine` / `PModeBoundaryMix` + `program_mode_to_modality` round-trip). No theorems. Phase A scaffold landed 2026-05-28. |
+| `src/abi/Ephapax/…` (Idris2) | n/a | (E1–E6 + compileOk = 7 `0`-quantity postulates) | ✅ active — ABI; postulates are explicit OWED-to-Coq forwards. See §1 Idris row below. |
+| `src/formal/Ephapax/…` (Idris2) | working | none | ✅ active — Region linearity, narrow no-escape proof; no `believe_me` / `sorry` / `assert_total` |
 
-### Seam audit (slice 4, 2026-05-27): every admit/axiom classified
+### Seam audit (current 2026-06-01): every admit/axiom classified
 
-Every `admit.` and `Admitted.` in `formal/*.v` after L3 slice 4
-landed. No new debt was introduced; the avoidable T_Region_L1_Echo
-mirror was closed. The remaining set is exactly the **pre-existing
-L1 structural debt** (with two true parallel mirrors that close
-when their originals close) plus the **sacrosanct legacy
-preservation** (provably false per `Counterexample.v`).
+The current `admit.` / `Admitted.` set in `formal/*.v`. The remaining
+admits are exactly the **pre-existing L1 structural debt** (with one
+true parallel mirror that closes when its original closes) plus the
+**sacrosanct legacy preservation** (provably false per `Counterexample.v`).
 
 | Location | Class | Closes when |
 |---|---|---|
-| `Semantics_L1.v:553` (`admit.`) | **Pre-existing** L1 structural — `region_shrink_preserves_typing_l1_gen_m` / T_Region_Active_L1 shadowed sub-case; list-vs-multiset gap | L1 perm/multiset bridge OR `T_Region_*_L1` redesign |
-| `Semantics_L1.v:621` (`admit.`) | **Parallel mirror** of `:553` — T_Region_Active_L1_Echo shadowed sub-case; structurally identical | Same as `:553` (mechanical replay) |
-| `Semantics_L1.v:653` (`Admitted.`) | **Outer marker** — depends on internal `:553` + `:621` | When both internal admits close |
-| `Semantics_L1.v:1256` (`admit.`) | **Pre-existing** L1 structural — `region_liveness_at_split_l1_gen` / T_Region_Active_L1 `r = rv` sub-case; "GENUINELY FALSE" counterexample documented at site | L2 effect-typed `TFun` per `PRESERVATION-DESIGN.md §5.1` |
-| `Semantics_L1.v:1276` (`admit.`) | **Parallel mirror** of `:1256` — T_Region_Active_L1_Echo `r = rv` sub-case | Same as `:1256` (mechanical replay) |
-| `Semantics_L1.v:1290` (`Admitted.`) | **Outer marker** — depends on internal `:1256` + `:1276` | When both internal admits close |
-| `Semantics_L1.v:1694` (`admit.`) | **Pre-existing** — `preservation_l1` body; lambda-rigidity gap per `PRESERVATION-DESIGN.md §4.8` | L2 effect-typed `TFun` (Phase 2) |
-| `Semantics_L1.v:1695` (`Admitted.`) | **Outer marker** — depends on internal `:1694` | When `:1694` closes |
+| `Semantics_L1.v:576` (`admit.`) | **Pre-existing** L1 structural — `region_shrink_preserves_typing_l1_gen_m` / T_Region_Active_L1 shadowed sub-case; list-vs-multiset gap | L1 perm/multiset bridge OR `T_Region_*_L1` redesign (deferred to Phase D) |
+| `Semantics_L1.v:646` (`admit.`) | **Parallel mirror** of `:576` — T_Region_Active_L1_Echo shadowed sub-case; structurally identical | Same as `:576` (mechanical replay) |
+| `Semantics_L1.v:678` (`Admitted.`) | **Outer marker** — depends on internal `:576` + `:646` | When both internal admits close |
+| `Semantics_L1.v:1994` (`admit.`) | **Pre-existing** L1 structural — `region_liveness_at_split_l1_gen` / T_Region_Active_L1 `binder = rv` sub-case; **GENUINELY FALSE as stated** (single-case counterexample documented at site lines 1923-1926); current `Admitted.` is a transparency mark, not "almost done" | L2 effect-typed `TFun` per `PRESERVATION-DESIGN.md §5.1`; closure requires reformulation, not direct proof |
+| `Semantics_L1.v:2014` (`admit.`) | **Parallel mirror** of `:1994` — T_Region_Active_L1_Echo `binder = rv` sub-case; inherits same falsity | Same as `:1994` |
+| `Semantics_L1.v:2028` (`Admitted.`) | **Outer marker** — depends on internal `:1994` + `:2014` | When both internal admits close (i.e., never directly — only via reformulation) |
+| `Semantics_L1.v:3132` (`admit.`) | **Pre-existing** — `preservation_l1` body, covering S_StringConcat_Step2 + S_App_Step2 + S_Pair_Step2 cases; lambda-rigidity gap per `PRESERVATION-DESIGN.md §4.8` | Phase 3b Stages 2/3/4 (#240/#241/#242) — L2 effect-typed lambdas with `R_in/R_out` syntactic annotations |
+| `Semantics_L1.v:3133` (`Admitted.`) | **Outer marker** — depends on internal `:3132` | When `:3132` closes |
 | `Semantics.v:9257` (`Admitted.`) | **🛑 Sacrosanct** — legacy `Theorem preservation`, **provably false** per `Counterexample.v` (owner directive 2026-05-27) | Never. The `Admitted.` is correct. |
 
-No `Axiom` declarations in `formal/*.v`. Counterexample.v carries 5
-Qed; TypingL1.v / Modality.v / Echo.v / TypingL2.v are all
-admit-free.
+**Falsity audit** — two admits are not "unproven but true"; they are
+**provably false as stated**:
+
+1. `Semantics.v:9257` — refuted by `Counterexample.v`; sacrosanct.
+2. `Semantics_L1.v:1994` (and its mirror `:2014`) — refuted by single-case
+   counterexample `ERegion rv (EI32 5)` at `R=[rv]` documented in the
+   source at lines 1923-1926. Their `Admitted.` is a transparency mark
+   acknowledging the residual sub-case is false. Closure requires
+   reformulation at the L2 layer (lambda-rigidity gap), not a direct proof.
+
+No `Axiom` declarations in `formal/*.v`. `Counterexample.v` /
+`Counterexample_L2.v` / `Counterexample_L2_nested.v` carry 5 + 5 + 5
+Qed respectively; `TypingL1.v` / `Modality.v` / `Echo.v` / `TypingL2.v`
+are all `admit.`-free.
 
 ### Idris2 side (proof carriers, not Coq mechanisation)
 

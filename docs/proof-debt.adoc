@@ -1,16 +1,33 @@
 // SPDX-License-Identifier: MPL-2.0
+// Copyright (c) Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk>
 // SPDX-FileCopyrightText: 2026 Jonathan D.A. Jewell (hyperpolymath)
-= Proof debt
+= Proof debt (SUPERSEDED — archaeology only)
 :policy: https://github.com/hyperpolymath/standards/blob/main/docs/TRUSTED-BASE-REDUCTION-POLICY.adoc
-:design: formal/PRESERVATION-DESIGN.md (on branch `proof/l1-region-threading-design`)
-:handoff: formal/PRESERVATION-HANDOFF.md
-:roadmap: ROADMAP.adoc § "Preservation closure plan"
-:counterexample: formal/Counterexample.v (on branch `proof/l1-region-threading-design`)
 
-Per link:{policy}[standards#203] (trusted-base reduction policy), every
-soundness-relevant escape hatch in this repo is classified below as one
-of: (a) DISCHARGED, (b) BUDGETED, (c) NECESSARY AXIOM, or (d) DEBT.
-Disposition (d) is the only category that should shrink over time.
+[IMPORTANT]
+====
+*This document is SUPERSEDED.* It was written against the pre-2026-05-26
+legacy-judgment closure plan (the `step_preserves_type` / `step_output_context_eq` /
+`preservation` reduction-from-910-goals story) and references a now-merged
+branch `proof/l1-region-threading-design`. That entire framing is now
+banned per owner directive 2026-05-27 — `Theorem preservation` in
+`formal/Semantics.v` is *provably false* via `formal/Counterexample.v`
+(five Qed lemmas) and its `Admitted.` is correct + durable.
+
+*Canonical proof-debt sources*:
+
+* `PROOF-NEEDS.md` (root) — current per-sublanguage proof-debt audit
+* `formal/PRESERVATION-DESIGN.md §12` — four-layer redesign + per-layer
+  preservation strategy
+* `formal/PHASE-D-REDESIGN.md` — current active workstream
+* `formal/PRESERVATION-HANDOFF.md` — historical record (also marked
+  ARCHAEOLOGY at top)
+
+The remainder of this file is retained only for traceability of the
+trusted-base-reduction-policy categories `(a)–(d)` against
+link:{policy}[standards#203], and to point readers at the canonical
+sources above.
+====
 
 == (a) Discharged in this repo
 

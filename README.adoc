@@ -4,7 +4,8 @@ image:https://img.shields.io/badge/Philosophy-Palimpsest-indigo.svg[Palimpsest,l
 image:https://github.com/hyperpolymath/ephapax/actions/workflows/codeql.yml/badge.svg?branch=main[CodeQL,link="https://github.com/hyperpolymath/ephapax/actions/workflows/codeql.yml"]
 image:https://api.thegreenwebfoundation.org/greencheckimage/ephapax.org[Green Hosting,link="https://www.thegreenwebfoundation.org/green-web-check/?url=ephapax.org"]
 
-// SPDX-License-Identifier: PMPL-1.0-or-later
+// SPDX-License-Identifier: MPL-2.0
+// Copyright (c) Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk>
 // SPDX-FileCopyrightText: 2025-2026 Jonathan D.A. Jewell
 :toc: macro
 :toclevels: 3
@@ -741,14 +742,32 @@ Contributions welcome. Please see:
 
 The highest-leverage open work, in priority order:
 
-1. **Close `preservation` to Qed** (`formal/PRESERVATION-HANDOFF.md`)
-   — multi-day proof engineering, 22 goals remaining.
-2. **Fuel-refactor `Parse/Parser.idr`** from `%default covering` to
+1. **Phase 3b Stages 2 → 4** (issues #240/#241/#242) — `ELam` annotation
+   extension, CPS-form substitution, then compound non-linear values +
+   unconditional `preservation_l2`. The path forward; see
+   `formal/PRESERVATION-DESIGN.md §12.15` and `formal/PHASE-D-REDESIGN.md`.
+2. **Progress for L1** — state and prove `progress_l1` plus the L1
+   `canonical_*` lemmas (currently legacy-only at `Semantics.v:603-630`).
+   Combined with the conditional `preservation_l1`, this gives
+   conventional type-soundness in conditional form.
+3. **Fuel-refactor `Parse/Parser.idr`** from `%default covering` to
    `%default total`. Substantial — ~30 mutually-recursive combinators
    threaded through a `Stream` record.
-3. **Type-checker completion** (`ephapax-typing`) and **WASM codegen
+4. **Type-checker completion** (`ephapax-typing`) and **WASM codegen
    for lambda/app** (`ephapax-wasm`).
-4. **Native backend via Cranelift** (v0.2.0).
+5. **Native backend via Cranelift** (v0.2.0).
+
+[NOTE]
+====
+*Closing the legacy `Theorem preservation` in `formal/Semantics.v` is
+NOT a valid contribution.* That theorem is provably false (sealed by
+`formal/Counterexample.v`); its `Admitted.` is correct and durable per
+owner directive 2026-05-27. `formal/PRESERVATION-HANDOFF.md` is
+archaeology kept for context. The path forward is the per-layer
+preservation theorems (`preservation_l1`, `preservation_l2`,
+`preservation_l3`) on the redesigned judgment in `formal/Semantics_L1.v`.
+See `formal/PRESERVATION-DESIGN.md §12` and `PROOF-NEEDS.md §3`.
+====
 
 == Licence
 

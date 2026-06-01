@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: PMPL-1.0-or-later
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk>
 = Ephapax — Show Me The Receipts
 :toc:
 :toclevels: 3
@@ -98,13 +99,15 @@ soundness invariant the legacy judgment was missing.
   carries the R-threading directly. Step relation at
   `formal/Semantics_L1.v`.
 * Design rationale at `formal/PRESERVATION-DESIGN.md §3-§4`.
-* Status: judgment landed; 9 L1 supporting-lemma admits remain as
-  L2-integration debt (tracked in `PROOF-NEEDS.md`).
+* Status: judgment landed; `Semantics_L1.v` carries 3 outer
+  `Admitted.` markers covering 5 inner `admit.` cases — pre-existing
+  L1 structural debt + parallel mirrors (file:line breakdown in
+  `PROOF-NEEDS.md §4`).
 
-== Claim: Irreversibility residue is first-class (L3, planned)
+== Claim: Irreversibility residue is first-class (L3, wired)
 
-*Evidence (planned)*: Operations that erase information (region
-exit, drop) will produce typed residue witnesses, following the
+*Evidence*: Operations that erase information (region exit, drop)
+produce typed residue witnesses, following the
 https://github.com/hyperpolymath/echo-types[echo-types]
 formulation. Linear mode requires the residue to be observed;
 Affine mode permits silent lowering.
@@ -115,9 +118,13 @@ Affine mode permits silent lowering.
 * Local mirror at `formal/Echo.v` — the L3 calculus is mechanised
   here (modes, `LEcho`, `weaken`, `degrade_mode`, all `Qed`).
 * Forward-looking design at `formal/PRESERVATION-DESIGN.md §6`.
-* Status: **planned** integration — `Echo.v` is wired up
-  internally, but no ephapax typing rule yet introduces `TEcho`.
-  The L3 extension follows L1's residual admit closure.
+* Status: **wiring landed** (slice 4, 2026-05-27).
+  `preservation_l3_region_active_echo`, `preservation_l3_drop_echo`,
+  and the `preservation_l3` umbrella in `Semantics_L1.v` are all
+  Qed, each conditional on the
+  `region_shrink_preserves_typing_l1_gen_m` L1 structural admit.
+  Remaining L3 work is unconditional `preservation_l3` (Phase 3b
+  Stage 2).
 
 == Claim: Dyadic mode is project-level only (L4)
 
@@ -242,20 +249,20 @@ theorem.
 | `formal/TypingL1.v` — modality-indexed, R-threaded
 
 | L1 semantics
-| 🟡 15 Qed, 9 admits (L2-integration debt)
-| `formal/Semantics_L1.v` — 9 admits are bullet-structure rewrites for new Affine-only constructors, *not* legacy patching
+| 🟡 37 Qed, 3 Admitted (5 inner admits — pre-existing L1 structural debt + parallel mirrors)
+| `formal/Semantics_L1.v` — 3 outer `Admitted.` markers cover 5 internal `admit.` cases. Per `PROOF-NEEDS.md §4`: pre-existing L1 structural debt (multiset/list-perm bridge + L2 effect-typed `TFun` per PRESERVATION-DESIGN.md §5.1 + lambda-rigidity at `preservation_l1` body) and two parallel mirrors that close mechanically when their originals close.
 
 | L2 modality (`Modality.v`)
 | ✅ Core landed (1 Qed, 0 axioms)
 | `formal/Modality.v` + `m : Modality` in `has_type_l1`. PRs #176 + #177. `linear_to_affine` Qed with zero axioms.
 
 | L3 echo / residue calculus
-| ✅ 12 Qed, 0 admits (calculus); ⏳ integration pending
-| `formal/Echo.v` — one type former (fiber `Echo f y := Σ x. f x ≡ y`) + degrade map + no-section-collapse-to-residue proof. Not yet wired into `has_type_l1` or step rules.
+| ✅ Calculus 12 Qed + wiring landed (slice 4, 2026-05-27)
+| `formal/Echo.v` — one type former (fiber `Echo f y := Σ x. f x ≡ y`) + degrade map + no-section-collapse-to-residue proof. Wiring lemmas (`preservation_l3_region_active_echo`, `preservation_l3_drop_echo`, `preservation_l3` umbrella) in `Semantics_L1.v` — all Qed, conditional on `region_shrink_preserves_typing_l1_gen_m`.
 
 | L4 dyadic interaction
-| 🔲 Not started
-| Design in `formal/PRESERVATION-DESIGN.md §7`.
+| ✅ Phase A scaffold landed (`formal/L4.v`, 2026-05-28); definitions only
+| `PModeLinear` / `PModeAffine` / `PModeBoundaryMix` enum + `program_mode_to_modality` round-trip. No theorems by design. Design in `formal/PRESERVATION-DESIGN.md §7`.
 
 | Legacy `Theorem preservation` (`formal/Semantics.v`)
 | 🛑 Provably false (Admitted)
@@ -263,12 +270,16 @@ theorem.
 |===
 
 What's done = `Modality.linear_to_affine` (Linear ⇒ Affine weakening,
-zero axioms), the L1 judgment, L3 fiber + degrade calculus, and the
-counterexample regression witness. What's todo = close the 9
-Semantics_L1 admits (L2-integration debt), wire L3 into the typing
-judgment + step rules, then state per-layer preservation. What's
-banned = closing the legacy theorem, adding new `Axiom` declarations
-to discharge L1/L2 gaps, conflating `ephapax-affine` (this repo's
+zero axioms), the L1 judgment, L3 fiber + degrade calculus, L3
+wiring into the L1 step rules (slice 4 — `preservation_l3` umbrella
+Qed conditional on the L1 structural admit), L4 Phase A scaffold
+(definitions only), and the counterexample regression witness.
+What's todo = close the 3 Semantics_L1 outer Admitteds (pre-existing
+L1 structural debt: multiset/list-perm bridge + L2-effect-typed
+`TFun` + lambda-rigidity at `preservation_l1`), then state
+unconditional `preservation_l3` (Phase 3b Stage 2). What's banned =
+closing the legacy theorem, adding new `Axiom` declarations to
+discharge L1/L2 gaps, conflating `ephapax-affine` (this repo's
 sublanguage) with `AffineScript` (a separate language at
 `hyperpolymath/affinescript`). Full per-sublanguage breakdown in
 `PROOF-NEEDS.md`.
@@ -341,7 +352,9 @@ total`.
 
 == Test Evidence
 
-~229 tests across ~19 crates, 0 failures. Key test categories:
+357 tests across 17 active workspace crates + `tests/fuzz`, 0
+failures (per `cargo test --all-targets`; see `TEST-NEEDS.md` for
+the per-crate breakdown). Key test categories:
 
 * *Type checker dyadic tests*: `let` vs `let!` semantics, branch
   agreement, region exit (`ephapax-typing`)
@@ -352,8 +365,8 @@ total`.
 * *Discipline tests*: linear vs affine checker divergence
   (`ephapax-linear`)
 * *Integration tests*: parse → desugar → typecheck end-to-end
-* *Conformance tests*: `conformance/pass/` programs must type-check,
-  `conformance/fail/` programs must be rejected
+* *Conformance tests*: `conformance/valid/` programs must type-check,
+  `conformance/invalid/` programs must be rejected
 
 == Design Documents
 

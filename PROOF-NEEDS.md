@@ -1,4 +1,4 @@
-<!-- SPDX-License-Identifier: PMPL-1.0-or-later -->
+<!-- SPDX-License-Identifier: MPL-2.0 -->
 <!-- SPDX-FileCopyrightText: 2026 Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk> -->
 
 # Proof needs — Ephapax (linear + affine sublanguages)
@@ -232,6 +232,15 @@ to the owner**:
 ---
 
 ## §4. Counts + file-by-file map
+
+<!-- status-gate marker: do not move. scripts/status-gate.sh reads this line. -->
+Coq admitted proofs remaining: 4
+
+(1 outer `Admitted.` in `formal/Semantics.v` — sacrosanct legacy
+preservation, provably false per `Counterexample.v` + 3 outer
+`Admitted.` markers in `formal/Semantics_L1.v` covering 5 internal
+`admit.` cases — all pre-existing L1 structural debt + parallel
+mirrors. See the per-file table and seam audit below.)
 
 ### Per-file Qed / Admitted summary (as of 2026-05-28)
 

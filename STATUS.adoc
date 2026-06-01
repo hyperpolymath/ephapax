@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: PMPL-1.0-or-later
+// SPDX-License-Identifier: MPL-2.0
 // SPDX-FileCopyrightText: 2026 Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk>
 :toc: preamble
 :toclevels: 2
@@ -118,29 +118,32 @@ fix at one layer must not require changes at another.
 | Region capabilities, capability environment threading
 | `formal/TypingL1.v` + `formal/Semantics_L1.v`
 | Substantially complete — judgment is 100%; semantics carries the
-  L2-integration debt
-| `TypingL1.v`: **2 / 0**. `Semantics_L1.v`: **15 / 9**.
+  pre-existing L1 structural debt + parallel mirrors
+| `TypingL1.v`: **2 / 0**. `Semantics_L1.v`: **37 Qed / 3 Admitted** (3 outer markers cover 5 internal `admit.` cases — see PROOF-NEEDS.md §4 for the file:line classification).
 
 | L2
 | Structural modality (Linear vs Affine)
 | `formal/Modality.v` + `m : Modality` indexing in `has_type_l1`
 | Core landed via PRs #176 + #177. `linear_to_affine` Qed, zero
-  axioms. Integration debt = the 9 L1 supporting lemmas above.
+  axioms.
 | `Modality.v`: **1 / 0**.
 
 | L3
 | Echo / residue — what was *lost* when an irreversible step fired
 | `formal/Echo.v` (+ upstream `hyperpolymath/echo-types`)
-| Calculus done locally (fiber + degrade + no-section proof of
-  irreversibility). **NOT YET WIRED** into `has_type_l1` or step
-  rules. The wiring is the next-block work.
-| `Echo.v`: **12 / 0**.
+| Calculus + wiring both landed (slice 4, 2026-05-27).
+  `preservation_l3_region_active_echo`, `preservation_l3_drop_echo`,
+  and `preservation_l3` (umbrella) all Qed (conditional on the
+  `region_shrink_preserves_typing_l1_gen_m` L1 structural admit).
+| `Echo.v`: **12 / 0** (plus 3 new Qed in `Semantics_L1.v` for the wiring).
 
 | L4
 | Dyadic interaction semantics (mother–child distinction)
-| (none)
-| Not started. Design in `PRESERVATION-DESIGN.md §7`.
-| — / —
+| `formal/L4.v` (Phase A scaffold — definitions only)
+| Phase A scaffold landed 2026-05-28. `PModeLinear` / `PModeAffine` /
+  `PModeBoundaryMix` + `program_mode_to_modality` round-trip. No
+  theorems by design. Design in `PRESERVATION-DESIGN.md §7`.
+| `L4.v`: definitions only — no Qed, no Admitted.
 |===
 
 [NOTE]
@@ -158,47 +161,54 @@ combined form.
 
 [IMPORTANT]
 ====
-.Reading the layer status correctly
-"L3 calculus is done; L3 is not wired" means the `Echo.v` fiber +
-degrade + no-section proofs exist, but no typing rule reads them. To
-land L3 we add `T_Observe`-style rules to `has_type_l1` that consume
-echoes under Linear modality, step rules that *emit* echo values
-on collapse functions at irreversible steps (region exit, drop),
-and a context `G` threaded alongside `R`. The calculus is the
-foundation; the wiring is the language change.
+.Reading the L3 layer status (post-slice-4, 2026-05-27)
+L3 wiring has landed. The `Echo.v` fiber + degrade + no-section
+proofs are now consumed by L1 step rules at irreversible boundaries.
+The `preservation_l3` umbrella in `Semantics_L1.v` discharges
+`preservation_l3_region_active_echo` + `preservation_l3_drop_echo`
+(both Qed) — each conditional on the
+`region_shrink_preserves_typing_l1_gen_m` L1 structural admit.
+Remaining L3 work is unconditional `preservation_l3` (Phase 3b Stage
+2) plus any extension of the wiring to additional irreversible
+step rules. Mid-block work is L4 design (`PRESERVATION-DESIGN.md §7`).
 ====
 
 == Future — what comes next
 
-=== Near-term (close L1 ⇒ L2 integration debt + L3 wiring)
+=== Near-term (close L1 structural admits + unconditional preservation_l3)
 
-* Close the 9 `Admitted` lemmas in `formal/Semantics_L1.v` — these
-  are *L2-integration debt* (bullet-structure rewrites for the 3 new
-  Affine-only constructors `T_Lam_L1_Affine`, `T_Case_L1_Affine`,
-  `T_If_L1_Affine`). Mechanical; not legacy patching.
+* Close the 3 outer `Admitted.` markers in `formal/Semantics_L1.v`
+  (covering 5 internal `admit.` cases). Per PROOF-NEEDS.md §4 these
+  are pre-existing L1 structural debt + parallel mirrors:
+  `region_shrink_preserves_typing_l1_gen_m` (list / multiset bridge),
+  `region_liveness_at_split_l1_gen` (L2-effect-typed `TFun` per
+  PRESERVATION-DESIGN.md §5.1), and `preservation_l1`
+  lambda-rigidity. Two of the five are mechanical parallel mirrors
+  that close when their originals close.
 
-* Wire L3 into `has_type_l1`:
-+
-[loweralpha]
-. Add `T_Observe : has_type_l1 m R G e (Echo f y) → has_type_l1 m R
-  G e' T` (Linear mode consumes; Affine mode permits silent
-  lowering).
-. Step rules at irreversible boundaries (`S_Region_Exit`, `S_Drop`)
-  emit a collapse-function-typed `Echo` value into `G`.
-. Thread `G` (echo context) alongside `R` (region context) through
-  every compound rule.
+* L3 wiring landed (slice 4, 2026-05-27). Remaining L3 work is
+  Phase 3b Stage 2: state + prove the **unconditional**
+  `preservation_l3` (currently conditional on the
+  `region_shrink_preserves_typing_l1_gen_m` admit). Stages 1b / 3 /
+  4 also open per `PRESERVATION-DESIGN.md §12.x`.
 
-* Per-layer preservation theorems: state and prove
+* Per-layer preservation theorems: continue building
   `preservation_l1`, `preservation_l2`, `preservation_l3` — each
   against its own judgment, using its own invariants. **Do not** try
   to re-derive the legacy theorem.
 
-=== Mid-term (L4 design)
+=== Mid-term (L4 — Phase A landed, design ongoing)
 
-* Mother / child dyadic mode distinction —
-  `PRESERVATION-DESIGN.md §7`. Project-level mode declarations
-  parameterising the whole language by which dyadic discipline is in
-  effect.
+* L4 Phase A landed 2026-05-28 (`formal/L4.v`): three-constructor
+  `ProgramMode` enum (`PModeLinear` / `PModeAffine` /
+  `PModeBoundaryMix`) + `program_mode_to_modality` round-trip,
+  definitions only.
+
+* Future L4 work: surface-syntax integration (the
+  `#![ephapax_linear]` / `#![ephapax_affine]` /
+  `#![module_boundary_mix(...)]` decls aren't yet wired into the
+  parser or borrow checker), plus the dyadic mother–child semantics
+  per `PRESERVATION-DESIGN.md §7`.
 
 === Value-prop directions (committed and speculative)
 

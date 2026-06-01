@@ -4,8 +4,8 @@ image:https://img.shields.io/badge/Philosophy-Palimpsest-indigo.svg[Palimpsest,l
 image:https://github.com/hyperpolymath/ephapax/actions/workflows/codeql.yml/badge.svg?branch=main[CodeQL,link="https://github.com/hyperpolymath/ephapax/actions/workflows/codeql.yml"]
 image:https://api.thegreenwebfoundation.org/greencheckimage/ephapax.org[Green Hosting,link="https://www.thegreenwebfoundation.org/green-web-check/?url=ephapax.org"]
 
-// SPDX-License-Identifier: PMPL-1.0-or-later
-// SPDX-FileCopyrightText: 2025-2026 Jonathan D.A. Jewell
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2025-2026 Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk>
 :toc: macro
 :toclevels: 3
 :icons: font
@@ -62,10 +62,13 @@ link:formal/PRESERVATION-DESIGN.md[`formal/PRESERVATION-DESIGN.md`]
 
 Quick read: **L1** (region capabilities) substantially complete;
 **L2** (Linear/Affine modality) core landed with zero axioms; **L3**
-(echo / residue) calculus done locally, integration into the typing
-judgment is the next-block work; **L4** (dyadic mode) mechanical
-scaffold landed (`formal/L4.v` — definitions only by design; no proof
-obligations).
+(echo / residue) wiring landed (slice 4, 2026-05-27): `preservation_l3`
++ `preservation_l3_region_active_echo` + `preservation_l3_drop_echo`
+all Qed (conditional on L1 structural admits — see PROOF-NEEDS.md §4);
+**L4** (dyadic mode) Phase A scaffold landed 2026-05-28 (`formal/L4.v`
+— `PModeLinear` / `PModeAffine` / `PModeBoundaryMix` + the
+`program_mode_to_modality` round-trip; definitions only by design, no
+proof obligations).
 ====
 
 Ephapax is a research language for **principled handling of
@@ -278,7 +281,7 @@ system can *prove* properties about:
   (affine-ish, with linearisation via `Drop`). Ephapax separates the
   two disciplines explicitly: `let` is affine, `let!` is linear, and
   the user chooses per-binding.
-* **Not a research vapourware.** ~19 Rust crates exist; the lexer,
+* **Not a research vapourware.** 17 active Rust workspace crates + `tests/fuzz` (with `src/ephapax-tools/` outside the workspace and `src/ephapax-vram-cache/` explicitly disabled — needs `hyperpolymath/ephapax-proven`); the lexer,
   parser, interpreter, REPL, CLI, S-expression IR, two-phase pipeline,
   Zig FFI, and conformance test suite are complete. Type checker and
   WASM codegen are in progress. See `ROADMAP.adoc`.
@@ -325,7 +328,7 @@ fn process(input: i32) -> i32 {
 }
 ----
 
-More examples in `examples/` and `conformance/pass/`.
+More examples in `examples/` and `conformance/valid/`.
 
 == Quickstart
 
@@ -416,9 +419,11 @@ based calculus. Post-2026-05-26 the formalisation is layered:
   `formal/Semantics_L1.v`). The new judgment is modality-indexed
   (`has_type_l1 m : ...`) and threads a capability environment `R`
   through compound rules. Judgment 100% (0 admits, 2 Qed); semantics
-  carries 9 supporting-lemma admits that are *L2-integration debt*
-  (bullet-structure rewrites for new Affine-only constructors), not
-  legacy patching.
+  carries 3 outer `Admitted.` markers covering 5 internal `admit.`
+  cases — pre-existing L1 structural debt (multiset / list-perm bridge
+  + L2 effect-typed `TFun` per PRESERVATION-DESIGN.md §5.1) and two
+  parallel mirrors, not legacy patching. See PROOF-NEEDS.md §4 for the
+  file:line classification.
 
 * **Layer 2 — structural modality** (`formal/Modality.v`). Linear
   vs Affine as a K-free thin-poset decoration. `linear_to_affine`
@@ -429,13 +434,17 @@ based calculus. Post-2026-05-26 the formalisation is layered:
   `no-section-collapse-to-residue` irreversibility theorem (mirrors
   the upstream Agda development at
   https://github.com/hyperpolymath/echo-types[`hyperpolymath/echo-types`]).
-  Calculus is done; *wiring into the typing rules* (`T_Observe`,
-  collapse-function emission on irreversible steps,
-  `G`-context threading) is the next-block work.
+  Wiring into the L1 typing rules landed via slice 4 (2026-05-27):
+  `preservation_l3_region_active_echo`, `preservation_l3_drop_echo`,
+  and the `preservation_l3` umbrella are all Qed (conditional on the
+  `region_shrink_preserves_typing_l1_gen_m` L1 structural admit).
 
-* **Layer 4 — dyadic interaction**. Design in
-  link:formal/PRESERVATION-DESIGN.md[`formal/PRESERVATION-DESIGN.md §7`].
-  Not started.
+* **Layer 4 — dyadic interaction**. Phase A scaffold landed
+  2026-05-28: `formal/L4.v` defines `ProgramMode`
+  (`PModeLinear` / `PModeAffine` / `PModeBoundaryMix`) and the
+  `program_mode_to_modality` round-trip. No theorems by design
+  (definitions only — labelling discipline, not a proof layer). Design
+  in link:formal/PRESERVATION-DESIGN.md[`formal/PRESERVATION-DESIGN.md §7`].
 
 Per-sublanguage proof debt with explicit do-not-do list lives in
 link:PROOF-NEEDS.md[`PROOF-NEEDS.md`]. The four-layer architecture
@@ -582,20 +591,20 @@ generics, effects, traits, comptime, contracts) lives on
 | Counterexample at `formal/Counterexample.v` (5 Qed). Not closable. Archaeology.
 
 | Coq L1 (region capabilities)
-| ✅ Judgment 100%; 🟡 semantics 9 admits
-| 9 admits = L2-integration debt. See `PROOF-NEEDS.md`.
+| ✅ Judgment 100%; 🟡 semantics 3 Admitted (5 inner admits)
+| 3 outer `Admitted.` markers cover 5 internal `admit.` cases — pre-existing L1 structural debt + parallel mirrors. Refresh PROOF-NEEDS.md §4 for the file:line breakdown.
 
 | Coq L2 (modality)
 | ✅ Core landed (PRs #176 + #177); 0 axioms
 | `linear_to_affine` Qed. Integration debt absorbed by L1 admits above.
 
 | Coq L3 (echo / residue calculus)
-| ✅ 12 Qed, 0 admits
-| Calculus done locally; integration into typing rules pending.
+| ✅ Wiring landed (slice 4, 2026-05-27); 0 admits in `Echo.v`
+| `preservation_l3` (umbrella) + `preservation_l3_region_active_echo` + `preservation_l3_drop_echo` all Qed (conditional on `region_shrink_preserves_typing_l1_gen_m` L1 structural admit). 12 Qed in `Echo.v` for the underlying calculus.
 
 | Coq L4 (dyadic interaction)
-| 🔲 Not started
-| Design in `formal/PRESERVATION-DESIGN.md §7`.
+| ✅ Phase A scaffold landed (`formal/L4.v`, 2026-05-28); definitions only
+| `PModeLinear` / `PModeAffine` / `PModeBoundaryMix` + `program_mode_to_modality` round-trip. No theorems by design; design in `formal/PRESERVATION-DESIGN.md §7`.
 
 | Idris2 region-linearity theorems
 | ✅ Complete (zero unsafe)

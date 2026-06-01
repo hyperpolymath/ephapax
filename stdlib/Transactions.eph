@@ -1,0 +1,343 @@
+// SPDX-License-Identifier: MPL-2.0
+// Copyright (c) Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk>
+//
+// Ephapax stdlib — Transactions as linear scopes (ACID via affine).
+//
+// Citations:
+//   Gray, J. "The Transaction Concept: Virtues and Limitations."
+//   Proceedings of the 7th International Conference on Very Large
+//   Data Bases (VLDB '81), 144-154. September 1981.
+//
+//   Bernstein, P. A.; Hadzilacos, V.; Goodman, N. "Concurrency
+//   Control and Recovery in Database Systems." Addison-Wesley,
+//   1987. (Chapter 2 — the canonical ACID treatment.)
+//
+// The transaction concept — atomicity, consistency, isolation,
+// durability — has historically required an external runtime
+// (lock manager, WAL, recovery scheduler) to enforce. Linear
+// types let us encode the begin/commit/abort triad directly in
+// the type system:
+//
+//   * `begin` returns a LINEAR handle `Transaction!`.
+//   * The handle is consumed EXACTLY ONCE by `commit`, `abort`,
+//     or `rollback`.
+//   * Borrowed access (`&Transaction`) interleaves `execute` and
+//     `query` calls within the scope without releasing the handle.
+//
+// Forgetting to commit or abort is a STATIC type error: the
+// unconsumed-linear diagnostic at the close of the enclosing
+// region/function says exactly "you forgot to finalise the
+// transaction." This is the L1 contribution — atomicity becomes
+// a structural property of the program text, not a runtime check.
+//
+// Pedigree thread:
+//   Gray 1981 introduced the transaction as a unit of consistency
+//   and recovery. Bernstein/Hadzilacos/Goodman 1987 §2 formalised
+//   the ACID properties. Wadler 1990 ("Linear types can change the
+//   world!") sketched the linear-handle pattern for resources.
+//   Ephapax inherits all three lines.
+//
+// Fit in ephapax:
+//   This module abstracts over the manual `region r { let! txn =
+//   begin@r(...); ...; commit(txn) }` pattern. The L1 region
+//   capability is the source of atomicity: a transaction handle's
+//   resource lifetime is bounded by an enclosing region, so an
+//   unwinding panic at the region boundary CANNOT leave a half-
+//   committed transaction floating. L2 affine + L3 echo provide
+//   isolation; L4 dyadic-mix is what makes `let txn` (affine query
+//   result) and `let! txn` (linear handle) coexist in one scope.
+//
+// Companion stdlib modules to expect later:
+//   - `stdlib/Isolation.eph`  (D05 — isolation-level effect system)
+//   - `stdlib/Serializable.eph` (D06 — serializability proofs)
+//   - `stdlib/Wal.eph`         (D07 — write-ahead log via Linear Echo)
+
+module Transactions
+
+// --- Isolation levels ---
+//
+// The four isolation levels canonised by ANSI SQL-92 §4.28 plus
+// Berenson et al. 1995 "A Critique of ANSI SQL Isolation Levels"
+// (SIGMOD '95). `Snapshot` is included for parity with Postgres /
+// Oracle multi-version concurrency control even though it is not
+// in ANSI SQL.
+//
+// Affine: a level descriptor carries no resource obligation; it is
+// freely dropped, copied (by reconstruction), and compared.
+type Isolation =
+    | ReadCommitted
+    | RepeatableRead
+    | Serializable
+    | Snapshot
+
+// --- The transaction handle ---
+//
+// A `Transaction` is a LINEAR handle. Its construction (`begin`)
+// allocates a transaction-control block in the underlying engine;
+// its consumption (`commit` / `abort` / `rollback`) is the moment
+// at which the engine publishes or discards the in-flight write
+// set.
+//
+// Linearity is the ACID guarantee:
+//   * Atomicity: every `Transaction!` is finalised exactly once,
+//     so partial commits are unrepresentable.
+//   * Durability: the consumption point IS the durability
+//     observable side effect — there is no "did I forget to
+//     flush?" question.
+//   * Isolation + Consistency are delegated to the engine and
+//     surfaced via `Isolation` (D05 will lift them into effects).
+//
+// Capability story: a transaction handle is bound to the L1
+// region active at its `begin` site. Calling `commit` from a
+// deeper region is well-typed; calling it from a SHALLOWER region
+// is rejected by region inference (the handle would outlive its
+// capability).
+type Transaction = Transaction(i64)
+
+// --- Outcome of a closed transaction ---
+//
+// `with_transaction` (below) collapses the linear-handle lifecycle
+// into a values-only result. `Committed(a)` carries the body's Ok
+// payload; `Aborted(e)` carries the body's Err; `RolledBack`
+// signals an engine-initiated rollback (deadlock victim, serial-
+// ization failure, etc.).
+//
+// Affine: outcomes hold no resource — the handle has already been
+// consumed by the time an `Outcome` exists.
+type Outcome<A, E> =
+    | Committed(A)
+    | Aborted(E)
+    | RolledBack
+
+// --- Lifecycle: begin ---
+//
+// `begin` opens a transaction at the engine's DEFAULT isolation
+// level (whatever the underlying engine reports — typically
+// `ReadCommitted` for Postgres, `RepeatableRead` for MySQL).
+//
+// Linearity: the returned handle MUST be passed to `commit`,
+// `abort`, or `rollback` exactly once. The unconsumed-linear
+// diagnostic at the end of the enclosing scope IS the "you forgot
+// to finalise the transaction" error.
+//
+// L1 capability: the handle is bound to the active region;
+// `begin` is effectively `begin@r` at the source level when
+// inferred.
+fn begin() -> Transaction! {
+    __intrinsic_transaction_begin()
+}
+
+// --- Lifecycle: begin_with ---
+//
+// As `begin`, but pins the isolation level explicitly. Use
+// `Serializable` when you need conflict-serializable semantics;
+// use `Snapshot` for read-mostly analytic workloads under MVCC.
+//
+// The isolation descriptor is consumed affinely (passed by value);
+// it is not retained in the handle's type today. D05 will lift the
+// level into the handle's type to make isolation-mismatch
+// diagnoses static.
+fn begin_with(iso: Isolation) -> Transaction! {
+    __intrinsic_transaction_begin_with(iso)
+}
+
+// --- Lifecycle: commit ---
+//
+// Publishes the in-flight write set, releases the engine's locks,
+// and consumes the linear handle. After `commit` returns, the
+// handle binding is gone (consumed); reusing it is a static type
+// error (linear use-after-consume).
+//
+// Durability: the observable side effect of `commit` is the
+// engine's flush-and-acknowledge cycle. Crash-recovery is delegated
+// to the engine's WAL today; D07 will surface WAL events through
+// Linear Echo so the type system can witness durability.
+fn commit(txn: Transaction!) -> () {
+    __intrinsic_transaction_commit(txn)
+}
+
+// --- Lifecycle: abort ---
+//
+// Discards the in-flight write set, releases locks, and consumes
+// the linear handle. Use when the application detects a logical
+// failure (e.g. a precondition violation) and wants to roll back
+// explicitly.
+//
+// Synonym: `rollback` (below) — provided for readers who learned
+// transactions from the SQL `ROLLBACK` keyword.
+fn abort(txn: Transaction!) -> () {
+    __intrinsic_transaction_abort(txn)
+}
+
+// --- Lifecycle: rollback ---
+//
+// Alias of `abort` for clarity at call sites that already use the
+// SQL vocabulary. Both consume the linear handle identically.
+fn rollback(txn: Transaction!) -> () {
+    __intrinsic_transaction_abort(txn)
+}
+
+// --- Borrowed access: execute ---
+//
+// Executes a statement that returns no rows (INSERT / UPDATE /
+// DELETE / DDL). Returns the affected-row count on success, an
+// engine-string error on failure.
+//
+// Borrow: `&Transaction` is a SHARED borrow. Multiple `execute` /
+// `query` calls can interleave within the transaction's scope
+// without releasing the linear handle. The borrow ends at the
+// statement boundary; the handle is reusable on the next line.
+//
+// L1 capability: the borrow is scoped to the region active at the
+// call site; it cannot escape via closure capture.
+fn execute(txn: &Transaction, sql: String) -> Result<i64, String> {
+    __intrinsic_transaction_execute(txn, sql)
+}
+
+// --- Borrowed access: query ---
+//
+// Executes a statement that returns rows. Type parameter `A` is
+// the row-shape the caller expects; engine-level row decoding is
+// delegated to `__intrinsic_transaction_query`, which fails with
+// `Err` on shape-mismatch.
+//
+// Borrow: identical to `execute` — shared borrow, statement-
+// boundary scope.
+//
+// Note: a row-streaming variant (returning `Iter<A>` instead of
+// `A`) is deferred — it depends on `stdlib/Iter.eph`, which does
+// not yet exist.
+fn query<A>(txn: &Transaction, sql: String) -> Result<A, String> {
+    __intrinsic_transaction_query(txn, sql)
+}
+
+// --- Convenience: with_transaction ---
+//
+// Higher-order sugar over the manual lifecycle. Opens a fresh
+// transaction at the engine default, runs `body` against the
+// linear handle, and either commits (on `Ok`) or aborts (on `Err`).
+// The result is collapsed into an `Outcome`.
+//
+// Atomicity guarantee: `body` MUST consume the handle along every
+// control path — this is enforced statically by the linear type.
+// The wrapper itself does not finalise the handle; it relies on
+// `body` to do so. (The function-signature contract is "body takes
+// `Transaction!` and returns `Result`"; the linear-checker proves
+// the handle is consumed inside.)
+//
+// Idiomatic usage:
+//
+//   let outcome = with_transaction((txn) => {
+//     let _ = execute(&txn, "UPDATE accounts SET balance = ...")
+//     let _ = execute(&txn, "UPDATE accounts SET balance = ...")
+//     commit(txn)
+//     Ok(())
+//   })
+//
+// Note: the linear handle threads through `body` and is consumed
+// by the explicit `commit`/`abort`/`rollback` call inside. A
+// future revision (post-D05) may auto-finalise on Ok/Err by
+// inspecting the body's return.
+fn with_transaction<A, E>(body: (Transaction!) -> Result<A, E>) -> Outcome<A, E> {
+    let! txn = begin()
+    match body(txn) of
+        | Ok(a)  => Committed(a)
+        | Err(e) => Aborted(e)
+    end
+}
+
+// --- Convenience: with_transaction_at ---
+//
+// As `with_transaction`, but pins the isolation level. Equivalent
+// to opening with `begin_with(iso)` and otherwise delegating.
+fn with_transaction_at<A, E>(
+    iso: Isolation,
+    body: (Transaction!) -> Result<A, E>
+) -> Outcome<A, E> {
+    let! txn = begin_with(iso)
+    match body(txn) of
+        | Ok(a)  => Committed(a)
+        | Err(e) => Aborted(e)
+    end
+}
+
+// --- Pattern guide ---
+//
+// 1. Manual form (region + let!) — Aqueduct-style:
+//
+//    fn transfer(amount: i32) -> Result<(), String> {
+//        region r {
+//            let! txn = begin@r()
+//            let _    = execute(&txn, "UPDATE accounts SET ... id=1")
+//            let _    = execute(&txn, "UPDATE accounts SET ... id=2")
+//            commit(txn)
+//            Ok(())
+//        }
+//    }
+//
+//    Linearity guarantees: forgetting `commit(txn)` is rejected at
+//    compile time; the unconsumed-linear diagnostic names `txn`
+//    and points at the region boundary.
+//
+// 2. Sugar form (with_transaction) — for the common
+//    "all-or-nothing on body Ok/Err" idiom:
+//
+//    fn transfer(amount: i32) -> Outcome<(), String> {
+//        with_transaction((txn) => {
+//            let r1 = execute(&txn, "UPDATE accounts SET ... id=1")
+//            match r1 of
+//                | Err(e) => { abort(txn); Err(e) }
+//                | Ok(_)  => {
+//                    let r2 = execute(&txn, "UPDATE accounts SET ... id=2")
+//                    match r2 of
+//                        | Err(e) => { abort(txn); Err(e) }
+//                        | Ok(_)  => { commit(txn); Ok(()) }
+//                    end
+//                }
+//            end
+//        })
+//    }
+//
+//    The wrapper collapses two outcomes (commit-on-Ok and abort-on-
+//    Err) into a single `Outcome` value; `body` must still consume
+//    the linear handle, so the inner `commit`/`abort` calls remain
+//    explicit. A future macro-style revision may elide them.
+//
+// 3. Pinned-isolation form:
+//
+//    let outcome = with_transaction_at(Serializable, (txn) => {
+//        // ... reads and writes against &txn ...
+//        commit(txn)
+//        Ok(())
+//    })
+
+// --- Future work (not in this slice) ---
+//
+// D05. Isolation-level effects: lift `Isolation` into the handle's
+//      type, so a `Transaction<ReadCommitted>` and a
+//      `Transaction<Serializable>` are distinct. Static rejection
+//      of "this query needs Serializable but the handle is
+//      RepeatableRead" becomes possible.
+//
+// D06. Serializability proofs: a Coq mechanisation in
+//      `formal/Serializable.v` proving that the sequential-
+//      composition of a list of `with_transaction` blocks is
+//      conflict-serializable under the standard Bernstein 1987 §2
+//      definition. Requires a model of the schedule lattice.
+//
+// D07. WAL via Linear Echo: durability becomes type-visible.
+//      `commit(txn)` produces a `LogEcho!` linear obligation that
+//      MUST be consumed by `flush(echo)` — losing the echo is the
+//      "you forgot to fsync" diagnostic. Pedigree: Mohan et al.
+//      ARIES (1992).
+//
+// D09. Provenance: thread a why-provenance value through
+//      `execute`/`query` so that the answer to "what writes
+//      contributed to this read?" is type-derivable. Pedigree:
+//      Buneman et al. (TODS 2001) and Green et al. (PODS 2007).
+//
+// Coq mechanisation: out of scope for this PR. A `formal/
+// Transactions.v` follow-up would mechanise (a) the linear-
+// finalisation lemma (every `begin` is reachable by exactly one
+// `commit`/`abort`/`rollback`) and (b) the with_transaction
+// soundness theorem (Outcome reflects body's Result, never both).

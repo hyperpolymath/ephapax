@@ -693,3 +693,51 @@ Proof.
     eapply preservation_l2_app_eff_beta_tfuneff_l1; eassumption.
   - exfalso. inversion Hval.
 Qed.
+
+(* ============================================================
+   Print Assumptions audit — L2 lift honest-ness seal
+   ============================================================
+
+   Closes proof-debt P10/P32 (per the PROOF-NEEDS.md inventory):
+   formally certify which axioms / Admitted lemmas surface through
+   each L2 β-case and the lift theorem. Without this audit, the
+   "L2 lift is honest" claim in PROOF-NEEDS.md §1 ("conditional on
+   preservation_l1") is unverified — `Print Assumptions` is the
+   build oracle for that claim.
+
+   Expected (per the design):
+
+   - [preservation_l2_via_l1]  surfaces [preservation_l1] only.
+     This is the canonical L1-conditional lift; no other axioms.
+
+   - [preservation_l2_app_eff_beta_linear]  surfaces structural
+     L1 admits via [subst_typing_gen_l1_m] +
+     [region_shrink_preserves_typing_l1_gen_m].
+
+   - [preservation_l2_app_eff_beta_ground_nonlinear]  surfaces
+     [ground_nonlinear_retype_l1_m] + structural L1 admits.
+
+   - [preservation_l2_app_eff_beta_tfuneff]  surfaces Phase 3b
+     Stage 1b machinery + the three side conditions (P1 leaf-only,
+     P2 regions ⊆ R_in_v, P3 closed-below-0) + structural L1
+     admits.
+
+   - [weaken_modality]  zero axioms.
+
+   - [linear_to_affine] (TypingL1.v)  zero axioms.
+
+   Verifying these mechanically means a future Qed silently
+   accruing an undocumented Axiom (the historical anti-pattern
+   that produced the legacy [region_liveness_at_split_l1] axiom)
+   would be caught at the next [Print Assumptions] re-run.
+
+   Build-oracle conformance: `just -f formal/Justfile all` prints
+   these blocks at compile time; CI (coq-build.yml) preserves
+   them in the artefacts. *)
+
+Print Assumptions weaken_modality.
+Print Assumptions preservation_l2_via_l1.
+Print Assumptions linear_value_retype_l1_m.
+Print Assumptions preservation_l2_app_eff_beta_linear.
+Print Assumptions preservation_l2_app_eff_beta_ground_nonlinear.
+Print Assumptions preservation_l2_app_eff_beta_tfuneff.

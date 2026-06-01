@@ -3265,3 +3265,47 @@ Proof.
   - exact preservation_l3_region_active_echo.
   - exact preservation_l3_drop_echo.
 Qed.
+
+(* ============================================================
+   Print Assumptions audit — L1 + L3 axiom inventory
+   ============================================================
+
+   Companion to the L2-side audit at the end of TypingL2.v.
+   Closes proof-debt P10/P32: certify exactly which axioms each
+   layer-keystone theorem surfaces, mechanically.
+
+   Expected per the design:
+
+   - [region_shrink_preserves_typing_l1_gen_m]  Admitted at
+     :678 → surfaces itself as an axiom (its outer Admitted is
+     listed). Once the list-vs-multiset gap closes, this drops.
+
+   - [region_liveness_at_split_l1_gen]  Admitted at :2028 →
+     surfaces itself. Provably-false-as-stated in the residual
+     [binder = rv] sub-case (counterexample documented in source
+     at :1923-:1926); closure requires Phase D reformulation.
+
+   - [preservation_l1]  Admitted at :3133 → surfaces itself plus
+     any structural debt its conditional Qed-portion already
+     pulls in.
+
+   - [preservation_l3] / [preservation_l3_region_active_echo] /
+     [preservation_l3_drop_echo]  surface
+     [region_shrink_preserves_typing_l1_gen_m] only (the L1
+     structural admit they're conditional on). [drop_echo] is
+     additionally expected to be axiom-free (it doesn't traverse
+     region-shrink).
+
+   - [subst_typing_gen_l1_m_tfuneff] (Phase 3b Stage 1b) should
+     be zero-axiom under its three side conditions (P1+P2+P3) —
+     this is the cleanliness claim of Stage 1b. *)
+
+Print Assumptions ground_nonlinear_retype_l1_m.
+Print Assumptions tfuneff_lambda_retype_l1_m.
+Print Assumptions subst_typing_gen_l1_m.
+Print Assumptions subst_typing_gen_l1_m_ground_nonlinear.
+Print Assumptions subst_typing_gen_l1_m_tfuneff.
+Print Assumptions preservation_l1.
+Print Assumptions preservation_l3_region_active_echo.
+Print Assumptions preservation_l3_drop_echo.
+Print Assumptions preservation_l3.

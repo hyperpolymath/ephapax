@@ -946,6 +946,7 @@ dependencies = [
  "ephapax-syntax",
  "gimli 0.31.1",
  "object 0.36.7",
+ "proptest",
  "serde",
  "serde_json",
  "smol_str",

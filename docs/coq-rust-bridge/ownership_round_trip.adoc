@@ -1,0 +1,189 @@
+// SPDX-License-Identifier: MPL-2.0
+// Copyright (c) Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk>
+= `OwnershipKind` — wire-format round-trip specification
+:toc:
+:toclevels: 2
+
+This document closes proof-debt obligation **P59** from the
+comprehensive proof inventory: certify that the Rust-side
+`OwnershipKind::from_byte` / `to_byte` pair (at
+`src/ephapax-wasm/src/ownership.rs:55-67`) round-trips on every
+defined `OwnershipKind` variant.
+
+The `typedwasm.ownership` wasm custom section is the carrier of
+ephapax's linearity discipline across the ABI boundary to
+`hyperpolymath/typed-wasm:crates/typed-wasm-verify/src/section.rs`.
+The wire format is the **ADR-0002 carrier handshake**: ephapax
+emits, typed-wasm verifies. Both sides MUST agree byte-for-byte;
+otherwise the verifier on the other side observes a different
+ownership annotation than the producer emitted, breaking
+soundness of the cross-tool linearity claim.
+
+P59 is the first of a three-obligation arc:
+
+* **P59** — `from_byte` / `to_byte` round-trip on the four-variant
+  `OwnershipKind` enum (this document).
+* **P60** — `ty_to_ownership_kind` monotone w.r.t. linearity: any
+  Rust `Ty` for which `Ty::is_linear()` holds elaborates to an
+  `OwnershipKind` other than `Unrestricted`.
+* **P61** — `build_/parse_ownership_section_payload` round-trip on
+  the full `OwnershipEntry` structure (the surrounding container).
+
+== The wire format
+
+Single-byte encoding, fixed at the value of the Rust discriminant:
+
+[cols="1,1,1"]
+|===
+| Variant | Wire byte (decimal) | Wire byte (hex)
+
+| `OwnershipKind::Unrestricted` | `0` | `0x00`
+| `OwnershipKind::Linear`       | `1` | `0x01`
+| `OwnershipKind::SharedBorrow` | `2` | `0x02`
+| `OwnershipKind::ExclBorrow`   | `3` | `0x03`
+|===
+
+[NOTE]
+.Asymmetric decoder fallback
+====
+`from_byte` is **total** on `u8`. Any byte outside `0..=3` decodes
+to `Unrestricted`. This matches the OCaml
+`Tw_verify.parse_ownership_section_payload` reference and the
+Rust port in `typed-wasm-verify`. The fallback is **not** a
+round-trip violation because no `to_byte` call ever emits those
+bytes — the round-trip claim is asymmetric and runs only in the
+encoder-first direction:
+
+  for every `k : OwnershipKind`,
+      `from_byte(to_byte(k)) == k`.
+====
+
+== The two definitions, side by side
+
+[cols="1,1"]
+|===
+| Rust producer (`ephapax-wasm`)
+| Rust consumer (`typed-wasm-verify`)
+
+a|
+[source,rust]
+----
+pub enum OwnershipKind {
+    Unrestricted = 0,
+    Linear = 1,
+    SharedBorrow = 2,
+    ExclBorrow = 3,
+}
+
+impl OwnershipKind {
+    pub fn from_byte(b: u8) -> Self {
+        match b {
+            1 => OwnershipKind::Linear,
+            2 => OwnershipKind::SharedBorrow,
+            3 => OwnershipKind::ExclBorrow,
+            _ => OwnershipKind::Unrestricted,
+        }
+    }
+
+    pub fn to_byte(self) -> u8 {
+        self as u8
+    }
+}
+----
+a|
+The sister type in
+`typed-wasm-verify::OwnershipKind` carries the SAME four
+variants with the SAME wire-byte values. The canonical source
+lives at
+`hyperpolymath/typed-wasm:crates/typed-wasm-verify/src/section.rs`.
+
+Both definitions are deliberately duplicated, not shared via a
+common crate: ephapax intentionally does NOT depend on
+`typed-wasm-verify` (see the `Cargo.toml` note in
+`src/ephapax-wasm`). The wire format is the contract.
+|===
+
+== The bridge claim
+
+[NOTE]
+.Bridge claim (P59)
+====
+For every `k : OwnershipKind`,
+
+  `OwnershipKind::from_byte(k.to_byte()) == k`.
+
+Equivalently, `to_byte` is a section of `from_byte`: the
+encoder followed by the decoder is the identity on the image of
+the encoder.
+====
+
+The four-variant case-split is exhaustive — there are no other
+`OwnershipKind` constructors to consider, and `to_byte` emits a
+constant byte (`self as u8`) on each, so the proof is by direct
+computation:
+
+[cols="1,1,1,1"]
+|===
+| `k`             | `k.to_byte()` | `from_byte(...)` | round-trip OK?
+
+| `Unrestricted`  | `0` | `Unrestricted`  | yes (fallback arm)
+| `Linear`        | `1` | `Linear`        | yes (arm 1)
+| `SharedBorrow`  | `2` | `SharedBorrow`  | yes (arm 2)
+| `ExclBorrow`    | `3` | `ExclBorrow`    | yes (arm 3)
+|===
+
+== Mechanical verification
+
+Three tests pin the bridge claim in
+`src/ephapax-wasm/src/ownership.rs`, `mod tests`:
+
+. `coq_bridge_p59_owner_byte_map_pinned` — asserts the exact wire
+  byte for each of the four variants. Any change in the byte map
+  is a wire-format break and trips this test.
+. `coq_bridge_p59_owner_round_trip_exhaustive` — directly
+  case-splits on the four variants and asserts
+  `from_byte(to_byte(k)) == k`. Exhaustive ⇒ equivalent in
+  strength to a property test on a finite domain.
+. `coq_bridge_p59_owner_round_trip` — the `proptest!` form of the
+  same lemma. Mirrors the standard formulation used in
+  `typed-wasm-verify`'s own property suite; ships alongside the
+  exhaustive test for parity with the canonical consumer.
+
+All three are deterministic, dependency-light, and complete in
+sub-millisecond.
+
+== Cross-references
+
+* `PROOF-NEEDS.md` — proof obligation **P59** in this session's
+  inventory.
+* `src/ephapax-wasm/src/ownership.rs:55-67` — Rust definition of
+  `from_byte` / `to_byte`.
+* `src/ephapax-wasm/src/ownership.rs`, `mod tests` — the three
+  P59 tests landed in the same PR as this document.
+* `hyperpolymath/typed-wasm:crates/typed-wasm-verify/src/section.rs`
+  — sister consumer; the canonical reader of the wire format.
+* `hyperpolymath/typed-wasm:docs/adr/0002-*.md` — ADR-0002 carrier
+  handshake (if present; otherwise the ephapax-side
+  `src/ephapax-wasm/src/ownership.rs` module header is the
+  authoritative wire-format spec).
+* `docs/coq-rust-bridge/is_linear_ty.adoc` — sister bridge
+  document for proof-debt P28, closed in PR #273.
+
+== Future work
+
+The full ADR-0002 cross-tool soundness link needs P60 + P61 in
+addition to this P59 round-trip:
+
+* **P60** — `ty_to_ownership_kind` monotone w.r.t. linearity.
+  Claim: if `Ty::is_linear(t)` then
+  `ty_to_ownership_kind(t) != Unrestricted`. Combined with P28
+  (Rust ↔ Coq `is_linear_ty` bridge), this links the Coq linear
+  type judgment to the emitted wire byte.
+* **P61** — full `OwnershipEntry` round-trip: for every entry
+  list `es : Vec<OwnershipEntry>`,
+  `parse_ownership_section_payload(build_ownership_section_payload(&es)) == es`.
+  The existing `mixed_kinds_roundtrip` test exhibits one witness;
+  P61 generalises it to a property test on arbitrary entries.
+
+P59 is the simplest of the three (1-day, four-variant case
+analysis); P60 and P61 are larger and ship in follow-up PRs.

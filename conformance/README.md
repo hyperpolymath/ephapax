@@ -1,6 +1,7 @@
 # Ephapax Conformance Test Suite
 
-<!-- SPDX-License-Identifier: PMPL-1.0-or-later -->
+<!-- SPDX-License-Identifier: MPL-2.0 -->
+<!-- SPDX-FileCopyrightText: 2026 Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk> -->
 
 Type system conformance tests for the Ephapax compiler.
 
@@ -11,12 +12,15 @@ Type system conformance tests for the Ephapax compiler.
 
 ## Error Codes
 
-| Code | Category | Description |
-|------|----------|-------------|
-| E001 | Linear | Variable not consumed |
-| E002 | Linear | Variable used after consumption |
-| E003 | Region | Value escapes its region |
-| E004 | Branch | Branches consume different linear resources |
+| Code | Category | Description | `DisciplineViolation` variant |
+|------|----------|-------------|-------------------------------|
+| E001 | Linear | Linear variable not consumed | `WeakeningForbidden` |
+| E002 | Linear | Variable used after consumption | `Contraction` |
+| E003 | Region | Value escapes its region | (typing-rule `NoRegionInType`) |
+| E004 | Region | Linear binding in region not consumed before region exit | `RegionLeakLinear` |
+| E005 | Branch | Branches disagree on consumption of a linear variable | `BranchDisagreement` |
+
+Ground-truth source: `DisciplineViolation` enum in `ephapax-linear/src/lib.rs`.
 
 ## Running
 

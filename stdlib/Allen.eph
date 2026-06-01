@@ -1,0 +1,217 @@
+// SPDX-License-Identifier: MPL-2.0
+// Copyright (c) Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk>
+//
+// Ephapax stdlib — Allen's interval algebra (1983).
+//
+// Citation:
+//   Allen, J. F. "Maintaining knowledge about temporal intervals."
+//   Communications of the ACM 26 (11): 832-843. November 1983.
+//
+// Allen's interval algebra is the canonical qualitative-temporal-
+// reasoning framework. Given two intervals A and B, there are exactly
+// 13 mutually-exclusive base relations describing their possible
+// configurations (7 plus 6 inverses, with `equals` being self-
+// inverse).
+//
+// Pedigree:
+//   Snodgrass (1995) "The TSQL2 Temporal Query Language" applied this
+//   algebra to relational databases, motivating the SQL:2011 valid-
+//   time / transaction-time period support.
+//
+// Fit in ephapax:
+//   This is a fully self-contained foundation primitive — no L1/L2/
+//   L3/L4 dependency, no proof obligations attached at landing time.
+//   Composition table proofs can follow as a separate Coq file in
+//   `formal/Allen.v` if/when bitemporal types (D12) land.
+//
+// Companion stdlib modules to expect later:
+//   - `stdlib/Bitemporal.eph` (D12 — valid-time × transaction-time)
+//   - `stdlib/Provenance.eph` (D09 — why/where/how provenance)
+
+module Allen
+
+// --- The 13 base relations ---
+//
+// Every pair of intervals (A, B) on a totally-ordered time domain
+// stands in exactly one of these relations. Mutual exclusion +
+// joint exhaustiveness is the canonical Allen result.
+//
+// Pictorial cheat-sheet (A = top line, B = bottom line):
+//
+//   Before(A, B)        A: ===     B:     ===
+//   Meets(A, B)         A: ===     B:    ===   (A.end == B.start)
+//   Overlaps(A, B)      A: =====   B:   =====  (A.end strictly inside B)
+//   Starts(A, B)        A: ==      B: =====    (A.start == B.start, A.end < B.end)
+//   During(A, B)        A:  ==     B: =====    (strictly inside)
+//   Finishes(A, B)      A:    ==   B: =====    (A.end == B.end, A.start > B.start)
+//   Equals(A, B)        A: =====   B: =====    (identical)
+//   (and their 6 inverses)
+//
+type Relation =
+    | Before
+    | After
+    | Meets
+    | MetBy
+    | Overlaps
+    | OverlappedBy
+    | Starts
+    | StartedBy
+    | During
+    | Contains
+    | Finishes
+    | FinishedBy
+    | Equals
+
+// --- The interval type ---
+//
+// An interval is a half-open `[start, end)` pair on i64. We use i64
+// (not i32) to give 64-bit time stamps room — enough for
+// nanosecond-resolution UNIX time well past year 2200.
+//
+// Affinely consumable: an `Interval` carries no resource obligation
+// at L1 (no region capability) and is dropped freely at L2 (Affine
+// or Linear).
+//
+// Invariant: callers should maintain `start <= end`. The smart
+// constructor `make` enforces it.
+type Interval = Interval(i64, i64)
+
+// --- Smart constructor ---
+//
+// Constructs an interval, returning `Err` if `start > end`. The
+// degenerate point-interval `start == end` is permitted; the
+// half-open convention means it represents the empty interval.
+fn make(start: i64, end: i64) -> Result<Interval, String> {
+    if start > end then
+        Err("Allen.make: start > end")
+    else
+        Ok(Interval(start, end))
+}
+
+// --- Accessors ---
+
+fn start(i: &Interval) -> i64 {
+    let Interval(s, _) = i in s
+}
+
+fn end(i: &Interval) -> i64 {
+    let Interval(_, e) = i in e
+}
+
+fn duration(i: &Interval) -> i64 {
+    end(i) - start(i)
+}
+
+// --- The 13-way classifier ---
+//
+// Computes the unique Allen relation between two intervals.
+// Total: every (A, B) pair returns exactly one variant.
+//
+// Complexity: O(1) — at most six integer comparisons.
+//
+// The case-tree below follows Allen 1983 §2, exhaustively
+// partitioning the (start_a vs start_b, end_a vs end_b, end_a vs
+// start_b) lattice.
+fn relate(a: &Interval, b: &Interval) -> Relation {
+    let sa = start(a)
+    let ea = end(a)
+    let sb = start(b)
+    let eb = end(b)
+
+    if ea < sb then
+        Before
+    else if sa > eb then
+        After
+    else if ea == sb then
+        Meets
+    else if sa == eb then
+        MetBy
+    else if sa == sb && ea == eb then
+        Equals
+    else if sa == sb && ea < eb then
+        Starts
+    else if sa == sb && ea > eb then
+        StartedBy
+    else if ea == eb && sa > sb then
+        Finishes
+    else if ea == eb && sa < sb then
+        FinishedBy
+    else if sa > sb && ea < eb then
+        During
+    else if sa < sb && ea > eb then
+        Contains
+    else if sa < sb && ea < eb then
+        Overlaps
+    else
+        OverlappedBy
+}
+
+// --- Inverse ---
+//
+// `relate(a, b)` and `relate(b, a)` are related by `inverse`.
+// This is one of the two foundational Allen properties (the other
+// being composition — see Future Work).
+fn inverse(r: Relation) -> Relation {
+    match r of
+        | Before        => After
+        | After         => Before
+        | Meets         => MetBy
+        | MetBy         => Meets
+        | Overlaps      => OverlappedBy
+        | OverlappedBy  => Overlaps
+        | Starts        => StartedBy
+        | StartedBy     => Starts
+        | During        => Contains
+        | Contains      => During
+        | Finishes      => FinishedBy
+        | FinishedBy    => Finishes
+        | Equals        => Equals
+    end
+}
+
+// --- Convex / disjoint predicates ---
+
+// Two intervals are disjoint iff one is entirely before/after the
+// other (no contact AT ALL — meets/met-by share an endpoint).
+fn is_disjoint(a: &Interval, b: &Interval) -> bool {
+    match relate(a, b) of
+        | Before    => true
+        | After     => true
+        | _         => false
+    end
+}
+
+// Two intervals overlap (in the inclusive sense — share at least one
+// instant) iff they are NOT disjoint AND NOT merely touching at an
+// endpoint.
+fn has_proper_overlap(a: &Interval, b: &Interval) -> bool {
+    match relate(a, b) of
+        | Before        => false
+        | After         => false
+        | Meets         => false
+        | MetBy         => false
+        | _             => true
+    end
+}
+
+// --- Future work (not in this slice) ---
+//
+// 1. Composition table: `compose : Relation -> Relation -> Set<Relation>`.
+//    Allen 1983 §3 specifies the 13×13 = 169-entry table. The table
+//    is canonical; encoding it requires a set type — landing this
+//    is a follow-up once `stdlib/Set.eph` exists.
+//
+// 2. Coq mechanisation: prove `inverse(inverse(r)) = r` (self-
+//    inverse property) and `relate(a, b) = inverse(relate(b, a))`
+//    (the foundational orientation lemma). Target file:
+//    `formal/Allen.v`. Both proofs are case-analysis on the 13
+//    variants; trivial.
+//
+// 3. Bitemporal extension (D12): combine valid-time interval +
+//    transaction-time interval into a 2D Allen lattice. Snodgrass
+//    1995 §4.
+//
+// 4. Point intervals: half-open semantics already model the empty
+//    interval at `start == end`. A future sibling type
+//    `PointInstant = i64` would distinguish a single-instant event
+//    from any interval.

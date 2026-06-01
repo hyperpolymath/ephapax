@@ -1,5 +1,6 @@
-// SPDX-License-Identifier: PMPL-1.0-or-later
-// SPDX-FileCopyrightText: 2025-2026 Jonathan D.A. Jewell
+// SPDX-License-Identifier: MPL-2.0
+// Copyright (c) Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk>
+// SPDX-FileCopyrightText: 2025-2026 Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk>
 //
 //! In-tree codec for the `typedwasm.ownership` wasm custom section.
 //!
@@ -222,5 +223,85 @@ mod tests {
         assert_eq!(OwnershipKind::from_byte(1), OwnershipKind::Linear);
         assert_eq!(OwnershipKind::from_byte(2), OwnershipKind::SharedBorrow);
         assert_eq!(OwnershipKind::from_byte(3), OwnershipKind::ExclBorrow);
+    }
+
+    // -----------------------------------------------------------------
+    // Proof-debt P59: OwnershipKind::from_byte / to_byte round-trip.
+    //
+    // The `typedwasm.ownership` custom section crosses the ABI boundary
+    // to `hyperpolymath/typed-wasm:crates/typed-wasm-verify/src/section.rs`
+    // (ADR-0002 carrier handshake). The wire format MUST round-trip
+    // cleanly on the four defined `OwnershipKind` variants, otherwise the
+    // verifier on the other side observes a different value than the
+    // producer emitted.
+    //
+    // Sister obligations:
+    //   P60 — `ty_to_ownership_kind` monotone w.r.t. linearity.
+    //   P61 — `build_/parse_ownership_section_payload` round-trip on
+    //         the full `OwnershipEntry` structure.
+    //
+    // The asymmetric corner (bytes 4..=255 collapse to `Unrestricted`) is
+    // covered by `unknown_byte_maps_to_unrestricted` above; that is NOT
+    // a round-trip violation because no `to_byte` call ever emits those
+    // bytes — the round-trip claim is asymmetric and runs only in the
+    // `kind -> byte -> kind` direction.
+    // -----------------------------------------------------------------
+
+    /// Exhaustive round-trip on every defined `OwnershipKind` variant.
+    /// The enum has exactly four constructors, so this case-analysis is
+    /// just as strong as a property test — it pins the entire image of
+    /// `to_byte` against `from_byte`.
+    #[test]
+    fn coq_bridge_p59_owner_round_trip_exhaustive() {
+        use OwnershipKind::*;
+        for k in [Unrestricted, Linear, SharedBorrow, ExclBorrow]
+            .iter()
+            .copied()
+        {
+            let byte = k.to_byte();
+            let decoded = OwnershipKind::from_byte(byte);
+            assert_eq!(
+                decoded, k,
+                "P59: from_byte(to_byte({:?})) = {:?}, want {:?}",
+                k, decoded, k
+            );
+        }
+    }
+
+    /// Pin the concrete wire byte for each variant. Coordinated with
+    /// `typed-wasm-verify::OwnershipKind` — both sides must agree.
+    /// Any change here is a wire-format break.
+    #[test]
+    fn coq_bridge_p59_owner_byte_map_pinned() {
+        assert_eq!(OwnershipKind::Unrestricted.to_byte(), 0);
+        assert_eq!(OwnershipKind::Linear.to_byte(), 1);
+        assert_eq!(OwnershipKind::SharedBorrow.to_byte(), 2);
+        assert_eq!(OwnershipKind::ExclBorrow.to_byte(), 3);
+    }
+
+    proptest::proptest! {
+        /// Round-trip lemma (proof-debt P59):
+        /// For every `OwnershipKind` value `k`,
+        ///   `from_byte(to_byte(k)) == k`.
+        ///
+        /// Mechanically certifies the wire-format encoder/decoder is a
+        /// section retraction on the image of `to_byte`. Sister property
+        /// of P60+P61. Because the enum is finite this proptest is
+        /// equivalent in strength to the exhaustive case-split above;
+        /// it is included to mirror the standard formulation used in
+        /// `typed-wasm-verify`'s own property suite.
+        #[test]
+        fn coq_bridge_p59_owner_round_trip(idx in 0u8..4) {
+            use OwnershipKind::*;
+            let k = match idx {
+                0 => Unrestricted,
+                1 => Linear,
+                2 => SharedBorrow,
+                _ => ExclBorrow,
+            };
+            let byte = k.to_byte();
+            let decoded = OwnershipKind::from_byte(byte);
+            proptest::prop_assert_eq!(decoded, k);
+        }
     }
 }

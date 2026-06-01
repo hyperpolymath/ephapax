@@ -1,0 +1,85 @@
+;; SPDX-License-Identifier: PMPL-1.0-or-later
+;; Copyright (c) 2026 Jonathan D.A. Jewell (hyperpolymath) <j.d.a.jewell@open.ac.uk>
+;;
+;; Assail Classifications — ephapax
+;; See panic-attack/.claude/CLAUDE.md § "User-Classification Registry".
+
+(assail-classifications
+  (metadata
+    (version "1.0.0")
+    (project "ephapax")
+    (last-updated "2026-06-01")
+    (entries 8)
+    (status "active"))
+
+  ;; ─────────────────────────────────────────────────────────────────
+  ;; Track C — 8 findings from the 2026-05-26 panic-attack estate
+  ;; sweep (#138 / panic-attack#32). All 8 triaged 2026-06-01 — none
+  ;; require code changes today. Each entry below records *why*, so a
+  ;; future sweep on the same line does not require re-investigation.
+  ;; Parallel triage of boj-server#155 (sister issue, same campaign).
+  ;; ─────────────────────────────────────────────────────────────────
+
+  (classification
+    (file "flake.nix")
+    (category "SupplyChain")
+    (classification "legitimate-template-scaffold")
+    (audit "ephapax#138 (2026-06-01)")
+    (rationale "ephapax's flake.nix is dormant scaffolding — it still carries the placeholder `description = \"ephapax - {project-description}\"` and `*REMINDER:* Update inputs` comments, and no workflow (`abi-verify.yml`, `boj-build.yml`, `rust-ci.yml`, etc.) invokes `nix develop`/`nix-shell`/`nix build`. There is no `flake.lock` to pin against because nothing consumes the flake. Pinning a flake whose only purpose is template-future use would be premature; activate-then-pin should be one PR. Re-classify to a real-finding if/when the flake is wired into CI."))
+
+  (classification
+    (file "src/ephapax-package/src/registry.rs")
+    (line 98)
+    (category "UnboundedAllocation")
+    (classification "legitimate-user-config-file")
+    (audit "ephapax#138 (2026-06-01)")
+    (rationale "`std::fs::read_to_string(&index_path)` where index_path is the local package-registry index (user's own `.ephapax/registry/index.json` or equivalent). Owned by the user; not attacker-controlled remote input. Same trust-boundary classification as boj-server#155's tray/src/server.rs:130 prefs.json pattern."))
+
+  (classification
+    (file "src/ephapax-package/src/registry.rs")
+    (line 261)
+    (category "UnboundedAllocation")
+    (classification "legitimate-local-hash-walk")
+    (audit "ephapax#138 (2026-06-01)")
+    (rationale "`std::fs::read(&path)` inside `compute_directory_hash` (BLAKE3 / SHA-256 of a registry directory tree). `path` comes from a `fs::read_dir` walk of files the registry installer just wrote locally — same machine, same process, written moments earlier. Bounded by the registry's own writes."))
+
+  (classification
+    (file "src/ephapax-package/src/manifest.rs")
+    (line 130)
+    (category "UnboundedAllocation")
+    (classification "legitimate-user-manifest")
+    (audit "ephapax#138 (2026-06-01)")
+    (rationale "`std::fs::read_to_string(path)` reads the user's own `ephapax.toml` (or analogous) manifest. Manifests are project-local files the user authored. CLI tooling assumes the user is not trying to OOM their own machine; if they wrote a 4GB manifest they have bigger problems."))
+
+  (classification
+    (file "src/ephapax-repl/src/lib.rs")
+    (line 170)
+    (category "UnboundedAllocation")
+    (classification "legitimate-repl-load-command")
+    (audit "ephapax#138 (2026-06-01)")
+    (rationale "REPL `:load <path>` command — reads a path the user just typed into their own interactive REPL. The REPL is an interactive single-user environment; the path is whatever the user typed. No remote attacker surface."))
+
+  (classification
+    (file "src/ephapax-cli/src/main.rs")
+    (line 245)
+    (category "UnboundedAllocation")
+    (classification "legitimate-cli-arg-path")
+    (audit "ephapax#138 (2026-06-01)")
+    (rationale "`fs::read_to_string(&path)` reads a file path the user passed as a CLI argument. Standard CLI tool pattern: trust the user to point at sensible files. Same applies to lines 257 and 327 in the same file — all three are CLI-arg path reads."))
+
+  (classification
+    (file "src/ephapax-cli/src/import_resolver.rs")
+    (line 125)
+    (category "UnboundedAllocation")
+    (classification "legitimate-project-source")
+    (audit "ephapax#138 (2026-06-01)")
+    (rationale "Import resolver reads `.eph` source files from the user's project tree during import-graph construction. Paths come from `import` statements in the user's own source files (which the user just wrote and pointed the resolver at). Bounded by the project's own source-file inventory. Line 195 in the same file is the same pattern."))
+
+  (classification
+    (file "src/ephapax-tools/src/formatter.rs")
+    (line 311)
+    (category "UnboundedAllocation")
+    (classification "legitimate-cli-source-input")
+    (audit "ephapax#138 (2026-06-01)")
+    (rationale "`std::fs::read_to_string(path)` reads a source file the formatter was asked to format — typically via `ephapax fmt path/to/file.eph` or `ephapax fmt .`. User-supplied path to user-owned source. The companion finding in `src/ephapax-tools/src/documenter.rs:211` (`ephapax doc path/to/file.eph`) is the same pattern."))
+)

@@ -1,0 +1,159 @@
+// SPDX-License-Identifier: MPL-2.0
+// Copyright (c) Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk>
+= `is_linear_ty` — Rust ↔ Coq bridge specification
+:toc:
+:toclevels: 2
+
+This document closes proof-debt obligation **P28** from the
+comprehensive proof inventory: certify that the Rust-side
+`Ty::is_linear()` (at `src/ephapax-syntax/src/lib.rs:155-166`)
+agrees with the Coq-side `is_linear_ty` (at `formal/Syntax.v:467-473`)
+**on the kernel subset of `Ty`**.
+
+Bridging this predicate is a prerequisite for proof-debt obligations
+**P25** (LinearChecker soundness), **P26** (AffineChecker soundness),
+and **P27** (TypeChecker soundness) — the full Rust ↔ Coq reflection
+arc. None of those can be even stated without P28 first.
+
+== The two definitions, side by side
+
+[cols="1,1"]
+|===
+| Coq (`formal/Syntax.v:467-473`)
+| Rust (`src/ephapax-syntax/src/lib.rs:155-166`)
+
+a|
+[source,coq]
+----
+Fixpoint is_linear_ty (T : ty) : bool :=
+  match T with
+  | TString _ => true
+  | TRef Lin _ => true
+  | TRegion _ T' => is_linear_ty T'
+  | _ => false
+  end.
+----
+a|
+[source,rust]
+----
+pub fn is_linear(&self) -> bool {
+    match self {
+        Ty::String(_) => true,
+        Ty::Ref {
+            linearity: Linearity::Linear,
+            ..
+        } => true,
+        Ty::Region { inner, .. } => inner.is_linear(),
+        Ty::ForAll { body, .. } => body.is_linear(),
+        _ => false,
+    }
+}
+----
+|===
+
+== The kernel-subset bridge claim
+
+The Coq `ty` and the Rust `Ty` are **not** in 1:1 correspondence.
+Specifically:
+
+* The **Coq side** is the *kernel* typing language. Its constructors
+  are: `TBase _`, `TString _`, `TRef _ _`, `TFun _ _`, `TProd _ _`,
+  `TSum _ _`, `TRegion _ _`, `TBorrow _`, `TEcho _`, `TFunEff _ _ _ _`,
+  and `TRegionRef _` (11 total).
+* The **Rust side** is the *surface* typing language. It extends the
+  kernel with surface-only constructors used by the parser and type-
+  inference pipelines: `Ty::Var(_)` (type variables), `Ty::Unif(_)`
+  (unification variables), `Ty::ForAll { var, body }`
+  (universally-quantified polymorphism), `Ty::List(_)`, `Ty::Tuple(_)`,
+  `Ty::Effectful { … }` (cf. Coq's `TFunEff`), `Ty::Borrow { mutable, … }`
+  (Coq's `TBorrow` does not yet distinguish mutable), and `Ty::Region {
+  name, inner }` (matches Coq's `TRegion`).
+
+The **kernel subset** is the image of an elaboration function
+`erase_surface_to_kernel : Rust::Ty → option Coq::ty` that fails on
+the surface-only constructors. The bridge claim is then:
+
+[NOTE]
+.Bridge claim (P28-kernel)
+====
+For every `t : Rust::Ty` and `t_kernel : Coq::ty` such that
+`erase_surface_to_kernel(t) = Some(t_kernel)`,
+
+  `Rust::is_linear(t) == Coq::is_linear_ty(t_kernel)`.
+====
+
+The four kernel cases compose as follows.
+
+[cols="1,1,1,1"]
+|===
+| Coq constructor | Rust constructor | `is_linear` | Where pinned
+| `TString r` | `Ty::String(r)` | **true** | clauses 1
+| `TRef Lin T` | `Ty::Ref { linearity: Linear, .. }` | **true** | clauses 2
+| `TRef Unr T` | `Ty::Ref { linearity: Unrestricted, .. }` | **false** | fallthrough
+| `TRegion r T'` | `Ty::Region { name: r, inner: T' }` | recurse | clauses 3
+| `TBase _` | `Ty::Base(_)` | **false** | fallthrough
+| `TFun _ _` | `Ty::Fun { .. }` | **false** | fallthrough
+| `TProd _ _` | `Ty::Prod { .. }` | **false** | fallthrough
+| `TSum _ _` | `Ty::Sum { .. }` | **false** | fallthrough
+| `TBorrow _` | `Ty::Borrow { .. }` | **false** | fallthrough
+| `TEcho _` | (no kernel-Rust counterpart yet)
+                                         | n/a | n/a
+| `TFunEff _ _ _ _` | `Ty::Effectful { .. }` | **false** | fallthrough
+|===
+
+== The two Rust-only "extra" recursion cases
+
+Two surface-only Rust constructors carry recursive `is_linear`
+behaviour that has no kernel mirror:
+
+`Ty::ForAll { body, .. }`::
+Recurses on `body`. The kernel has no `TForAll` constructor (the Coq
+typing judgment does not yet model polymorphism). This recursion is
+sound for the surface ↔ kernel pipeline because elaboration
+instantiates `ForAll` with a concrete witness type before lowering to
+the kernel; the elaborated type either is or isn't linear depending
+on the witness.
+
+`Ty::Region { inner, .. }`::
+Recurses on `inner`. Same as Coq's `TRegion _ T'`. The bridge holds
+directly.
+
+The other recursive forms (`Ty::Borrow { inner, .. }`, `Ty::Fun`,
+`Ty::Prod`, `Ty::Sum`, `Ty::Effectful`, `Ty::List`, `Ty::Tuple`,
+`Ty::Effectful`) are intentionally **NOT** recursive for
+`is_linear` on either side — they always return `false`.  This is a
+deliberate kernel choice: a function `T1 → T2` is treated as a
+value (a closure), not a linear obligation, even if `T1` or `T2`
+mention linear resources. The linearity of resources captured by the
+closure is tracked at the typing-judgment level (`T_Lam_L1_*`'s body-
+context discipline), not at the type-shape level.
+
+== Mechanical verification
+
+Two artefacts pin the bridge claim:
+
+1. **`formal/Syntax.v:467-473`** — the canonical Coq definition; build
+   oracle `coqc 8.18.0` is authoritative.
+2. **`src/ephapax-syntax/src/lib.rs`, `mod tests`** — Rust unit tests
+   that hardcode the truth table for every kernel `Ty` variant and
+   assert `Ty::is_linear()` matches. Added in the same PR as this
+   document.
+
+Future work for the full Rust ↔ Coq reflection arc (P25–P27):
+
+* Define `erase_surface_to_kernel` formally in either Coq (as a
+  Definition over a Coq-side AST of `Rust::Ty`) or in a separate
+  Idris2 module that bridges both.
+* Lift this lemma from `is_linear_ty` to the full typing judgment:
+  if Rust's `LinearChecker::check(e)` accepts, then the elaborated
+  expression types in `has_type_l1 Linear`.
+
+== Cross-references
+
+* `PROOF-NEEDS.md` — proof obligation **P28** in this session's
+  inventory.
+* `formal/Syntax.v:467-473` — Coq definition.
+* `src/ephapax-syntax/src/lib.rs:155-166` — Rust definition.
+* `ephapax-linear/src/linear.rs` — the consumer of `Ty::is_linear()`
+  on the Rust side; future P25 ports its 17 ExprKind branches to
+  Coq lemmas.

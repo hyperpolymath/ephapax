@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: PMPL-1.0-or-later
+// SPDX-License-Identifier: MPL-2.0
 // Escape analysis: determine if variables escape their scope
 
 use ephapax_syntax::{Expr, ExprKind};

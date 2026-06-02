@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: PMPL-1.0-or-later
+// SPDX-License-Identifier: MPL-2.0
 // Free variable analysis for Ephapax expressions
 
 use ephapax_syntax::{Expr, ExprKind};

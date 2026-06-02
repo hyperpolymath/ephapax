@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: PMPL-1.0-or-later
+# SPDX-License-Identifier: MPL-2.0
 # Aligned with the documented caller pattern in
 # hyperpolymath/standards .github/workflows/scorecard-reusable.yml.
 # Previously this workflow was startup_failure-on-every-run (50/50)

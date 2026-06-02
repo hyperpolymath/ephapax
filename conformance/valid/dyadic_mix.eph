@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: PMPL-1.0-or-later
+// SPDX-License-Identifier: MPL-2.0
 // Conformance test: mixing affine and linear bindings in one function.
 // Demonstrates the dyadic principle: both coexist without interference.
 // Expected: type-checks successfully.

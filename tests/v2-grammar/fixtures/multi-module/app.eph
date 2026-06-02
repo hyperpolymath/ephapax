@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: PMPL-1.0-or-later
+// SPDX-License-Identifier: MPL-2.0
 // Cross-module compile target. Imports `lib/math` and calls its public
 // `double` function from a local fn.
 

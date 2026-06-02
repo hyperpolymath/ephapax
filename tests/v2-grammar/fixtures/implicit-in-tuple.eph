@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: PMPL-1.0-or-later
+// SPDX-License-Identifier: MPL-2.0
 // Implicit-`in` with tuple binders. Two `let` statements destructuring
 // pairs, followed by a final expression. This is the shape bridge.eph
 // uses on its TEA loop.

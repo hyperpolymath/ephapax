@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: PMPL-1.0-or-later
+// SPDX-License-Identifier: MPL-2.0
 //
 // Phase I regressions for hyperpolymath/ephapax#43. Cross-module type
 // resolution — the final ingredient bridge.eph was waiting on.

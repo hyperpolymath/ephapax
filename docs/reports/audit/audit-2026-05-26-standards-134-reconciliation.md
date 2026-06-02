@@ -19,7 +19,7 @@
   not instructions.
 -->
 
-<!-- SPDX-License-Identifier: PMPL-1.0-or-later -->
+<!-- SPDX-License-Identifier: MPL-2.0 -->
 
 # Audit Report: ephapax — 2026-05-26 — standards#134 reconciliation
 

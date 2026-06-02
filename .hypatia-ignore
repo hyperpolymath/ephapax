@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: PMPL-1.0-or-later
+# SPDX-License-Identifier: MPL-2.0
 #
 # .hypatia-ignore — repo-scoped exemptions for the estate governance
 # bundle's anti-pattern scanner. Format (per the bundle's `is_exempt`

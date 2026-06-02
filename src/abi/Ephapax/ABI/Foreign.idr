@@ -1,4 +1,4 @@
-||| SPDX-License-Identifier: PMPL-1.0-or-later
+||| SPDX-License-Identifier: MPL-2.0
 ||| Ephapax ABI: FFI Boundary Obligations
 |||
 ||| The Zig/WASM-FFI side of the Ephapax ABI seam. The Rust pipeline

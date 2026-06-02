@@ -11,13 +11,24 @@ _Linear-type language with dual formalisation (Coq + Idris2) targeting WebAssemb
 
 toc::[]
 
-== Status snapshot (2026-05-20)
+== Status snapshot (2026-06-02)
 
 Ephapax is an early-development linear-type language implemented across
 ~19 Rust crates with a two-phase compiler pipeline (Idris2 type-checking
 → Rust/WASM backend). Lexer, parser, interpreter, REPL, CLI, S-expression
 IR, two-phase pipeline, Zig FFI, and conformance test suite are
 complete. Type checker and WASM code generation are in progress.
+
+2026-06-01 → 02 proof + stdlib wave (13 PRs): canonical-forms L1
+modality-polymorphic (P43, axiom-free, prerequisite for `progress_l1`);
+Print Assumptions audit framework across L1 + L3 keystones (P10/P32);
+`step_pop_disjoint_from_type_l1` stated + EASY cases (P06, HARD cases
+blocked on issues #240/#241/#242); Rust↔Coq `is_linear_ty` bridge truth-
+table (P28); OwnershipKind from_byte/to_byte round-trip (P59, typed-wasm
+ADR-0002 carrier handshake); 4 stdlib DB-theory additions — Transactions
+(D04), Allen's interval algebra (D11), MessageHandle (D17), monoidal
+aggregates (D18). Stages 2-4 of the Phase 3b plan (#240/#241/#242) remain
+un-touched. See `CHANGELOG.md` for full enumeration and per-PR detail.
 
 == Four-layer redesign (2026-05-26 → )
 

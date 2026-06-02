@@ -6,6 +6,46 @@ All notable changes to Ephapax are documented here.
 
 ## [Unreleased]
 
+### Proof + stdlib wave (2026-06-01 → 2026-06-02)
+
+- **P43 — canonical-forms L1 modality-polymorphic** (PR #274): port
+  `canonical_{unit,bool,i32,fun,prod,sum,string}_l1_m` to the
+  modality-polymorphic L1 judgment. All 7 axiom-free (verified via
+  `Print Assumptions`). Prerequisite for `progress_l1` (P42).
+- **P10 / P32 — Print Assumptions audit framework** (PR #270): per-
+  module whitelist guards mechanically certifying which axioms each
+  layer-keystone surfaces. `tfuneff_lambda_retype_l1_m` /
+  `subst_typing_gen_l1_m_tfuneff` etc. confirmed zero-axiom; the
+  expected residuals (`preservation_l1`, `region_liveness_at_split_l1_gen`,
+  `region_shrink_preserves_typing_l1_gen_m`) listed.
+- **P06 — `step_pop_disjoint_from_type_l1` partial proof** (PR #280):
+  stated + EASY cases Qed-closed (atomic non-region step rules; region
+  Enter/Exit/Exit_Echo; StringConcat; App_Step1; Fst/Snd; Borrow;
+  Drop; Copy). HARD cases (Let / LetLin / App_Step2 / If / Pair_Step
+  / Inl / Inr / Case / Region_Step T_Region_L1) Admitted, tracked
+  under issues #240 / #241 / #242.
+- **P28 — Rust↔Coq `is_linear_ty` bridge** (PR #273): kernel truth
+  table mechanically asserted. Pins the cross-language contract.
+- **P59 — OwnershipKind from_byte/to_byte round-trip** (PR #277):
+  typed-wasm ADR-0002 carrier handshake locked in Coq.
+- **D04 — Transactions as linear scopes** (PR #275): ACID semantics
+  via affine sublanguage.
+- **D11 — Allen's interval algebra** (PR #272): from DB-theory inventory.
+- **D17 — exactly-once `MessageHandle` as linear typestate** (PR #279).
+- **D18 — monoidal aggregates** (PR #281): `Sum`/`Product`/`Max`/`Min`/
+  `Count`/`And`/`Or`/`String` instances.
+- **Truth restore + banned-preservation burial** (PR #263): doc-code
+  consistency for proof state.
+- **Cluster D meander** (PR #278): L3/L4 status refresh + error-code
+  reconciliation + stale counts/paths.
+- **CI — coq-build noble apt** (PR #282): switch from
+  coqorg/coq:8.18 + `--user root` quirks to ubuntu-latest + apt-coq,
+  ~37s one-shot (unblocks ~5 PRs).
+- **CI — Track C panic-attack triage** (PR #271): classify findings
+  per #138.
+- **Governance — R5b standards SHA bump** (PR #276): consume
+  version-string drift detection from standards#329.
+
 ### Phase 3b Stage 1a + 1b — L2 effect-typed TFun + L3 wiring conditional preservation (2026-05-30 → 2026-05-31)
 
 - **Stage 1a (PR #252, merged 2026-05-30 17:42Z)**: `tfuneff_lambda_free`

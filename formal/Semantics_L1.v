@@ -3652,3 +3652,86 @@ Print Assumptions preservation_l3.
     [region_shrink_preserves_typing_l1_gen_m]'s structural admit. *)
 
 Print Assumptions step_pop_disjoint_from_type_l1.
+
+(** ============================================================
+    Canonical forms for the L1 judgment (proof-debt P43)
+    ============================================================
+
+    Mirror of the legacy [canonical_*] lemmas at [Semantics.v:603-630]
+    on the [has_type_l1] judgment. Together these are the
+    prerequisite for [progress_l1] (proof-debt P42).
+
+    A canonical-forms lemma reads: "if [v] is a value of type [T],
+    then [v] is of the canonical syntactic shape for [T]". This is
+    invertibility of value-typing rules from the value side: it
+    inverts the [is_value v] view of a closed [has_type_l1] derivation
+    into the constructor pattern of [v].
+
+    Modality-polymorphic by design — the structural property holds
+    in both [Linear] and [Affine] modes; the modality parameter
+    threads through inversion unchanged.
+
+    All 7 follow the same pattern as the legacy proofs: inversion on
+    [is_value v] (case-splits the value constructors), then inversion
+    on the typing derivation (rules that don't produce [T] are
+    contradictory). [eauto] discharges the existential witnesses. *)
+
+Lemma canonical_unit_l1_m :
+  forall m R R' G G' v,
+    has_type_l1 m R G v (TBase TUnit) R' G' -> is_value v -> v = EUnit.
+Proof. intros; inversion H0; subst; inversion H; subst; reflexivity. Qed.
+
+Lemma canonical_bool_l1_m :
+  forall m R R' G G' v,
+    has_type_l1 m R G v (TBase TBool) R' G' -> is_value v ->
+    exists b, v = EBool b.
+Proof. intros; inversion H0; subst; inversion H; subst; eauto. Qed.
+
+Lemma canonical_i32_l1_m :
+  forall m R R' G G' v,
+    has_type_l1 m R G v (TBase TI32) R' G' -> is_value v ->
+    exists n, v = EI32 n.
+Proof. intros; inversion H0; subst; inversion H; subst; eauto. Qed.
+
+Lemma canonical_fun_l1_m :
+  forall m R R' G G' v T1 T2,
+    has_type_l1 m R G v (TFun T1 T2) R' G' -> is_value v ->
+    exists body, v = ELam T1 body.
+Proof. intros; inversion H0; subst; inversion H; subst; eauto. Qed.
+
+Lemma canonical_prod_l1_m :
+  forall m R R' G G' v T1 T2,
+    has_type_l1 m R G v (TProd T1 T2) R' G' -> is_value v ->
+    exists v1 v2, v = EPair v1 v2 /\ is_value v1 /\ is_value v2.
+Proof. intros; inversion H0; subst; inversion H; subst; eexists _, _; auto. Qed.
+
+Lemma canonical_sum_l1_m :
+  forall m R R' G G' v T1 T2,
+    has_type_l1 m R G v (TSum T1 T2) R' G' -> is_value v ->
+    (exists T v0, v = EInl T v0 /\ is_value v0) \/
+    (exists T v0, v = EInr T v0 /\ is_value v0).
+Proof.
+  intros; inversion H0; subst; inversion H; subst;
+    [left|right]; eexists _, _; auto.
+Qed.
+
+Lemma canonical_string_l1_m :
+  forall m R R' G G' v r,
+    has_type_l1 m R G v (TString r) R' G' -> is_value v ->
+    exists l, v = ELoc l r.
+Proof. intros; inversion H0; subst; inversion H; subst; eauto. Qed.
+
+(** ============================================================
+    Print Assumptions — Canonical-forms axiom audit
+    ============================================================
+    Verify each canonical-forms lemma is clean: their statement is
+    structurally derivable from the typing-rule shapes + [is_value]
+    inversion, so they should not surface any axiom. *)
+
+Print Assumptions canonical_unit_l1_m.
+Print Assumptions canonical_bool_l1_m.
+Print Assumptions canonical_i32_l1_m.
+Print Assumptions canonical_fun_l1_m.
+Print Assumptions canonical_prod_l1_m.
+Print Assumptions canonical_sum_l1_m.
+Print Assumptions canonical_string_l1_m.

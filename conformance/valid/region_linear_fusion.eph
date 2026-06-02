@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: PMPL-1.0-or-later
+// SPDX-License-Identifier: MPL-2.0
 // Conformance test: region-linear fusion — the core Ephapax guarantee.
 // All linear bindings in a region consumed, result doesn't escape.
 // Expected: type-checks successfully in BOTH affine and linear modes.

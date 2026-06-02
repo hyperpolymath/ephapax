@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: PMPL-1.0-or-later
+// SPDX-License-Identifier: MPL-2.0
 // Conformance test: FFI intrinsic with zero, single, and multi arguments.
 // Expected: type-checks successfully in both affine and linear modes.
 

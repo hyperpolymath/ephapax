@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: PMPL-1.0-or-later
+// SPDX-License-Identifier: MPL-2.0
 // Conformance test: linear region handle consumed by destroy.
 // This is the dyadic emergence: linear handle + affine interiors.
 // Expected: type-checks successfully.

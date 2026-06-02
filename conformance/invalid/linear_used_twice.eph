@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: PMPL-1.0-or-later
+// SPDX-License-Identifier: MPL-2.0
 // Conformance test: linear binding used twice — must be rejected.
 // Expected: compile error E002 "linear variable 'x' already consumed"
 

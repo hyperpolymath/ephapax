@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: PMPL-1.0-or-later
+// SPDX-License-Identifier: MPL-2.0
 //
 // Phase F regressions for hyperpolymath/ephapax#43. Implicit-`in` between
 // sequential `let` bindings — the deepest grammar gap bridge.eph relied

@@ -1,4 +1,4 @@
--- SPDX-License-Identifier: PMPL-1.0-or-later
+-- SPDX-License-Identifier: MPL-2.0
 -- Build/typecheck package for the Ephapax Rust↔SPARK ABI seam.
 --
 -- The seam modules are namespaced `Ephapax.ABI.*`; Idris2 requires the

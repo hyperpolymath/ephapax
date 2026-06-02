@@ -1,4 +1,4 @@
-||| SPDX-License-Identifier: PMPL-1.0-or-later
+||| SPDX-License-Identifier: MPL-2.0
 ||| Ephapax ABI: Correctness-Critical Invariants
 |||
 ||| Type-level statements of the invariants the Ephapax compiler

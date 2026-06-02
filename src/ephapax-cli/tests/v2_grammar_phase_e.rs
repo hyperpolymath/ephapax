@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: PMPL-1.0-or-later
+// SPDX-License-Identifier: MPL-2.0
 //
 // Phase E regressions for hyperpolymath/ephapax#43. Bridge.eph
 // integration prep — adds the two grammar pieces it depends on:

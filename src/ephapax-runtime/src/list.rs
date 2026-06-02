@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: PMPL-1.0-or-later
+// SPDX-License-Identifier: MPL-2.0
 // List/Vector runtime operations for Ephapax self-hosting compiler
 
 //! Linear lists with dynamic resizing

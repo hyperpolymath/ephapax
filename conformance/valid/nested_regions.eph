@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: PMPL-1.0-or-later
+// SPDX-License-Identifier: MPL-2.0
 // Conformance test: nested regions with outlives relationship.
 // Values in outer region accessible in inner region.
 // Expected: type-checks successfully.

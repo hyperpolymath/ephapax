@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: PMPL-1.0-or-later
+// SPDX-License-Identifier: MPL-2.0
 // Trivial library module published at the path `lib/math`. Single
 // public function, no data types — keeps the cross-module fixture
 // minimal so the test focuses on import resolution.

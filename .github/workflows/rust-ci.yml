@@ -18,6 +18,7 @@ jobs:
   check:
     name: Cargo check + clippy + fmt
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     if: hashFiles('Cargo.toml') != ''
 
     steps:
@@ -44,6 +45,7 @@ jobs:
   test:
     name: Cargo test
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     needs: check
     if: hashFiles('Cargo.toml') != ''
 
@@ -71,6 +73,7 @@ jobs:
   status-gate:
     name: Status gate
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     needs: check
     if: hashFiles('Cargo.toml') != ''
 
@@ -90,6 +93,7 @@ jobs:
   proofs:
     name: Coq proofs
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     needs: check
 
     steps:

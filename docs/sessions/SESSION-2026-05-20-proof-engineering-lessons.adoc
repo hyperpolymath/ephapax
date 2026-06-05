@@ -14,7 +14,7 @@ Each lesson is named, has a reproducer, and lists where in the codebase
 the pattern bit us so the cross-reference is auditable.
 
 Companion machine-readable artefact:
-`.machine_readable/agent_instructions/lessons.a2ml`.
+`.machine_readable/bot_directives/lessons.a2ml`.
 
 PRs that surfaced these (this repo, 2026-05-20):
 proof-of-work#63, ephapax#92, ephapax#95, ephapax#98, ephapax#102,

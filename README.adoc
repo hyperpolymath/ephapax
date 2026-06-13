@@ -41,34 +41,52 @@ lesson):
 link:https://github.com/hyperpolymath/nextgen-languages/blob/main/docs/disambiguation/ephapax-vs-affinescript.md[nextgen-languages/docs/disambiguation/ephapax-vs-affinescript.md].
 ====
 
-[WARNING]
-.🔄 Foundational redesign in progress — read `STATUS.adoc` before opening any `.v` file
+[NOTE]
+.🌱 Ephapax is gestating — second-draft in progress, and going well (start with `V1-TO-V2.adoc`)
 ====
-On 2026-05-26 a verified Coq counterexample
-(link:formal/Counterexample.v[`formal/Counterexample.v`], 5 Qed
-lemmas) showed that preservation as stated in the legacy typing
-judgment is **provably false**. The repo is in the middle of a
-*four-layer principled redesign* (regions / modality / echo / dyadic
-mode) where preservation is *re-derived per layer* from explicit
-invariants rather than forced through the old judgment.
+This language is **not dead, abandoned, or frozen** — it is mid-way
+through a deliberate *second draft*, on two independent tracks, and both
+are landing. The full story (and why the older "provably false /
+archaeology" wording misled readers into writing the project off) is in
+link:V1-TO-V2.adoc[`V1-TO-V2.adoc`]. Read that first; this box is the
+short version.
 
-Anything in this README dated before 2026-05-26 that describes a
-"preservation closure plan" or counts "910 → 22 → 12 open goals" is
-**archaeology, not instructions**. The authoritative status is in
-link:STATUS.adoc[`STATUS.adoc`] (past / present / future map),
+**The grammar (v1 → v2).** The flat v1 surface worked for the core but
+could not grow into modules / generics / effects / comptime. v2 adds the
+missing layer — *surface → desugar → core* — and is **landing in phases,
+tests green** (`spec/ephapax-v2-grammar.ebnf` + the `v2_grammar_phase_*`
+suite).
+
+**The soundness proof (v1 → v2).** On 2026-05-26 a machine-checked Coq
+counterexample (link:formal/Counterexample.v[`formal/Counterexample.v`],
+5 Qed lemmas) *proved* that preservation as stated in the legacy
+single-judgment design is unsound — a region exit could invalidate a
+sibling's assumptions untracked. Discovering that **with a proof, before
+anyone depended on it**, is the rare correct thing, not a failure. The
+redesign re-derives preservation across *four orthogonal layers* (regions
+/ modality / echo / dyadic mode), each from its own explicit invariants.
+The legacy theorem stays `Admitted` on purpose — it is proven unclosable,
+so it is fenced off, not abandoned.
+
+Quick proof-status read: **L1** (region capabilities) substantially
+complete; **L2** (Linear/Affine modality) core landed with zero axioms;
+**L3** (echo / residue) wiring landed (slice 4, 2026-05-27) —
+`preservation_l3` + `preservation_l3_region_active_echo` +
+`preservation_l3_drop_echo` all Qed (conditional on L1 structural admits,
+see PROOF-NEEDS.md §4); **L4** (dyadic mode) Phase A scaffold landed
+2026-05-28 (`formal/L4.v`, definitions by design).
+
+**For anyone (human or bot) doing the work:** the only fenced-off
+artefacts are the *one* falsified legacy theorem and the *one* superseded
+flat grammar. Everything in the v2 columns — the grammar phases and the
+per-layer proofs — is open and tractable. Authoritative maps:
+link:V1-TO-V2.adoc[`V1-TO-V2.adoc`] (the frame),
+link:STATUS.adoc[`STATUS.adoc`] (operational past/present/future),
 link:formal/PRESERVATION-DESIGN.md[`formal/PRESERVATION-DESIGN.md`]
-(four-layer architecture), and link:PROOF-NEEDS.md[`PROOF-NEEDS.md`]
-(per-sublanguage proof debt with explicit do-not-do list).
-
-Quick read: **L1** (region capabilities) substantially complete;
-**L2** (Linear/Affine modality) core landed with zero axioms; **L3**
-(echo / residue) wiring landed (slice 4, 2026-05-27): `preservation_l3`
-+ `preservation_l3_region_active_echo` + `preservation_l3_drop_echo`
-all Qed (conditional on L1 structural admits — see PROOF-NEEDS.md §4);
-**L4** (dyadic mode) Phase A scaffold landed 2026-05-28 (`formal/L4.v`
-— `PModeLinear` / `PModeAffine` / `PModeBoundaryMix` + the
-`program_mode_to_modality` round-trip; definitions only by design, no
-proof obligations).
+(four-layer architecture), link:PROOF-NEEDS.md[`PROOF-NEEDS.md`] (proof
+debt + do-not-do list). Anything dated before 2026-05-26 describing a
+"preservation closure plan" or "910 → 12 goals" is the record of how the
+first draft hit its wall — read it as history, not instructions.
 ====
 
 Ephapax is a research language for **principled handling of

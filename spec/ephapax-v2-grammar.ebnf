@@ -22,7 +22,18 @@
  * It cannot reference runtime values or violate linearity.
  * Harvard separation: meta plane output is validated by the type checker.
  *
- * Status: DRAFT — design document, not yet implemented.
+ * Status: ACTIVE — the v2 surface grammar, landing in phases.
+ *   This is the second-draft grammar. The v1 surface (parsed straight
+ *   into the core, no desugaring layer) worked for the core calculus
+ *   but could not grow into modules / generics / effects / comptime;
+ *   v2 adds the surface -> desugar -> core layer that v1 lacked. See
+ *   ../V1-TO-V2.adoc for the full v1 -> v2 story.
+ *
+ *   The specification below is complete. Implementation proceeds in
+ *   phases, each gated by its own CLI test
+ *   (src/ephapax-cli/tests/v2_grammar_phase_*.rs); landed phases pass.
+ *   "Draft" here means the surface is still growing toward full
+ *   coverage, NOT that it is abandoned or wrong.
  *)
 
 

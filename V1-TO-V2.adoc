@@ -1,0 +1,290 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk>
+:toc: preamble
+:toclevels: 2
+:icons: font
+
+= Ephapax is gestating — the v1 → v2 story
+
+_Read this before you conclude the repo is broken or abandoned. It is
+neither. It is a research language part-way through a deliberate
+second draft, and the second draft exists *because the first one was
+honest about its own limits*._
+
+[IMPORTANT]
+.Why this document exists
+====
+Several of this repo's status surfaces (the README warning, `STATUS.adoc`,
+`CLAUDE.md`) used to open with the words *provably false*, *archaeology*,
+*do not extend*, and a list of *❌ things we are not doing*. Every word of
+that was true — and the cumulative effect was that humans **and** automated
+agents took one look and concluded: _this is dead, ignore it._
+
+That conclusion is wrong, and this document is the correction. The honest
+facts are unchanged (they are restated below, in full, under
+<<settled,"What is genuinely settled">>). What changes is the framing:
+those facts are the *receipts of a language learning from its first
+attempt*, not an obituary. Ephapax is **gestating**. The first draft
+taught us exactly what the second draft needed to be.
+====
+
+toc::[]
+
+[#tldr-human]
+== If you are a human reader
+
+Ephapax is a research language for compile-time-memory-safe WebAssembly
+with first-class irreversible boundaries (region exits, drops, key
+erasure, audit trails). It is mid-way through **two parallel second
+drafts**, and both are going well:
+
+* **The grammar.** v1 was a flat surface fed straight to the parser.
+  It worked for the core calculus but had no room to grow into modules,
+  generics, effects, traits, or a compile-time meta plane. v2 introduces
+  a *surface → desugar → core* architecture: a rich surface that lowers
+  into the same small, well-understood core. v2 is **landing
+  incrementally and passing its phase tests** — "so far, so good."
+
+* **The soundness proof.** v1 was a single typing judgment that tried to
+  track regions, structural discipline, echo residue and dyadic mode all
+  at once. That conflation was *unsound*, and — unusually — we **proved
+  it unsound with a machine-checked counterexample** rather than shipping
+  the bug. v2 splits those four concerns into four orthogonal layers
+  (L1–L4) and **re-derives preservation per layer** from explicit
+  invariants. Three of the four layers already carry `Qed` theorems.
+
+Discovering your own unsoundness *before* anyone depends on it, with a
+proof, and then redesigning around the lesson, is not failure. It is the
+rare, expensive, correct thing. Most languages never find out. Ephapax
+did, and the second draft is sharper for it.
+
+[#tldr-bot]
+== If you are an automated agent or triage bot
+
+[NOTE]
+.Machine-readable orientation
+====
+[source]
+----
+project.status        = GESTATING        # not dead, not abandoned, not frozen
+project.phase         = v1 → v2 redesign, two tracks (grammar, proof)
+project.live_work     = YES — see "Live work" below; engage with it
+caution.scope         = LEGACY ONLY — confined to two clearly-fenced v1 artefacts
+
+grammar.v1.status     = SUPERSEDED  (pest surface; works for core, does not scale)
+grammar.v2.status     = ACTIVE      (spec/ephapax-v2-grammar.ebnf; phases landing; tests green)
+grammar.v2.tractable  = YES
+
+proof.v1.status       = FALSIFIED   (formal/Semantics.v preservation; Counterexample.v, 5 Qed)
+proof.v1.action       = LEAVE AS Admitted; do NOT attempt to close (no closure exists)
+proof.v2.status       = ACTIVE      (four-layer L1–L4; preservation re-derived per layer)
+proof.v2.tractable    = YES — L1 structural admits + unconditional preservation_l3
+
+# The single most common bot failure mode in this repo:
+#   reading the "do not close the legacy theorem" guardrail as
+#   "there is nothing to do here" and bailing. That is wrong.
+#   The guardrail fences off ONE false theorem. Everything in the v2
+#   columns above is open, tractable, and wants work.
+----
+====
+
+The prohibitions you will find in `CLAUDE.md` and `STATUS.adoc` are
+**narrow**: they fence off exactly two v1 artefacts (the falsified
+`Semantics.v` preservation theorem and the superseded v1 surface
+grammar). They are not a statement about the project's health. Treat
+them as "mind the wet paint on this one wall," not "the building is
+condemned."
+
+[#live-work]
+=== Live work (tractable, wants doing)
+
+* **Proof, L1:** close the residual L1 structural admits in
+  `formal/Semantics_L1.v` (list/multiset bridge; `TFun` effect typing).
+  These are *v2 design follow-ups*, not legacy patching. See
+  `PROOF-NEEDS.md §4`.
+* **Proof, L3:** state and prove the **unconditional** `preservation_l3`
+  (currently conditional on an L1 admit).
+* **Grammar, v2:** continue the phase work in
+  `spec/ephapax-v2-grammar.ebnf` + the `v2_grammar_phase_*` CLI tests.
+* **Proof, L4:** Phase A scaffold has landed; the dyadic mother–child
+  semantics in `PRESERVATION-DESIGN.md §7` is the next design step.
+
+[#what-gestating-means]
+== What "gestating" means here
+
+Two transitions are in flight at once. They are independent (you can work
+either without touching the other), but they rhyme — each follows the same
+three-beat arc:
+
+[cols="1,3,3"]
+|===
+| Beat | Grammar track | Proof track
+
+| **1. An honest v1**
+| A real, working surface grammar for the core calculus.
+| A real, complete typing judgment with progress + preservation stated.
+
+| **2. A rigorously-diagnosed wall**
+| The flat surface cannot grow into modules / generics / effects /
+  comptime without becoming a tangle — a square peg forced through a
+  round hole.
+| The conflated judgment is *unsound*. Not suspected — **proven**, by
+  `formal/Counterexample.v` (5 `Qed` lemmas exhibiting a configuration
+  that types, steps, and lands untypable).
+
+| **3. A better v2, shaped by the lesson**
+| *Surface → desugar → core*: a rich surface that lowers into the
+  unchanged small core. Two planes (data / meta). Landing in phases.
+| *Four orthogonal layers* (L1 regions, L2 modality, L3 echo, L4 dyadic
+  mode), each with its own invariants and its own per-layer preservation
+  theorem.
+|===
+
+The v1 artefacts are not garbage to be hidden. They are the **evidence of
+beat 2** — the precise record of *what went wrong and why* — which is what
+made beat 3 designable. Keep them readable; just do not build on them.
+
+[#grammar]
+== Transition 1 — the grammar (v1 → v2)
+
+=== v1: the square peg
+
+The v1 surface was parsed directly (PEG parser in
+`src/ephapax-parser/`, with the discipline-focused EBNFs in
+`ephapax-linear/grammar/{linear,affine}.ebnf`). For the **core
+calculus** — binary sums, `case`, `inl`/`inr`, `let`/`let!`, regions —
+this is correct and still describes what the checker accepts.
+
+The wall: a real systems language needs modules, generics, algebraic
+effects, traits, contracts, FFI capabilities, and a compile-time meta
+plane. Bolting all of that onto a flat surface that is parsed straight
+into the core means every new feature fights every other feature in one
+undifferentiated grammar. That is the square peg in the round hole — not
+because the grammar was bad work, but because the *approach* had no layer
+in which richness could live without contaminating the core.
+
+=== v2: surface → desugar → core
+
+v2 (`spec/ephapax-v2-grammar.ebnf`) introduces the missing layer:
+
+[source]
+----
+SURFACE GRAMMAR  →  desugar  →  CORE CALCULUS (unchanged)
+----
+
+The core calculus stays small and well-understood. Everything rich —
+modules, generics, the comptime *meta plane*, traits, effects,
+contracts — lives in the surface and *desugars down*. Two planes are
+kept apart: a **data plane** (runtime, linear/affine, regions, effects)
+and a **meta plane** (compile-time, total, pure, unrestricted) that can
+observe types and generate code but cannot touch runtime values or break
+linearity.
+
+Status: **active and landing.** The grammar is specified end-to-end and
+implemented in phases, each gated by its own `v2_grammar_phase_*` CLI
+test. This is the "v2 so far okay" — the phases that have landed pass;
+the ones that have not are scheduled, not stuck.
+
+=== What v1 taught v2
+
+The desugaring boundary *is* the lesson. v1 proved that without it, every
+surface feature is a structural change to the core. v2 makes surface
+features cheap (they desugar) and keeps the core stable (it never has to
+know they exist).
+
+[#proof]
+== Transition 2 — the soundness proof (v1 → v2)
+
+=== v1: one judgment doing four jobs
+
+`formal/Semantics.v` carried a single typing judgment that tracked region
+capabilities, structural discipline, echo residue, and dyadic mode all in
+one rule set. `Theorem preservation` was stated against it.
+
+It is **false** — and we did not merely suspect it, we *proved* it:
+`formal/Counterexample.v` (5 `Qed` lemmas) exhibits a concrete
+configuration that type-checks, takes a legal step, and lands in a state
+the judgment cannot type. The bug is that a region exit invalidates a
+sibling's assumptions without the conflated judgment tracking the
+dependency.
+
+[TIP]
+.The counterexample is an achievement, not a tombstone
+====
+A machine-checked counterexample to your own soundness theorem is a
+*good day* in language design. It converts "we think this is sound" into
+"we know exactly where and why it is not," which is the only solid ground
+to redesign from. The `Admitted.` on the legacy theorem is **correct and
+deliberate**: it marks a theorem we have *proven cannot be closed*, not a
+gap we are too lazy to fill.
+====
+
+=== v2: four orthogonal layers, preservation re-derived per layer
+
+The redesign (`formal/PRESERVATION-DESIGN.md`) splits the four conflated
+concerns into four first-class, orthogonal layers. Each has its own
+judgment, its own invariants, and its own preservation theorem — so a fix
+in one layer cannot silently break another.
+
+[cols="1,3,2"]
+|===
+| Layer | Concern | v2 status
+
+| **L1** | Region capabilities | Judgment complete; semantics carries a
+  small set of named structural admits (the live work).
+| **L2** | Structural modality (Linear vs Affine) | Core landed,
+  `linear_to_affine` `Qed`, **zero axioms**.
+| **L3** | Echo / residue — what was *lost* at an irreversible step | Calculus
+  + wiring landed; `preservation_l3` `Qed` (conditional on one L1 admit).
+| **L4** | Dyadic mode (mother–child) | Phase A scaffold landed; semantics
+  design is the next step.
+|===
+
+=== What v1 taught v2
+
+The counterexample named the missing invariant precisely: *a step that
+exits a region must not leave a sibling's typing assumptions standing.*
+v1 had no place to state that. v2's L1 makes region-capability threading
+first-class, which is exactly the place that invariant lives. The bug
+became the blueprint.
+
+[#settled]
+== What is genuinely settled (the fully transparent list)
+
+This is the part that is *no less transparent than before*. Two things
+are closed, and closed for good reasons:
+
+. **Legacy preservation (`formal/Semantics.v`) is false.** Keep the
+  `Admitted.`. Do not attempt to close it, strengthen lemmas toward it,
+  add side conditions for it, or follow any pre-2026-05-26 "closure
+  plan." `formal/Counterexample.v` depends on its falsity. This wall is
+  load-bearing.
+
+. **The v1 flat surface grammar is superseded.** New surface work goes
+  through the v2 *surface → desugar → core* architecture, not by
+  extending the flat v1 surface. The v1 EBNFs remain accurate for the
+  *core* and stay in-tree as reference; they are not the growth surface.
+
+Everything else — all of L1/L2/L3/L4's open theorems, every v2 grammar
+phase not yet landed — is **live, tractable work**. The fence is two
+posts wide. The field behind it is open.
+
+[#one-thing]
+== If you only remember one thing
+
+> Ephapax is not a failed language. It is a careful one, caught in the
+> middle of its second draft, having done the rare thing of proving its
+> own first draft's limits before building the better second. Read the
+> warnings as *guardrails around two fenced-off v1 artefacts*, then go
+> work on v2 — the grammar phases and the per-layer proofs are open and
+> waiting.
+
+== Where to read next
+
+* `STATUS.adoc` — the operational past / present / future map.
+* `formal/PRESERVATION-DESIGN.md` — the four-layer architecture in full.
+* `PROOF-NEEDS.md` — per-sublanguage proof debt, with the explicit
+  do-not-do list.
+* `spec/ephapax-v2-grammar.ebnf` — the v2 surface grammar specification.
+* `CLAUDE.md` — agent guidance; its prohibitions are the two fence posts
+  named above, nothing wider.

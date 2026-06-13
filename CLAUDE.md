@@ -74,24 +74,50 @@ Most questions touch exactly one layer. The design rationale is in `formal/PRESE
 
 ---
 
-## 🛑 Owner directive 2026-05-27 — preservation work
+## Orientation: this language is gestating — engage with v2
 
-> Read this before touching anything in `formal/`. Several Claude sessions
-> burned hours walking the pre-discovery patching path. This block
-> exists so that doesn't happen again.
+**Read `V1-TO-V2.adoc` first.** Ephapax is *not* dead, broken, or
+abandoned — it is part-way through a deliberate second draft on two
+tracks (grammar and soundness proof), both landing. Do not read the
+prohibitions below as "there is nothing to do here." They fence off
+exactly **two** v1 artefacts; everything in v2 is open and wants work.
+
+**Where the tractable work is (engage with this):**
+
+- **Proof, L1** — close the residual L1 structural admits in
+  `formal/Semantics_L1.v` (list/multiset bridge;
+  `region_shrink_preserves_typing_l1_gen_m`; `TFun` effect typing).
+  These are *v2 design follow-ups*, not legacy patching. See
+  `PROOF-NEEDS.md §4`.
+- **Proof, L3** — state + prove the **unconditional** `preservation_l3`
+  (currently conditional on an L1 admit).
+- **Grammar, v2** — continue the phase work in
+  `spec/ephapax-v2-grammar.ebnf` + the `v2_grammar_phase_*` CLI tests.
+- **Proof, L4** — Phase A scaffold landed; mother–child dyadic
+  semantics (`PRESERVATION-DESIGN.md §7`) is the next design step.
+
+## 🛑 Owner directive 2026-05-27 — the two fences (narrow, load-bearing)
+
+> The guardrails below are narrow by design. They stop one specific
+> wasted path (several sessions burned hours trying to close a theorem
+> that is *proven* unclosable). They do **not** mean "skip this repo."
+> Engage with the v2 work listed above; just keep off the two fenced
+> v1 artefacts.
 
 ### TL;DR
 
 Ephapax preservation as originally stated in `formal/Semantics.v` is
-**provably false**. `formal/Counterexample.v` exhibits a concrete
-configuration that types, steps, and lands at an untypable post-state
-— all three lemmas `Qed`. The work is therefore **not** to close
-`Theorem preservation` in `Semantics.v`. The work is the **four-layer
-principled redesign** (L1 region capabilities / L2 modality (now
-`m`-indexed into `has_type_l1`) / L3 echo / L4 dyadic mode) documented
-in `formal/PRESERVATION-DESIGN.md`. Preservation is **re-derived** in
-the new architecture from explicit invariants, not forced through
-the old one.
+**provably false** — and that is a *result*, not a defeat:
+`formal/Counterexample.v` exhibits a concrete configuration that types,
+steps, and lands at an untypable post-state (5 lemmas `Qed`), which
+named the exact invariant the redesign needed. So the work is **not** to
+close `Theorem preservation` in `Semantics.v` (no closure exists; the
+`Admitted` is deliberate). The work is the **four-layer principled
+redesign** (L1 region capabilities / L2 modality, now `m`-indexed into
+`has_type_l1` / L3 echo / L4 dyadic mode) in
+`formal/PRESERVATION-DESIGN.md`, where preservation is **re-derived
+per layer** from explicit invariants. Three of the four layers already
+carry `Qed` theorems — this is a healthy build, not a stalled one.
 
 ### DO NOT
 

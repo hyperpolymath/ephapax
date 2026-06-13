@@ -31,27 +31,38 @@ https://github.com/hyperpolymath/nextgen-languages/blob/main/docs/disambiguation
 [discrete]
 ==== One-paragraph orientation
 
-On 2026-05-26 a verified Coq counterexample (`formal/Counterexample.v`,
-5 Qed lemmas) showed that preservation as stated in the legacy typing
-judgment (`formal/Semantics.v`) is **provably false**. The work since
-is **not** to close that theorem — no closure exists. The work is a
-*four-layer principled redesign* (`formal/PRESERVATION-DESIGN.md`)
-where preservation is **re-derived per layer** from explicit
-invariants instead of forced through the old judgment.
+Ephapax is **gestating** — part-way through a deliberate second draft,
+on two independent tracks (grammar and soundness proof), both landing.
+For the why-this-is-healthy framing, read link:V1-TO-V2.adoc[`V1-TO-V2.adoc`]
+first; this document is the *operational* map underneath it.
 
-This document is the single-page map of what that means for the repo:
-which work is past (archaeology — don't touch), which is present
-(active — extend), and which is future (next moves). Read this before
-opening any `.v` file or any PR comment dated before 2026-05-26.
+On 2026-05-26 a verified Coq counterexample (`formal/Counterexample.v`,
+5 Qed lemmas) *proved* that preservation as stated in the legacy
+single-judgment design (`formal/Semantics.v`) is unsound. Proving your
+own first draft's limit, before anyone depends on it, is the rare correct
+move — and it named exactly the invariant the redesign needed. The work
+since is **not** to close that theorem (no closure exists; the
+`Admitted` is deliberate) but to build the *four-layer principled
+redesign* (`formal/PRESERVATION-DESIGN.md`) where preservation is
+**re-derived per layer** from explicit invariants. Three of the four
+layers already carry `Qed` theorems.
+
+This document maps what that means for the repo: which work is **past**
+(the v1 lesson — read it, don't build on it), which is **present**
+(the v2 layers — active, extend), and which is **future** (next moves).
+The two fenced-off v1 artefacts are narrow; everything in the v2 columns
+is open and tractable. Read this before opening any `.v` file or any PR
+comment dated before 2026-05-26.
 
 toc::[]
 
-== Past — archaeology (do not extend)
+== Past — the v1 lesson (read it, don't build on it)
 
-These artefacts exist on main as the historical record of how we
-reached the counterexample. They have documentation value (they show
-the *pathway to* the soundness gap). They have **zero merge value**
-going forward.
+These artefacts are the v1 first draft and the trail that proved its
+limit. Their value is real but specific: they are *why the v2 redesign
+has the shape it has* — the precise record of the missing invariant.
+Keep them readable as the lesson; do **not** build forward on them (the
+v2 layers below are where forward work goes).
 
 [cols="2,3,2"]
 |===
@@ -264,7 +275,14 @@ ownership). Treating them as competition for mark-and-sweep is a
 category error.
 ====
 
-== What we are NOT doing
+== The fences (narrow by design)
+
+These are the guardrails — and they are deliberately *narrow*. Items 1–5
+all fence off the **one** falsified v1 artefact (the legacy preservation
+theorem and attempts to close it). Items 6–7 are two **design invariants**
+that keep the v2 layers orthogonal. Nothing here closes off the live v2
+work: the per-layer proofs and the grammar phases remain open. Read this
+as "mind these specific posts," not "the field is closed."
 
 * ❌ Closing the legacy `Theorem preservation` in `formal/Semantics.v`.
   It is FALSE. No proof closes it.

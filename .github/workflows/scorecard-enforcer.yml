@@ -43,6 +43,7 @@ permissions:
 jobs:
   scorecard:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     permissions:
       security-events: write
       id-token: write  # For OIDC
@@ -73,6 +74,7 @@ jobs:
   enforce-min-score:
     needs: scorecard
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - name: Download results artifact
         uses: actions/download-artifact@cc203385981b70ca67e1cc392babf9cc229d5806 # v4.1.9
@@ -97,6 +99,7 @@ jobs:
   # Check specific high-priority items
   check-critical:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 

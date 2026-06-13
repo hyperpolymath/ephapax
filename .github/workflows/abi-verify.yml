@@ -38,6 +38,7 @@ jobs:
   idris2-abi:
     name: Idris2 ABI seam (ephapax-abi.ipkg)
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     container:
       image: snazzybucket/idris2:latest  # estate-standard Idris2 image
     steps:

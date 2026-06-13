@@ -50,6 +50,7 @@ jobs:
   detect-relevant-changes:
     name: detect-relevant-changes
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     outputs:
       relevant: ${{ steps.f.outputs.relevant }}
     steps:
@@ -84,6 +85,7 @@ jobs:
     needs: detect-relevant-changes
     if: needs.detect-relevant-changes.outputs.relevant == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     # Coq 8.18 via Ubuntu 24.04 noble apt (coq 8.18.0+dfsg) exactly
     # matches the toolchain pinned by formal/Justfile and the local
     # developer setup.
@@ -156,6 +158,7 @@ jobs:
     needs: [detect-relevant-changes, coq-build]
     if: always()
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - name: Aggregate coq-build results
         env:

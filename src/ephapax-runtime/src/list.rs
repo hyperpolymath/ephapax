@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: MPL-2.0
+// Owner: Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk>
 // List/Vector runtime operations for Ephapax self-hosting compiler
 
 //! Linear lists with dynamic resizing

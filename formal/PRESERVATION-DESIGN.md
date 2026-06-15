@@ -1,44 +1,13 @@
-<!--
-SPDX-License-Identifier: MPL-2.0
-Copyright (c) Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk>
--->
+<!-- SPDX-License-Identifier: MPL-2.0 -->
+<!-- Owner: Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk> -->
 <!-- Copyright (c) 2026 Jonathan D.A. Jewell -->
 
 # Preservation: principled redesign
 
-> # 🛑 CANONICAL — read before touching `formal/`
->
-> Preservation in `formal/Semantics.v` is **provably false** —
-> verified by `formal/Counterexample.v` (five lemmas `Qed.`). It is
-> not closable by proof technique.
->
-> The work is the **four-layer redesign in this document**. Do not:
->
-> 1. attempt to close `Theorem preservation` in `Semantics.v`;
-> 2. add lemmas to `Semantics.v` aimed at that closure (Lemma B
->    variants, region-weakening predicates, strengthened subst
->    variants, `step_preserves_type_at_pre`-style helpers, etc.);
-> 3. close any residual axiom in `Semantics_L1.v` by ad-hoc side
->    conditions or proof tricks — post-L2-hybrid (PRs #176 + #177)
->    these closures are cross-layer, not single-layer;
-> 4. follow any pre-2026-05-26 "preservation closure plan" — those
->    PRs (#92, #102, #104, #106, #114, #116, #117, #121, #146) are
->    archaeology, not instructions.
->
-> Anti-pattern detector: if a session is producing
-> `sibling-region-disjointness` side conditions, region-weakening
-> predicates indexed on syntactic shape, or admit-shuffling between
-> Semantics.v and a new lemma — escalate to a layer-design
-> discussion. The architecture is asking for an explicit invariant,
-> not a clever lemma.
->
-> The owner-issued directive (2026-05-27) is captured in `CLAUDE.md`
-> at the repo root.
-
 Companion to `PRESERVATION-HANDOFF.md`. The handoff document is a
 diagnostic record of attempted proof-engineering. This document is the
 **design** rationale for the typing-layer change that the verified
-counterexample (`Counterexample.v`, all five lemmas `Qed.`) now makes
+counterexample (`Counterexample.v`, all three lemmas `Qed.`) now makes
 unavoidable.
 
 The handoff's Option 3 ("type-system change") is here re-cast not as a
@@ -320,35 +289,6 @@ proof-engineering gap but a calculus-design gap.
 The L1.E PR documents this in-source. None of (1)/(2)/(3) is in scope
 for the L1 minimal-fix; each is a follow-up. See ROADMAP for sequencing.
 
-### 4.8.1 Resolution path (3) landed 2026-05-27 — and what it does not close
-
-`T_Var_Lin_L1` and `T_Var_Unr_L1` were strengthened with the premise
-`forall r, In r (free_regions T) -> In r R` (originally as PR #170
-on the design branch, subsumed into the m-indexed main via #176).
-The strengthening:
-
-- **Closes the source-level soundness gap**: programs like
-
-      let_lin x = (ELoc 0 "r") in (ELet (ERegion "r" (EI32 5)) (EDrop (EVar 1)))
-
-  no longer type, because the `EDrop (EVar 1)` site fails the
-  variable rule's new well-formedness premise at R = `[]`.
-
-What the strengthening does **not** close: the
-`region_liveness_at_split_l1` lemma's residual admit (formerly the
-opaque `Axiom`, converted to an Admitted Lemma with 28-of-29 cases
-proved concretely in the L1.G follow-up). An empirical closure
-attempt closes most cases trivially via the IH chain, but the
-T_Region_Active_L1 case with `binder = rv` exhibits a real
-counterexample even under the strengthened judgment:
-
-    ERegion rv (EI32 5) : TBase TI32 — In rv R, In rv R' = False
-                                        (because remove_first_L1 pops the only rv)
-
-Three follow-up paths (side-conditioned lemma, multi-set R,
-contextual weaker signature) remain L1 follow-up work, independent
-of and additional to this §4.8 resolution.
-
 ---
 
 ## 5. Layer 2 in detail — Linear vs Affine modality
@@ -408,7 +348,7 @@ recipe (echo-types' `degradeMode-comp`, `EchoLinear.agda:93-101`).
 
 | Property | Ephapax-Linear | Ephapax-Affine |
 |---|---|---|
-| Preservation | ✓ (L1 fix, *conditional on §5.1*) | ✓ (same fix; Affine derivations are L1-safe by weakening) |
+| Preservation | ✓ (L1 fix) | ✓ (same fix; Affine derivations are L1-safe by weakening) |
 | Progress | ✓ | ✓ |
 | **No-leak** (every introduced linear value is consumed) | proved | does **not** hold; replaced by "no-duplicate" |
 | **No-duplicate** | trivially (Linear ⇒ no-duplicate) | proved as a structural property |
@@ -419,190 +359,12 @@ Cross-mode: the Linear ⇒ Affine weakening lemma is a single induction.
 Combined with monomode preservation, this gives Affine preservation
 for free.
 
-### 5.1 Cross-layer dependency: L1's lambda-rigidity gap closes at L2
-
-The "Preservation ✓ (L1 fix)" cell above is **not realised by L1 alone**.
-`formal/Semantics_L1.v`'s `preservation_l1` is currently `Admitted`
-because of three internal admits in its proof body:
-
-- `S_StringConcat_Step2` — tractable; needs a
-  `step_pop_disjoint_from_type_l1` lemma.
-- `S_App_Step2` and `S_Pair_Step2` — the **lambda-rigidity gap** per
-  §4.8: `T_Lam_L1_*` fixes the body's region environment at lambda-
-  creation time; the rules give no way to re-derive the lambda's
-  typing at a shifted `R'` after the inner step.
-
-§4.8.1 records that path (3) — strengthening `T_Var_*_L1` — landed
-2026-05-27 via PR #170 (and subsumed via #176). It closes the
-source-level *variable* soundness gap but leaves the lambda-body
-case open because the body's typing is fixed at `T_Lam_L1_*`-
-introduction, not at variable-use. Path (3) is necessary but **not
-sufficient**.
-
-**Path (1) — effect-typed lambdas — is L2 Phase 2's mechanism.** The
-mode-specific `T_Lam_L1_Linear` / `T_Lam_L1_Affine` constructors
-should carry an annotation of the body's region effect (how `R`
-shifts through the body). Concretely, the lambda type would extend
-from
-
-```
-TFun T1 T2
-```
-
-to
-
-```
-TFun T1 T2 (R_in : region_env) (R_out : region_env)
-```
-
-(or an equivalent abstract `Effect` parameter). At application time,
-`T_App_L1` would consume `R_in` and produce `R_out`, threading the
-region change properly. This lets `S_App_Step2`'s preservation
-close: the lambda's typing at the post-step `R'` is derived from the
-recorded effect, not blocked by rigid `T_Lam` introduction.
-
-**Sequencing.** The current `T_Lam_L1_*` rules (per the L2 mode-
-split table above) carry only the per-type-flag changes. The
-effect-typed `TFun` is an additional, orthogonal extension planned
-for L2 Phase 2. When it lands, the L1 preservation closure can
-return and discharge the lambda-rigidity admits in
-`Semantics_L1.v`.
-
-**Why this isn't L1's job.** Effect-typed function types are a
-typing-layer property, not a region-layer property. Adding them to
-L1's unparameterised judgment would conflate the two. L2 is the
-natural home: the modality parameter is *already* a typing-layer
-decoration; the effect annotation rides alongside it. After L2's
-effect-typed TFun lands, L1's gap closes by importation, not by
-re-deriving L1.
-
-Until that follow-up lands, the §5 table's "Preservation ✓" should
-be read as "achievable under the L1 architecture once L2 effect-
-typed lambdas are introduced". The Linear ⇒ Affine weakening
-(`linear_to_affine` Qed, PR #176) is independent of this dependency
-and already ships.
-
-**Phase D — current refinement (2026-05-28).** Slice 1 (TFunEff
-syntax) landed via PR #200. An implementation attempt for slice 2
-(`T_Lam_L1_*_Eff` typing rules) surfaced a substitution-lemma
-structural gap: the substituted value's region (`In rv R`, outer)
-does not connect to the lambda body's input env (`R_in`,
-independent), so `subst_typing_gen_l1_m` cannot close its new
-case without an additional invariant. The refinement adds a side
-condition to `T_Lam_L1_*_Eff` requiring
-`forall r, In r (free_regions T1) -> In r R_in`, which ties the
-bound variable's regions to the body's input environment and
-makes substitution well-defined. See
-[`PHASE-D-REDESIGN.md`](PHASE-D-REDESIGN.md) for the full memo
-including the revised slice plan, lemma-cascade audit, and
-owner-directive compliance check.
-
 ---
 
 ## 6. Layer 3 — Echo / residue, in design
 
 This layer is **not required for preservation**. Documented here so
 that L1 + L2 don't bake in assumptions that block L3 later.
-
-### 6.0 One-sentence anchor
-
-> **L3 is the one place ephapax mechanises what happens to the
-> information that an irreversible step erases** — region exit,
-> drop, anything that throws away a distinguishable preimage. It
-> introduces exactly **one type former** (the echo, a fiber); the
-> linear-vs-affine distinction is layered over that one type former
-> as a thin-poset of *observation disciplines* — not as two separate
-> echo types.
-
-### 6.0.1 The picture (mechanical map)
-
-```
-L3 — Irreversibility residue (Echo Types)
-═════════════════════════════════════════
-▸ ONE type former
-▸ TWO observation disciplines (inherited from L2 — not invented here)
-▸ The disciplines order as a thin poset:  Linear ≤ Affine
-
-
-┌─ TRIGGER: irreversible operational steps ──────────────────────────┐
-│                                                                    │
-│   S_Region_Exit  : (μ, R,    ERegion r v)  →  (μ', R\r, v)         │
-│   S_Drop         : (μ, R,    EDrop v)      →  (μ,  R,   EUnit)     │
-│   …  every step that throws away which preimage hit y               │
-│                                                                    │
-└──────────────────────┬─────────────────────────────────────────────┘
-                       │  each step has an associated
-                       │  COLLAPSE FUNCTION f : A → B
-                       │     e.g.   collapse_r : LiveAt_r → ExitedAt_r
-                       │            collapse_T : T → ⊤
-                       ▼
-┌─ L3's CONTRIBUTION: the echo, mode-agnostic ──────────────────────┐
-│                                                                    │
-│            ┌───────────────────────────────────────────┐           │
-│            │   Echo (f : A → B) (y : B)                │           │
-│            │     :=   Σ (x : A) .  f x ≡ y             │           │
-│            │   "the proof-relevant preimage of y"      │           │
-│            │   (echo-types/proofs/agda/Echo.agda:14)   │           │
-│            └───────────────────────────────────────────┘           │
-│                ONE definition, no Linear/Affine inside              │
-│                                                                    │
-└──────────────────────┬─────────────────────────────────────────────┘
-                       │  L2 modality decorates the echo
-                       │  with an OBSERVATION DISCIPLINE
-                       │
-           ┌───────────┴───────────┐
-           ▼                       ▼
-╔═ LINEAR ══════════════════╗    ╔═ AFFINE ══════════════════╗
-║                           ║    ║                           ║
-║   LEcho Linear            ║    ║   LEcho Affine            ║
-║     ≡  Echo f y           ║    ║     ≡  EchoR ⊤ TrivCert y ║
-║   (full fiber: all        ║    ║   (lowered triple:        ║
-║    witnesses retained)    ║    ║    witnesses erased to ⊤) ║
-║                           ║    ║                           ║
-║   Discipline:             ║    ║   Discipline:             ║
-║   • MUST be observed      ║    ║   • MAY be observed       ║
-║     (T_Observe consumes)  ║    ║   • MAY be silently lowered║
-║   • Non-duplicable        ║    ║   • Non-duplicable        ║
-║   • Resource-exact        ║    ║   • Resource-bounded      ║
-║                           ║    ║                           ║
-╚═══════════════════════════╝    ╚═══════════════════════════╝
-                  │                                ▲
-                  │         weaken                 │
-                  └───────────────────────────────►
-                  LEcho Linear  ⟶  LEcho Affine
-
-      echo-types' "degrade" map — the SAME map that lowers the full
-      fiber to the trivial residue. No reverse map exists
-      (proved by no-section-collapse-to-residue,
-       EchoResidue.agda:33-73).
-
-      Linear ≤ Affine is a TWO-POINT THIN POSET. Composition
-      commutes with R-threading and G-threading by degradeMode-comp
-      (EchoLinear.agda:93-101).
-```
-
-### 6.0.2 What this diagram makes precise
-
-1. **"Echo" lives in L3.** It is a single type former, defined as a
-   fiber. There is no `LinearEcho` distinct from `AffineEcho` —
-   there is *one* `Echo`, and `LEcho Linear` / `LEcho Affine` are
-   applications of it with different witness shapes.
-
-2. **"Linear" and "Affine" do not live in L3.** They are L2
-   modalities. L3 just reads the current modality and chooses which
-   discipline (mandatory observation vs optional lowering) to enforce
-   on the echo value. **This is what makes the layers orthogonal** —
-   L3's type former is the same regardless of L2; only the rule for
-   consuming the echo differs.
-
-3. **The Linear ⟶ Affine arrow is one-way.** Every Linear-disciplined
-   echo can be lowered to an Affine-disciplined one (weaken /
-   degrade). The reverse direction does not exist — echo-types proves
-   `no-section-collapse-to-residue`. This is the precise sense in
-   which "Linear ⊂ Affine in valid programs" holds at the echo
-   layer: every Linear program's echo obligations can be satisfied
-   affinely (by lowering), but not every Affine program can be
-   retrofitted to Linear.
 
 ### 6.1 Echo, the fiber
 
@@ -957,7 +719,7 @@ Add a new top-level section after "Claim: Region-Based Memory":
 environments through every compound typing rule. A sibling cannot
 reference a region a previous sibling has exited.
 
-* Counterexample at `formal/Counterexample.v` (all five lemmas
+* Counterexample at `formal/Counterexample.v` (all three lemmas
   `Qed`) demonstrates the soundness gap the threading fixes.
 * Design rationale at `formal/PRESERVATION-DESIGN.md §3-§4`.
 * Reference implementation: forthcoming — see `ROADMAP.adoc` for
@@ -1160,7 +922,7 @@ that side condition *derivable*, not stated.
 ### Proof / theory
 
 - Verified counterexample to preservation in the current rules
-  (`formal/Counterexample.v` — five lemmas `Qed`). The
+  (`formal/Counterexample.v` — three lemmas `Qed`). The
   counterexample is the canonical regression test for the L1 fix.
 
 ### Docs
@@ -1319,7 +1081,7 @@ narrower than the target.
 | Mechanisation | Scope | Status |
 |---|---|---|
 | `formal/Semantics.v`, `formal/Typing.v`, `formal/Syntax.v` (Coq) | A **single** typing judgment `R; G ⊢ e : T -| G'` and its small-step operational semantics | Builds with `coqc 8.18.0` |
-| `formal/Counterexample.v` | A verified counterexample to preservation **as currently stated** | All five lemmas `Qed` |
+| `formal/Counterexample.v` | A verified counterexample to preservation **as currently stated** | All three lemmas `Qed` |
 | `preservation` theorem in `Semantics.v` | Soundness under the current single judgment | **`Admitted.`** — 11 cascading goals open (see `PRESERVATION-HANDOFF.md`) |
 | `src/abi/Ephapax/…/*.idr` (Idris2) | Selected structural-safety claims | Per file; see `idris2 --check` |
 

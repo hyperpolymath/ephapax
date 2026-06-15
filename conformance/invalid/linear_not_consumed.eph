@@ -1,4 +1,6 @@
 // SPDX-License-Identifier: MPL-2.0
+# Owner: Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk>
+// Owner: Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk>
 // Conformance test: linear binding NOT consumed — must be rejected.
 // Expected: compile error E001 "linear variable 'x' not consumed"
 

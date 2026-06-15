@@ -1,6 +1,7 @@
 # ephapax-doc
 
 <!-- SPDX-License-Identifier: MPL-2.0 -->
+<!-- Owner: Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk> -->
 
 Documentation generator for Ephapax.
 

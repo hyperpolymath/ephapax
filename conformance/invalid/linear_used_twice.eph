@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: MPL-2.0
+// Owner: Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk>
 // Conformance test: linear binding used twice — must be rejected.
 // Expected: compile error E002 "linear variable 'x' already consumed"
 

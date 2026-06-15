@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: MPL-2.0
+// Owner: Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk>
 // SPDX-FileCopyrightText: 2026 Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk>
 // Conformance test: branches consume different linear bindings — must be rejected.
 // Expected: compile error E005 "branches consume different linear resources"

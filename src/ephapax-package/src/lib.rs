@@ -1,5 +1,6 @@
 #![forbid(unsafe_code)]
 // SPDX-License-Identifier: MPL-2.0
+// Owner: Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk>
 // SPDX-FileCopyrightText: 2025 Jonathan D.A. Jewell
 
 //! Ephapax Package Manager
@@ -82,6 +83,7 @@ pub fn init_project(path: &Path, name: &str) -> Result<(), PackageError> {
     std::fs::write(
         main_eph,
         r#"// SPDX-License-Identifier: MPL-2.0
+// Owner: Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk>
 
 fn main(): I32 =
     42

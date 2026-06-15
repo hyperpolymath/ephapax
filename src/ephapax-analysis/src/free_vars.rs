@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: MPL-2.0
+// Owner: Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk>
 // Free variable analysis for Ephapax expressions
 
 use ephapax_syntax::{Expr, ExprKind};

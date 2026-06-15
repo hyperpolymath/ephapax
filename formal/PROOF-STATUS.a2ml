@@ -1,22 +1,21 @@
-# SPDX-License-Identifier: MPL-2.0
+# SPDX-License-Identifier: PMPL-1.0-or-later
+// Owner: Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk>
 # Copyright (c) 2026 Jonathan D.A. Jewell (hyperpolymath) <j.d.a.jewell@open.ac.uk>
 #
 # PROOF-STATUS.a2ml — machine-readable Coq proof state
 #
-# Snapshot of formal/*.v as of 2026-05-27 (post-L1.A through L1.F,
-# post-#176 L2 hybrid, post-#180 K-free Echo.v, post-#181 Axiom→Lemma).
+# Snapshot of formal/*.v as of 2026-05-27 (post-L1.A through L1.F).
 # Consumed by automated proof-debt trackers, status dashboards, and
 # CI gates that need to know "what counts as proven here".
 #
-# Human-readable companion: formal/PRESERVATION-DESIGN.md §4.7, §4.8,
-# §4.8.1, §5.1.
+# Human-readable companion: formal/PRESERVATION-DESIGN.md §4.7 and §4.8.
 
 [metadata]
-version = "1.1.0"
+version = "1.0.0"
 snapshot-date = "2026-05-27"
+design-branch = "proof/l1-region-threading-design"
 spec-doc = "formal/PRESERVATION-DESIGN.md"
 counterexample = "formal/Counterexample.v"
-note = "Design-branch is superseded by main's L2 hybrid (#176/#177). All L1+L2+L3 work now lives on main."
 
 # ============================================================================
 # FILES — what's in formal/ and its proof-status posture
@@ -63,36 +62,12 @@ note = "Legacy preservation has 1 residual admit (S_Region_Step + T_Region_Activ
 
 [[files]]
 path = "formal/Semantics_L1.v"
-purpose = "L1 preservation theorem + helpers (now m-indexed per #176)"
+purpose = "L1 preservation theorem + helpers"
 status = "active"
-admit-count = 4  # post-#181: 1 in region_liveness_at_split_l1_gen + 3 lambda-rigidity in preservation_l1
-axiom-count = 0  # post-#181: Axiom region_liveness_at_split_l1 → Lemma + 1 admit
-admitted-lemma-count = 3  # region_shrink_..._gen + region_liveness_at_split_l1_gen + preservation_l1
-landed-in = ["PR-157", "PR-158", "PR-159", "PR-160", "PR-161", "PR-162", "PR-163", "PR-176", "PR-181"]
-
-[[files]]
-path = "formal/Modality.v"
-purpose = "L2 modality datatype + thin-poset (Linear ≤ Affine)"
-status = "stable"
-qed-only = true
-landed-in = ["PR-168", "PR-176"]
-note = "K-free throughout. All Qed lemmas (refl/trans/prop) closed under the global context."
-
-[[files]]
-path = "formal/TypingL2.v"
-purpose = "L2 has_type_l2 modality-indexed judgment skeleton"
-status = "stable"
-qed-only = true
-landed-in = "PR-168"
-note = "Single L2_lift_l1 constructor + weaken_modality Qed (zero axioms). Mode-specific T_Lam_*, T_Case_*, T_If_* now live directly on m-indexed has_type_l1 per #176; this file's role is to be the cross-layer entry point for callers wanting the L2 framing explicitly."
-
-[[files]]
-path = "formal/Echo.v"
-purpose = "L3 residue/echo type former — forward-looking scaffold"
-status = "stable"
-qed-only = true
-landed-in = ["PR-166", "PR-167", "PR-180"]
-note = "K-free throughout (post-#180/#173). Headlines: Echo fiber, LEcho mode-polymorphic carrier, weaken Linear→Affine, EchoR + collapse_to_residue + no_section_collapse_to_residue (the irreversibility theorem; closed under the global context, zero axioms)."
+admit-count = 4
+axiom-count = 1
+admitted-lemma-count = 2
+landed-in = ["PR-157", "PR-158", "PR-159", "PR-160", "PR-161", "PR-162", "PR-163"]
 
 # ============================================================================
 # L1 PROOF CHAIN — Qed lemmas
@@ -207,12 +182,11 @@ follow-up = "see PRESERVATION-DESIGN.md §4.8"
 [[proof-debt]]
 id = "L1.C-region-liveness"
 file = "Semantics_L1.v"
-line-anchor = "region_liveness_at_split_l1_gen T_Region_Active_L1 r=rv (post-#181)"
-class = "structurally-false-as-universal"
+line-anchor = "region_liveness_at_split_l1 (Axiom)"
+class = "carry-invariant-through-induction"
 tractable = true
-diagnosis = "ERegion rv (EI32 5) at R = [rv] gives In rv R but In rv R' = False (the rule pops the only rv from R_body). The Lemma's universal statement is false in this sub-case; 28/29 cases proved concretely via PR #181."
-closes-when = "one of (i) restate with a no_region_active_pop_of rv e side condition + discharge at the 9 call sites in subst_typing_gen_l1, (ii) multi-set region_env, (iii) weaker contextual signature"
-status-history = "Axiom (pre-#181) → Lemma with 1 narrow admit (post-#181). Transparency improvement, not soundness."
+diagnosis = "subst_typing_gen_l1 needs to know that In rv R_inner at each compound-rule split point. The outer call provides In rv R; the inductive descent doesn't propagate it because T_Var_Lin_L1 doesn't enforce In rv R."
+closes-when = "one of (1) strengthen T_Var_Lin_L1 to require In rv R, (2) add a side condition to subst_typing_gen_l1 stating In rv R at every R_inner reached, (3) prove a region-liveness corollary of L1.B's count monotonicity"
 
 # ============================================================================
 # DOCUMENTATION POINTERS

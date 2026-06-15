@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: MPL-2.0
+// Owner: Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk>
 // Escape analysis: determine if variables escape their scope
 
 use ephapax_syntax::{Expr, ExprKind};

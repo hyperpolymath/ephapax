@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: MPL-2.0
+// Owner: Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk>
 //
 // Phase E regressions for hyperpolymath/ephapax#43. Bridge.eph
 // integration prep — adds the two grammar pieces it depends on:

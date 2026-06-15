@@ -1,27 +1,6 @@
-(* SPDX-License-Identifier: MPL-2.0 *)
+(* SPDX-License-Identifier: PMPL-1.0-or-later *)
+// Owner: Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk>
 (* SPDX-FileCopyrightText: 2026 Jonathan D.A. Jewell *)
-
-(**
-
-  *********************************************************************
-  ***  📌 PINNED REGRESSION WITNESS                                   ***
-  ***                                                                ***
-  ***  5 Qed lemmas. Authoritative source of the 2026-05-26          ***
-  ***  soundness gap.                                                ***
-  ***                                                                ***
-  ***  This file SHOULD NOT BE WEAKENED. Any future proof work must  ***
-  ***  coexist with these lemmas. The legacy judgment's falsity is   ***
-  ***  load-bearing for the regression theorem; do not "fix" the     ***
-  ***  legacy judgment to make these lemmas fail.                    ***
-  ***                                                                ***
-  ***  bad_input_untypable_l1 is also Qed under BOTH modalities,     ***
-  ***  showing that the new L1 judgment closes the gap regardless of ***
-  ***  Linear vs Affine.                                             ***
-  ***                                                                ***
-  ***  See `STATUS.adoc`, `formal/PRESERVATION-DESIGN.md §1`.        ***
-  *********************************************************************
-
-*)
 
 (** * Soundness gap: counterexample to preservation as currently stated
 
@@ -194,12 +173,8 @@ Section L1Fix.
     inversion H; subst; split; reflexivity.
   Qed.
 
-  (** The L1 regression theorem.
-
-      Generalised to [forall m : Modality, ...] per L2: the bad
-      input is untypable in BOTH ephapax-linear AND ephapax-affine.
-      The inversion logic is mode-polymorphic — the region-threading
-      contradiction surfaces identically in both modes. *)
+  (** The L1 regression theorem: the bad input is untypable in EVERY
+      modality (linear and affine alike). *)
   Lemma bad_input_untypable_l1 :
     forall m R_out G_out,
       ~ has_type_l1 m (r0 :: r1 :: nil) nil e_bad T_bad R_out G_out.

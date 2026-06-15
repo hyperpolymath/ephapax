@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: MPL-2.0
+// Owner: Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk>
 // Liveness analysis: determine which variables are live at each program point
 
 use ephapax_syntax::{Expr, ExprKind};

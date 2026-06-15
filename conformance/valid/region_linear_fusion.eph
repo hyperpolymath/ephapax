@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: MPL-2.0
+// Owner: Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk>
 // Conformance test: region-linear fusion — the core Ephapax guarantee.
 // All linear bindings in a region consumed, result doesn't escape.
 // Expected: type-checks successfully in BOTH affine and linear modes.

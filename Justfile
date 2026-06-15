@@ -1,4 +1,5 @@
 # SPDX-License-Identifier: MPL-2.0
+// Owner: Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk>
 # Ephapax build recipes
 
 # Default recipe
@@ -126,6 +127,7 @@ tour:
     echo "═══════════════════════════════════════════════════"
     echo ""
     echo '// SPDX-License-Identifier: MPL-2.0'
+// Owner: Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk>
     echo ""
     echo "Key directories:"
     echo "  src/                      Source code" 

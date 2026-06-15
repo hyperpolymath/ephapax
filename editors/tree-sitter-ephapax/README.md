@@ -1,6 +1,7 @@
 # tree-sitter-ephapax
 
 <!-- SPDX-License-Identifier: MPL-2.0 -->
+<!-- Owner: Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk> -->
 
 Tree-sitter grammar for [Ephapax](https://github.com/hyperpolymath/ephapax) — a dyadic language with affine and linear types.
 

@@ -1,5 +1,6 @@
 #![forbid(unsafe_code)]
 // SPDX-License-Identifier: MPL-2.0
+// Owner: Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk>
 // SPDX-FileCopyrightText: 2025-2026 Jonathan D.A. Jewell
 
 //! Ephapax Type Checker (Dyadic Design)

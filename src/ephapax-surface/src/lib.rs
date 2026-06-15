@@ -1,5 +1,6 @@
 #![forbid(unsafe_code)]
-// SPDX-License-Identifier: PMPL-1.0-or-later
+// SPDX-License-Identifier: MPL-2.0
+// Owner: Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk>
 // SPDX-FileCopyrightText: 2026 Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk>
 
 //! Surface AST for Ephapax
@@ -91,8 +92,8 @@ pub enum SurfaceTy {
         inner: Box<SurfaceTy>,
     },
 
-    /// Second-class borrow &T
-    Borrow(Box<SurfaceTy>),
+    /// Second-class borrow `&T` (shared) or `&mut T` (exclusive).
+    Borrow { inner: Box<SurfaceTy>, mutable: bool },
 
     /// Type variable (bound by data declaration)
     Var(TyVar),
@@ -324,7 +325,7 @@ pub enum SurfaceExprKind {
         name: RegionName,
         body: Box<SurfaceExpr>,
     },
-    Borrow(Box<SurfaceExpr>),
+    Borrow { inner: Box<SurfaceExpr>, mutable: bool },
     Deref(Box<SurfaceExpr>),
     Drop(Box<SurfaceExpr>),
     Copy(Box<SurfaceExpr>),

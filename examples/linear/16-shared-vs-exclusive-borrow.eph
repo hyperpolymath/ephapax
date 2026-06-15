@@ -1,0 +1,21 @@
+// SPDX-License-Identifier: MPL-2.0
+// Owner: Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk>
+// Copyright (c) 2026 Jonathan D.A. Jewell (hyperpolymath) <j.d.a.jewell@open.ac.uk>
+//
+// Example: shared (`&`) vs exclusive (`&mut`) borrow parameters.
+//
+// At codegen these surface in `typedwasm.ownership` as `SharedBorrow`
+// and `ExclBorrow` respectively. The L7 alias-exclusion verifier pass
+// in typed-wasm fires on `ExclBorrow` parameters used more than once.
+
+fn observe(buf: &String@r) -> I32 {
+    // `buf` is a shared borrow — multiple shared borrows of the same
+    // backing object may coexist. Emitted as SharedBorrow.
+    0
+}
+
+fn mutate(buf: &mut String@r) -> I32 {
+    // `buf` is an exclusive borrow — no other live borrow of the same
+    // backing object is permitted. Emitted as ExclBorrow.
+    0
+}

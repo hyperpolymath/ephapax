@@ -1,4 +1,5 @@
-||| SPDX-License-Identifier: PMPL-1.0-or-later
+||| SPDX-License-Identifier: MPL-2.0
+// Owner: Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk>
 ||| Ephapax ABI: Boundary Types
 |||
 ||| Idris2 statements of the data types that the Ephapax Rust pipeline

@@ -1,5 +1,5 @@
-# SPDX-License-Identifier: PMPL-1.0-or-later
-# Dustfile — Cleanup and hygiene contract for Burble
+# SPDX-License-Identifier: MPL-2.0
+# Dustfile — Cleanup and hygiene contract for Ephapax
 # Author: Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk>
 #
 # What should be cleaned up. Housekeeping, not blockers.
@@ -7,8 +7,9 @@
 # Roll back with: dust rollback <name>
 
 @abstract:
-Cleanup and hygiene items for the Burble voice platform.
-These are maintenance tasks — not blocking, but should be addressed.
+Cleanup and hygiene items for Ephapax. Maintenance tasks — not blocking, but
+should be addressed. Destructive actions are dry-run by default and gated
+behind --apply with per-item approval.
 @end
 
 ## Stale Files
@@ -19,60 +20,40 @@ These are maintenance tasks — not blocking, but should be addressed.
 - severity: info
 
 ### no-ai-djot
-- description: AI.djot is superseded by 0-AI-MANIFEST.a2ml
+- description: AI.djot superseded by 0-AI-MANIFEST.a2ml
 - run: test ! -f AI.djot
 - severity: warning
 
-### no-next-steps
-- description: NEXT_STEPS.md superseded by ROADMAP
-- run: test ! -f NEXT_STEPS.md
-- severity: info
+### no-lust-dir
+- description: The lust/ contractile verb was removed estate-wide 2026-04-18 (semantics absorbed into intend)
+- run: test ! -d .machine_readable/contractiles/lust
+- severity: warning
+- notes: Any lust/ dir is drift; horizon/aspiration semantics live in intend now.
 
 ## Build Artifacts
 
-### no-tracked-elixir-build
-- description: No Elixir build artifacts tracked in git
-- run: test -z "$(git ls-files server/_build/ server/deps/ 2>/dev/null)"
+### no-tracked-rust-build
+- description: No Rust build artifacts tracked in git
+- run: test -z "$(git ls-files 'target/' '**/target/' 2>/dev/null)"
 - severity: warning
 
-### no-tracked-rescript-build
-- description: No ReScript build artifacts tracked in git
-- run: test -z "$(git ls-files 'client/web/src/**/*.res.mjs' client/web/lib/ 2>/dev/null)"
-- severity: warning
+## Duplicates
 
-## Burble-Specific Cleanup
-
-### stale-room-processes
-- description: Room processes should auto-terminate after idle timeout
-- verification: Burble.Rooms.Room uses @idle_timeout_ms (5 minutes)
+### single-contributing-format
+- description: Prefer a single CONTRIBUTING (DOC-FORMAT prefers .adoc; .md is the GitHub community-health exception)
+- run: test -z "$(test -f CONTRIBUTING.adoc && test -f CONTRIBUTING.md && echo dup)"
 - severity: info
-- notes: Not a file check — design verification that idle rooms are cleaned up
-
-### expired-invite-tokens
-- description: Expired invite tokens should be purged periodically
-- verification: Scheduled task purges tokens past expires_at
-- severity: info
-- notes: Planned — not yet implemented
-
-### orphaned-turn-credentials
-- description: TURN credentials expire after 1 hour
-- verification: Burble.Media.Privacy.generate_turn_credential sets TTL
-- severity: info
-
-### template-example-trustfile
-- description: Remove the example Trustfile (keep only the real one)
-- run: test ! -f .machine_readable/contractiles/trust/Trustfile_just_an_example.a2ml
-- severity: info
-- rollback: git checkout HEAD -- .machine_readable/contractiles/trust/Trustfile_just_an_example.a2ml
-
-## Format Duplicates
-
-### no-duplicate-contributing
-- description: Only one CONTRIBUTING format
-- run: test -z "$(test -f CONTRIBUTING.md && test -f CONTRIBUTING.adoc && echo dup)"
-- severity: warning
+- notes: Both CONTRIBUTING.adoc and CONTRIBUTING.md currently exist (2026-06-05); owner decides which to retire.
 
 ### no-duplicate-readme
 - description: Only one README format
 - run: test ! -f README.md || test ! -f README.adoc
 - severity: warning
+
+## Formal Archive Hygiene
+
+### preservation-design-is-canonical
+- description: PRESERVATION-DESIGN.md is the canonical design; PRESERVATION-HANDOFF.md is historical diagnostic only
+- run: test -f formal/PRESERVATION-DESIGN.md
+- severity: info
+- notes: HANDOFF carries the pre-discovery record; do not act on it as instructions. Keep both.

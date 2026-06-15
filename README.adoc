@@ -1,11 +1,12 @@
 image:https://img.shields.io/badge/OpenSSF-Best_Practices-green?logo=opensourcesecurity[OpenSSF Best Practices,link="https://www.bestpractices.dev/en/projects/new?repo_url=https://github.com/hyperpolymath/ephapax"]
-image:https://img.shields.io/badge/License-PMPL--1.0-blue.svg[License: PMPL-1.0,link="https://github.com/hyperpolymath/palimpsest-license"]
+image:https://img.shields.io/badge/License-MPL--2.0-blue.svg[License: MPL-2.0,link="https://www.mozilla.org/MPL/2.0/"]
 image:https://img.shields.io/badge/Philosophy-Palimpsest-indigo.svg[Palimpsest,link="https://github.com/hyperpolymath/palimpsest-license"]
 image:https://github.com/hyperpolymath/ephapax/actions/workflows/codeql.yml/badge.svg?branch=main[CodeQL,link="https://github.com/hyperpolymath/ephapax/actions/workflows/codeql.yml"]
 image:https://api.thegreenwebfoundation.org/greencheckimage/ephapax.org[Green Hosting,link="https://www.thegreenwebfoundation.org/green-web-check/?url=ephapax.org"]
 
-// SPDX-License-Identifier: PMPL-1.0-or-later
-// SPDX-FileCopyrightText: 2025-2026 Jonathan D.A. Jewell
+// SPDX-License-Identifier: MPL-2.0
+// Owner: Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk>
+// SPDX-FileCopyrightText: 2025-2026 Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk>
 :toc: macro
 :toclevels: 3
 :icons: font
@@ -16,11 +17,90 @@ image:https://api.thegreenwebfoundation.org/greencheckimage/ephapax.org[Green Ho
 
 _ἐφάπαξ — once for all._
 
-A dyadic linear+affine type system for compile-time WebAssembly
-memory safety. Resources are tracked through the type system so the
-compiler can guarantee — without a garbage collector — that no value
-is used after being freed, no resource is leaked, and region-scoped
-allocations are deallocated in bulk at scope exit.
+[IMPORTANT]
+.Not to be confused with AffineScript
+====
+This is **Ephapax**, a research language for WebAssembly memory safety.
+It is *not* https://github.com/hyperpolymath/affinescript[AffineScript], a
+separate language at `hyperpolymath/affinescript` that succeeds JS / TS /
+ReScript.
+
+The two share **exactly one thing**: both target
+https://github.com/hyperpolymath/typed-wasm[typed-wasm]. They have separate
+ASTs, separate type checkers, separate compilers, separate proof stories.
+The word `affine` overlaps in both names because it names a substructural-
+logic property — that's a logic-family fact, not a project relationship.
+
+Internal note: Ephapax is itself dyadic — `ephapax-linear` (strict core)
+and `ephapax-affine` (versatile prototyping companion) are *both inside this
+repo*, one Rust crate, one AST, two structural disciplines. **`ephapax-affine`
+is not AffineScript.** When ambiguous, write "ephapax-affine sublanguage"
+vs "AffineScript language".
+
+Canonical disambiguation (read this before applying any cross-repo
+lesson):
+link:https://github.com/hyperpolymath/nextgen-languages/blob/main/docs/disambiguation/ephapax-vs-affinescript.md[nextgen-languages/docs/disambiguation/ephapax-vs-affinescript.md].
+====
+
+[NOTE]
+.🌱 Ephapax is gestating — second-draft in progress, and going well (start with `V1-TO-V2.adoc`)
+====
+This language is **not dead, abandoned, or frozen** — it is mid-way
+through a deliberate *second draft*, on two independent tracks, and both
+are landing. The full story (and why the older "provably false /
+archaeology" wording misled readers into writing the project off) is in
+link:V1-TO-V2.adoc[`V1-TO-V2.adoc`]. Read that first; this box is the
+short version.
+
+**The grammar (v1 → v2).** The flat v1 surface worked for the core but
+could not grow into modules / generics / effects / comptime. v2 adds the
+missing layer — *surface → desugar → core* — and is **landing in phases,
+tests green** (`spec/ephapax-v2-grammar.ebnf` + the `v2_grammar_phase_*`
+suite).
+
+**The soundness proof (v1 → v2).** On 2026-05-26 a machine-checked Coq
+counterexample (link:formal/Counterexample.v[`formal/Counterexample.v`],
+5 Qed lemmas) *proved* that preservation as stated in the legacy
+single-judgment design is unsound — a region exit could invalidate a
+sibling's assumptions untracked. Discovering that **with a proof, before
+anyone depended on it**, is the rare correct thing, not a failure. The
+redesign re-derives preservation across *four orthogonal layers* (regions
+/ modality / echo / dyadic mode), each from its own explicit invariants.
+The legacy theorem stays `Admitted` on purpose — it is proven unclosable,
+so it is fenced off, not abandoned.
+
+Quick proof-status read: **L1** (region capabilities) substantially
+complete; **L2** (Linear/Affine modality) core landed with zero axioms;
+**L3** (echo / residue) wiring landed (slice 4, 2026-05-27) —
+`preservation_l3` + `preservation_l3_region_active_echo` +
+`preservation_l3_drop_echo` all Qed (conditional on L1 structural admits,
+see PROOF-NEEDS.md §4); **L4** (dyadic mode) Phase A scaffold landed
+2026-05-28 (`formal/L4.v`, definitions by design).
+
+**For anyone (human or bot) doing the work:** the only fenced-off
+artefacts are the *one* falsified legacy theorem and the *one* superseded
+flat grammar. Everything in the v2 columns — the grammar phases and the
+per-layer proofs — is open and tractable. Authoritative maps:
+link:V1-TO-V2.adoc[`V1-TO-V2.adoc`] (the frame),
+link:STATUS.adoc[`STATUS.adoc`] (operational past/present/future),
+link:formal/PRESERVATION-DESIGN.md[`formal/PRESERVATION-DESIGN.md`]
+(four-layer architecture), link:PROOF-NEEDS.md[`PROOF-NEEDS.md`] (proof
+debt + do-not-do list). Anything dated before 2026-05-26 describing a
+"preservation closure plan" or "910 → 12 goals" is the record of how the
+first draft hit its wall — read it as history, not instructions.
+====
+
+Ephapax is a research language for **principled handling of
+irreversible boundaries** (region exits, drops, key erasure, audit
+trails) in compile-time-memory-safe WebAssembly. Real systems are
+irreversible — operating systems deallocate, databases drop tables,
+security systems erase keys, compilers collapse high-level
+distinctions. Ephapax gives a disciplined, machine-checkable
+framework to handle those boundaries responsibly: the type system
+tracks not just *what is owned* but *what was lost when it was given
+up*, so reclamation can carry mandatory evidence where it matters
+(audit, compliance, cryptographic erasure) and degrade to free where
+it doesn't (inference loops, hot paths).
 
 The core calculus is mechanically formalised. Soundness theorems on
 the dynamic side (Coq) and structural-safety theorems on the type
@@ -44,15 +124,19 @@ Ephapax is a programming language with:
 |===
 | Property | What this means
 
-| **Dyadic discipline**
+| **Dyadic discipline (L2)**
 | Each binding is *either* affine (`let` — used at most once,
   weakening allowed) *or* linear (`let!` — used exactly once,
-  weakening forbidden). Type checker enforces.
+  weakening forbidden). Type checker enforces. See "The four layers"
+  below for how this composes with L1/L3/L4.
 
-| **Region-based memory**
-| Allocations live in named regions (`region r: ...`); when the
-  region's scope ends, the runtime bulk-frees every resource in it.
-  No allocator overhead per object; no per-object frees.
+| **Region-based memory (L1)**
+| Allocations live in named regions (`region r: ...`). The type
+  system threads a region-capability environment through every
+  expression so a sibling cannot read from a region another sibling
+  has just exited. When a region's scope ends, the runtime bulk-frees
+  every resource in it. No allocator overhead per object; no
+  per-object frees.
 
 | **Second-class borrows**
 | `&x` gives temporary access without consuming `x`. Borrows cannot
@@ -71,13 +155,152 @@ Ephapax is a programming language with:
   reference counting, no allocator-per-object metadata.
 |===
 
+== The four layers
+
+Ephapax composes four orthogonal disciplines. Each is a thin-poset
+refinement, so they compose without coherence obligations
+(https://github.com/hyperpolymath/echo-types[echo-types] supplies the
+recipe).
+
+[cols="1,3"]
+|===
+| Layer | What it enforces
+
+| **L1 — Region capabilities**
+| Every live region is tracked in an input/output environment threaded
+  through every expression. A region cannot be referenced after a
+  sibling has exited it. Soundness proof in `formal/TypingL1.v` +
+  `formal/Semantics_L1.v`.
+
+| **L2 — Structural discipline (linear ↔ affine)**
+| The *modality* of the surrounding program decides whether linear
+  bindings must be consumed (Linear: ephapax-linear) or may be dropped
+  (Affine: ephapax-affine). Same syntax, same semantics — different
+  admissible derivations. Linear ⊆ Affine, proved by `linear_to_affine`
+  Qed in `formal/Modality.v`.
+
+| **L3 — Irreversibility residue (Echo)**
+| Operations that erase information (region exit, drop) produce
+  proof-relevant residue — `Echo f y := Σ A (λ x → f x ≡ y)`. In
+  Linear mode the residue must be observed; in Affine mode it may be
+  silently lowered. Calculus mechanised in `formal/Echo.v`;
+  integration into the typing judgment is the next-block work.
+
+| **L4 — Dyadic interaction mode**
+| A project-level declaration of which side of the dyad the program
+  speaks from (`ephapax_linear` / `ephapax_affine` /
+  `module_boundary_mix`). Selects the L2 modality and the L3
+  observation discipline. No proof obligations of its own — mechanical
+  scaffold in `formal/L4.v` carries definitions only by design.
+|===
+
+.Soundness story
+****
+The four-layer separation is *not* decorative — it exists because the
+original "linear+affine + regions" framing admitted a verified
+counterexample to preservation (see `formal/Counterexample.v` and
+`formal/PRESERVATION-DESIGN.md`). The four-layer redesign restores
+soundness by making each discipline's invariants explicit and
+orthogonal: preservation is *re-derived per layer* from explicit
+invariants rather than forced through a single judgment that hides
+them.
+****
+
+== Three superpowers
+
+The L3 echo / residue layer (Ephapax's contribution to the four-layer
+design) opens three things proper reversible programming struggles
+with:
+
+[cols="1,3"]
+|===
+| Superpower | What it gives you
+
+| **A. Accountability of irreversible reclamation**
+| You can free memory (`S_Region_Exit`, `S_Drop`) and the type system
+  *knows* you lost the data — and tracks what depended on it. Under
+  the Linear modality the reclamation event carries a mandatory
+  evidence-bearing `Echo` value; under Affine you opt out for
+  performance. Pairs cleanly with region-based memory management
+  (deterministic bulk free) to deliver high-assurance reclamation
+  that tracing GC cannot — by design, tracing GC *hides* the
+  reclamation evidence.
+
+| **B. Selective reversibility (thin-poset)**
+| Linear ≤ Affine is a two-point thin poset at the L2 modality. You
+  pick per-region (or per-project) which discipline applies. Same
+  code shape, different evidence obligations. Concrete examples:
+  *Linear* during backpropagation (must keep the gradient residue);
+  *Affine* during inference (drop the residue, save memory). You get
+  the safety of reversibility where you need it, and the performance
+  of irreversibility where you don't.
+
+| **C. Debugging + provenance**
+| Attach Linear Echoes to critical state changes. The type system
+  guarantees the receipt (preimage) of that state change was retained
+  — so when a bug fires, the inputs that produced the error are
+  recoverable by construction. In Affine mode you opt out of this
+  debugging info, with the same code shape. The evidence is a
+  *theorem-level guarantee*, not a runtime convention.
+|===
+
+[CAUTION]
+.Echo Types are NOT a tracing-GC replacement
+====
+Echo Types do **not** solve reachability or cycles. They are not a
+"fire-and-forget" automatic memory manager. Their strength is
+*accountability of irreversible reclamation* in systems that already
+know when and how to deallocate (regions, explicit drop, deterministic
+ownership). Treating them as competition for mark-and-sweep or
+generational GC is a category error.
+
+The committed v1 direction is *Linear Echo + Region-Based Memory
+Management* (deterministic bulk free with mandatory certified
+evidence). A speculative future direction is an optional Linear
+discipline on deterministic Rust-style drop for critical resources
+(keys, sensitive buffers requiring provable erasure) — flagged but
+not committed.
+====
+
+== What this enables
+
+The three superpowers translate to concrete use cases the type
+system can *prove* properties about:
+
+* **Mandatory evidence for critical actions.** By making certain
+  echoes Linear (mandatory observation), the type system guarantees
+  that a region exit *always* emits an audit trail, or that a drop
+  *always* triggers a required cleanup.
+
+* **GDPR "right to be forgotten" with certified evidence of
+  erasure.** Linear-echo discipline on the `S_Drop` of a personal-data
+  resource is a type-level proof that erasure happened *and* that the
+  required notification / log was produced. Auditors get a
+  machine-checkable artefact instead of a process attestation.
+
+* **Verified resource management for keys, secrets, and sensitive
+  buffers.** Linear-echo on the deallocation of a key buffer
+  guarantees provable erasure; the typing rule cannot be silenced.
+
+* **Selective reversibility without redesigning your language.**
+  The thin-poset means you don't redesign the runtime to be
+  bijective. You add *one* type former (the fiber) and layer
+  existing L2 modalities over it. Orthogonal and compositional.
+
+* **Machine-checkable foundation for policy enforcement.** The
+  thin-poset Linear ≤ Affine + the proven non-invertibility
+  (`EchoResidue.no-section-collapse-to-residue`) gives sharp,
+  proof-relevant reasoning: *weakening obligations is allowed*,
+  *strengthening them back is impossible*. Clean logical foundation
+  for compliance work.
+
 == What this isn't
 
 * **Not Rust.** Rust uses ownership + borrowing with a single discipline
   (affine-ish, with linearisation via `Drop`). Ephapax separates the
   two disciplines explicitly: `let` is affine, `let!` is linear, and
   the user chooses per-binding.
-* **Not a research vapourware.** ~19 Rust crates exist; the lexer,
+* **Not a research vapourware.** 17 active Rust workspace crates + `tests/fuzz` (with `src/ephapax-tools/` outside the workspace and `src/ephapax-vram-cache/` explicitly disabled — needs `hyperpolymath/ephapax-proven`); the lexer,
   parser, interpreter, REPL, CLI, S-expression IR, two-phase pipeline,
   Zig FFI, and conformance test suite are complete. Type checker and
   WASM codegen are in progress. See `ROADMAP.adoc`.
@@ -124,7 +347,7 @@ fn process(input: i32) -> i32 {
 }
 ----
 
-More examples in `examples/` and `conformance/pass/`.
+More examples in `examples/` and `conformance/valid/`.
 
 == Quickstart
 
@@ -202,25 +425,52 @@ Two complementary formalisations, both run on every push:
 === Coq (`formal/`)
 
 Operational semantics with small-step reduction over a substitution-
-based calculus. Proves dynamic properties (no stuck states, region
-exits free everything, substitution preserves typing).
+based calculus. Post-2026-05-26 the formalisation is layered:
 
-Currently `Qed`-closed: `no_leaks`, `subst_preserves_typing`,
-`typing_ctx_transfer`, `region_env_perm_typing`, `region_add_typing`,
-`region_shrink_preserves_typing`, plus 70+ supporting lemmas.
+* **Legacy** (`formal/Semantics.v`, `formal/Typing.v`) — the original
+  pre-discovery judgment. `Theorem preservation` here is **provably
+  false** (the counterexample at `formal/Counterexample.v` is 5 Qed
+  lemmas proving it). The `Admitted.` is correct. **Do not extend.**
+  Treat as archaeology — see link:STATUS.adoc[`STATUS.adoc`] for the
+  pre-discovery PR list and the explicit do-not-do reasoning.
 
-Currently `Admitted`: `preservation`. **12 open goals remain** after
-the reduction chain — down from **910** at the start of the campaign
-(98.7% reduction across PRs #92 / #102 / #104 / #106 / #114 / #116 /
-#117 / #121, 2026-05-20 → 2026-05-21). Phase 1 scaffold of the
-closure plan (Lemma B `step_output_context_eq`) landed; per-case
-discharges next. The remaining 12 are 11 congruence cases (blocked
-on Lemma B's per-case proofs — linearity-context drift between IH
-and sibling) + 1 `S_Region_Step + T_Region_Active` case (blocked on
-region-env weakening for non-values). Canonical closure path:
-**`ROADMAP.adoc` §"Preservation closure plan"** (5 phases, ~3
-sessions of focused work). See also `formal/PRESERVATION-HANDOFF.md`
-for the per-case diagnostic record.
+* **Layer 1 — region capabilities** (`formal/TypingL1.v`,
+  `formal/Semantics_L1.v`). The new judgment is modality-indexed
+  (`has_type_l1 m : ...`) and threads a capability environment `R`
+  through compound rules. Judgment 100% (0 admits, 2 Qed); semantics
+  carries 3 outer `Admitted.` markers covering 5 internal `admit.`
+  cases — pre-existing L1 structural debt (multiset / list-perm bridge
+  + L2 effect-typed `TFun` per PRESERVATION-DESIGN.md §5.1) and two
+  parallel mirrors, not legacy patching. See PROOF-NEEDS.md §4 for the
+  file:line classification.
+
+* **Layer 2 — structural modality** (`formal/Modality.v`). Linear
+  vs Affine as a K-free thin-poset decoration. `linear_to_affine`
+  is **Qed with zero axioms**. Landed via PRs #176 + #177.
+
+* **Layer 3 — echo / residue** (`formal/Echo.v`). 12 Qed lemmas
+  covering the fiber calculus, degrade map, and the
+  `no-section-collapse-to-residue` irreversibility theorem (mirrors
+  the upstream Agda development at
+  https://github.com/hyperpolymath/echo-types[`hyperpolymath/echo-types`]).
+  Wiring into the L1 typing rules landed via slice 4 (2026-05-27):
+  `preservation_l3_region_active_echo`, `preservation_l3_drop_echo`,
+  and the `preservation_l3` umbrella are all Qed (conditional on the
+  `region_shrink_preserves_typing_l1_gen_m` L1 structural admit).
+
+* **Layer 4 — dyadic interaction**. Phase A scaffold landed
+  2026-05-28: `formal/L4.v` defines `ProgramMode`
+  (`PModeLinear` / `PModeAffine` / `PModeBoundaryMix`) and the
+  `program_mode_to_modality` round-trip. No theorems by design
+  (definitions only — labelling discipline, not a proof layer). Design
+  in link:formal/PRESERVATION-DESIGN.md[`formal/PRESERVATION-DESIGN.md §7`].
+
+Per-sublanguage proof debt with explicit do-not-do list lives in
+link:PROOF-NEEDS.md[`PROOF-NEEDS.md`]. The four-layer architecture
+rationale is in
+link:formal/PRESERVATION-DESIGN.md[`formal/PRESERVATION-DESIGN.md`].
+The counterexample itself is
+link:formal/Counterexample.v[`formal/Counterexample.v`] (5 Qed).
 
 [source,bash]
 ----
@@ -355,9 +605,25 @@ generics, effects, traits, comptime, contracts) lives on
 | ✅ Qed
 |
 
-| Coq `preservation`
-| 🟡 Admitted (22 open / 910 closed)
-| Multi-day proof-engineering campaign in flight
+| Coq legacy `preservation`
+| 🛑 Admitted — provably false
+| Counterexample at `formal/Counterexample.v` (5 Qed). Not closable. Archaeology.
+
+| Coq L1 (region capabilities)
+| ✅ Judgment 100%; 🟡 semantics 3 Admitted (5 inner admits)
+| 3 outer `Admitted.` markers cover 5 internal `admit.` cases — pre-existing L1 structural debt + parallel mirrors. Refresh PROOF-NEEDS.md §4 for the file:line breakdown.
+
+| Coq L2 (modality)
+| ✅ Core landed (PRs #176 + #177); 0 axioms
+| `linear_to_affine` Qed. Integration debt absorbed by L1 admits above.
+
+| Coq L3 (echo / residue calculus)
+| ✅ Wiring landed (slice 4, 2026-05-27); 0 admits in `Echo.v`
+| `preservation_l3` (umbrella) + `preservation_l3_region_active_echo` + `preservation_l3_drop_echo` all Qed (conditional on `region_shrink_preserves_typing_l1_gen_m` L1 structural admit). 12 Qed in `Echo.v` for the underlying calculus.
+
+| Coq L4 (dyadic interaction)
+| ✅ Phase A scaffold landed (`formal/L4.v`, 2026-05-28); definitions only
+| `PModeLinear` / `PModeAffine` / `PModeBoundaryMix` + `program_mode_to_modality` round-trip. No theorems by design; design in `formal/PRESERVATION-DESIGN.md §7`.
 
 | Idris2 region-linearity theorems
 | ✅ Complete (zero unsafe)
@@ -381,21 +647,41 @@ generics, effects, traits, comptime, contracts) lives on
 | link:README.adoc[README]
 | You are here. Overview + quickstart.
 
+| link:STATUS.adoc[STATUS.adoc]
+| **Past / present / future map.** Single page that answers "where
+  are we?" Read this before any `.v` file or any PR comment dated
+  before 2026-05-26.
+
+| link:PROOF-NEEDS.md[PROOF-NEEDS.md]
+| Per-sublanguage proof debt audit. What's done (Qed), what's todo,
+  what's banned (anti-pattern detector). Separated for ephapax-linear
+  and ephapax-affine sublanguages.
+
+| link:formal/PRESERVATION-DESIGN.md[formal/PRESERVATION-DESIGN.md]
+| **Canonical four-layer design doctrine.** Why the counterexample
+  forced the redesign, the four orthogonal concerns, per-layer plans.
+
+| link:formal/Counterexample.v[formal/Counterexample.v]
+| The 5 Qed lemmas that pin the soundness gap of the legacy judgment.
+  Authoritative source of the gap; future proofs must coexist with it.
+
+| link:CLAUDE.md[CLAUDE.md]
+| Agent guidance. Carries the 2026-05-27 owner directive,
+  anti-pattern detector, escalation rule.
+
 | link:EXPLAINME.adoc[EXPLAINME.adoc]
 | "Show me the receipts" — every claim in this README backed by a
   specific file, test, or proof.
 
 | link:ROADMAP.adoc[ROADMAP.adoc]
-| Quantitative milestones (v0.1.0 → v1.0.0), per-version checklists,
-  current open work.
-
-| link:PROOF-NEEDS.md[PROOF-NEEDS.md]
-| Outstanding proof obligations: what's `Admitted` / `covering` /
-  `partial` and why.
+| Milestones (v0.1.0 → v1.0.0), per-version checklists, current open
+  work. Note: any pre-2026-05-26 closure-plan content is superseded
+  by STATUS.adoc + PRESERVATION-DESIGN.md.
 
 | link:formal/PRESERVATION-HANDOFF.md[formal/PRESERVATION-HANDOFF.md]
-| Per-case checklist for the 22 remaining preservation goals. Read
-  this if you're picking up the Coq proof work.
+| **Archaeology only** — historical diagnostic record of the
+  pre-counterexample closure attempts. Reads as a closure plan; isn't
+  one. Useful only for understanding *why* the redesign happened.
 
 | link:RUST-SPARK-STANCE.adoc[RUST-SPARK-STANCE.adoc]
 | Stance on Rust + SPARK interop and where Ephapax fits.
@@ -483,14 +769,32 @@ Contributions welcome. Please see:
 
 The highest-leverage open work, in priority order:
 
-1. **Close `preservation` to Qed** (`formal/PRESERVATION-HANDOFF.md`)
-   — multi-day proof engineering, 22 goals remaining.
-2. **Fuel-refactor `Parse/Parser.idr`** from `%default covering` to
+1. **Phase 3b Stages 2 → 4** (issues #240/#241/#242) — `ELam` annotation
+   extension, CPS-form substitution, then compound non-linear values +
+   unconditional `preservation_l2`. The path forward; see
+   `formal/PRESERVATION-DESIGN.md §12.15` and `formal/PHASE-D-REDESIGN.md`.
+2. **Progress for L1** — state and prove `progress_l1` plus the L1
+   `canonical_*` lemmas (currently legacy-only at `Semantics.v:603-630`).
+   Combined with the conditional `preservation_l1`, this gives
+   conventional type-soundness in conditional form.
+3. **Fuel-refactor `Parse/Parser.idr`** from `%default covering` to
    `%default total`. Substantial — ~30 mutually-recursive combinators
    threaded through a `Stream` record.
-3. **Type-checker completion** (`ephapax-typing`) and **WASM codegen
+4. **Type-checker completion** (`ephapax-typing`) and **WASM codegen
    for lambda/app** (`ephapax-wasm`).
-4. **Native backend via Cranelift** (v0.2.0).
+5. **Native backend via Cranelift** (v0.2.0).
+
+[NOTE]
+====
+*Closing the legacy `Theorem preservation` in `formal/Semantics.v` is
+NOT a valid contribution.* That theorem is provably false (sealed by
+`formal/Counterexample.v`); its `Admitted.` is correct and durable per
+owner directive 2026-05-27. `formal/PRESERVATION-HANDOFF.md` is
+archaeology kept for context. The path forward is the per-layer
+preservation theorems (`preservation_l1`, `preservation_l2`,
+`preservation_l3`) on the redesigned judgment in `formal/Semantics_L1.v`.
+See `formal/PRESERVATION-DESIGN.md §12` and `PROOF-NEEDS.md §3`.
+====
 
 == Licence
 

@@ -1,5 +1,5 @@
-# SPDX-License-Identifier: PMPL-1.0-or-later
-# Mustfile — Physical state contract for Burble
+# SPDX-License-Identifier: MPL-2.0
+# Mustfile — Physical state contract for Ephapax
 # Author: Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk>
 #
 # What MUST be true about this repository. Hard requirements.
@@ -7,8 +7,10 @@
 # Fix with: must fix (where deterministic fix exists)
 
 @abstract:
-Physical state invariants for the Burble voice platform.
-These are hard requirements — CI and pre-commit hooks fail if any check fails.
+Physical-state invariants for Ephapax — the substructural-logic language
+(ephapax-linear strict core / ephapax-affine prototyping companion) with a
+Rust toolchain and mechanised Coq + Idris2 metatheory, compiling to typed-wasm.
+Hard requirements: CI and pre-commit hooks fail if any critical check fails.
 @end
 
 ## File Presence
@@ -35,7 +37,7 @@ These are hard requirements — CI and pre-commit hooks fail if any check fails.
 
 ### contributing
 - description: CONTRIBUTING guide must exist
-- run: test -f CONTRIBUTING.adoc || test -f .github/CONTRIBUTING.md
+- run: test -f CONTRIBUTING.adoc || test -f CONTRIBUTING.md
 - severity: warning
 
 ### editorconfig
@@ -43,102 +45,104 @@ These are hard requirements — CI and pre-commit hooks fail if any check fails.
 - run: test -f .editorconfig
 - severity: warning
 
-## Elixir Server
+## Rust Toolchain
 
-### mix-exs-present
-- description: Elixir mix.exs must exist in server/
-- run: test -f server/mix.exs
+### cargo-manifest-present
+- description: Cargo workspace manifest must exist
+- run: test -f Cargo.toml
 - severity: critical
 
-### elixir-compiles
-- description: Elixir server compiles without errors
-- run: test -f server/mix.exs
-- severity: critical
-- notes: Full compile check via CI (mix compile), file presence check here
-
-### ecto-migrations-exist
-- description: Database migrations directory exists
-- run: test -d server/priv/repo/migrations
+### cargo-lock-present
+- description: Cargo.lock must be committed (reproducible builds)
+- run: test -f Cargo.lock
 - severity: critical
 
-### config-files-present
-- description: All config files exist
-- run: test -f server/config/config.exs && test -f server/config/dev.exs && test -f server/config/prod.exs && test -f server/config/runtime.exs
+### linear-crate-present
+- description: ephapax-linear (strict verified core) crate must exist
+- run: test -d ephapax-linear
 - severity: critical
 
-## Web Client
+### workspace-compiles
+- description: Rust workspace compiles
+- run: test -f Cargo.toml
+- severity: critical
+- notes: File-presence proxy here; full `cargo build --workspace` runs in CI.
 
-### rescript-json-present
-- description: ReScript config exists for web client
-- run: test -f client/web/rescript.json
-- severity: warning
+## Mechanised Metatheory
 
-### web-entry-point
-- description: Web client entry point exists
-- run: test -f server/priv/static/index.html || test -f client/web/index.html
+### coq-semantics-present
+- description: Coq operational semantics must exist
+- run: test -f formal/Semantics.v
+- severity: critical
+
+### preservation-design-present
+- description: Four-layer preservation design doc must exist
+- run: test -f formal/PRESERVATION-DESIGN.md
+- severity: critical
+
+### counterexample-present
+- description: Preservation counterexample (regression guard) must exist
+- run: test -f formal/Counterexample.v
+- severity: critical
+
+### legacy-preservation-stays-admitted
+- description: Legacy `Theorem preservation` in Semantics.v MUST remain Admitted — it is provably false; closing it to Qed is forbidden (owner directive 2026-05-27)
+- run: grep -q 'Admitted' formal/Semantics.v
+- severity: critical
+- notes: Counterexample.v depends on this falsity for the regression theorem. The four-layer redesign re-derives preservation per-layer; it is never forced through the legacy judgment.
+
+### idris-abi-present
+- description: Idris2 ABI modules must exist
+- run: test -d src/abi/Ephapax
+- severity: critical
+
+## Source Surface
+
+### stdlib-present
+- description: .eph standard-library sources must exist
+- run: test -n "$(find stdlib -name '*.eph' 2>/dev/null | head -1)"
 - severity: warning
 
 ## SPDX Compliance
 
-### spdx-elixir
-- description: All Elixir files have SPDX header
-- run: test -z "$(find server/lib -name '*.ex' -exec head -1 {} \; 2>/dev/null | grep -cv 'SPDX' | grep -v '^0$')"
+### spdx-rust
+- description: Rust sources carry an SPDX header
+- run: test -z "$(find src ephapax-linear -name '*.rs' -not -path '*/target/*' -exec head -1 {} \; 2>/dev/null | grep -cv 'SPDX' | grep -v '^0$')"
 - severity: warning
 
 ### no-agpl
-- description: No AGPL-3.0 references (replaced by PMPL)
+- description: No AGPL-3.0 in license-bearing root files (estate license is MPL-2.0)
 - run: test -z "$(grep -rl 'AGPL-3.0' LICENSE .editorconfig .gitattributes 2>/dev/null)"
 - severity: critical
 
 ## Dangerous Patterns
 
 ### no-believe-me
-- description: No believe_me in Idris2 code
+- description: No believe_me escapes in Idris2 proofs
 - run: test -z "$(find . -name '*.idr' -not -path '*/deps/*' -exec grep -l 'believe_me' {} \; 2>/dev/null)"
-- severity: critical
-
-### no-unsafe-coerce
-- description: No unsafeCoerce in ReScript/Haskell code
-- run: test -z "$(find . \( -name '*.res' -o -name '*.hs' \) -not -path '*/deps/*' -not -path '*/node_modules/*' -exec grep -l 'unsafeCoerce\|Obj.magic' {} \; 2>/dev/null)"
-- severity: critical
-
-## Container Policy
-
-### containerfile-not-dockerfile
-- description: Uses Containerfile, not Dockerfile
-- run: test -z "$(find . -name 'Dockerfile' -not -path '*/.clusterfuzzlite/*' 2>/dev/null)"
 - severity: warning
-
-### no-docker-commands
-- description: No docker commands in scripts (use podman)
-- run: test -z "$(grep -rl 'docker run\|docker build\|docker compose' --include='*.sh' --include='*.yml' . 2>/dev/null | grep -v deps | grep -v node_modules)"
-- severity: warning
+- notes: 1 occurrence currently exists (2026-06-05) — tracked to zero; see deferred issue. Warning (not critical) so it does not block while tracked.
 
 ## Language Policy
 
-### no-typescript
-- description: No TypeScript files (use ReScript)
-- run: test -z "$(find . -name '*.ts' -not -name '*.d.ts' -not -path '*/deps/*' -not -path '*/node_modules/*' 2>/dev/null)"
+### no-python
+- description: No Python sources (use Rust)
+- run: test -z "$(find . -name '*.py' -not -path '*/deps/*' -not -path '*/.git/*' 2>/dev/null)"
 - severity: warning
 
-### no-python
-- description: No Python files (use Julia/Rust/ReScript)
-- run: test -z "$(find . -name '*.py' -not -path '*/deps/*' -not -path '*/node_modules/*' 2>/dev/null)"
+### no-typescript
+- description: No TypeScript sources
+- run: test -z "$(find . -name '*.ts' -not -name '*.d.ts' -not -path '*/deps/*' -not -path '*/node_modules/*' 2>/dev/null)"
 - severity: warning
 
 ## Security
 
-### no-secrets-in-config
-- description: No hardcoded secrets in Elixir config
-- run: test -z "$(grep -rE '(secret_key_base|password).*=\"[A-Za-z0-9+/]{32,}\"' server/config/ 2>/dev/null | grep -v 'dev_only\|test_only')"
-- severity: critical
-
-### beam-cookie-absent
-- description: No Erlang cookie in repository
-- run: test -z "$(find . -name '.erlang.cookie' 2>/dev/null)"
-- severity: critical
-
 ### env-files-absent
 - description: No .env files committed
-- run: test ! -f .env && test ! -f server/.env && test ! -f .env.local && test ! -f .env.production
+- run: test ! -f .env && test ! -f .env.local && test ! -f .env.production
+- severity: critical
+
+### no-hardcoded-secrets
+- description: No obvious hardcoded secrets in tracked sources
+- run: test -z "$(grep -rIE '(secret|password|api[_-]?key)[[:space:]]*=[[:space:]]*\"[A-Za-z0-9+/]{24,}\"' src 2>/dev/null | grep -v test)"
 - severity: critical

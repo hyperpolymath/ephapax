@@ -1,9 +1,46 @@
 // SPDX-License-Identifier: MPL-2.0
+// Owner: Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk>
 = Ephapax: Design Vision
 Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk>
 :toc:
 :toclevels: 3
 :icons: font
+
+[IMPORTANT]
+.Post-counterexample reorientation 2026-05-27
+====
+This vision document is **the design rationale**. The architecture
+described here was reframed on 2026-05-26 when a verified Coq
+counterexample showed the original single-layer typing judgment was
+*provably false*. The current architecture is a *four orthogonal
+layers* design (region capabilities / structural modality / echo
+residue / dyadic mode) where preservation is re-derived per layer
+from explicit invariants.
+
+The *intent* below — dyadic discipline, region-based memory, no
+tracing GC, WASM target — survives the redesign intact. The
+*mechanisation* is layered.
+
+For implementation status (per-layer counts, what's done, what's
+todo, what's banned), read in this order:
+
+. link:../../STATUS.adoc[`STATUS.adoc`] — past/present/future map.
+. link:../../formal/PRESERVATION-DESIGN.md[`formal/PRESERVATION-DESIGN.md`] — the four-layer architecture doctrine.
+. link:../../PROOF-NEEDS.md[`PROOF-NEEDS.md`] — per-sublanguage proof debt.
+====
+
+[NOTE]
+.Disambiguation (ephapax ≠ AffineScript)
+====
+This is **`hyperpolymath/ephapax`** — a research language with
+mechanised Coq + Idris2 proofs. It is **not**
+`hyperpolymath/affinescript`, which is a separate JS/TS/ReScript
+successor with no mechanised proofs. The lexical overlap of "affine"
+in both names is a coincidence of substructural-logic terminology.
+Internal naming trap: `ephapax-affine` (the sublanguage *inside*
+this repo) is also **not** AffineScript. Canonical disambiguation:
+https://github.com/hyperpolymath/nextgen-languages/blob/main/docs/disambiguation/ephapax-vs-affinescript.md.
+====
 
 == What Ephapax Is
 
@@ -57,6 +94,55 @@ well-typed affinely but cannot satisfy linear discipline without redesign.
 linear" or "linear in training." It has intrinsic value. There are programs
 that belong in affine permanently. As Ephapax matures, the affine form must
 mature *into itself* — not toward becoming linear.
+
+== The Dyad and the Layers
+
+The dyad — linear mother, affine child — is one of *four orthogonal
+disciplines* that together define Ephapax. The other three are silent
+partners in the dyad: each is enforced independently, but each takes its
+*defaults* from which side of the dyad you are on.
+
+[cols="1,3", options="header"]
+|===
+| Layer | What the dyad says about it
+
+| L1 — Region capabilities
+| Identical in both modes. Every live region is tracked in an
+  input/output capability environment threaded through every
+  compound expression. A sibling cannot reference a region a
+  previous sibling has exited. The mother and the child obey the
+  same L1 invariant; the soundness story is the same.
+
+| L2 — Structural modality
+| *This is the dyad itself.* The mother is `Linear`; the child is
+  `Affine`. The thin-poset embedding `Linear ⊆ Affine` is
+  mechanised as `linear_to_affine : Linear ≤ Affine` (Qed, zero
+  axioms in `formal/Modality.v`). Every Linear derivation is an
+  Affine derivation; not every Affine derivation is Linear.
+
+| L3 — Irreversibility residue (Echo)
+| The discipline of *what was lost*. When a region exits or a
+  binding drops, the value is gone — L3 captures the residue as
+  a typed witness. The mother demands the residue be observed
+  (no silent discarding); the child may silently lower it. The
+  same `Echo` fiber serves both modes; only the rule for
+  consuming it differs.
+
+| L4 — Dyadic interaction
+| The declaration of which side you speak from. The mother answers
+  to the linear discipline; the child to the affine. Every closed
+  program has one.
+|===
+
+The four layers compose without coherence obligations because each
+is a *thin poset* — propositional ordering kills the categorical
+overhead that would otherwise demand pentagon laws and the like. The
+construction is taken verbatim from
+https://github.com/hyperpolymath/echo-types[echo-types]'
+decoration-commuting recipe.
+
+The dyad remains primary. The layers are how the dyad's promises
+are *enforced*.
 
 == One Language, One Feel
 

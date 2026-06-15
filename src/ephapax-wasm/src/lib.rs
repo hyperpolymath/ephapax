@@ -1,5 +1,6 @@
 #![forbid(unsafe_code)]
-// SPDX-License-Identifier: PMPL-1.0-or-later
+// SPDX-License-Identifier: MPL-2.0
+// Owner: Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk>
 //! SPDX-FileCopyrightText: 2025 Jonathan D.A. Jewell
 
 //! Ephapax WASM Code Generator (Dyadic: Affine + Linear modes)
@@ -45,13 +46,18 @@
 //! Mode is set per-module compilation and affects how unused linear values are handled.
 
 mod debug;
+pub mod ownership;
 
 pub use debug::{DebugInfo, VariableMetadata};
+pub use ownership::{
+    build_ownership_section_payload, parse_ownership_section_payload, OwnershipEntry,
+    OwnershipKind, OWNERSHIP_SECTION_NAME,
+};
 
 use ephapax_ir::module_from_sexpr;
 use ephapax_syntax::{
-    BaseTy, BinOp, Decl, Expr, ExprKind, ExternItem, Literal, MatchArm, Module as AstModule,
-    Pattern, Ty, UnaryOp,
+    BaseTy, BinOp, Decl, Expr, ExprKind, ExternItem, Linearity, Literal, MatchArm,
+    Module as AstModule, Pattern, Ty, UnaryOp,
 };
 use smol_str::SmolStr;
 use std::collections::HashMap;
@@ -161,6 +167,32 @@ impl std::fmt::Display for CodegenError {
 impl std::error::Error for CodegenError {}
 
 // ---------------------------------------------------------------------------
+// Ty → OwnershipKind mapping
+// ---------------------------------------------------------------------------
+
+/// Classify a parameter `Ty` into its `OwnershipKind` for the
+/// `typedwasm.ownership` custom section.
+///
+/// Mapping:
+/// - `Ty::Borrow { mutable: true, .. }` → `ExclBorrow` (typed-wasm L7
+///   alias-exclusion fires on these)
+/// - `Ty::Borrow { mutable: false, .. }` → `SharedBorrow`
+/// - `Ty::Ref { linearity: Linear, .. }`, `Ty::String(_)` → `Linear`
+/// - `Ty::Region { inner, .. }`, `Ty::ForAll { body, .. }` → recurse
+/// - everything else → `Unrestricted`
+fn ty_to_ownership_kind(ty: &Ty) -> ownership::OwnershipKind {
+    match ty {
+        Ty::Borrow { mutable: true, .. } => ownership::OwnershipKind::ExclBorrow,
+        Ty::Borrow { mutable: false, .. } => ownership::OwnershipKind::SharedBorrow,
+        Ty::Ref { linearity: Linearity::Linear, .. } => ownership::OwnershipKind::Linear,
+        Ty::String(_) => ownership::OwnershipKind::Linear,
+        Ty::Region { inner, .. } => ty_to_ownership_kind(inner),
+        Ty::ForAll { body, .. } => ty_to_ownership_kind(body),
+        _ => ownership::OwnershipKind::Unrestricted,
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Metadata for a user-defined function
 // ---------------------------------------------------------------------------
 
@@ -174,10 +206,12 @@ struct UserFnInfo {
     /// Parameter names (in order) for local binding
     #[allow(dead_code)]
     param_names: Vec<String>,
-    /// Whether each parameter is linear (must-use-once). Drives the
-    /// `affinescript.ownership` custom section emitted by
-    /// [`Codegen::emit_ownership_section`].
-    param_linear: Vec<bool>,
+    /// Ownership classification for each parameter. Drives the
+    /// `typedwasm.ownership` custom section emitted by
+    /// [`Codegen::emit_ownership_section`]. Computed from the
+    /// parameter's `Ty` at function-collection time via
+    /// [`ty_to_ownership_kind`].
+    param_kinds: Vec<ownership::OwnershipKind>,
 }
 
 // ---------------------------------------------------------------------------
@@ -258,12 +292,6 @@ const CLOSURE_SIZE: u32 = 8; // 2 x i32
 
 /// Code generator state.
 pub struct Codegen {
-    /// Current bump pointer for allocations (reserved for future interpreter use)
-    #[allow(dead_code)]
-    bump_ptr: u32,
-    /// Region stack for tracking active regions (reserved for future interpreter use)
-    #[allow(dead_code)]
-    region_stack: Vec<RegionInfo>,
     /// Generated WASM module
     module: WasmModule,
 
@@ -382,16 +410,6 @@ struct LambdaInfo {
     body: Expr,
 }
 
-#[derive(Debug, Clone)]
-struct RegionInfo {
-    /// Region name
-    #[allow(dead_code)]
-    name: String,
-    /// Start of region allocations
-    #[allow(dead_code)]
-    start_ptr: u32,
-}
-
 impl Default for Codegen {
     fn default() -> Self {
         Self::new()
@@ -402,8 +420,6 @@ impl Codegen {
     /// Create a new code generator
     pub fn new() -> Self {
         Self {
-            bump_ptr: REGION_HEADER_SIZE,
-            region_stack: Vec::new(),
             module: WasmModule::new(),
             locals: LocalTracker::default(),
             data_entries: Vec::new(),
@@ -592,7 +608,7 @@ impl Codegen {
                 wasm_fn_idx: self.first_user_fn(),
                 wasm_type_idx: TYPE_VOID_VOID,
                 param_names: Vec::new(),
-                param_linear: Vec::new(),
+                param_kinds: Vec::new(),
             },
         );
 
@@ -754,8 +770,8 @@ impl Codegen {
 
                     let param_names: Vec<String> =
                         params.iter().map(|(n, _)| n.to_string()).collect();
-                    let param_linear: Vec<bool> =
-                        params.iter().map(|(_, ty)| ty.is_linear()).collect();
+                    let param_kinds: Vec<ownership::OwnershipKind> =
+                        params.iter().map(|(_, ty)| ty_to_ownership_kind(ty)).collect();
 
                     self.user_fns.insert(
                         name.to_string(),
@@ -763,7 +779,7 @@ impl Codegen {
                             wasm_fn_idx: idx,
                             wasm_type_idx: type_idx,
                             param_names,
-                            param_linear,
+                            param_kinds,
                         },
                     );
                     idx += 1;
@@ -1269,7 +1285,7 @@ impl Codegen {
         self.module.section(&data);
     }
 
-    /// Emit the `affinescript.ownership` custom section if any user
+    /// Emit the `typedwasm.ownership` custom section if any user
     /// function takes a Linear parameter. The section is consumed by
     /// `typed-wasm-verify` (and by affinescript's OCaml verifier) to
     /// enforce L7 + L10 across emitted wasm modules. Functions with no
@@ -1277,27 +1293,18 @@ impl Codegen {
     /// missing entries as fully Unrestricted, so the smaller payload
     /// has identical semantics.
     fn emit_ownership_section(&mut self) {
-        let mut entries: Vec<typed_wasm_verify::OwnershipEntry> = self
+        let mut entries: Vec<ownership::OwnershipEntry> = self
             .user_fns
             .values()
-            .filter(|info| info.param_linear.iter().any(|&l| l))
-            .map(|info| {
-                let param_kinds = info
-                    .param_linear
+            .filter(|info| {
+                info.param_kinds
                     .iter()
-                    .map(|&is_linear| {
-                        if is_linear {
-                            typed_wasm_verify::OwnershipKind::Linear
-                        } else {
-                            typed_wasm_verify::OwnershipKind::Unrestricted
-                        }
-                    })
-                    .collect();
-                typed_wasm_verify::OwnershipEntry {
-                    func_idx: info.wasm_fn_idx,
-                    param_kinds,
-                    ret_kind: typed_wasm_verify::OwnershipKind::Unrestricted,
-                }
+                    .any(|k| !matches!(k, ownership::OwnershipKind::Unrestricted))
+            })
+            .map(|info| ownership::OwnershipEntry {
+                func_idx: info.wasm_fn_idx,
+                param_kinds: info.param_kinds.clone(),
+                ret_kind: ownership::OwnershipKind::Unrestricted,
             })
             .collect();
         if entries.is_empty() {
@@ -1306,9 +1313,9 @@ impl Codegen {
         // `user_fns` is a HashMap; sort by func_idx for deterministic output.
         entries.sort_by_key(|e| e.func_idx);
 
-        let payload = typed_wasm_verify::build_ownership_section_payload(&entries);
+        let payload = ownership::build_ownership_section_payload(&entries);
         let custom = wasm_encoder::CustomSection {
-            name: typed_wasm_verify::OWNERSHIP_SECTION_NAME.into(),
+            name: ownership::OWNERSHIP_SECTION_NAME.into(),
             data: payload.as_slice().into(),
         };
         self.module.section(&custom);
@@ -1741,7 +1748,7 @@ impl Codegen {
                 else_branch,
             } => self.compile_if(func, cond, then_branch, else_branch),
             ExprKind::Region { name: _, body } => self.compile_region(func, body),
-            ExprKind::Borrow(inner) | ExprKind::Deref(inner) => {
+            ExprKind::Borrow { inner, .. } | ExprKind::Deref(inner) => {
                 // Borrow/deref are identity at the WASM level
                 self.compile_expr(func, inner);
             }
@@ -1973,7 +1980,7 @@ impl Codegen {
                 ExprKind::Region { body, .. } => {
                     collect(body, bound, free, seen);
                 }
-                ExprKind::Borrow(inner) | ExprKind::Deref(inner) | ExprKind::Drop(inner) => {
+                ExprKind::Borrow { inner, .. } | ExprKind::Deref(inner) | ExprKind::Drop(inner) => {
                     collect(inner, bound, free, seen);
                 }
                 ExprKind::StringConcat { left, right } => {
@@ -3537,9 +3544,10 @@ mod tests {
     fn compile_borrow_deref() {
         let mut codegen = Codegen::new();
         // *(&42)
-        let expr = e(ExprKind::Deref(Box::new(e(ExprKind::Borrow(Box::new(e(
-            ExprKind::Lit(Literal::I32(42)),
-        )))))));
+        let expr = e(ExprKind::Deref(Box::new(e(ExprKind::Borrow {
+            inner: Box::new(e(ExprKind::Lit(Literal::I32(42)))),
+            mutable: false,
+        }))));
         let wasm = codegen.compile_program(&expr);
         assert_wasm_header(&wasm);
         validate_wasm(&wasm);
@@ -4569,10 +4577,10 @@ mod tests {
     }
 
     // -----------------------------------------------------------------------
-    // affinescript.ownership custom section (C6)
+    // typedwasm.ownership custom section (C6)
     // -----------------------------------------------------------------------
 
-    /// Locate the `affinescript.ownership` custom section in a wasm
+    /// Locate the `typedwasm.ownership` custom section in a wasm
     /// module's bytes and return its payload, or None if the section
     /// isn't present.
     fn ownership_payload(wasm: &[u8]) -> Option<Vec<u8>> {
@@ -4580,7 +4588,7 @@ mod tests {
         for payload in WP::new(0).parse_all(wasm) {
             if let Payload::CustomSection(reader) = payload.expect("wasm parse")
             {
-                if reader.name() == typed_wasm_verify::OWNERSHIP_SECTION_NAME {
+                if reader.name() == ownership::OWNERSHIP_SECTION_NAME {
                     return Some(reader.data().to_vec());
                 }
             }
@@ -4609,15 +4617,15 @@ mod tests {
         assert_wasm_header(&wasm);
 
         let payload = ownership_payload(&wasm).expect("ownership section missing");
-        let entries = typed_wasm_verify::parse_ownership_section_payload(&payload);
+        let entries = ownership::parse_ownership_section_payload(&payload);
         assert_eq!(entries.len(), 1, "expected one ownership entry");
         assert_eq!(
             entries[0].param_kinds,
-            vec![typed_wasm_verify::OwnershipKind::Linear]
+            vec![ownership::OwnershipKind::Linear]
         );
         assert_eq!(
             entries[0].ret_kind,
-            typed_wasm_verify::OwnershipKind::Unrestricted
+            ownership::OwnershipKind::Unrestricted
         );
     }
 
@@ -4683,7 +4691,7 @@ mod tests {
         };
         let wasm = compile_module(&module).expect("compilation failed");
         let payload = ownership_payload(&wasm).expect("ownership section missing");
-        let entries = typed_wasm_verify::parse_ownership_section_payload(&payload);
+        let entries = ownership::parse_ownership_section_payload(&payload);
         assert_eq!(entries.len(), 2);
         assert!(
             entries[0].func_idx < entries[1].func_idx,
@@ -4720,11 +4728,79 @@ mod tests {
         };
         let wasm = compile_module(&module).expect("compilation failed");
         let payload = ownership_payload(&wasm).expect("ownership section missing");
-        let entries = typed_wasm_verify::parse_ownership_section_payload(&payload);
+        let entries = ownership::parse_ownership_section_payload(&payload);
         assert_eq!(entries.len(), 1, "only the Linear fn should be listed");
         assert_eq!(
             entries[0].param_kinds,
-            vec![typed_wasm_verify::OwnershipKind::Linear]
+            vec![ownership::OwnershipKind::Linear]
+        );
+    }
+
+    #[test]
+    fn ownership_section_emits_shared_borrow_for_borrow_param() {
+        // fn obs(b: &String) -> I32 = 0
+        // &T at the parameter position must surface as SharedBorrow
+        // (typed-wasm L7 alias-shared check fires on these).
+        let module = AstModule {
+            name: "test".into(),
+            imports: vec![],
+            decls: vec![Decl::Fn {
+                name: "obs".into(),
+                visibility: Visibility::Private,
+                type_params: vec![],
+                params: vec![(
+                    "b".into(),
+                    Ty::Borrow {
+                        inner: Box::new(Ty::String("r".into())),
+                        mutable: false,
+                    },
+                )],
+                ret_ty: Ty::Base(BaseTy::I32),
+                body: e(ExprKind::Lit(Literal::I32(0))),
+            }],
+        };
+        let wasm = compile_module(&module).expect("compilation failed");
+        let payload = ownership_payload(&wasm).expect("ownership section missing");
+        let entries = ownership::parse_ownership_section_payload(&payload);
+        assert_eq!(entries.len(), 1);
+        assert_eq!(
+            entries[0].param_kinds,
+            vec![ownership::OwnershipKind::SharedBorrow],
+            "&T must classify as SharedBorrow, not Unrestricted (#221)"
+        );
+    }
+
+    #[test]
+    fn ownership_section_emits_excl_borrow_for_mut_borrow_param() {
+        // fn write(b: &mut String) -> I32 = 0
+        // &mut T must classify as ExclBorrow — closes the L7
+        // alias-exclusion enforcement gap on the ephapax producer side.
+        let module = AstModule {
+            name: "test".into(),
+            imports: vec![],
+            decls: vec![Decl::Fn {
+                name: "write".into(),
+                visibility: Visibility::Private,
+                type_params: vec![],
+                params: vec![(
+                    "b".into(),
+                    Ty::Borrow {
+                        inner: Box::new(Ty::String("r".into())),
+                        mutable: true,
+                    },
+                )],
+                ret_ty: Ty::Base(BaseTy::I32),
+                body: e(ExprKind::Lit(Literal::I32(0))),
+            }],
+        };
+        let wasm = compile_module(&module).expect("compilation failed");
+        let payload = ownership_payload(&wasm).expect("ownership section missing");
+        let entries = ownership::parse_ownership_section_payload(&payload);
+        assert_eq!(entries.len(), 1);
+        assert_eq!(
+            entries[0].param_kinds,
+            vec![ownership::OwnershipKind::ExclBorrow],
+            "&mut T must classify as ExclBorrow (#221)"
         );
     }
 

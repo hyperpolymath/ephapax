@@ -946,10 +946,10 @@ dependencies = [
  "ephapax-syntax",
  "gimli 0.31.1",
  "object 0.36.7",
+ "proptest",
  "serde",
  "serde_json",
  "smol_str",
- "typed-wasm-verify",
  "wasm-encoder 0.221.3",
  "wasmparser 0.221.3",
 ]
@@ -1026,6 +1026,12 @@ name = "foldhash"
 version = "0.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d9c4f5dac5e15c24eb999c26181a6ca40b39fe946cbe4c263c7209467bc83af2"
+
+[[package]]
+name = "foldhash"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "77ce24cb58228fbb8aa041425bb1050850ac19177686ea6e0f41a70416f56fdb"
 
 [[package]]
 name = "foreign-types"
@@ -1274,15 +1280,20 @@ version = "0.15.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9229cfe53dfd69f0609a49f65461bd93001ea1ef889cd5529dd176593f5338a1"
 dependencies = [
- "foldhash",
+ "foldhash 0.1.5",
  "serde",
 ]
 
 [[package]]
 name = "hashbrown"
-version = "0.16.1"
+version = "0.17.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "841d1cc9bed7f9236f321df977030373f4a4163ae1a7dbfe1a51a2c1a51d9100"
+checksum = "ed5909b6e89a2db4456e54cd5f673791d7eca6732202bbf2a9cc504fe2f9b84a"
+dependencies = [
+ "foldhash 0.2.0",
+ "serde",
+ "serde_core",
+]
 
 [[package]]
 name = "heck"
@@ -1533,12 +1544,12 @@ dependencies = [
 
 [[package]]
 name = "indexmap"
-version = "2.13.0"
+version = "2.14.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7714e70437a7dc3ac8eb7e6f8df75fd8eb422675fc7678aff7364301092b1017"
+checksum = "d466e9454f08e4a911e14806c24e16fba1b4c121d1ea474396f396069cf949d9"
 dependencies = [
  "equivalent",
- "hashbrown 0.16.1",
+ "hashbrown 0.17.1",
  "serde",
  "serde_core",
 ]
@@ -3189,10 +3200,10 @@ dependencies = [
 [[package]]
 name = "typed-wasm-verify"
 version = "0.1.0"
-source = "git+https://github.com/hyperpolymath/typed-wasm?rev=67006edddef34e86be2afd97f23d0dfb1191b228#67006edddef34e86be2afd97f23d0dfb1191b228"
+source = "git+https://github.com/hyperpolymath/typed-wasm?rev=a1935c16176567e0470de2feedf9c37a87dc0158#a1935c16176567e0470de2feedf9c37a87dc0158"
 dependencies = [
  "thiserror 2.0.18",
- "wasmparser 0.221.3",
+ "wasmparser 0.250.0",
 ]
 
 [[package]]
@@ -3502,6 +3513,19 @@ dependencies = [
  "bitflags 2.11.0",
  "indexmap",
  "semver",
+]
+
+[[package]]
+name = "wasmparser"
+version = "0.250.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "071d99cdfb8111603ed05500506c3298a940b58d609dd0259d3981785dd33556"
+dependencies = [
+ "bitflags 2.11.0",
+ "hashbrown 0.17.1",
+ "indexmap",
+ "semver",
+ "serde",
 ]
 
 [[package]]

@@ -1,5 +1,7 @@
 #![forbid(unsafe_code)]
-// SPDX-License-Identifier: PMPL-1.0-or-later
+// SPDX-License-Identifier: MPL-2.0
+// Owner: Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk>
+// Copyright (c) Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk>
 // SPDX-FileCopyrightText: 2025 Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk>
 
 //! Ephapax Abstract Syntax Tree
@@ -83,8 +85,10 @@ pub enum Ty {
     /// Region-scoped type
     Region { name: RegionName, inner: Box<Ty> },
 
-    /// Second-class borrow &T
-    Borrow(Box<Ty>),
+    /// Second-class borrow `&T` (shared) or `&mut T` (exclusive).
+    /// `mutable: true` corresponds to `&mut T`; emitted as `ExclBorrow`
+    /// in `typedwasm.ownership` (L7 aliasing enforcement).
+    Borrow { inner: Box<Ty>, mutable: bool },
 
     /// Type variable (for polymorphism)
     Var(SmolStr),
@@ -135,7 +139,7 @@ impl Ty {
             Ty::Prod { left, right } | Ty::Sum { left, right } => {
                 left.references_region(region) || right.references_region(region)
             }
-            Ty::Borrow(inner) => inner.references_region(region),
+            Ty::Borrow { inner, .. } => inner.references_region(region),
             Ty::List(inner) => inner.references_region(region),
             Ty::Tuple(elements) => elements.iter().any(|t| t.references_region(region)),
             Ty::ForAll { body, .. } => body.references_region(region),
@@ -194,7 +198,10 @@ impl Ty {
                 name: name.clone(),
                 inner: Box::new(inner.subst_var(var, replacement)),
             },
-            Ty::Borrow(inner) => Ty::Borrow(Box::new(inner.subst_var(var, replacement))),
+            Ty::Borrow { inner, mutable } => Ty::Borrow {
+                inner: Box::new(inner.subst_var(var, replacement)),
+                mutable: *mutable,
+            },
             Ty::Effectful { param, ret, effects } => Ty::Effectful {
                 param: Box::new(param.subst_var(var, replacement)),
                 ret: Box::new(ret.subst_var(var, replacement)),
@@ -219,7 +226,7 @@ impl Ty {
             }
             Ty::Ref { inner, .. }
             | Ty::Region { inner, .. }
-            | Ty::Borrow(inner)
+            | Ty::Borrow { inner, .. }
             | Ty::List(inner)
             | Ty::ForAll { body: inner, .. } => inner.contains_unif(id),
             Ty::Effectful { param, ret, .. } => {
@@ -260,7 +267,10 @@ impl Ty {
                 name: name.clone(),
                 inner: Box::new(inner.resolve(solutions)),
             },
-            Ty::Borrow(inner) => Ty::Borrow(Box::new(inner.resolve(solutions))),
+            Ty::Borrow { inner, mutable } => Ty::Borrow {
+                inner: Box::new(inner.resolve(solutions)),
+                mutable: *mutable,
+            },
             Ty::ForAll { var, body } => Ty::ForAll {
                 var: var.clone(),
                 body: Box::new(body.resolve(solutions)),
@@ -505,8 +515,10 @@ pub enum ExprKind {
     Region { name: RegionName, body: Box<Expr> },
 
     // ===== Borrowing =====
-    /// Create borrow: &e
-    Borrow(Box<Expr>),
+    /// Create borrow: `&e` (shared) or `&mut e` (exclusive).
+    /// `mutable: true` requires an `&mut T` parameter type and produces
+    /// an `ExclBorrow` ownership classification at codegen.
+    Borrow { inner: Box<Expr>, mutable: bool },
 
     /// Dereference: *e
     Deref(Box<Expr>),
@@ -751,5 +763,157 @@ mod tests {
     fn base_is_unrestricted() {
         let ty = Ty::Base(BaseTy::I32);
         assert!(!ty.is_linear());
+    }
+
+    // === Coq ↔ Rust bridge for `is_linear` (proof-debt P28) ===
+    //
+    // The tests below pin the truth table for every kernel-subset
+    // variant of `Ty`, where "kernel" means the subset of Rust `Ty`
+    // that corresponds to Coq's `ty` inductive (formal/Syntax.v:48-85).
+    //
+    // The cross-language specification lives at
+    // docs/coq-rust-bridge/is_linear_ty.adoc; the canonical Coq
+    // definition at formal/Syntax.v:467-473.
+    //
+    // Maintenance contract: any change to `Ty::is_linear()` MUST
+    // be mirrored in formal/Syntax.v `is_linear_ty` (and the bridge
+    // doc updated). If you add a new constructor to either side,
+    // add a matching test below.
+
+    fn boxed_base() -> Box<Ty> {
+        Box::new(Ty::Base(BaseTy::I32))
+    }
+
+    #[test]
+    fn coq_bridge_base_all_six_unrestricted() {
+        // Coq: TBase _ falls through → false for every base.
+        for base in [
+            BaseTy::Unit,
+            BaseTy::Bool,
+            BaseTy::I32,
+            BaseTy::I64,
+            BaseTy::F32,
+            BaseTy::F64,
+        ] {
+            assert!(
+                !Ty::Base(base.clone()).is_linear(),
+                "Coq bridge: TBase {base:?} should be NOT linear"
+            );
+        }
+    }
+
+    #[test]
+    fn coq_bridge_string_always_linear() {
+        // Coq: TString _ → true. Region irrelevant.
+        assert!(Ty::String("r0".into()).is_linear());
+        assert!(Ty::String("r1".into()).is_linear());
+    }
+
+    #[test]
+    fn coq_bridge_ref_linearity_decides() {
+        // Coq: TRef Lin _ → true; TRef Unr _ → false.
+        let inner = boxed_base();
+        let lin_ref = Ty::Ref {
+            linearity: Linearity::Linear,
+            inner: inner.clone(),
+        };
+        let unr_ref = Ty::Ref {
+            linearity: Linearity::Unrestricted,
+            inner,
+        };
+        assert!(lin_ref.is_linear(), "Coq bridge: TRef Lin _ → true");
+        assert!(!unr_ref.is_linear(), "Coq bridge: TRef Unr _ → false");
+    }
+
+    #[test]
+    fn coq_bridge_region_recurses_on_inner() {
+        // Coq: TRegion _ T' → is_linear_ty T'.
+        let lin_inner = Ty::String("r".into());
+        let unr_inner = Ty::Base(BaseTy::I32);
+        let lin_region = Ty::Region {
+            name: "r".into(),
+            inner: Box::new(lin_inner),
+        };
+        let unr_region = Ty::Region {
+            name: "r".into(),
+            inner: Box::new(unr_inner),
+        };
+        assert!(lin_region.is_linear(), "Coq bridge: TRegion _ (linear) → recurse");
+        assert!(!unr_region.is_linear(), "Coq bridge: TRegion _ (unrestricted) → recurse");
+    }
+
+    #[test]
+    fn coq_bridge_fun_prod_sum_borrow_fallthrough_unrestricted() {
+        // Coq: TFun / TProd / TSum / TBorrow all fall through → false
+        // regardless of constituent linearity. Linearity of CAPTURED
+        // resources is tracked at the judgment level (T_Lam_L1_*'s
+        // body context discipline), not at the type shape.
+        let lin = Box::new(Ty::String("r".into()));
+        let unr = boxed_base();
+
+        let fun = Ty::Fun {
+            param: lin.clone(),
+            ret: unr.clone(),
+        };
+        let prod = Ty::Prod {
+            left: lin.clone(),
+            right: unr.clone(),
+        };
+        let sum = Ty::Sum {
+            left: lin.clone(),
+            right: unr.clone(),
+        };
+        let borrow = Ty::Borrow {
+            inner: lin.clone(),
+            mutable: false,
+        };
+
+        assert!(!fun.is_linear(), "Coq bridge: TFun is NOT linear");
+        assert!(!prod.is_linear(), "Coq bridge: TProd is NOT linear");
+        assert!(!sum.is_linear(), "Coq bridge: TSum is NOT linear");
+        assert!(!borrow.is_linear(), "Coq bridge: TBorrow is NOT linear");
+    }
+
+    #[test]
+    fn coq_bridge_effectful_fallthrough_unrestricted() {
+        // Coq: TFunEff _ _ _ _ falls through → false.
+        let effectful = Ty::Effectful {
+            param: Box::new(Ty::String("r".into())),
+            ret: boxed_base(),
+            effects: vec!["IO".into()],
+        };
+        assert!(!effectful.is_linear(), "Coq bridge: TFunEff is NOT linear");
+    }
+
+    #[test]
+    fn surface_only_forall_recurses_on_body() {
+        // Rust-only behaviour: ForAll recurses on body.
+        // The Coq kernel has no TForAll; this is documented in
+        // docs/coq-rust-bridge/is_linear_ty.adoc as a surface-side
+        // extension. Elaboration instantiates ForAll before lowering
+        // to the kernel, so the bridge holds after elaboration.
+        let lin_body = Ty::ForAll {
+            var: "T".into(),
+            body: Box::new(Ty::String("r".into())),
+        };
+        let unr_body = Ty::ForAll {
+            var: "T".into(),
+            body: boxed_base(),
+        };
+        assert!(lin_body.is_linear(), "ForAll over a linear body is linear");
+        assert!(!unr_body.is_linear(), "ForAll over an unrestricted body is unrestricted");
+    }
+
+    #[test]
+    fn surface_only_var_unif_list_tuple_unrestricted() {
+        // Conservative non-linear for unsubstituted type variables
+        // (see is_linear() docstring). Coq kernel has no equivalent —
+        // surface-only.
+        assert!(!Ty::Var("T".into()).is_linear());
+        assert!(!Ty::Unif(0).is_linear());
+        assert!(!Ty::List(Box::new(Ty::String("r".into()))).is_linear());
+        assert!(
+            !Ty::Tuple(vec![Ty::String("r".into()), Ty::Base(BaseTy::I32)]).is_linear()
+        );
     }
 }

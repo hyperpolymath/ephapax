@@ -1,5 +1,6 @@
 #![forbid(unsafe_code)]
-// SPDX-License-Identifier: PMPL-1.0-or-later
+// SPDX-License-Identifier: MPL-2.0
+// Owner: Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk>
 // SPDX-FileCopyrightText: 2025 Jonathan D.A. Jewell
 
 //! Ephapax Parser
@@ -583,13 +584,22 @@ fn parse_type_atom(pair: pest::iterators::Pair<Rule>) -> Result<Ty, ParseError> 
             Ok(Ty::String(region))
         }
         Rule::borrow_ty => {
-            let inner_ty = parse_type_atom(
-                inner
-                    .into_inner()
-                    .next()
-                    .ok_or_else(|| ParseError::missing("borrowed type"))?,
-            )?;
-            Ok(Ty::Borrow(Box::new(inner_ty)))
+            let mut children = inner.into_inner();
+            let first = children
+                .next()
+                .ok_or_else(|| ParseError::missing("borrowed type"))?;
+            let (mutable, ty_pair) = if first.as_rule() == Rule::mut_marker {
+                (
+                    true,
+                    children
+                        .next()
+                        .ok_or_else(|| ParseError::missing("borrowed type"))?,
+                )
+            } else {
+                (false, first)
+            };
+            let inner_ty = parse_type_atom(ty_pair)?;
+            Ok(Ty::Borrow { inner: Box::new(inner_ty), mutable })
         }
         Rule::list_ty => {
             let elem_ty = parse_type(
@@ -1748,13 +1758,25 @@ fn parse_atom_expr(pair: pest::iterators::Pair<Rule>) -> Result<Expr, ParseError
             ))
         }
         Rule::borrow_expr => {
-            let inner_expr = parse_unary_expr(
-                inner
-                    .into_inner()
-                    .next()
-                    .ok_or_else(|| ParseError::missing("borrow operand"))?,
-            )?;
-            Ok(Expr::new(ExprKind::Borrow(Box::new(inner_expr)), span))
+            let mut children = inner.into_inner();
+            let first = children
+                .next()
+                .ok_or_else(|| ParseError::missing("borrow operand"))?;
+            let (mutable, operand_pair) = if first.as_rule() == Rule::mut_marker {
+                (
+                    true,
+                    children
+                        .next()
+                        .ok_or_else(|| ParseError::missing("borrow operand"))?,
+                )
+            } else {
+                (false, first)
+            };
+            let inner_expr = parse_unary_expr(operand_pair)?;
+            Ok(Expr::new(
+                ExprKind::Borrow { inner: Box::new(inner_expr), mutable },
+                span,
+            ))
         }
         Rule::fst_expr => {
             let inner_expr = parse_expression(
@@ -2106,10 +2128,22 @@ mod tests {
     #[test]
     fn test_parse_borrow() {
         let expr = parse_ok("&x");
-        if let ExprKind::Borrow(inner) = expr.kind {
+        if let ExprKind::Borrow { inner, mutable } = expr.kind {
             assert!(matches!(inner.kind, ExprKind::Var(_)));
+            assert!(!mutable, "`&x` must parse as shared (mutable=false)");
         } else {
             panic!("Expected borrow");
+        }
+    }
+
+    #[test]
+    fn test_parse_mut_borrow() {
+        let expr = parse_ok("&mut x");
+        if let ExprKind::Borrow { inner, mutable } = expr.kind {
+            assert!(matches!(inner.kind, ExprKind::Var(_)));
+            assert!(mutable, "`&mut x` must parse as exclusive (mutable=true)");
+        } else {
+            panic!("Expected mut borrow");
         }
     }
 

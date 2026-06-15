@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: PMPL-1.0-or-later
+// SPDX-License-Identifier: MPL-2.0
+// Owner: Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk>
 // Conformance test: FFI with linear handle pattern (Gossamer-style).
 // A linear handle is created via FFI, used, then consumed via FFI.
 // Expected: type-checks successfully in both affine and linear modes.

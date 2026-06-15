@@ -1,4 +1,6 @@
-// SPDX-License-Identifier: PMPL-1.0-or-later
+// SPDX-License-Identifier: MPL-2.0
+// Owner: Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk>
+// SPDX-FileCopyrightText: 2026 Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk>
 = Ephapax — Show Me The Receipts
 :toc:
 :toclevels: 3
@@ -16,7 +18,12 @@ is used after being freed, no resource is leaked, and region-scoped
 allocations are deallocated in bulk at scope exit.
 ____
 
-== Claim: Dyadic Type System
+== Claim: Dyadic Type System (L2)
+
+The dyad is L2 in the four-layer architecture (see
+`README.adoc#the-four-layers` and `docs/vision/EPHAPAX-VISION.adoc`).
+This section presents the Rust-side evidence for the L2 discipline;
+L1 / L3 / L4 evidence follows below.
 
 *Evidence*: The type checker (`src/ephapax-typing/src/lib.rs`) tracks
 `BindingForm` per context entry:
@@ -28,6 +35,9 @@ ____
 Tests `test_let_allows_unconsumed_linear` and `test_let_bang_rejects_unconsumed`
 verify the distinction. `test_let_bang_rejects_unconsumed_unrestricted` proves
 that `let!` enforces exactly-once even for unrestricted types like `I32`.
+
+The Coq-side L2 evidence is `linear_to_affine : Linear ≤ Affine` (Qed,
+zero axioms) in `formal/Modality.v`.
 
 == Claim: Two-Layer AST (Surface + Core)
 
@@ -76,6 +86,62 @@ demonstrate where they diverge on identical programs (e.g.
 
 Test `test_region_non_escaping` verifies escape detection.
 Test `test_region_string_allocation` verifies in-region allocation.
+
+== Claim: Sibling-safe region capabilities (L1)
+
+*Evidence*: Region capabilities are threaded as input/output
+environments through every compound typing rule. A sibling cannot
+reference a region a previous sibling has exited — this is the
+soundness invariant the legacy judgment was missing.
+
+* Counterexample at `formal/Counterexample.v` (all five lemmas
+  `Qed`) demonstrates the soundness gap the threading fixes.
+* The new `has_type_l1` judgment lives in `formal/TypingL1.v` and
+  carries the R-threading directly. Step relation at
+  `formal/Semantics_L1.v`.
+* Design rationale at `formal/PRESERVATION-DESIGN.md §3-§4`.
+* Status: judgment landed; `Semantics_L1.v` carries 3 outer
+  `Admitted.` markers covering 5 inner `admit.` cases — pre-existing
+  L1 structural debt + parallel mirrors (file:line breakdown in
+  `PROOF-NEEDS.md §4`).
+
+== Claim: Irreversibility residue is first-class (L3, wired)
+
+*Evidence*: Operations that erase information (region exit, drop)
+produce typed residue witnesses, following the
+https://github.com/hyperpolymath/echo-types[echo-types]
+formulation. Linear mode requires the residue to be observed;
+Affine mode permits silent lowering.
+
+* Upstream theory at
+  `~/developer/repos/echo-types/proofs/agda/EchoLinear.agda` (lines
+  30–101), already mechanised.
+* Local mirror at `formal/Echo.v` — the L3 calculus is mechanised
+  here (modes, `LEcho`, `weaken`, `degrade_mode`, all `Qed`).
+* Forward-looking design at `formal/PRESERVATION-DESIGN.md §6`.
+* Status: **wiring landed** (slice 4, 2026-05-27).
+  `preservation_l3_region_active_echo`, `preservation_l3_drop_echo`,
+  and the `preservation_l3` umbrella in `Semantics_L1.v` are all
+  Qed, each conditional on the
+  `region_shrink_preserves_typing_l1_gen_m` L1 structural admit.
+  Remaining L3 work is unconditional `preservation_l3` (Phase 3b
+  Stage 2).
+
+== Claim: Dyadic mode is project-level only (L4)
+
+*Evidence*: L4 is a labelling discipline, not a proof layer.
+`formal/L4.v` carries `ProgramMode` (three-constructor enum) and
+`program_mode_to_modality` (total mapping to L2's modality). No
+theorems, no admits, no axioms — by design.
+
+* Companion design note: `formal/L4-DYADIC.md`.
+* Canonical design source: `formal/PRESERVATION-DESIGN.md §7`.
+* Surface syntax for the L4 declaration
+  (`#![ephapax_linear]` / `#![ephapax_affine]` /
+  `#![module_boundary_mix(...)]`) is not yet wired into the parser
+  or borrow checker; the mechanical scaffold is a citable type for
+  downstream tools (Idris2 ABI, Rust borrow checker, surface
+  parser).
 
 == Technology Choices
 
@@ -151,64 +217,73 @@ Test `test_region_string_allocation` verifies in-region allocation.
 
 === Coq (`formal/`)
 
-The Coq operational semantics is a small-step substitution-based
-calculus over the Tofte-Talpin region-linear type system.
+[IMPORTANT]
+.Post-counterexample 2026-05-26 — read this before any older proof claim
+====
+The legacy preservation theorem in `formal/Semantics.v` is **provably
+false**. `formal/Counterexample.v` (5 Qed lemmas) demonstrates a
+configuration that types under the legacy judgment, steps via the
+operational semantics, and lands at an untypable post-state. The
+`Admitted.` on `Theorem preservation` is correct — no proof closes it.
 
-[cols="3,1,2"]
+The post-discovery work is the **four-layer principled redesign**
+documented in `formal/PRESERVATION-DESIGN.md`, where preservation is
+*re-derived per layer* from explicit invariants. Any earlier-in-this-
+README counts of "910 → 22 → 12 open goals" are archaeology, not
+instructions. See `STATUS.adoc` for the past/present/future map.
+====
+
+The Coq formalisation is now layered. Each layer has its own
+judgment, its own invariants, and its own per-layer preservation
+theorem.
+
+[cols="3,1,3"]
 |===
-| Theorem | Status | Where
+| Component | Status | Where
 
-| `no_leaks`
-| ✅ Qed
-| `formal/Semantics.v`
+| Counterexample regression (5 Qed)
+| ✅ Pinned
+| `formal/Counterexample.v` — `bad_input_untypable_l1` Qed under both modes
 
-| `subst_preserves_typing`
-| ✅ Qed
-| `formal/Semantics.v` (line 2808)
+| L1 judgment (`has_type_l1`)
+| ✅ 100% (2 Qed, 0 admits)
+| `formal/TypingL1.v` — modality-indexed, R-threaded
 
-| `typing_ctx_transfer`
-| ✅ Qed
-| `formal/Semantics.v`
+| L1 semantics
+| 🟡 37 Qed, 3 Admitted (5 inner admits — pre-existing L1 structural debt + parallel mirrors)
+| `formal/Semantics_L1.v` — 3 outer `Admitted.` markers cover 5 internal `admit.` cases. Per `PROOF-NEEDS.md §4`: pre-existing L1 structural debt (multiset/list-perm bridge + L2 effect-typed `TFun` per PRESERVATION-DESIGN.md §5.1 + lambda-rigidity at `preservation_l1` body) and two parallel mirrors that close mechanically when their originals close.
 
-| `region_env_perm_typing`, `region_add_typing`, `region_shrink_preserves_typing`
-| ✅ Qed
-| `formal/Semantics.v` (lines 2960, 3042, 3107)
+| L2 modality (`Modality.v`)
+| ✅ Core landed (1 Qed, 0 axioms)
+| `formal/Modality.v` + `m : Modality` in `has_type_l1`. PRs #176 + #177. `linear_to_affine` Qed with zero axioms.
 
-| **`preservation`**
-| 🟡 Admitted
-| `formal/Semantics.v` (Theorem at line 3207). **12 open goals** as of 2026-05-21 (was 910). See ROADMAP §"Preservation closure plan" + `formal/PRESERVATION-HANDOFF.md`.
+| L3 echo / residue calculus
+| ✅ Calculus 12 Qed + wiring landed (slice 4, 2026-05-27)
+| `formal/Echo.v` — one type former (fiber `Echo f y := Σ x. f x ≡ y`) + degrade map + no-section-collapse-to-residue proof. Wiring lemmas (`preservation_l3_region_active_echo`, `preservation_l3_drop_echo`, `preservation_l3` umbrella) in `Semantics_L1.v` — all Qed, conditional on `region_shrink_preserves_typing_l1_gen_m`.
+
+| L4 dyadic interaction
+| ✅ Phase A scaffold landed (`formal/L4.v`, 2026-05-28); definitions only
+| `PModeLinear` / `PModeAffine` / `PModeBoundaryMix` enum + `program_mode_to_modality` round-trip. No theorems by design. Design in `formal/PRESERVATION-DESIGN.md §7`.
+
+| Legacy `Theorem preservation` (`formal/Semantics.v`)
+| 🛑 Provably false (Admitted)
+| Pinned by `Counterexample.v`. **Do not attempt closure.** Archaeology.
 |===
 
-The `preservation` reduction story is recent and load-bearing:
-
-* **910 → 29 goals** via the standard preservation pattern
-  (`remember (mu, R, e) as cfg eqn:Hcfg` + `inversion Hcfg; subst`
-  inside each case). Lands as PR #102 (2026-05-20). 97% reduction.
-* **29 → 22 goals** via `revert mu R e mu' R' e' Hcfg Hcfg'` before
-  `induction Hstep`, so each case's IH carries clean universal
-  quantification over the inner step's config rather than the
-  inconsistent outer-cfg equation. Lands as PR #106.
-* **22 → 12 goals** via per-case manual proofs using the new
-  `step_R_eq_or_touches_region` region-invariance lemma (PR #114
-  for the lemma, PR #116 for the 10 case closures: β-reduction,
-  value-step, and atomic cases like `S_Let_Val`, `S_App_Fun`,
-  `S_If_True/False`, `S_Fst`, `S_Snd`, `S_Case_Inl/Inr`, `S_Copy`).
-* **Phase 1 scaffold landed** (PR #121): `step_output_context_eq`
-  (Lemma B) stated with induction-on-step skeleton. Per-case
-  discharges are the next session's substantive work.
-* The remaining 12 are 11 congruence cases blocked on Lemma B
-  (linearity-context drift between IH's output context and
-  sibling's pre-context) + 1 `S_Region_Step + T_Region_Active`
-  case blocked on the documented region-env weakening lemma for
-  non-values.
-
-The canonical closure path is **`ROADMAP.adoc` §"Preservation
-closure plan"** — 5 phases, ~3 sessions of focused work.
-
-An earlier in-file comment (corrected by PR #92, 2026-05-20) claimed
-preservation was Qed-closed on 2026-04-27. That claim was
-unsubstantiated — `coqc` 8.18.0 rejected the proof script. The
-chain above is the honest closure work in progress.
+What's done = `Modality.linear_to_affine` (Linear ⇒ Affine weakening,
+zero axioms), the L1 judgment, L3 fiber + degrade calculus, L3
+wiring into the L1 step rules (slice 4 — `preservation_l3` umbrella
+Qed conditional on the L1 structural admit), L4 Phase A scaffold
+(definitions only), and the counterexample regression witness.
+What's todo = close the 3 Semantics_L1 outer Admitteds (pre-existing
+L1 structural debt: multiset/list-perm bridge + L2-effect-typed
+`TFun` + lambda-rigidity at `preservation_l1`), then state
+unconditional `preservation_l3` (Phase 3b Stage 2). What's banned =
+closing the legacy theorem, adding new `Axiom` declarations to
+discharge L1/L2 gaps, conflating `ephapax-affine` (this repo's
+sublanguage) with `AffineScript` (a separate language at
+`hyperpolymath/affinescript`). Full per-sublanguage breakdown in
+`PROOF-NEEDS.md`.
 
 === Idris2 (`idris2/src/Ephapax/` + `src/formal/`)
 
@@ -278,7 +353,9 @@ total`.
 
 == Test Evidence
 
-~229 tests across ~19 crates, 0 failures. Key test categories:
+357 tests across 17 active workspace crates + `tests/fuzz`, 0
+failures (per `cargo test --all-targets`; see `TEST-NEEDS.md` for
+the per-crate breakdown). Key test categories:
 
 * *Type checker dyadic tests*: `let` vs `let!` semantics, branch
   agreement, region exit (`ephapax-typing`)
@@ -289,8 +366,8 @@ total`.
 * *Discipline tests*: linear vs affine checker divergence
   (`ephapax-linear`)
 * *Integration tests*: parse → desugar → typecheck end-to-end
-* *Conformance tests*: `conformance/pass/` programs must type-check,
-  `conformance/fail/` programs must be rejected
+* *Conformance tests*: `conformance/valid/` programs must type-check,
+  `conformance/invalid/` programs must be rejected
 
 == Design Documents
 
@@ -301,8 +378,11 @@ total`.
 * `docs/specs/LANGUAGE-COMPARISON.adoc` — comparison against 10 languages
 * `docs/vision/EPHAPAX-VISION.adoc` — design rationale, why dyadic +
   regions + WASM
-* `formal/PRESERVATION-HANDOFF.md` — per-case checklist for the 22
-  remaining preservation goals
+* `formal/PRESERVATION-HANDOFF.md` — *archaeology only*: per-case
+  checklist from the pre-2026-05-26 legacy-judgment closure plan,
+  retained for historical context. The legacy `preservation` is
+  provably false; the path forward is the per-layer theorems documented
+  in `formal/PRESERVATION-DESIGN.md`.
 * `PROOF-NEEDS.md` — outstanding proof obligations + leverage
 
 == Questions?

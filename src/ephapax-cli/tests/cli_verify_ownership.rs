@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: PMPL-1.0-or-later
+// SPDX-License-Identifier: MPL-2.0
+// Owner: Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk>
 //
 // End-to-end test for `ephapax compile --verify-ownership` (C7).
 //
@@ -8,6 +9,13 @@
 // in `typed-wasm-verify`; this test exists to prove the CLI plumbing
 // works — flag parsing → post-compile verification call → exit code
 // → user-facing output.
+//
+// The two positive-assertion tests are gated by the
+// `typed-wasm-verify` feature: with the feature OFF, the CLI prints a
+// warning and skips verification, so the "verification: clean" line
+// the tests look for is absent (by design). The third test —
+// `compile_without_verify_flag_does_not_run_verifier` — works
+// regardless because it asserts an *absence* of verifier output.
 
 use std::process::Command;
 
@@ -15,6 +23,7 @@ fn ephapax_bin() -> String {
     env!("CARGO_BIN_EXE_ephapax").to_string()
 }
 
+#[cfg(feature = "typed-wasm-verify")]
 #[test]
 fn verify_ownership_clean_module() {
     let src = tempfile::NamedTempFile::with_suffix(".eph").expect("tempfile");
@@ -48,6 +57,7 @@ fn verify_ownership_clean_module() {
     );
 }
 
+#[cfg(feature = "typed-wasm-verify")]
 #[test]
 fn verify_ownership_linear_program() {
     // A program that takes a linear String param and consumes it

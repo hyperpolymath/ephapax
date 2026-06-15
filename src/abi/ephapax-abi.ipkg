@@ -1,4 +1,5 @@
--- SPDX-License-Identifier: PMPL-1.0-or-later
+-- SPDX-License-Identifier: MPL-2.0
+// Owner: Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk>
 -- Build/typecheck package for the Ephapax Rust↔SPARK ABI seam.
 --
 -- The seam modules are namespaced `Ephapax.ABI.*`; Idris2 requires the

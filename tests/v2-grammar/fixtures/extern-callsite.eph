@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: PMPL-1.0-or-later
+// SPDX-License-Identifier: MPL-2.0
+// Owner: Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk>
 // Extern fn callsite — proves Phase B of #43: the extern signature is
 // in scope from the function body. `entry()` returns the result of an
 // `extern "wasm"`-declared identity function on a literal.

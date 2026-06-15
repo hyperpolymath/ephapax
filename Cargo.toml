@@ -1,4 +1,5 @@
-# SPDX-License-Identifier: PMPL-1.0-or-later
+# SPDX-License-Identifier: MPL-2.0
+// Owner: Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk>
 # SPDX-FileCopyrightText: 2025 Jonathan D.A. Jewell
 
 [workspace]
@@ -29,7 +30,7 @@ members = [
 version = "0.1.0"
 edition = "2021"
 rust-version = "1.83"
-license = "PMPL-1.0-or-later"
+license = "MPL-2.0"
 authors = ["Jonathan D.A. Jewell <jonathan.jewell@open.ac.uk>"]
 repository = "https://github.com/hyperpolymath/ephapax"
 keywords = ["linear-types", "memory-safety", "wasm", "compiler"]
@@ -51,8 +52,13 @@ ephapax-lsp = { path = "src/ephapax-lsp" }
 ephapax-package = { path = "src/ephapax-package" }
 ephapax-vram-cache = { path = "src/ephapax-vram-cache" }
 
-# Sibling-repo crates
-typed-wasm-verify = { git = "https://github.com/hyperpolymath/typed-wasm", rev = "67006edddef34e86be2afd97f23d0dfb1191b228" }
+# Sibling-repo crates.
+# NOTE: rev pin is the post-merge SHA of typed-wasm#65 on
+# `hyperpolymath/typed-wasm:origin/main` (renames the custom section
+# `affinescript.ownership` → `typedwasm.ownership`). This is the
+# canonical C7 pin (cf. CHANGELOG.md "Added" / "C7 (#72)"). Re-bump
+# only if a newer `typed-wasm-verify` API change is needed.
+typed-wasm-verify = { git = "https://github.com/hyperpolymath/typed-wasm", rev = "a1935c16176567e0470de2feedf9c37a87dc0158" }
 
 # External dependencies
 serde = { version = "1.0", features = ["derive"] }

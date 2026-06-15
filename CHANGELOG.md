@@ -1,9 +1,109 @@
-<!-- SPDX-License-Identifier: PMPL-1.0-or-later -->
+<!-- SPDX-License-Identifier: MPL-2.0 -->
+<!-- Owner: Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk> -->
+<!-- SPDX-FileCopyrightText: 2026 Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk> -->
 # Changelog
 
 All notable changes to Ephapax are documented here.
 
 ## [Unreleased]
+
+### Proof + stdlib wave (2026-06-01 → 2026-06-02)
+
+- **P43 — canonical-forms L1 modality-polymorphic** (PR #274): port
+  `canonical_{unit,bool,i32,fun,prod,sum,string}_l1_m` to the
+  modality-polymorphic L1 judgment. All 7 axiom-free (verified via
+  `Print Assumptions`). Prerequisite for `progress_l1` (P42).
+- **P10 / P32 — Print Assumptions audit framework** (PR #270): per-
+  module whitelist guards mechanically certifying which axioms each
+  layer-keystone surfaces. `tfuneff_lambda_retype_l1_m` /
+  `subst_typing_gen_l1_m_tfuneff` etc. confirmed zero-axiom; the
+  expected residuals (`preservation_l1`, `region_liveness_at_split_l1_gen`,
+  `region_shrink_preserves_typing_l1_gen_m`) listed.
+- **P06 — `step_pop_disjoint_from_type_l1` partial proof** (PR #280):
+  stated + EASY cases Qed-closed (atomic non-region step rules; region
+  Enter/Exit/Exit_Echo; StringConcat; App_Step1; Fst/Snd; Borrow;
+  Drop; Copy). HARD cases (Let / LetLin / App_Step2 / If / Pair_Step
+  / Inl / Inr / Case / Region_Step T_Region_L1) Admitted, tracked
+  under issues #240 / #241 / #242.
+- **P28 — Rust↔Coq `is_linear_ty` bridge** (PR #273): kernel truth
+  table mechanically asserted. Pins the cross-language contract.
+- **P59 — OwnershipKind from_byte/to_byte round-trip** (PR #277):
+  typed-wasm ADR-0002 carrier handshake locked in Coq.
+- **D04 — Transactions as linear scopes** (PR #275): ACID semantics
+  via affine sublanguage.
+- **D11 — Allen's interval algebra** (PR #272): from DB-theory inventory.
+- **D17 — exactly-once `MessageHandle` as linear typestate** (PR #279).
+- **D18 — monoidal aggregates** (PR #281): `Sum`/`Product`/`Max`/`Min`/
+  `Count`/`And`/`Or`/`String` instances.
+- **Truth restore + banned-preservation burial** (PR #263): doc-code
+  consistency for proof state.
+- **Cluster D meander** (PR #278): L3/L4 status refresh + error-code
+  reconciliation + stale counts/paths.
+- **CI — coq-build noble apt** (PR #282): switch from
+  coqorg/coq:8.18 + `--user root` quirks to ubuntu-latest + apt-coq,
+  ~37s one-shot (unblocks ~5 PRs).
+- **CI — Track C panic-attack triage** (PR #271): classify findings
+  per #138.
+- **Governance — R5b standards SHA bump** (PR #276): consume
+  version-string drift detection from standards#329.
+
+### Phase 3b Stage 1a + 1b — L2 effect-typed TFun + L3 wiring conditional preservation (2026-05-30 → 2026-05-31)
+
+- **Stage 1a (PR #252, merged 2026-05-30 17:42Z)**: `tfuneff_lambda_free`
+  + `Counterexample_L2_nested.v`. Admin-merged after local build oracle
+  GREEN with no axiom slippage (only the known-good
+  `region_liveness_at_split_l1_gen` axiom).
+- **Stage 1b (PR #253)**: L1/L2 plumbing for the effect-typed `TFun` track —
+  `expr_closed_below` + closure helpers (Syntax.v), body-transfer + closed-
+  value G-poly helpers, `subst_typing_gen_l1_m_tfuneff` Qed (zero axioms),
+  and `preservation_l2` β-case for closed `TFunEff` substituents. Builds
+  toward the unconditional `preservation_l2` track per
+  `PRESERVATION-DESIGN.md §12.x`.
+
+### L3 wiring + L4 Phase A scaffold (2026-05-27 → 2026-05-28)
+
+- **L3 wiring (slice 4, 2026-05-27)**: `preservation_l3_region_active_echo`,
+  `preservation_l3_drop_echo`, and the `preservation_l3` umbrella all Qed in
+  `formal/Semantics_L1.v` — each conditional on the
+  `region_shrink_preserves_typing_l1_gen_m` L1 structural admit. The
+  avoidable `T_Region_L1_Echo` mirror was closed in the same slice. Zero new
+  admits introduced.
+- **L4 Phase A scaffold (2026-05-28)**: `formal/L4.v` lands with `ProgramMode`
+  (`PModeLinear` / `PModeAffine` / `PModeBoundaryMix`) and
+  `program_mode_to_modality` round-trip. Definitions only by design — no
+  theorems, no admits, no axioms.
+
+### Four-layer preservation redesign (2026-05-26 → 2026-05-27)
+
+- **L1 — region capabilities** (PRs #153-line, integration branch
+  `proof/l1-region-threading-design`): introduces `has_type_l1` with
+  R-threading in `formal/TypingL1.v`. Supporting lemmas in
+  `formal/Semantics_L1.v`. Counterexample regression (`bad_input_untypable_l1`)
+  Qed in `formal/Counterexample.v`. `preservation_l1` Admitted with 1
+  residual inner `admit.` covering App / Pair / StringConcat (lambda-
+  rigidity gap per `PRESERVATION-DESIGN.md §4.8`).
+- **L2 — Linear/Affine modality** (PR #176, this entry): `has_type_l1`
+  carries `m : Modality` parameter so a single judgment specialises to
+  ephapax-linear AND ephapax-affine. New `formal/Modality.v` with K-free
+  thin poset (`modality_le` at `Type` sort + `_refl`/`_trans`/`_prop`).
+  Mode-split constructors for `T_Lam` / `T_Case` / `T_If`; remaining 21
+  rules modality-polymorphic. **`linear_to_affine` Qed, closed under the
+  global context (zero axioms).** Mirrors `EchoLinear.agda:38-58`'s
+  `weaken : LEcho linear → LEcho affine`. `weaken_modality` at the L2
+  layer dispatches through `linear_to_affine`. Six pre-L2 `Semantics_L1.v`
+  lemmas regressed to `Admitted` (bullet-structure rewrite needed for
+  the 3 new Affine-only constructors); restoration tracked as L2-β.
+  `Counterexample.bad_input_untypable_l1` generalised to `forall m,
+  ~ has_type_l1 m ...` — Qed under both indices.
+- **L3 — Echo / residue** (PRs #166, #167-line, parallel track):
+  `formal/Echo.v` scaffold with `Mode + LEcho + decoration-commuting
+  weakening`; `EchoR` residue + no-section irreversibility headline.
+  Decouples residue layer from typing layer; couples through L2's
+  thin-poset structure.
+- **Disambiguation, durable**: `ephapax-affine ≠ AffineScript`. They are
+  separate languages sharing only the typed-wasm target. Per `README`,
+  `CLAUDE.md`, `.machine_readable/disambiguation.a2ml` hooks landed via
+  PRs #152 / affinescript#393 / typed-wasm#73.
 
 ### Proof state (2026-05-20 → 2026-05-21)
 - **Coq `preservation` reduction campaign**: 910 open goals → 12 (98.7% reduction). PR chain:

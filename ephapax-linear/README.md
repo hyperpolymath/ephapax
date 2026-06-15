@@ -1,8 +1,38 @@
 # ephapax-linear
 
+> ## 🛑 First-read disambiguation
+>
+> This crate is part of **`hyperpolymath/ephapax`** — a research language for
+> compile-time WebAssembly memory safety, formally verified in Coq + Idris2.
+>
+> **`ephapax-linear` is *not* `hyperpolymath/affinescript`.** AffineScript is
+> a separate, unrelated language (JS/TS/ReScript successor, OCaml + ReScript
+> runtime). The two share only the compile target (`hyperpolymath/typed-wasm`).
+>
+> **Internal naming trap (important):** This crate implements *both*
+> sublanguages of Ephapax — `ephapax-linear` (strict core) AND `ephapax-affine`
+> (versatile prototyping companion). The name of the crate is `ephapax-linear`
+> for historical reasons, but **the affine grammar in this crate is NOT
+> `AffineScript`.** The lexical overlap of the word `affine` is a coincidence
+> of substructural-logic family terminology, not a project relationship. Do
+> not apply tactics, lessons, or framings from `hyperpolymath/affinescript`
+> here, and vice versa.
+>
+> Canonical disambiguation:
+> [`hyperpolymath/nextgen-languages/docs/disambiguation/ephapax-vs-affinescript.md`](https://github.com/hyperpolymath/nextgen-languages/blob/main/docs/disambiguation/ephapax-vs-affinescript.md).
+
 Standalone linear/affine discipline checker for the Ephapax language.
 
-## Dual Grammars
+> **Naming note.** This crate is called `ephapax-linear` for historical
+> reasons; it implements **both** L2 modalities (Linear and Affine). The
+> two are not different languages — they are two admissible-derivation
+> regimes over the same syntax and semantics. See
+> [`docs/vision/EPHAPAX-VISION.adoc`](../docs/vision/EPHAPAX-VISION.adoc)
+> for the dyad framing, and
+> [`formal/PRESERVATION-DESIGN.md §5`](../formal/PRESERVATION-DESIGN.md)
+> for the L2 layer in the four-layer architecture.
+
+## Two L2 Modalities
 
 This crate implements two **focused substructural grammars** — two views of the same ephapax syntax, each enforcing a different structural discipline:
 
@@ -40,4 +70,5 @@ check_expr(&expr, Discipline::Affine)?;
 
 ## License
 
-SPDX-License-Identifier: PMPL-1.0-or-later
+SPDX-License-Identifier: MPL-2.0
+<!-- Owner: Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk> -->

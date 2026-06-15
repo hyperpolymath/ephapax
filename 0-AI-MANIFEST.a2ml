@@ -13,19 +13,21 @@ This is the AI manifest for **ephapax**. It declares:
 
 ### Machine-Readable Metadata: `.machine_readable/6a2/` ONLY
 
-These 6 A2ML files MUST exist in `.machine_readable/6a2/` directory ONLY:
+These 7 A2ML files MUST exist in `.machine_readable/6a2/` directory ONLY:
 1. **STATE.a2ml** - Project state, progress, blockers
 2. **META.a2ml** - Architecture decisions, governance
 3. **ECOSYSTEM.a2ml** - Position in ecosystem, relationships
 4. **AGENTIC.a2ml** - AI agent interaction patterns
 5. **NEUROSYM.a2ml** - Neurosymbolic integration config
 6. **PLAYBOOK.a2ml** - Operational runbook
+7. **ANCHOR.a2ml** - Canonical authority + project recalibration trigger (SSG / cartridge / parent-relationship metadata; template from `hyperpolymath/standards`)
 
 ## CORE INVARIANTS
 
-1. **Formal Proof Integrity** - No `Admitted` in Coq or `believe_me`/`assert_total` in Idris2. All proofs MUST remain closed (67/67 Qed).
+1. **Formal Proof Integrity** — Coq proofs are layered per the four-layer redesign (`formal/PRESERVATION-DESIGN.md`). The legacy `preservation` in `Semantics.v` is provably FALSE per `Counterexample.v` (5 Qed lemmas) and remains `Admitted`. The L1 preservation chain (`Semantics_L1.v`) is in flight; explicit `Admitted` / `admit.` / `Axiom` sites are enumerated by `file:line` in `docs/proof-debt.adoc` per the standards#203 trusted-base reduction policy. Idris2 source has no `believe_me` / `assert_total` / `sorry`. ANY new escape hatch must be enumerated in `docs/proof-debt.adoc` before the trusted-base CI check will pass.
 2. **Dyadic Separation** - The boundary between affine and linear types must be strictly enforced.
-3. **SPDX Headers** - All source files MUST carry `SPDX-License-Identifier: PMPL-1.0-or-later`.
+3. **SPDX Headers** - All source files MUST carry `SPDX-License-Identifier: MPL-2.0`.
+// Owner: Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk>
 4. **Author Attribution** - Always "Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk>".
 
 ## REPOSITORY STRUCTURE

@@ -1,0 +1,473 @@
+// SPDX-License-Identifier: MPL-2.0
+// Owner: Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk>
+// Copyright (c) Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk>
+//
+// Ephapax stdlib — Streams with exactly-once message handles.
+//
+// Citations:
+//   Lamport, L. "Time, Clocks, and the Ordering of Events in a
+//   Distributed System." Communications of the ACM 21 (7): 558-565.
+//   July 1978.
+//
+//   Akidau, T.; Bradshaw, R.; Chambers, C.; Chernyak, S.;
+//   Fernandez-Moctezuma, R. J.; Lax, R.; McVeety, S.; Mills, D.;
+//   Perry, F.; Schmidt, E.; Whittle, S. "The Dataflow Model: A
+//   Practical Approach to Balancing Correctness, Latency, and Cost
+//   in Massive-Scale, Unbounded, Out-of-Order Data Processing."
+//   Proceedings of the VLDB Endowment 8 (12): 1792-1803. August
+//   2015. (§3 — "What/Where/When/How" of exactly-once delivery.)
+//
+// Exactly-once message delivery has historically required an
+// external runtime (idempotent receivers, two-phase commit between
+// broker and consumer, deduplication windows). Linear types let us
+// encode the message-acknowledgement protocol directly in the type
+// system:
+//
+//   * `produce` and `next` both return a LINEAR `MessageHandle!`.
+//   * The handle is consumed EXACTLY ONCE by `ack`, `fail`,
+//     `retry`, or `drop_with_dlq`.
+//   * Dropping the handle silently at region exit is a STATIC type
+//     error — the unconsumed-linear diagnostic at the close of the
+//     enclosing region/function says exactly "you forgot to
+//     acknowledge this message."
+//
+// The L1 region capability ensures a handle cannot escape its
+// engine-side scope; on rebalance / consumer death, any unacked
+// handle whose region has not closed is automatically redelivered,
+// so the "type error = no message loss" guarantee composes with
+// failure recovery.
+//
+// Pedigree thread:
+//   Lamport 1978 supplied the happened-before relation and the
+//   logical-clock vocabulary on which every later exactly-once
+//   protocol is defined. Akidau et al. 2015 §3 articulated the
+//   modern dataflow guarantee: each input record contributes
+//   exactly once to each output. Wadler 1990 ("Linear types can
+//   change the world!") sketched the linear-handle pattern for
+//   resources. Ephapax inherits all three lines.
+//
+// Fit in ephapax:
+//   This module abstracts over the manual `region r { let! (msg,
+//   h) = next@r(&mut c); process(&h, msg); ack(h) }` pattern. The
+//   L1 region capability is the source of bounded-redelivery:
+//   handles cannot outlive their consumer's region, so an
+//   unwinding panic at the region boundary cannot leave a half-
+//   processed message unacknowledged. L2 affine + L3 mandatory
+//   echo on `ack` are what make "every committed offset is the
+//   echo of exactly one processed handle" hold structurally.
+//
+// Companion stdlib modules to expect later:
+//   - `stdlib/Window.eph`    (D19 — windowed aggregation; depends
+//                             on this module's MessageHandle).
+//   - `stdlib/Consensus.eph` (D28 — 2PC / Paxos / Raft as a linear
+//                             protocol extension).
+//   - `stdlib/Wal.eph`       (D07 — write-ahead log via Linear
+//                             Echo; ties `ack` to durability).
+
+module Stream
+
+// --- Topic identifier ---
+//
+// A `Topic` names a logical stream at the broker. It is affine: a
+// topic descriptor carries no resource obligation; it is freely
+// dropped, copied (by reconstruction), and compared.
+//
+// Engines map this to whatever the underlying broker uses (Kafka
+// topic, Pulsar topic, Redpanda topic, in-memory channel, etc.);
+// `__intrinsic_stream_topic` is the resolution point.
+type Topic = Topic(String)
+
+// --- The message handle ---
+//
+// A `MessageHandle` is a LINEAR handle representing a single
+// in-flight message that has been delivered to this consumer but
+// not yet acknowledged. Its construction (`produce` on the
+// producer side, `next` on the consumer side) allocates a tracking
+// record in the broker's in-flight set; its consumption (`ack`,
+// `fail`, `retry`, or `drop_with_dlq`) is the moment at which the
+// broker advances or replays the offset.
+//
+// Linearity is the exactly-once guarantee:
+//
+//   * No-loss: every `MessageHandle!` is consumed exactly once, so
+//     "silently dropping" a message is unrepresentable. The
+//     unconsumed-linear diagnostic at the close of the enclosing
+//     scope IS the "you forgot to ack" error.
+//
+//   * No-duplication: a handle cannot be split (linearity forbids
+//     copying), so the same `ack` cannot fire twice for the same
+//     message from inside the type system.
+//
+//   * No-reordering-of-finalisation: `ack` consumes the handle
+//     before the next statement runs, so the broker observes
+//     finalisations in program order on each consumer thread.
+//
+// Capability story: a `MessageHandle` is bound to the L1 region
+// active at its construction site. Calling `ack` from a deeper
+// region is well-typed; calling it from a SHALLOWER region is
+// rejected by region inference (the handle would outlive its
+// capability and the broker's in-flight tracking).
+type MessageHandle = MessageHandle(i64)
+
+// --- Outcome of a finalised handle ---
+//
+// `ack`, `fail`, and `drop_with_dlq` collapse the linear-handle
+// lifecycle into a values-only result. `Acked` reports a
+// successful commit of the offset; `Failed(reason)` reports an
+// engine-side failure to commit (network partition, broker
+// rejection, etc.); `Retried` indicates the handle was re-queued
+// rather than acknowledged.
+//
+// Affine: outcomes hold no resource — the handle has already been
+// consumed by the time an `AckResult` exists.
+type AckResult =
+    | Acked
+    | Failed(String)
+    | Retried
+
+// --- Consumer handle ---
+//
+// A `Consumer` is a LINEAR handle representing a subscription to a
+// topic under a particular consumer group. Its construction
+// (`consumer`) registers with the broker; its consumption
+// (`close`) deregisters and releases the broker-side resources.
+//
+// Linearity ensures a consumer is never silently abandoned: the
+// unconsumed-linear diagnostic at region exit says "you forgot to
+// close the consumer," which on most brokers also means "you
+// leaked a session and your partitions won't rebalance promptly."
+//
+// L1 capability: the consumer is bound to the region in which it
+// was opened; `close` must fire in the same region or a deeper
+// one.
+type Consumer = Consumer(i64)
+
+// --- Topic construction ---
+//
+// `topic` resolves a logical name to a `Topic` descriptor. It is a
+// pure value-level operation; no broker round-trip fires until a
+// producer or consumer is opened against the topic.
+fn topic(name: String) -> Topic {
+    Topic(name)
+}
+
+// --- Producer side: produce ---
+//
+// `produce` writes a single message to the topic and returns a
+// LINEAR handle representing the in-flight publish. The handle
+// MUST be passed to `ack` (the publish acknowledged by the broker)
+// or `fail` (the publish rejected) exactly once.
+//
+// Type parameter `A` is the message payload's shape; engine-level
+// serialisation is delegated to `__intrinsic_stream_produce`,
+// which fails by returning a handle whose subsequent `ack` returns
+// `Failed`. (A statically-typed serialiser surface is deferred to
+// `stdlib/Serialize.eph`.)
+//
+// L1 capability: the returned handle is bound to the active region
+// at the call site. The producer-side broker reservation is
+// released when the handle is consumed.
+fn produce<A>(t: &Topic, msg: A) -> MessageHandle! {
+    __intrinsic_stream_produce(t, msg)
+}
+
+// --- Acknowledgement: ack ---
+//
+// Commits the message's offset (consumer side) or the publish
+// (producer side), and consumes the linear handle. After `ack`
+// returns, the handle binding is gone (consumed); reusing it is a
+// static type error (linear use-after-consume).
+//
+// L3 mandatory echo: every `ack` emits an offset-commit echo into
+// the L3 channel — this is the structural witness that "the
+// processing of this message is observably complete." A future
+// revision will expose the echo to callers so they can chain
+// downstream effects on it.
+fn ack(h: MessageHandle!) -> AckResult {
+    __intrinsic_stream_ack(h)
+}
+
+// --- Acknowledgement: fail ---
+//
+// Marks the message as definitively failed (a poison pill, an
+// uncatchable application error), and consumes the linear handle.
+// The broker is told NOT to redeliver — typically the message is
+// routed to a dead-letter topic via the broker's own DLQ
+// configuration, or simply discarded.
+//
+// Use `drop_with_dlq` (below) when the application wants to
+// explicitly route the failed message to a named DLQ topic;
+// `fail` defers DLQ routing to the broker.
+fn fail(h: MessageHandle!, reason: String) -> AckResult {
+    __intrinsic_stream_fail(h, reason)
+}
+
+// --- Acknowledgement: retry ---
+//
+// Re-queues the message at the broker (consumer side) and consumes
+// the linear handle, returning a FRESH linear handle representing
+// the new in-flight slot. The fresh handle has its own region
+// binding (the active region at the `retry` call site) and must in
+// turn be consumed.
+//
+// Use case: the application detected a transient failure (engine
+// timeout, downstream service unavailable) and wants the broker
+// to redeliver after `attempts` further attempts. After the
+// `attempts` budget is exhausted, the broker promotes the message
+// to a dead-letter topic per its own policy.
+//
+// Linearity is preserved transitively: the chain
+// `next → process → retry → process → ack` consumes the original
+// handle exactly once and each fresh handle exactly once.
+fn retry(h: MessageHandle!, attempts: i32) -> MessageHandle! {
+    __intrinsic_stream_retry(h, attempts)
+}
+
+// --- Acknowledgement: drop_with_dlq ---
+//
+// Routes the failed message to the named dead-letter topic and
+// consumes the linear handle. Returns `Acked` on successful DLQ
+// publish, `Failed(reason)` on DLQ-publish failure.
+//
+// Use this when the application wants explicit control over DLQ
+// routing (e.g. a per-tenant DLQ topic) rather than the broker's
+// default DLQ policy.
+fn drop_with_dlq(h: MessageHandle!, dlq: &Topic) -> AckResult {
+    __intrinsic_stream_drop_with_dlq(h, dlq)
+}
+
+// --- Consumer side: consumer ---
+//
+// Opens a subscription to `t` under the consumer group `group`.
+// Returns a LINEAR handle representing the broker-side session.
+// Multiple consumers in the same group share the topic's
+// partitions; the broker is responsible for partition assignment
+// and rebalancing.
+//
+// Linearity: the returned `Consumer!` MUST be passed to `close`
+// exactly once. Forgetting to close is a static type error and a
+// rebalancing hazard.
+fn consumer(t: &Topic, group: String) -> Consumer! {
+    __intrinsic_stream_consumer(t, group)
+}
+
+// --- Consumer side: close ---
+//
+// Deregisters the consumer from the broker, releases the session,
+// and consumes the linear handle. Any in-flight `MessageHandle!`
+// values produced from this consumer that have not yet been
+// acknowledged are automatically returned to the broker for
+// redelivery (the broker's lease expires when the session closes).
+//
+// L1 capability: `close` consumes the consumer at the active
+// region. A consumer cannot escape its construction region by
+// design.
+fn close(c: Consumer!) -> () {
+    __intrinsic_stream_close(c)
+}
+
+// --- Consumer side: next ---
+//
+// Polls for the next message on the consumer's partition set.
+// Returns `Some((payload, handle))` when a message is available
+// and `None` when the consumer's poll deadline expires without a
+// message (the engine-level timeout is engine-specific; see
+// `__intrinsic_stream_next` for tuning).
+//
+// The returned `MessageHandle!` is LINEAR and MUST be consumed
+// before exiting the region. Not consuming it is a static type
+// error — which is precisely the exactly-once guarantee: an
+// unconsumed handle CANNOT silently advance the offset, so the
+// broker will redeliver on the next poll or on rebalance.
+//
+// `&mut Consumer` is an exclusive borrow: a consumer's offset
+// cursor is mutable session state, so two concurrent `next` calls
+// against the same consumer are forbidden. Multiple consumers in
+// the same group is the supported parallelism story.
+//
+// Type parameter `A` is the row-shape the caller expects;
+// engine-level row decoding is delegated to
+// `__intrinsic_stream_next`, which fails with `None` on shape-
+// mismatch. A future revision will surface decode errors via
+// `Result<(A, MessageHandle!), DecodeError>`.
+fn next<A>(c: &mut Consumer) -> Option<Pair<A, MessageHandle!>> {
+    __intrinsic_stream_next(c)
+}
+
+// --- Convenience: exactly_once ---
+//
+// Higher-order sugar over the manual `next → process → ack` arc.
+// Borrows the handle to `body` for processing; if `body` returns
+// `Ok(a)`, calls `ack` on the handle and yields `Ok(a)`; if
+// `body` returns `Err(e)`, calls `fail` on the handle with a
+// stringified reason and yields `Err(e)`. Either way the linear
+// handle is consumed.
+//
+// Atomicity guarantee: every control path through `exactly_once`
+// consumes the handle exactly once. The linear-checker proves this
+// at the call site by inspecting the wrapper's body.
+//
+// Note on `body`'s borrow: `body` receives `&MessageHandle`
+// (shared) so it can inspect handle metadata (offset, partition,
+// timestamp) without consuming the handle. The wrapper retains
+// ownership through the borrow and consumes the handle after
+// `body` returns.
+//
+// Idiomatic usage:
+//
+//   let outcome = exactly_once(h, (h_ref) => {
+//     let _ = process_payload(h_ref, &payload)
+//     Ok(())
+//   })
+fn exactly_once<A, E>(
+    h: MessageHandle!,
+    body: (&MessageHandle) -> Result<A, E>
+) -> Result<A, E> {
+    match body(&h) of
+        | Ok(a) => {
+            let _ = ack(h)
+            Ok(a)
+        }
+        | Err(e) => {
+            let _ = fail(h, "exactly_once: body returned Err")
+            Err(e)
+        }
+    end
+}
+
+// --- Pattern guide ---
+//
+// 1. Manual form (region + let!) — Aqueduct-style consumer loop:
+//
+//    fn consume_one(c: &mut Consumer) -> Result<(), String> {
+//        region r {
+//            match next(c) of
+//                | Some(Pair(msg, h)) => {
+//                    let outcome = process(&h, msg)
+//                    match outcome of
+//                        | Ok(_)  => { let _ = ack(h); Ok(()) }
+//                        | Err(e) => { let _ = fail(h, e); Err(e) }
+//                    end
+//                }
+//                | None => Ok(())
+//            end
+//        }
+//    }
+//
+//    Linearity guarantees: forgetting to call `ack`/`fail` on `h`
+//    along any control path is rejected at compile time; the
+//    unconsumed-linear diagnostic names `h` and points at the
+//    region boundary. THIS IS THE EXACTLY-ONCE PROPERTY.
+//
+// 2. Sugar form (exactly_once) — for the common
+//    "process-and-ack-on-Ok / fail-on-Err" idiom:
+//
+//    fn consume_one(c: &mut Consumer) -> Result<(), String> {
+//        region r {
+//            match next(c) of
+//                | Some(Pair(msg, h)) =>
+//                    exactly_once(h, (h_ref) => process(h_ref, msg))
+//                | None => Ok(())
+//            end
+//        }
+//    }
+//
+//    The wrapper collapses the two outcomes (ack-on-Ok and fail-
+//    on-Err) into a single `Result`; the linear handle threads
+//    through invisibly. A future macro-style revision may chain
+//    this with `next` directly: `for_each_message(c, body)`.
+//
+// 3. Retry form — transient-failure recovery:
+//
+//    fn consume_with_retry(c: &mut Consumer) -> Result<(), String> {
+//        region r {
+//            match next(c) of
+//                | Some(Pair(msg, h)) => {
+//                    let outcome = process(&h, msg)
+//                    match outcome of
+//                        | Ok(_)            => { let _ = ack(h); Ok(()) }
+//                        | Err("transient") => {
+//                            let! h2 = retry(h, 3)
+//                            let _ = fail(h2, "give up after retry budget")
+//                            Err("retry budget exhausted")
+//                        }
+//                        | Err(e) => { let _ = fail(h, e); Err(e) }
+//                    end
+//                }
+//                | None => Ok(())
+//            end
+//        }
+//    }
+//
+//    Each branch consumes a linear handle exactly once; the
+//    `retry → fail` chain shows handle threading through a fresh
+//    linear binding.
+//
+// 4. Dead-letter form — explicit DLQ routing:
+//
+//    fn consume_with_dlq(c: &mut Consumer, dlq: &Topic)
+//        -> Result<(), String>
+//    {
+//        region r {
+//            match next(c) of
+//                | Some(Pair(msg, h)) => {
+//                    let outcome = process(&h, msg)
+//                    match outcome of
+//                        | Ok(_)  => { let _ = ack(h); Ok(()) }
+//                        | Err(_) => { let _ = drop_with_dlq(h, dlq); Ok(()) }
+//                    end
+//                }
+//                | None => Ok(())
+//            end
+//        }
+//    }
+//
+// 5. Producer form — exactly-once publish:
+//
+//    fn publish<A>(t: &Topic, msg: A) -> Result<(), String> {
+//        region r {
+//            let! h = produce(t, msg)
+//            match ack(h) of
+//                | Acked       => Ok(())
+//                | Failed(e)   => Err(e)
+//                | Retried     => Err("unexpected Retried on produce")
+//            end
+//        }
+//    }
+
+// --- Future work (not in this slice) ---
+//
+// D19. Windowed aggregation: `Window<A>` becomes a region-scoped
+//      collector that consumes `MessageHandle!` values to advance
+//      its watermark. The exactly-once property of this module
+//      lifts to exactly-once aggregation: every input handle
+//      contributes to exactly one window-emit. Pedigree: Akidau
+//      et al. (VLDB 2015) §4-§5.
+//
+// D28. Distributed consensus as a linear protocol: 2PC / Paxos /
+//      Raft message exchanges become typed protocol sessions with
+//      a linear `Round!` handle that must be `committed` or
+//      `aborted` per round. The MessageHandle pattern here is the
+//      seed of the larger protocol-as-type story. Pedigree:
+//      Lamport 1998 ("The Part-Time Parliament"), Ongaro &
+//      Ousterhout 2014 (Raft).
+//
+// D07. WAL via Linear Echo: durability becomes type-visible. An
+//      `ack` on a producer handle produces a `LogEcho!` linear
+//      obligation that MUST be consumed by `flush(echo)`; losing
+//      the echo is the "you forgot to fsync" diagnostic. This
+//      ties exactly-once delivery to exactly-once durability.
+//      Pedigree: Mohan et al. ARIES (1992).
+//
+// D09. Provenance: thread a why-provenance value through `next`
+//      and `produce` so that "which input messages contributed to
+//      this output message?" is type-derivable. Pedigree: Buneman
+//      et al. (TODS 2001) and Green et al. (PODS 2007).
+//
+// Coq mechanisation: out of scope for this PR. A
+// `formal/Stream.v` follow-up would mechanise (a) the linear-
+// finalisation lemma (every `produce` / `next` handle is reachable
+// by exactly one `ack` / `fail` / `retry → ... → ack` / `drop_
+// with_dlq`) and (b) the exactly_once soundness theorem (every
+// `Ok(a)` outcome witnesses exactly one `ack`, every `Err(e)`
+// outcome witnesses exactly one `fail`).

@@ -1,5 +1,29 @@
-(* SPDX-License-Identifier: PMPL-1.0-or-later *)
+(* SPDX-License-Identifier: MPL-2.0 *)
+// Owner: Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk>
 (* SPDX-FileCopyrightText: 2025-2026 Jonathan D.A. Jewell *)
+
+(**
+
+  *********************************************************************
+  ***  🛑 ARCHAEOLOGY -- DO NOT EXTEND                                ***
+  ***                                                                ***
+  ***  This is the LEGACY typing judgment. `formal/Counterexample.v` ***
+  ***  depends on its falsity for the regression theorem -- the      ***
+  ***  counterexample shows that this judgment types a configuration ***
+  ***  that the operational semantics steps to an untypable state.   ***
+  ***                                                                ***
+  ***  Do NOT patch. Do NOT close gaps. Do NOT extend with new       ***
+  ***  rules to "fix" the unsoundness.                               ***
+  ***                                                                ***
+  ***  Active typing judgment is `formal/TypingL1.v` (the L1         ***
+  ***  redesign: modality-indexed `has_type_l1`, R-threaded          ***
+  ***  capability environment).                                      ***
+  ***                                                                ***
+  ***  See `STATUS.adoc`, `PROOF-NEEDS.md`, and                      ***
+  ***  `formal/PRESERVATION-DESIGN.md`.                              ***
+  *********************************************************************
+
+*)
 
 (** * Ephapax Typing Rules (De Bruijn)
 
@@ -31,14 +55,20 @@ From Ephapax Require Import Syntax.
 
 Fixpoint free_regions (T : ty) : list region_name :=
   match T with
-  | TBase _          => []
-  | TString r        => [r]
-  | TRef _ T'        => free_regions T'
-  | TFun T1 T2       => free_regions T1 ++ free_regions T2
-  | TProd T1 T2      => free_regions T1 ++ free_regions T2
-  | TSum T1 T2       => free_regions T1 ++ free_regions T2
-  | TRegion r T'     => r :: free_regions T'
-  | TBorrow T'       => free_regions T'
+  | TBase _                  => []
+  | TString r                => [r]
+  | TRef _ T'                => free_regions T'
+  | TFun T1 T2               => free_regions T1 ++ free_regions T2
+  | TProd T1 T2              => free_regions T1 ++ free_regions T2
+  | TSum T1 T2               => free_regions T1 ++ free_regions T2
+  | TRegion r T'             => r :: free_regions T'
+  | TBorrow T'               => free_regions T'
+  | TEcho T'                 => free_regions T'
+  | TFunEff T1 T2 R_in R_out =>
+      (** Phase D slice 1: free regions of [TFunEff] include those of
+          the argument and return types AND the input/output region
+          environments that annotate the body's R-flow. *)
+      free_regions T1 ++ free_regions T2 ++ R_in ++ R_out
   end.
 
 (* Note: We don't need a separate determinism lemma for free_regions

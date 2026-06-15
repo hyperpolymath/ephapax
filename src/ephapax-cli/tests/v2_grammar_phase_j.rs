@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: PMPL-1.0-or-later
+// SPDX-License-Identifier: MPL-2.0
+// Owner: Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk>
 //
 // Phase J regressions for hyperpolymath/ephapax#43. Closes the bridge.eph
 // integration target — the original benchmark of "the v2 grammar work

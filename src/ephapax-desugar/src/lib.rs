@@ -1,5 +1,6 @@
 #![forbid(unsafe_code)]
-// SPDX-License-Identifier: PMPL-1.0-or-later
+// SPDX-License-Identifier: MPL-2.0
+// Owner: Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk>
 // SPDX-FileCopyrightText: 2026 Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk>
 
 //! Desugaring Pass: Surface AST → Core AST
@@ -454,7 +455,10 @@ impl Desugarer {
                 body: Box::new(self.desugar_expr(body)?),
             },
 
-            SurfaceExprKind::Borrow(inner) => ExprKind::Borrow(Box::new(self.desugar_expr(inner)?)),
+            SurfaceExprKind::Borrow { inner, mutable } => ExprKind::Borrow {
+                inner: Box::new(self.desugar_expr(inner)?),
+                mutable: *mutable,
+            },
             SurfaceExprKind::Deref(inner) => ExprKind::Deref(Box::new(self.desugar_expr(inner)?)),
             SurfaceExprKind::Drop(inner) => ExprKind::Drop(Box::new(self.desugar_expr(inner)?)),
             SurfaceExprKind::Copy(inner) => ExprKind::Copy(Box::new(self.desugar_expr(inner)?)),
@@ -553,7 +557,10 @@ impl Desugarer {
                 name: name.clone(),
                 inner: Box::new(self.desugar_ty(inner)?),
             }),
-            SurfaceTy::Borrow(inner) => Ok(Ty::Borrow(Box::new(self.desugar_ty(inner)?))),
+            SurfaceTy::Borrow { inner, mutable } => Ok(Ty::Borrow {
+                inner: Box::new(self.desugar_ty(inner)?),
+                mutable: *mutable,
+            }),
             SurfaceTy::Var(v) => Ok(Ty::Var(v.clone())),
             SurfaceTy::List(inner) => Ok(Ty::List(Box::new(self.desugar_ty(inner)?))),
             SurfaceTy::Tuple(elements) => {

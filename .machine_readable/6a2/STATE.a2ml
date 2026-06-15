@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: PMPL-1.0-or-later
+# SPDX-License-Identifier: MPL-2.0
 # Copyright (c) 2026 Jonathan D.A. Jewell (hyperpolymath) <j.d.a.jewell@open.ac.uk>
 #
 # STATE.a2ml v2 — Thin Session Journal for ephapax
@@ -6,28 +6,108 @@
 
 @state(version="2.0"):
 phase: "implementation"
-next_action: "Close residual ~29 open goals in formal/Semantics.v preservation theorem (see formal/PRESERVATION-HANDOFF.md for per-case checklist)"
-last_action: "Rust/SPARK ABI seam landed (PR#95); preservation proof now Admitted with honest open-goal count after 910 -> 29 reduction (PR#102)"
-updated: 2026-05-20T19:00:00Z
+next_action: "Phase D slice 4 Phase 3b Stages 2-4 (#240/#241/#242): Stage 1 (both 1a + 1b) complete. Stages 2-4 sequenced per the owner-approved 4-stage plan: Stage 2 (#240) ELam annotation extension — independent of Stage 1, ships when prioritised; Stage 3 (#241) CPS + relaxed Phase 3b — blocked on Stage 2; Stage 4 (#242) compound non-linear + unconditional preservation_l2 — blocked on Stage 3. Stage 4's destination collapses Stage 1b's three preconditions (P1 = tfuneff_lambda_free, P2 = regions_introduced_by ⊆ R_in_v, P3 = expr_closed_below 0 v) once typing-derived closure invariants land. Anti-patterns to refuse (per CLAUDE.md owner directive): no `Admitted`; no touching `Semantics.v` / `Typing.v` / `Counterexample.v`; no closure of residual `Semantics_L1.v` admits — strictly NEW infrastructure orthogonal to legacy. Coqc 8.18.0 is the only authority."
+last_action: "Proof + stdlib wave 2026-06-01 → 02 landed (13 PRs): canonical-forms L1 modality-polymorphic (#274, P43, 7 lemmas axiom-free, prerequisite for progress_l1/P42); Print Assumptions audit framework across L1 + L3 keystones (#270, closes P10/P32); step_pop_disjoint_from_type_l1 stated + EASY cases Qed-closed (#280, P06, HARD cases blocked on #240/#241/#242); Rust↔Coq is_linear_ty truth-table mechanical assertion (#273, P28); OwnershipKind from_byte/to_byte round-trip (#277, P59, typed-wasm ADR-0002 carrier handshake); 4 stdlib DB-theory additions — Transactions as linear scopes (#275, D04), Allen's interval algebra (#272, D11), MessageHandle as linear typestate (#279, D17), monoidal aggregates (#281, D18); doc truth-restore + banned-preservation framing buried (#263); cluster-D L3/L4 status meander (#278); Track C panic-attack triage (#271); coq-build noble apt CI fix (#282, unblocks ~5 PRs); R5b standards SHA bump (#276). Plus CHANGELOG sync (#283). Build oracle clean across all 12 .v files. Print Assumptions: canonical_*_l1_m + most new lemmas zero-axiom; expected residuals (preservation_l1, region_liveness_at_split_l1_gen, region_shrink_preserves_typing_l1_gen_m) tracked. Stages 2-4 (#240/#241/#242) still un-touched. Wiki Proof-status.md refreshed 2026-06-02."
+updated: 2026-06-02T13:30:00Z
+
+@directive(source="owner", date="2026-05-27", canonical="CLAUDE.md"):
+# Captured durable directive — preservation work is the four-layer redesign,
+# NOT closure of the legacy theorem. Pre-discovery patching paths are
+# closed.
+#
+# FRAME (read first): ephapax is GESTATING, not dead — a deliberate second
+# draft on two tracks (grammar + proof), both landing. See ../../V1-TO-V2.adoc.
+# The DO-NOTs below fence off exactly TWO v1 artefacts (the falsified legacy
+# preservation theorem; the superseded flat grammar). Everything in v2 is
+# OPEN and tractable: L1 structural admits, unconditional preservation_l3,
+# the v2 grammar phases, L4 semantics. Do NOT read these guardrails as
+# "nothing to do here" — engage with the v2 work.
+#
+# DO NOT:
+#   - close `Theorem preservation` in formal/Semantics.v (provably false)
+#   - extend Semantics.v with closure-support lemmas (Lemma B variants,
+#     step_preserves_type_at_pre, step_output_context_eq_at_pre,
+#     region_add_typing_for_non_values, strengthened subst variants)
+#   - close residual Semantics_L1.v axioms via proof tricks
+#   - follow any pre-2026-05-26 "preservation closure plan"
+#   - patch the legacy Typing.v judgment
+#
+# DO:
+#   - read formal/PRESERVATION-DESIGN.md first
+#   - work per-layer: preservation_l1, preservation_l2, etc.
+#   - escalate before patching when a side-condition is needed
+#
+# Anti-pattern detector: sibling-region-disjointness side conditions,
+# region-weakening predicates indexed on syntactic shape, admit-shuffling
+# between Semantics.v and a new lemma. Any of these → escalate.
+#
+# Companion memory: feedback_ephapax_no_patching_legacy_preservation.md
+@end
 
 @blockers:
-# Formal proofs NOT fully closed (earlier "FULLY CLOSED (67 Qed, 0 Admitted)"
-# claim was wrong — `coqc` 8.18.0 rejects `Qed.` on preservation).
-#   - formal/Semantics.v `preservation`: Admitted (down from 910 to ~29 open
-#     goals via remember-cfg pattern, PR#102). The prior in-file `Qed.` was
-#     rejected with "Attempt to save an incomplete proof"; the build-oracle
-#     is now source of truth. PR#92 marked it Admitted and reverted PR#87's
-#     propagated "Qed, closed 2026-04-27" claim from ROADMAP+PROOF-NEEDS.
-#   - src/formal/Ephapax/Formal/RegionLinear.idr `regionSafetyExtract` /
-#     `noGCExtract`: vacuous wrappers (body is the input unchanged); ROADMAP
-#     citing them as "regionSafetyTheorem"/"noGCTheorem" complete is
-#     overstated. Honest E3/E4 obligations stated in src/abi/Ephapax/ABI/
-#     Invariants.idr (PR#95-MERGED).
-#   - src/abi/Ephapax/ABI/Invariants.idr E1-E6: E1 (preservation) OWED;
-#     E2 (linear consumption) PARTIAL (head form discharged via
-#     splitLinearCoverage PR#85); E3 (region no-escape) PARTIAL (narrow
-#     form discharged via noEscapeTheorem); E4 (no-runtime-GC) OWED;
-#     E5 (WASM compilation) OWED; E6 (IR lowering) OWED.
-# Estate proof-debt arm: standards#134 (OPEN).
+# Layered work in progress; legacy preservation deliberately not addressed.
+#
+# Current state (verified by coqc 8.18 on main, post-#176/#177):
+#   - formal/Semantics.v `preservation`: Admitted — PROVABLY FALSE per
+#     Counterexample.v (five Qed lemmas). NOT to be closed.
+#   - formal/Semantics.v `step_preserves_type`, `step_output_context_eq`,
+#     and their at_pre helpers are Qed but support legacy-preservation
+#     closure attempts that are now ruled out. Retained for diagnostic
+#     value; no new lemmas in this class.
+#   - formal/Semantics_L1.v `preservation_l1`: stated `forall m`; body
+#     Admitted (lambda-rigidity gap, closes at Phase D / L2 effect-typed
+#     TFun per PRESERVATION-DESIGN.md §5.1). 5 inner `admit.` cases
+#     (3 distinct structural blockers + 2 mechanical mirrors) covered
+#     by 3 outer Admitted markers. Zero new debt introduced post-L2.
+#   - formal/Semantics_L1.v `preservation_l3`: Qed, both modes, slice 4
+#     of L3 wiring landed 2026-05-27 (PR #196).
+#   - formal/TypingL1.v: m-indexed (`has_type_l1 m R G e T R' G'`),
+#     `linear_to_affine` Qed zero axioms; T_Echo_L1 / T_Observe_L1 +
+#     parallel T_*_Echo rules landed for L3 wiring;
+#     T_Lam_L1_*_Eff (slice 2) produce TFunEff lambdas; T_App_L1
+#     requires TFun (not TFunEff), so TFunEff lambdas are inert at
+#     L1 — their elimination form lives at L2 via T_App_L2_Eff
+#     (PR #209, option 5a).
+#   - formal/TypingL2.v: post-#209/#211 has TWO constructors —
+#     L2_lift_l1 (any L1 derivation) and T_App_L2_Eff (effect-typed
+#     application, Phase D slice 3). project_l2_to_l1 now
+#     option-returning; weaken_modality proof by structural
+#     induction. Post-#211: `preservation_l2_via_l1` +
+#     `preservation_l2_lift_case` corollary land the L2_lift_l1
+#     case of preservation_l2 (depends transparently on
+#     `Semantics_L1.preservation_l1` admit via Print Assumptions).
+#     Full preservation_l2 over has_type_l2 blocked at T_App_L2_Eff
+#     β-case on `subst_typing_gen_l1_m`'s linearity precondition.
+#     All Qed, zero new axioms in TypingL2.v.
+#   - formal/Echo.v: K-free L3 calculus, no postulates, 12 Qed.
+#   - formal/Modality.v: thin-poset Linear ≤ Affine, all Qed.
+#   - formal/L4.v: ProgramMode labelling discipline, Definitions only,
+#     no theorems. Phase A landed 2026-05-28.
+#
+# Other proof-debt items (out of preservation scope):
+#   - src/abi/Ephapax/ABI/Invariants.idr E1-E6: E1 (preservation) OWED at
+#     the Idris2 layer too; E2/E3 PARTIAL; E4/E5/E6 OWED.
+#   - 30 unsafe Rust blocks; per-block contract audit out of scope.
+@end
+
+@artifacts:
+# Layered files on main (post-slice-4 + Phase A):
+#   formal/Counterexample.v   — 5 Qed lemmas; preservation FALSE
+#   formal/Echo.v             — L3 calculus, K-free, 12 Qed
+#   formal/Modality.v         — L2 thin poset, all Qed
+#   formal/TypingL1.v         — m-indexed has_type_l1 + Echo/Observe rules
+#   formal/Semantics_L1.v     — 26 Qed, 3 outer Admitted (5 inner admit.)
+#   formal/TypingL2.v         — L2_lift_l1 + T_App_L2_Eff +
+#                                preservation_l2_via_l1 (Phase D slice 4 partial)
+#   formal/L4.v               — ProgramMode labelling discipline (Phase A)
+#   formal/L4-DYADIC.md       — L4 design doc
+#   formal/SUBST-LEMMA-GENERALIZATION-DESIGN.md
+#                              — Phase D slice 4 follow-on 5-phase plan
+#                                + 4 open questions for owner (PR #213)
+# Doc lockdown:
+#   CLAUDE.md                       — owner directive §
+#   formal/PRESERVATION-DESIGN.md   — CANONICAL banner
+#   formal/PRESERVATION-HANDOFF.md  — ARCHAEOLOGY ONLY banner
+#   ROADMAP.adoc                    — closure-plan section removed
 @end
 @end

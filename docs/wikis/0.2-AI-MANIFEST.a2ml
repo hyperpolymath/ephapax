@@ -1,0 +1,18 @@
+# SPDX-License-Identifier: MPL-2.0
+// Owner: Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk>
+---
+### [META]
+id: "wikis-track"
+level: 2
+parent: "../0.1-AI-MANIFEST.a2ml"
+
+---
+### [AI_MANIFEST]
+description: |
+  Long-form collaborative documentation and project knowledge base.
+  This directory mirrors the content structure of the project wiki.
+
+invariants:
+  - "Primary wiki format MUST be Markdown (.md) or AsciiDoc (.adoc)"
+  - "Ephapax disambiguation notice MUST appear in Home.md"
+  - "Proof status MUST reflect current four-layer redesign state"

@@ -1,10 +1,15 @@
-// SPDX-License-Identifier: PMPL-1.0-or-later
+// SPDX-License-Identifier: MPL-2.0
+// Owner: Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk>
 // Copyright (c) 2026 Jonathan D.A. Jewell (hyperpolymath) <j.d.a.jewell@open.ac.uk>
-= Agent Instructions
+= Bot Directives
 :toc: preamble
 
-Methodology-aware configuration for AI agents. Read by any AI agent
-(Claude, Gemini, Copilot, etc.) at session start.
+Methodology-aware configuration for AI agents and bots. Read by any AI
+agent (Claude, Gemini, Copilot, etc.) or estate bot at session start.
+
+NOTE: This directory was renamed `agent_instructions/` -> `bot_directives/`
+to align with the estate-wide naming convention. Contents (methodology,
+coverage, debt, lessons) are unchanged.
 
 == Files
 
@@ -32,8 +37,8 @@ Methodology-aware configuration for AI agents. Read by any AI agent
 == Relationship to Other Files
 
 * `AGENTIC.a2ml` says WHAT agents can do (permissions, gating)
-* `agent_instructions/` says HOW agents should work (methodology)
-* `bot_directives/` says what the gitbot-fleet does (fleet-specific)
+* This directory (`bot_directives/`) says HOW agents should work — methodology, coverage, debt (the renamed methodology layer)
+* Per-bot fleet directives (hypatia, gitbot-fleet, .git-private-farm) are not yet populated — they will be added here as named files (deferred; see issue)
 * `CLAUDE.md` says how Claude specifically should work (Claude-specific)
 
 == Reference

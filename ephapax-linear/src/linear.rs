@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: PMPL-1.0-or-later
+// SPDX-License-Identifier: MPL-2.0
+// Owner: Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk>
 // SPDX-FileCopyrightText: 2026 Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk>
 
 //! Linear Discipline Checker
@@ -288,7 +289,7 @@ impl LinearChecker {
             }
 
             // --- Borrow/Deref: walk inner ---
-            ExprKind::Borrow(inner) | ExprKind::Deref(inner) => {
+            ExprKind::Borrow { inner, .. } | ExprKind::Deref(inner) => {
                 self.walk_expr(inner);
             }
 

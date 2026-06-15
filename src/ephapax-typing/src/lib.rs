@@ -1,5 +1,6 @@
 #![forbid(unsafe_code)]
-// SPDX-License-Identifier: PMPL-1.0-or-later
+// SPDX-License-Identifier: MPL-2.0
+// Owner: Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk>
 // SPDX-FileCopyrightText: 2025-2026 Jonathan D.A. Jewell
 
 //! Ephapax Type Checker (Dyadic Design)
@@ -410,7 +411,10 @@ fn subst_tys(ty: &Ty, subst: &HashMap<SmolStr, Ty>) -> Ty {
             name: name.clone(),
             inner: Box::new(subst_tys(inner, subst)),
         },
-        Ty::Borrow(inner) => Ty::Borrow(Box::new(subst_tys(inner, subst))),
+        Ty::Borrow { inner, mutable } => Ty::Borrow {
+            inner: Box::new(subst_tys(inner, subst)),
+            mutable: *mutable,
+        },
         Ty::ForAll { var, body } => {
             if subst.contains_key(var) {
                 ty.clone() // shadowed by binder
@@ -869,7 +873,15 @@ impl TypeChecker {
             {
                 self.unify(s, i1, i2)
             }
-            (Ty::Borrow(i1), Ty::Borrow(i2)) => self.unify(s, i1, i2),
+            (Ty::Borrow { inner: i1, mutable: m1 }, Ty::Borrow { inner: i2, mutable: m2 }) => {
+                if m1 != m2 {
+                    return Err(self.at(s, TypeError::TypeMismatch {
+                        expected: a.clone(),
+                        found: b.clone(),
+                    }));
+                }
+                self.unify(s, i1, i2)
+            }
             (Ty::List(i1), Ty::List(i2)) => self.unify(s, i1, i2),
             (Ty::Tuple(e1), Ty::Tuple(e2)) if e1.len() == e2.len() => {
                 for (t1, t2) in e1.iter().zip(e2.iter()) {
@@ -913,7 +925,7 @@ impl TypeChecker {
                 else_branch,
             } => self.check_if(s, cond, then_branch, else_branch),
             ExprKind::Region { name, body } => self.check_region(s, name, body),
-            ExprKind::Borrow(inner) => self.check_borrow(s, inner),
+            ExprKind::Borrow { inner, mutable } => self.check_borrow(s, inner, *mutable),
             ExprKind::Drop(inner) => self.check_drop(s, inner),
             ExprKind::Copy(inner) => self.check_copy(s, inner),
             ExprKind::StringLen(inner) => self.check_string_len(s, inner),
@@ -1189,7 +1201,7 @@ impl TypeChecker {
         Ok(body_ty)
     }
 
-    fn check_borrow(&mut self, s: Span, inner: &Expr) -> Result<Ty, SpannedTypeError> {
+    fn check_borrow(&mut self, s: Span, inner: &Expr, mutable: bool) -> Result<Ty, SpannedTypeError> {
         match &inner.kind {
             ExprKind::Var(name) => {
                 let ty = self
@@ -1197,11 +1209,11 @@ impl TypeChecker {
                     .lookup(name)
                     .ok_or_else(|| self.at(s, TypeError::UnboundVariable(name.clone())))?
                     .clone();
-                Ok(Ty::Borrow(Box::new(ty)))
+                Ok(Ty::Borrow { inner: Box::new(ty), mutable })
             }
             _ => {
                 let inner_ty = self.check(inner)?;
-                Ok(Ty::Borrow(Box::new(inner_ty)))
+                Ok(Ty::Borrow { inner: Box::new(inner_ty), mutable })
             }
         }
     }
@@ -1234,7 +1246,7 @@ impl TypeChecker {
 
         match inner_ty {
             Ty::String(_) => Ok(Ty::Base(BaseTy::I32)),
-            Ty::Borrow(ref boxed) => match boxed.as_ref() {
+            Ty::Borrow { inner: ref boxed, .. } => match boxed.as_ref() {
                 Ty::String(_) => Ok(Ty::Base(BaseTy::I32)),
                 _ => Err(self.at(
                     s,
@@ -1680,12 +1692,12 @@ impl TypeChecker {
         let inner_ty = self.check(inner)?;
 
         match inner_ty {
-            Ty::Borrow(boxed) => Ok(*boxed),
+            Ty::Borrow { inner: boxed, .. } => Ok(*boxed),
             Ty::Ref { inner, .. } => Ok(*inner),
             _ => Err(self.at(
                 s,
                 TypeError::TypeMismatch {
-                    expected: Ty::Borrow(Box::new(Ty::Base(BaseTy::Unit))),
+                    expected: Ty::Borrow { inner: Box::new(Ty::Base(BaseTy::Unit)), mutable: false },
                     found: inner_ty,
                 },
             )),
@@ -2532,9 +2544,10 @@ mod tests {
         tc.ctx
             .extend("s".into(), Ty::String("r".into()), BindingForm::LetBang);
 
-        let borrow_expr = dummy_expr(ExprKind::Borrow(Box::new(dummy_expr(ExprKind::Var(
-            "s".into(),
-        )))));
+        let borrow_expr = dummy_expr(ExprKind::Borrow {
+            inner: Box::new(dummy_expr(ExprKind::Var("s".into()))),
+            mutable: false,
+        });
         let result = tc.check(&borrow_expr);
         assert!(result.is_ok());
 
@@ -2550,9 +2563,10 @@ mod tests {
         tc.ctx
             .extend("s".into(), Ty::String("r".into()), BindingForm::LetBang);
 
-        let borrow_expr = dummy_expr(ExprKind::Borrow(Box::new(dummy_expr(ExprKind::Var(
-            "s".into(),
-        )))));
+        let borrow_expr = dummy_expr(ExprKind::Borrow {
+            inner: Box::new(dummy_expr(ExprKind::Var("s".into()))),
+            mutable: false,
+        });
         assert!(tc.check(&borrow_expr).is_ok());
 
         let drop_expr = dummy_expr(ExprKind::Drop(Box::new(dummy_expr(ExprKind::Var(

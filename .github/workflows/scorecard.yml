@@ -1,16 +1,22 @@
-# SPDX-License-Identifier: PMPL-1.0-or-later
-name: OSSF Scorecard
+# SPDX-License-Identifier: MPL-2.0
+# Aligned with the documented caller pattern in
+# hyperpolymath/standards .github/workflows/scorecard-reusable.yml.
+# Previously this workflow was startup_failure-on-every-run (50/50)
+# because it diverged from the reusable's documented caller shape:
+#   - missing `concurrency:` group (re-pushes piled up superseded runs)
+#   - `branch_protection_rule:` trigger (unused; complicates startup)
+#   - `secrets: inherit` against a reusable with no `secrets:` block
+#   - `permissions: read-all` instead of explicit `contents: read`
+# Pattern now matches the reusable's header example verbatim.
+name: Scorecards supply-chain security
+
 on:
   push:
-    branches: [main, master]
+    branches: [main]
   schedule:
-    - cron: '0 4 * * *'
+    - cron: '23 4 * * 1'
   workflow_dispatch:
 
-# Estate guardrail: cancel superseded runs so re-pushes / rebased PR
-# updates do not pile up queued runs against the shared account-wide
-# Actions concurrency pool. Applied only to read-only check workflows
-# (no publish/mutation), so cancelling a superseded run is always safe.
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
@@ -20,22 +26,7 @@ permissions:
 
 jobs:
   analysis:
-    runs-on: ubuntu-latest
     permissions:
       security-events: write
       id-token: write
-    steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with:
-          persist-credentials: false
-
-      - name: Run Scorecard
-        uses: ossf/scorecard-action@4eaacf0543bb3f2c246792bd56e8cdeffafb205a # v2.4.3
-        with:
-          results_file: results.sarif
-          results_format: sarif
-
-      - name: Upload results
-        uses: github/codeql-action/upload-sarif@7211b7c8077ea37d8641b6271f6a365a22a5fbfa # v3.31.8
-        with:
-          sarif_file: results.sarif
+    uses: hyperpolymath/standards/.github/workflows/scorecard-reusable.yml@e0caf11508a3989574713c78f5f444f2ce5e33ef

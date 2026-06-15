@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: PMPL-1.0-or-later
+# SPDX-License-Identifier: MPL-2.0
 # META.a2ml - Project metadata and architectural decisions for ephapax
 # Template from: https://github.com/hyperpolymath/standards
 
@@ -22,7 +22,14 @@ status = "accepted"
 date = "2026-04-11"
 context = "Formal verification of the type system is required for high-assurance use."
 decision = "Dual formalization in Coq (operational semantics) and Idris2 (type structure)."
-consequences = "Fully closed proofs (67 Qed) ensuring the correctness of the linear logic engine."
+consequences = "Mechanised Coq + Idris2 chain. NOTE: as of 2026-05-26 the legacy preservation theorem in formal/Semantics.v was shown to be provably false by formal/Counterexample.v (5 Qed). The single-layer mechanisation has been superseded by the four-layer redesign captured in adr-005 below — see formal/PRESERVATION-DESIGN.md and STATUS.adoc."
+
+[project-meta.architecture-decisions.adr-005]
+status = "accepted"
+date = "2026-05-27"
+context = "On 2026-05-26 formal/Counterexample.v (5 Qed lemmas) demonstrated that preservation in the legacy single-layer judgment is provably false: region exit can invalidate sibling assumptions without the typing judgment tracking that dependency explicitly. The legacy judgment conflates four distinct concerns (structural discipline, region capabilities, dyadic interaction, echo residue)."
+decision = "Four-layer principled redesign with each layer's preservation theorem derived against its own explicit invariants. L1 = region capabilities (TypingL1.v + Semantics_L1.v, modality-indexed); L2 = structural modality Linear/Affine (Modality.v + m in has_type_l1); L3 = echo/residue (Echo.v + preservation_l3 in Semantics_L1.v, fiber-shaped, one type former, L2-mode dispatched at typing-rule boundary); L4 = dyadic interaction (labelling discipline only, no proofs change — Definitions in L4.v + design doc L4-DYADIC.md, Phase A landed 2026-05-28). Echo Types are orthogonal to structural discipline by construction — one Echo type former, Linear/Affine is a thin-poset of observation disciplines layered on top, not two separate echo types."
+consequences = "Preservation is re-derived per layer. Legacy formal/Semantics.v + formal/Typing.v are archaeology and must not be extended. Per-sublanguage proof debt tracked in PROOF-NEEDS.md. Past/present/future map in STATUS.adoc. Owner directive 2026-05-27 in CLAUDE.md is durable. Pre-2026-05-26 closure-plan PRs (#92, #102, #104, #106, #114, #116, #117, #121, #146) are archaeology, not instructions."
 
 # ── Development Practices ──────────────────────────────────────────────────
 [project-meta.development-practices]

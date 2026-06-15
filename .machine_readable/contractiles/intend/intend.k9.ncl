@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: PMPL-1.0-or-later
+# SPDX-License-Identifier: MPL-2.0
 # intend.k9.ncl — K9 trust-tier component of the intend trident
 # Author: Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk>
 #
@@ -26,7 +26,7 @@
 # * Evidence sinks: VeriSimDB (queryable) + 6a2/DRIFT.a2ml (repo-local).
 # * Failure-mode defenses cross-referenced to the AI failure catalog.
 
-let base_k9 = import "../k9/template-hunt.k9.ncl" in
+let base_k9 = import "../../svc/k9/template-hunt.k9.ncl" in
 let base    = import "../_base.ncl" in
 
 {

@@ -1,4 +1,5 @@
-# SPDX-License-Identifier: PMPL-1.0-or-later
+# SPDX-License-Identifier: MPL-2.0
+// Owner: Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk>
 # Ephapax formal semantics — Coq project file
 # Build: coq_makefile -f _CoqProject -o Makefile && make
 
@@ -10,3 +11,9 @@ TypingL1.v
 Semantics.v
 Semantics_L1.v
 Counterexample.v
+Echo.v
+Modality.v
+TypingL2.v
+Counterexample_L2.v
+Counterexample_L2_nested.v
+L4.v

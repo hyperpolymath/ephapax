@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: PMPL-1.0-or-later
+// SPDX-License-Identifier: MPL-2.0
+// Owner: Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk>
 // Tuple-binder destructuring with explicit `in`. Parser lowers
 // `let (a, b) = e in body` to a 1-arm `match e of | (a, b) => body end`,
 // which the desugar fast-path now folds into nested fst/snd binds.

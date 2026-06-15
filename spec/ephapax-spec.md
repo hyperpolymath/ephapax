@@ -1,6 +1,7 @@
 # Ephapax Complete Language Specification v0.1
 
-<!-- SPDX-License-Identifier: PMPL-1.0-or-later -->
+<!-- SPDX-License-Identifier: MPL-2.0 -->
+<!-- Owner: Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk> -->
 <!-- Copyright (c) 2026 Jonathan D.A. Jewell (hyperpolymath) -->
 
 ## Purpose
@@ -13,6 +14,8 @@ language combining:
 - **WASM-first** compilation (no garbage collector required)
 
 The dyadic principle: both disciplines coexist at per-binding granularity.
+
+Ephapax's type system has four orthogonal disciplines: **L1** region capabilities, **L2** structural modality (linear/affine), **L3** irreversibility residue (Echo Types — planned), and **L4** dyadic interaction mode (project-level declaration). This specification is normative for L1 and L2 and forward-looking for L3 and L4. See [`docs/vision/EPHAPAX-VISION.adoc`](../docs/vision/EPHAPAX-VISION.adoc) for the dyad framing and [`formal/PRESERVATION-DESIGN.md`](../formal/PRESERVATION-DESIGN.md) for the per-layer design.
 
 ---
 

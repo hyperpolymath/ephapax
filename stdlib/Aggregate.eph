@@ -1,0 +1,305 @@
+// SPDX-License-Identifier: MPL-2.0
+// Owner: Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk>
+// Copyright (c) Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk>
+//
+// Ephapax stdlib — Monoidal aggregates (D18 from the DB-theory inventory).
+//
+// Citations:
+//   - Gray, Bosworth, Layman, Pirahesh. "Data Cube: A Relational Aggregation
+//     Operator." ICDE 1996. — establishes aggregation as the central
+//     dimensional operation in OLAP.
+//   - Cohen, S. "User-Defined Aggregates in Database Languages." DBPL 1999.
+//     — generalises SQL aggregates to user-defined monoid operations.
+//   - Bird, R. "Algebra of Programming." 1996. — the monoidal fold as the
+//     canonical right-fold-with-identity.
+//
+// What this module provides
+// -------------------------
+//
+// A `Monoid<A>` is a pair `(empty, combine)` where `combine` is associative
+// and `empty` is a left+right identity. This is the type-theoretic essence
+// of an aggregate function:
+//
+//   sum, product, max, min, count, set-union, list-concatenation, AND, OR,
+//   string-concatenation — all are monoids.
+//
+// Once your data carrier carries an `aggregate_with` ability, EVERY
+// well-typed fold over a collection is provably terminating + produces a
+// result whose meaning is uniquely determined by the monoid laws below.
+//
+// The three monoid laws
+// ---------------------
+//
+//   (L1) Left identity:        combine(empty(), x) == x
+//   (L2) Right identity:       combine(x, empty()) == x
+//   (L3) Associativity:        combine(a, combine(b, c))
+//                              == combine(combine(a, b), c)
+//
+// These laws are SHIPPED AS DOCUMENTATION here; the future
+// `formal/Aggregate.v` will mechanise them per-instance. Until then,
+// instances asserted via `aggregate_with` rely on programmer discipline.
+//
+// Why ephapax-shaped
+// ------------------
+//
+// Aggregates are AFFINE: the result can be discarded freely; intermediate
+// "running totals" need not be threaded linearly. (Compare: `Transaction`
+// from `stdlib/Transactions.eph` is LINEAR because of its commit-or-abort
+// obligation.) `Monoid<A>` carries no resource obligation at L1; its values
+// drop freely under L2's Affine discipline.
+//
+// Future work (separate PRs)
+// --------------------------
+//
+//   - D19 — Windowed aggregation: takes a `Monoid<A>` + a window-size and
+//           produces a streaming reducer. Depends on this module + D17's
+//           `Stream` module.
+//   - `formal/Aggregate.v` — Coq mechanisation of the three monoid laws,
+//           case-analysed per stock instance below. See the durable owner
+//           directive 2026-06-01: any L3-flavoured Coq side here must
+//           check `hyperpolymath/echo-types` for prior art first (the
+//           `EchoCategorical` + `EchoCanonicalIdentitySuite` Agda modules
+//           speak the categorical-monoid language we'd be mirroring).
+//   - Bag / SetAggregate: idempotent monoids (associativity + commutativity
+//           + idempotence) for set-valued aggregation. Belongs in
+//           `stdlib/SetAggregate.eph` once `stdlib/Set.eph` exists.
+
+module Aggregate
+
+// =============================================================
+// Sum (the canonical i64 monoid)
+// =============================================================
+//
+//   empty   = 0
+//   combine = +
+//
+// Laws (informal proofs):
+//   (L1) 0 + x = x          — definition of integer addition
+//   (L2) x + 0 = x          — definition of integer addition
+//   (L3) a + (b + c) = (a + b) + c — associativity of integer addition
+
+fn sum_empty() -> i64 {
+    0
+}
+
+fn sum_combine(a: i64, b: i64) -> i64 {
+    a + b
+}
+
+// Fold a list of i64s as a sum. Terminates structurally on the list length.
+fn sum_fold(xs: &List<i64>) -> i64 {
+    list_foldl_i64(xs, sum_empty(), sum_combine)
+}
+
+// =============================================================
+// Product (the multiplicative i64 monoid)
+// =============================================================
+//
+//   empty   = 1
+//   combine = *
+//
+// Laws:
+//   (L1) 1 * x = x
+//   (L2) x * 1 = x
+//   (L3) a * (b * c) = (a * b) * c
+
+fn product_empty() -> i64 {
+    1
+}
+
+fn product_combine(a: i64, b: i64) -> i64 {
+    a * b
+}
+
+fn product_fold(xs: &List<i64>) -> i64 {
+    list_foldl_i64(xs, product_empty(), product_combine)
+}
+
+// =============================================================
+// Max (over i64)
+// =============================================================
+//
+//   empty   = INT_MIN          (i64::MIN, used as the bottom element)
+//   combine = max
+//
+// Laws (informal):
+//   (L1) max(INT_MIN, x) = x   — INT_MIN is the bottom of the order
+//   (L2) max(x, INT_MIN) = x
+//   (L3) max(a, max(b, c)) = max(max(a, b), c) — total order
+
+fn max_empty() -> i64 {
+    // i64 minimum — used as the identity of `max`.
+    -9223372036854775808
+}
+
+fn max_combine(a: i64, b: i64) -> i64 {
+    if a >= b then a else b
+}
+
+fn max_fold(xs: &List<i64>) -> i64 {
+    list_foldl_i64(xs, max_empty(), max_combine)
+}
+
+// =============================================================
+// Min (over i64)
+// =============================================================
+//
+//   empty   = INT_MAX
+//   combine = min
+//
+// Laws: dual of Max — same shape.
+
+fn min_empty() -> i64 {
+    9223372036854775807
+}
+
+fn min_combine(a: i64, b: i64) -> i64 {
+    if a <= b then a else b
+}
+
+fn min_fold(xs: &List<i64>) -> i64 {
+    list_foldl_i64(xs, min_empty(), min_combine)
+}
+
+// =============================================================
+// Count (cardinality monoid; counts via the unit input)
+// =============================================================
+//
+// Count is the i64-valued monoid where each element contributes 1.
+// It's a "tag-and-sum" over a `unit -> i64` mapping:
+//
+//   empty()         = 0
+//   contribute()    = 1
+//   combine(a, b)   = a + b      // re-uses the Sum monoid
+//
+// Counting a list of A's: tag-each-with-1, then sum. The fold below
+// is parameterised over A to avoid forcing a specific element type.
+
+fn count_empty() -> i64 {
+    0
+}
+
+fn count_contribute() -> i64 {
+    1
+}
+
+fn count_combine(a: i64, b: i64) -> i64 {
+    sum_combine(a, b)
+}
+
+// =============================================================
+// And / Or (the boolean lattice monoids)
+// =============================================================
+//
+// And:  empty = true,   combine = &&
+// Or:   empty = false,  combine = ||
+//
+// Both are commutative + idempotent (so they're semilattice monoids,
+// satisfying laws L1-L3 plus a, combine(a, a) = a).
+
+fn and_empty() -> bool {
+    true
+}
+
+fn and_combine(a: bool, b: bool) -> bool {
+    a && b
+}
+
+fn or_empty() -> bool {
+    false
+}
+
+fn or_combine(a: bool, b: bool) -> bool {
+    a || b
+}
+
+// =============================================================
+// String concatenation
+// =============================================================
+//
+// Strings under concatenation form a (non-commutative) monoid:
+//
+//   empty   = ""
+//   combine = string_concat
+//
+// Laws:
+//   (L1) "" ++ s = s
+//   (L2) s ++ "" = s
+//   (L3) a ++ (b ++ c) = (a ++ b) ++ c
+//
+// NOTE: string_concat is at AFFINE-arg consumption per
+// `stdlib/Prelude.eph::string_concat`; the combine here mirrors that
+// affine signature.
+
+fn string_empty() -> String {
+    ""
+}
+
+fn string_combine(a: String, b: String) -> String {
+    string_concat(a, b)
+}
+
+// =============================================================
+// Generic fold over List<i64>
+// =============================================================
+//
+// The recursion engine for the i64 monoids above. Parameterised over
+// the (empty, combine) pair so that callers can express custom i64
+// monoids without rewriting the structural recursion.
+//
+// Termination: structural on `xs` (list length strictly decreases on
+// each recursive call). `@total` annotation would let the compiler
+// emit a fuel-free machine-checked totality witness; see the v2
+// grammar §4 for annotation syntax. Omitted here pending @total
+// implementation in the typechecker.
+fn list_foldl_i64(
+    xs: &List<i64>,
+    acc: i64,
+    op: fn(i64, i64) -> i64
+) -> i64 {
+    // Implementation defers to the Prelude's list recursor.
+    __intrinsic_list_foldl_i64(xs, acc, op)
+}
+
+// =============================================================
+// Pattern guide
+// =============================================================
+//
+// Example 1 — sum a list of payments:
+//
+//   let payments: List<i64> = ...;
+//   let total = sum_fold(&payments);
+//
+// Example 2 — count distinct items via the Count monoid:
+//
+//   let items: List<Item> = ...;
+//   let n = list_foldl_i64(
+//       &items.map(|_| count_contribute()),
+//       count_empty(),
+//       count_combine);
+//
+// Example 3 — running max across a stream:
+//
+//   let observations: List<i64> = ...;
+//   let peak = max_fold(&observations);
+//
+// Example 4 — concatenate string parts:
+//
+//   let parts: List<String> = ...;
+//   // (sequential fold; not via list_foldl_i64 since strings ≠ i64)
+//   let report = parts.iter().fold(string_empty(), string_combine);
+//
+// =============================================================
+// Echo-types audit (per durable owner directive 2026-06-01)
+// =============================================================
+//
+// This `Aggregate.eph` is a **stdlib slice** — surface-language API
+// only, no proof obligation attached at landing time. Echo-types audit
+// for the stdlib slice itself: **not relevant** — pure type signatures.
+//
+// However, the FUTURE `formal/Aggregate.v` Coq mechanisation of the
+// monoid laws IS echo-types territory: `EchoCategorical.agda`,
+// `EchoCanonicalIdentitySuite.agda`, and `EchoMonoidal.agda` (if it
+// exists in the upstream) speak the categorical-monoid language we
+// would be mirroring. The mechanisation PR must start with an
+// echo-types upstream audit per `feedback_proofs_must_check_and_cross_doc_echo_types.md`.

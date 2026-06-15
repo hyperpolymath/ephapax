@@ -1,5 +1,6 @@
 #![forbid(unsafe_code)]
-// SPDX-License-Identifier: PMPL-1.0-or-later
+// SPDX-License-Identifier: MPL-2.0
+// Owner: Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk>
 // SPDX-FileCopyrightText: 2026 Jonathan D.A. Jewell
 
 //! Ephapax S-expression IR bridge.
@@ -503,9 +504,10 @@ fn expr_to_sexpr(expr: &Expr) -> SExpr {
             SExpr::Atom(escape_atom(name)),
             expr_to_sexpr(body),
         ]),
-        ExprKind::Borrow(inner) => {
-            SExpr::List(vec![SExpr::Atom("borrow".into()), expr_to_sexpr(inner)])
-        }
+        ExprKind::Borrow { inner, mutable } => SExpr::List(vec![
+            SExpr::Atom(if *mutable { "borrow-mut" } else { "borrow" }.into()),
+            expr_to_sexpr(inner),
+        ]),
         ExprKind::Deref(inner) => {
             SExpr::List(vec![SExpr::Atom("deref".into()), expr_to_sexpr(inner)])
         }
@@ -735,7 +737,14 @@ fn decode_expr(expr: &SExpr) -> Result<Expr, SExprError> {
             name: SmolStr::new(atom_string(&list[1])?),
             body: Box::new(decode_expr(&list[2])?),
         },
-        "borrow" => ExprKind::Borrow(Box::new(decode_expr(&list[1])?)),
+        "borrow" => ExprKind::Borrow {
+            inner: Box::new(decode_expr(&list[1])?),
+            mutable: false,
+        },
+        "borrow-mut" => ExprKind::Borrow {
+            inner: Box::new(decode_expr(&list[1])?),
+            mutable: true,
+        },
         "deref" => ExprKind::Deref(Box::new(decode_expr(&list[1])?)),
         "drop" => ExprKind::Drop(Box::new(decode_expr(&list[1])?)),
         "copy" => ExprKind::Copy(Box::new(decode_expr(&list[1])?)),
@@ -851,7 +860,10 @@ fn ty_to_sexpr(ty: &Ty) -> SExpr {
             SExpr::Atom(escape_atom(name)),
             ty_to_sexpr(inner),
         ]),
-        Ty::Borrow(inner) => SExpr::List(vec![SExpr::Atom("borrow".into()), ty_to_sexpr(inner)]),
+        Ty::Borrow { inner, mutable } => SExpr::List(vec![
+            SExpr::Atom(if *mutable { "borrow-mut" } else { "borrow" }.into()),
+            ty_to_sexpr(inner),
+        ]),
         Ty::Var(v) => SExpr::List(vec![SExpr::Atom("var".into()), SExpr::Atom(escape_atom(v))]),
         Ty::List(inner) => SExpr::List(vec![SExpr::Atom("list".into()), ty_to_sexpr(inner)]),
         Ty::Tuple(elem_types) => {
@@ -926,7 +938,14 @@ fn decode_ty(expr: &SExpr) -> Result<Ty, SExprError> {
             name: SmolStr::new(atom_string(&list[1])?),
             inner: Box::new(decode_ty(&list[2])?),
         }),
-        "borrow" => Ok(Ty::Borrow(Box::new(decode_ty(&list[1])?))),
+        "borrow" => Ok(Ty::Borrow {
+            inner: Box::new(decode_ty(&list[1])?),
+            mutable: false,
+        }),
+        "borrow-mut" => Ok(Ty::Borrow {
+            inner: Box::new(decode_ty(&list[1])?),
+            mutable: true,
+        }),
         "var" => Ok(Ty::Var(SmolStr::new(atom_string(&list[1])?))),
         _ => Err(SExprError::Invalid("unknown type tag".into())),
     }

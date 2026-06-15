@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: PMPL-1.0-or-later
+// SPDX-License-Identifier: MPL-2.0
+// Owner: Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk>
 // Escape analysis: determine if variables escape their scope
 
 use ephapax_syntax::{Expr, ExprKind};
@@ -114,7 +115,7 @@ impl EscapeAnalysis {
                 Self::analyze_expr(inner, escaping, in_escaping_context);
             }
 
-            ExprKind::Borrow(inner) => {
+            ExprKind::Borrow { inner, .. } => {
                 Self::analyze_expr(inner, escaping, in_escaping_context);
             }
 

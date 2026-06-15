@@ -1,10 +1,13 @@
+<!-- SPDX-License-Identifier: MPL-2.0 -->
+<!-- Owner: Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk> -->
+<!-- SPDX-FileCopyrightText: 2026 Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk> -->
 # Test & Benchmark Requirements
 
 ## CRG Grade: C — ACHIEVED 2026-04-04
 
 ## Current State — CRG C ACHIEVED (2026-04-04)
 
-- Unit tests: 304 pass / 0 fail (across 19 crates: 42+24+17+16+14+14+13+9+7+6+3+3+3+2+1+1+1+49+63 + many 0-test crates)
+- Unit tests: 365 pass / 0 fail (across 17 active workspace crates + `tests/fuzz`; count from `cargo test --workspace --lib -- --list | grep ': test$'`)
 - Integration tests: `src/ephapax-cli/tests/integration.rs` (parse->type-check, 18 tests)
 - Conformance tests: `src/ephapax-cli/tests/conformance.rs` (spec compliance, 16 tests)
 - E2E/WASM tests: `src/ephapax-cli/tests/wasm_e2e.rs` (parse->type-check->compile->wasmtime, 13 tests)
@@ -12,14 +15,14 @@
 - Contract/invariant tests: `src/ephapax-cli/tests/contract_tests.rs` (type system invariants, 13 tests)
 - Aspect tests: `src/ephapax-cli/tests/aspect_tests.rs` (security, performance, correctness, 13 tests)
 - Benchmarks: `src/ephapax-parser/benches/parse_bench.rs`, `src/ephapax-vram-cache/benches/cache_bench.rs`
-- Total: **357 tests pass / 0 fail** (`cargo test --all-targets`)
-- Documented all-target tests: 357
+- Total: **467 tests pass / 0 fail** (`cargo test --workspace --all-targets`)
+- Documented all-target tests: 467
 
 ## CRG Testing Taxonomy — Status
 
 | Category | Status | Files |
 |----------|--------|-------|
-| Unit tests | DONE | 19 crates |
+| Unit tests | DONE | 17 active workspace crates + `tests/fuzz` |
 | Integration tests | DONE | `tests/integration.rs` |
 | Conformance tests | DONE | `tests/conformance.rs` |
 | E2E tests | DONE | `tests/wasm_e2e.rs` |
@@ -33,6 +36,12 @@
 ### Point-to-Point (P2P)
 **Source counts:** 49 Rust (19 crates) + 98 .eph files + 17 Idris2 + 3 V
 
+**Coq admitted proofs remaining: 4** (1 outer `Admitted.` in
+`formal/Semantics.v` + 3 outer `Admitted.` markers in
+`formal/Semantics_L1.v` covering 5 internal `admit.` cases). Single-
+source breakdown lives in `PROOF-NEEDS.md §4`; `scripts/status-gate.sh`
+reads from there.
+
 #### Crates with ZERO tests:
 - Multiple crates show 0 tests in cargo test output
 - codegen crates — no tests
@@ -43,7 +52,7 @@
 - Example programs not verified in CI
 
 #### Known issues:
-- 1 Admitted proof in Coq (`preservation`)
+- 4 Admitted markers in Coq (1 in `Semantics.v` — provably-false legacy preservation, sacrosanct; 3 in `Semantics_L1.v` covering 5 inner `admit.` cases — pre-existing L1 structural debt + parallel mirrors per PROOF-NEEDS.md §4)
 - 5 remaining tasks (#15-#19) from type checker audit
 - interp env-leak fix was made 2026-03-28
 
@@ -54,7 +63,7 @@
 
 ### Build & Execution
 - [x] cargo build — compiles
-- [x] cargo test --all-targets — 357 pass, 0 fail
+- [x] cargo test --workspace --all-targets — 467 pass, 0 fail
 - [ ] Compile and run all 98 .eph files — not automated
 - [ ] CLI --help works — not verified
 - [ ] Self-diagnostic — none
@@ -69,7 +78,7 @@
 ### Self-Tests
 - [ ] panic-attack assail on own repo
 - [ ] Compile all .eph stdlib files as test suite
-- [ ] Resolve remaining Admitted Coq proof (`preservation`)
+- [ ] Resolve remaining Admitted Coq markers (`preservation` in `Semantics.v` is sacrosanct — provably false; 3 in `Semantics_L1.v` track pre-existing L1 structural debt — see PROOF-NEEDS.md §4)
 
 ## Priority
 - **CRG C** — ACHIEVED (2026-04-04). Property, contract, aspect, and reflexive tests

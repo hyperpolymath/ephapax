@@ -1,0 +1,270 @@
+// SPDX-License-Identifier: MPL-2.0
+// Owner: Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk>
+// Copyright (c) 2026 Jonathan D.A. Jewell (hyperpolymath) <j.d.a.jewell@open.ac.uk>
+
+= CRG-PROFILE — Ephapax
+:toc: left
+:toclevels: 2
+
+[cols="1,3"]
+|===
+| Field | Value
+
+| Language | Ephapax
+| Repository | https://github.com/hyperpolymath/ephapax
+| Current CRG Grade | *D*  (X \| F \| E \| D \| C \| B \| A)
+| Assessed | 2026-05-28
+| Assessor | Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk>
+| CRG Spec Version | 2.2
+| ARG Profile | spec/ARG-PROFILE.adoc
+| TRG Profile | spec/TRG-PROFILE.adoc
+| FRG Profile | spec/FRG-PROFILE.adoc
+|===
+
+== About this profile
+
+This profile applies the *CRG v2.2 (STRICT)* baseline to Ephapax
+released components. *No Ephapax crate is yet published to
+crates.io.* The CRG grade is *D* by extension of the existing CRG
+audit (`docs/governance/CRG-AUDIT-2026-04-18.adoc`), which recommended
+demotion C → D under CRG v2.0 STRICT. This profile carries that
+recommendation forward at v2.2 and updates the evidence.
+
+CRG = *D*. The full chain of axes:
+
+* ARG: *E* (research artefact, narrow adopter base)
+* TRG: *D* (per spec/TRG-PROFILE.adoc)
+* FRG: *D* (active mechanised-proof line)
+* CRG: *D* (this profile)
+* RSR: assessed elsewhere
+
+== Released components
+
+A *released component* is any unit of work this repository publishes
+under its own name + version: crate, library, binary, plugin, schema,
+or vendored artefact. Each is graded independently against CRG.
+
+The list below is the published surface as of 2026-05-28. All
+entries are *workspace-internal* — no Ephapax crate is yet on
+crates.io. Per CRG §1, the language-level CRG is graded on the
+binary artefacts that ship under the `ephapax-cli` package + the
+internal workspace crates that consumers can pull as git
+dependencies (e.g. `typed-wasm` already does this).
+
+[cols="2,1,3,4", options="header"]
+|===
+| Component | Grade | Release stage | Evidence
+
+| `ephapax` binary (via `ephapax-cli`)
+| *D*
+| Pre-alpha
+| Compiler driver. Built from the Rust workspace. Contract / aspect / E2E tests in `src/ephapax-cli/tests/`. CI green per `.github/workflows/`.
+
+| `ephapax-lsp` binary
+| *D*
+| Pre-alpha
+| LSP server. `src/ephapax-lsp/src/main.rs` (~34KB, tower-lsp). Hover, goto, completions. Inline tests only.
+
+| `ephapax-syntax` workspace crate
+| *D*
+| Workspace-internal
+| 23KB AST library; unit tests. Consumed by typed-wasm via git dependency.
+
+| `ephapax-ir` workspace crate
+| *C*
+| Workspace-internal
+| 38KB IR library; unit tests + JSON round-trip tests.
+
+| `ephapax-typing` workspace crate
+| *C*
+| Workspace-internal
+| ~159KB type checker; extensive unit tests, contract tests (`invariant_*`), property tests. Heaviest single crate.
+
+| `ephapax-wasm` workspace crate
+| *C*
+| Workspace-internal
+| ~195KB WASM encoder; E2E + contract tests (magic-byte validation).
+
+| `ephapax-runtime` workspace crate
+| *D*
+| Workspace-internal
+| ~10KB wasmtime integration; runtime tests.
+
+| `ephapax-linear` workspace crate (sublanguage)
+| *D*
+| Workspace-internal
+| Linear + affine discipline checkers, dyadic interaction semantics. Per the disambiguation hook, `ephapax-affine` here is *not* `affinescript` (different syntax, different IR, shared logic-family terminology).
+
+| Other internal crates (lexer, parser, surface, desugar, interp, repl, stdlib, package, analysis, tools, externs)
+| *D*
+| Workspace-internal
+| Each has its own unit tests; collectively form the compiler pipeline. See spec/TRG-PROFILE.adoc for per-crate detail.
+|===
+
+== Per-component evidence (deep)
+
+`docs/governance/CRG-AUDIT-2026-04-18.adoc` is the prior CRG audit
+under v2.0 STRICT. Its grade-by-criterion analysis remains
+substantively valid for v2.2 (the criteria did not regress); the
+recommended demotion C → D was driven by the v2.0 *new* CI-green +
+per-directory-README + dogfooding-status clauses.
+
+`.machine_readable/6a2/STATE.a2ml` still self-declares
+`crg-grade = "C"` as of last update 2026-04-11. This profile
+recommends updating that flat-form claim to `D` with
+`grade-previous = "C"` and a note referencing the 2026-04-18 audit
++ this profile.
+
+No per-component `audits/audit-<crate>.md` files exist yet under
+v2.2 STRICT.
+
+== Grade rationale
+
+[cols="2,1,4", options="header"]
+|===
+| Grade clause (CRG §4) | Met? | Evidence
+
+| *E1 — At least one test exists*
+| YES
+| Multiple test suites across every workspace crate.
+
+| *E2 — Failures documented*
+| YES
+| `PROOF-NEEDS.md`, `TEST-NEEDS.md`, `formal/PRESERVATION-HANDOFF.md`.
+
+| *D1 — Test matrix documented*
+| YES
+| `TEST-NEEDS.md` (357-test matrix per the prior audit).
+
+| *D2 — Scope documented*
+| YES
+| `README.md`, `CLAUDE.md`, `EXPLAINME.adoc`, `TOPOLOGY.adoc`.
+
+| *D3 — RSR compliance*
+| YES
+| RSR baseline files present.
+
+| *C1 — Dogfooded*
+| PARTIAL
+| Ephapax is used internally for proof research; typed-wasm consumes `ephapax-syntax` as a git dependency. No external consumer beyond first-party tooling.
+
+| *C2 — CI green*
+| YES
+| CI green per `.github/workflows/`.
+
+| *C3 — Deep annotation (per-file + per-dir)*
+| NO
+| No v2.2 STRICT per-file / per-directory audit. Prior audit doc is per-component but at v2.0 strictness.
+
+| *B1 — ≥6 diverse external targets*
+| NO
+| External target list: typed-wasm only.
+
+| *B2 — Issues fed back from external use*
+| NO
+| Closed-issue trail is internal.
+
+| *A1 — Confirmed real-world value, no harm*
+| NO
+| No external feedback corpus.
+
+| *VeriSimDB attestation (grade C+)*
+| NO
+| Ephapax is not yet `DECLARE`'d to VeriSimDB.
+|===
+
+== Language-specific tightening (this profile only)
+
+For Ephapax, the following additional CRG obligations apply at the
+stated grades:
+
+* *Grade C tightening:* `ephapax-typing` MUST have a published
+  soundness statement (currently in flight via `formal/`). Either a
+  Qed preservation theorem for at least L1, or an explicit
+  "preservation by counter-example refinement" theorem reflecting
+  the design doctrine at `formal/PRESERVATION-DESIGN.md`.
+* *Grade C tightening:* `ephapax-wasm` MUST have a published
+  conformance report against the typed-wasm carrier ABI surface
+  (typed-wasm proposals 0001 + 0002 reached `[accepted]` 2026-05-30
+  and were promoted to typed-wasm ADR-0002 + ADR-0003; ephapax
+  conformance report is the downstream follow-up).
+* *Grade B tightening:* At least one workspace crate MUST be
+  published to crates.io with a v1.0 release and external-consumer
+  evidence.
+* *Grade A tightening:* Registered VeriSimDB instance + public
+  health check + third-party-maintained Ephapax library.
+
+These tightenings are *additional* to the baseline — none of the
+baseline evidence is waived.
+
+== What is NOT yet met (honest gaps)
+
+* *No crates.io publication*. Every workspace crate is internal.
+  Grade C asks for "released components"; this profile is treating
+  the binary artefacts + git-dep-consumed crates as released, but a
+  stricter reading would gate language CRG at X until crates.io
+  publication.
+* *No per-component v2.2 STRICT audits*. Update
+  `docs/governance/CRG-AUDIT-2026-04-18.adoc` to v2.2 strictness or
+  author per-crate audits under `audits/`.
+* *No VeriSimDB attestation*. Needed for grade C onward.
+* *No external consumers beyond typed-wasm*. ARG-C / CRG-C both
+  stall here.
+
+== Path to next grade (*C*)
+
+* Publish at least `ephapax-syntax` to crates.io as v0.1.0 (so
+  external consumption is on the registry, not git-dep only).
+  (~1-2 weeks if API is stable enough)
+* Land L1 preservation Qed (in flight per `formal/`). (~weeks)
+* Update `docs/governance/CRG-AUDIT-2026-04-18.adoc` to v2.2 STRICT
+  or author per-crate audits under `audits/`. (~2-3 weeks)
+* Land VeriSimDB attestation. (~1 week)
+* Update `.machine_readable/6a2/STATE.a2ml` to `crg-grade = "D"`
+  with the recommended note (mechanical, ~1 day).
+
+*Realistic timeline estimate:* 2-3 months from current state.
+
+== Path to grade beyond that (*B*)
+
+* Publish a v1.0 of at least one workspace crate (likely
+  `ephapax-syntax` or `ephapax-ir`).
+* External consumers beyond typed-wasm.
+* Issue-feedback pipeline with external reporters.
+
+== Demotion risk
+
+* *Lowest:* Any workspace crate CI flips to red and stays red.
+* *Medium:* The `ephapax-typing` invariant-test suite regresses
+  significantly.
+* *Catastrophic:* A consumer (e.g. typed-wasm) is broken by a
+  released-component change and the change is *not* rolled back.
+
+== Iteration history
+
+[cols="1,1,4", options="header"]
+|===
+| Date | Grade | Notes
+
+| 2026-04-04 | C | Earlier internal audit (CRG v1.x).
+| 2026-04-18 | D | CRG v2.0 STRICT audit `docs/governance/CRG-AUDIT-2026-04-18.adoc` recommended demotion C → D.
+| 2026-05-28 | D | Initial CRG-PROFILE per CRG v2.2 STRICT. Carries forward 2026-04-18 grade.
+|===
+
+== Review cycle
+
+* *Routine:* Reassess on every release cycle (per CRG §6.3).
+* *Immediate:* Reassess within 7 days of any released-component
+  regression.
+* *VeriSimDB drift alert:* Reassess within 24 hours of any drift
+  alert.
+
+== Footer
+
+Run `just crg-badge` in this repo to generate the shields.io badge
+for the README.
+
+This profile is itself a VCL-total proposition. Its content is
+`DECLARE`'d to VeriSimDB on each commit. Drift between the claimed
+grade above and the underlying evidence surfaces as a grade-stale
+alert.

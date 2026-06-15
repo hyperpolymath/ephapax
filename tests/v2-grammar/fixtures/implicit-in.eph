@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: PMPL-1.0-or-later
+// SPDX-License-Identifier: MPL-2.0
+// Owner: Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk>
 // Implicit-`in` between sequential `let` bindings. Each `let` / `let!`
 // is followed by another let or by the final expression — no `in`
 // keyword needed. Equivalent to the bridge.eph style.

@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: PMPL-1.0-or-later
+# SPDX-License-Identifier: MPL-2.0
 # adjust.k9.ncl — K9 trust-tier component of the adjust trident
 # Author: Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk>
 #
@@ -21,7 +21,7 @@
 # erosion causing gradual parameter drift). Where must flags "broken
 # now", adjust flags "drifting toward broken".
 
-let base_k9 = import "../k9/template-hunt.k9.ncl" in
+let base_k9 = import "../../svc/k9/template-hunt.k9.ncl" in
 let base    = import "../_base.ncl" in
 
 {

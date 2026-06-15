@@ -1,6 +1,24 @@
-(* SPDX-License-Identifier: PMPL-1.0-or-later *)
-// Owner: Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk>
+(* SPDX-License-Identifier: MPL-2.0 *)
 (* SPDX-FileCopyrightText: 2026 Jonathan D.A. Jewell *)
+
+(**
+
+  *********************************************************************
+  ***  ✅ ACTIVE -- L1 typing judgment. Modality-indexed.             ***
+  ***                                                                ***
+  ***  This is the post-counterexample L1 redesign. Extend HERE for  ***
+  ***  region-capability + modality typing work.                     ***
+  ***                                                                ***
+  ***  Judgment is 100% (0 admits, 2 Qed at last count). The         ***
+  ***  modality parameter `m : Modality` lives directly in           ***
+  ***  `has_type_l1` (L2-hybrid landing, PRs #176 + #177).            ***
+  ***  `linear_to_affine` is Qed with zero axioms.                   ***
+  ***                                                                ***
+  ***  See `STATUS.adoc`, `PROOF-NEEDS.md`,                          ***
+  ***  `formal/PRESERVATION-DESIGN.md`.                              ***
+  *********************************************************************
+
+*)
 
 (** * Ephapax Typing Rules — L1 redesign (region capability threading)
 
@@ -42,6 +60,7 @@ Import ListNotations.
 
 From Ephapax Require Import Syntax.
 From Ephapax Require Typing.  (* legacy judgment, for cross-reference only *)
+From Ephapax Require Import Modality.  (* L2 modality datatype + thin poset *)
 
 (** ** Helper: remove the first occurrence of [r] from [R].
 
@@ -54,79 +73,6 @@ Fixpoint remove_first_L1 (r : region_name) (R : region_env) : region_env :=
   | [] => []
   | r' :: R' => if String.eqb r r' then R' else r' :: remove_first_L1 r R'
   end.
-
-(** ** L2 Mode scaffolding — the Linear/Affine thin poset.
-
-    See [formal/PRESERVATION-DESIGN.md §5]. The two ephapax sublanguages
-    (ephapax-linear, ephapax-affine) share syntax and operational
-    semantics; they differ only in which typing derivations the L1
-    judgment admits. We encode this by adding a modality parameter
-    [m : modality] to [has_type_l1] below.
-
-    The poset structure mirrors
-    [echo-types/proofs/agda/EchoLinear.agda:30-101]: two modes
-    [Linear] and [Affine] with [Linear <= Affine] (Linear is the
-    stricter mode; every Linear derivation is also Affine). The
-    order is propositional — each ordered pair has at most one
-    proof — which makes the [linear_to_affine] weakening
-    deterministic.
-
-    Disambiguation: this is the [L2 modality] of the four-layer
-    redesign, internal to ephapax. It is NOT the AffineScript
-    language (separate project; shares only the typed-wasm target).
-    See [feedback_affinescript_ephapax_siblings_not_impl_proof]. *)
-
-Inductive modality : Type :=
-  | Linear : modality
-  | Affine : modality.
-
-Inductive le_mod : modality -> modality -> Prop :=
-  | le_LL : le_mod Linear Linear
-  | le_LA : le_mod Linear Affine
-  | le_AA : le_mod Affine Affine.
-
-Definition join_mod (m1 m2 : modality) : modality :=
-  match m1 with
-  | Linear => m2
-  | Affine => Affine
-  end.
-
-Lemma le_mod_refl : forall m, le_mod m m.
-Proof. destruct m; constructor. Qed.
-
-Lemma le_mod_trans :
-  forall m1 m2 m3, le_mod m1 m2 -> le_mod m2 m3 -> le_mod m1 m3.
-Proof.
-  intros m1 m2 m3 H12 H23.
-  destruct H12; destruct H23; constructor.
-Qed.
-
-(** Propositionality of [le_mod]: each ordered pair has a unique
-    proof. Mirrors [EchoLinear.agda:123] [<=m-prop]. Modality is
-    a decidable type with no equality cases, so [dependent
-    destruction] suffices. *)
-Require Import Coq.Program.Equality.
-
-Lemma le_mod_prop :
-  forall m1 m2 (p1 p2 : le_mod m1 m2), p1 = p2.
-Proof.
-  intros m1 m2 p1 p2.
-  dependent destruction p1; dependent destruction p2; reflexivity.
-Qed.
-
-Lemma le_mod_join_left : forall m1 m2, le_mod m1 (join_mod m1 m2).
-Proof. destruct m1; destruct m2; simpl; constructor. Qed.
-
-Lemma le_mod_join_right : forall m1 m2, le_mod m2 (join_mod m1 m2).
-Proof. destruct m1; destruct m2; simpl; constructor. Qed.
-
-Lemma le_mod_join_univ :
-  forall m1 m2 m3,
-    le_mod m1 m3 -> le_mod m2 m3 -> le_mod (join_mod m1 m2) m3.
-Proof.
-  intros m1 m2 m3 H1 H2.
-  destruct m1; destruct m2; simpl; assumption.
-Qed.
 
 (** ** L1 Typing Judgement
 
@@ -150,11 +96,19 @@ Qed.
     [R_out] equals the body's [R_body] minus one occurrence of [r],
     reflecting S_Region_Exit's operational effect. *)
 
+(** ** L2 integration: [has_type_l1] now carries the [Modality]
+    parameter from [Modality.v]. The bare [|=L1] notation continues
+    to mean [has_type_l1 Linear ...] (the Linear-specialised
+    judgment), so existing L1 lemmas in [Semantics_L1.v] remain
+    valid as Linear-only statements. The [|=L1[m]] notation gives
+    the modality-indexed form used by [linear_to_affine] and by
+    the L2 [preservation_l1] re-statement. *)
+
 Reserved Notation "R ';' G '|=L1[' m ']' e ':' T '-|' R' ';' G'"
   (at level 70, m at next level, G at next level, e at next level, T at next level, R' at next level).
 
 Inductive has_type_l1
-  : modality -> region_env -> ctx -> expr -> ty -> region_env -> ctx -> Prop :=
+  : Modality -> region_env -> ctx -> expr -> ty -> region_env -> ctx -> Prop :=
 
   (** ===== Values (R and G unchanged) — modality-polymorphic ===== *)
 
@@ -200,51 +154,25 @@ Inductive has_type_l1
 
   (** ===== Let Bindings ===== *)
 
-  (** ===== Let Bindings — MODE-SPLIT =====
+  | T_Let_L1 : forall m R R1 R2 G G' G'' e1 e2 T1 T2,
+      R  ; G                  |=L1[m] e1 : T1 -| R1 ; G' ->
+      R1 ; ctx_extend G' T1   |=L1[m] e2 : T2 -| R2 ; (T1, true) :: G'' ->
+      R  ; G                  |=L1[m] ELet e1 e2 : T2 -| R2 ; G''
 
-      Mirrors the T_Lam / T_Case split (PRESERVATION-DESIGN.md §5).
-      Linear: the let-bound variable must be consumed — body output
-      head flag forced to [true]. Affine: the body may leave it unused
-      ([u : bool] free), which is the affine "implicit drop" of an
-      unused binding at the point it goes out of scope. This replaces
-      the earlier free-floating [T_Forget_Affine_L1] structural rule,
-      which was length-non-preserving (it prepended an extra binding
-      to the output context, falsifying [typing_preserves_length_l1]
-      and [value_R_G_preserving_l1]). Modelling implicit-drop here, at
-      the binder, keeps every rule length-preserving. *)
-
-  | T_Let_L1_Linear : forall R R1 R2 G G' G'' e1 e2 T1 T2,
-      R  ; G                  |=L1[Linear] e1 : T1 -| R1 ; G' ->
-      R1 ; ctx_extend G' T1   |=L1[Linear] e2 : T2 -| R2 ; (T1, true) :: G'' ->
-      R  ; G                  |=L1[Linear] ELet e1 e2 : T2 -| R2 ; G''
-
-  | T_Let_L1_Affine : forall R R1 R2 G G' G'' e1 e2 T1 T2 u,
-      R  ; G                  |=L1[Affine] e1 : T1 -| R1 ; G' ->
-      R1 ; ctx_extend G' T1   |=L1[Affine] e2 : T2 -| R2 ; (T1, u) :: G'' ->
-      R  ; G                  |=L1[Affine] ELet e1 e2 : T2 -| R2 ; G''
-
-  | T_LetLin_L1_Linear : forall R R1 R2 G G' G'' e1 e2 T1 T2,
+  | T_LetLin_L1 : forall m R R1 R2 G G' G'' e1 e2 T1 T2,
       is_linear_ty T1 = true ->
-      R  ; G                  |=L1[Linear] e1 : T1 -| R1 ; G' ->
-      R1 ; ctx_extend G' T1   |=L1[Linear] e2 : T2 -| R2 ; (T1, true) :: G'' ->
-      R  ; G                  |=L1[Linear] ELetLin e1 e2 : T2 -| R2 ; G''
-
-  | T_LetLin_L1_Affine : forall R R1 R2 G G' G'' e1 e2 T1 T2 u,
-      is_linear_ty T1 = true ->
-      R  ; G                  |=L1[Affine] e1 : T1 -| R1 ; G' ->
-      R1 ; ctx_extend G' T1   |=L1[Affine] e2 : T2 -| R2 ; (T1, u) :: G'' ->
-      R  ; G                  |=L1[Affine] ELetLin e1 e2 : T2 -| R2 ; G''
+      R  ; G                  |=L1[m] e1 : T1 -| R1 ; G' ->
+      R1 ; ctx_extend G' T1   |=L1[m] e2 : T2 -| R2 ; (T1, true) :: G'' ->
+      R  ; G                  |=L1[m] ELetLin e1 e2 : T2 -| R2 ; G''
 
   (** ===== Functions — MODE-SPLIT =====
 
-      T_Lam_L1_Linear: the body must end with the bound variable
-      unused, i.e. body output ctx = [(T1, true) :: G]. This
-      enforces ephapax-linear's "no implicit drop" discipline.
+      T_Lam_L1_Linear: body must end with the bound variable unused
+      (output ctx = [(T1, true) :: G]) — ephapax-linear's strict
+      consumption discipline.
 
-      T_Lam_L1_Affine: the body may end with the bound variable
-      either used or unused; output ctx = [(T1, u) :: G] for any
-      [u : bool]. This admits ephapax-affine's relaxed binding
-      semantics. *)
+      T_Lam_L1_Affine: body may end with bound variable used OR
+      unused — ephapax-affine's relaxed semantics. *)
 
   | T_Lam_L1_Linear : forall R G T1 T2 e,
       R ; ctx_extend G T1 |=L1[Linear] e : T2 -| R ; (T1, true) :: G ->
@@ -253,6 +181,52 @@ Inductive has_type_l1
   | T_Lam_L1_Affine : forall R G T1 T2 e u,
       R ; ctx_extend G T1 |=L1[Affine] e : T2 -| R ; (T1, u) :: G ->
       R ; G               |=L1[Affine] ELam T1 e : TFun T1 T2 -| R ; G
+
+  (** ===== Phase D slice 2 — Effect-typed lambda rules =====
+
+      [T_Lam_L1_Linear_Eff] / [T_Lam_L1_Affine_Eff] parallel
+      [T_Lam_L1_Linear] / [T_Lam_L1_Affine] but record the body's
+      R-flow into the function type via [TFunEff T1 T2 R_in R_out]
+      (slice 1, PR #200; refined per [formal/PHASE-D-REDESIGN.md]).
+
+      **Design choice (2026-05-28 final):** the rule carries a
+      side condition [forall r, In r R -> In r R_in], i.e., the
+      body's input env [R_in] is a SUPERSET of the formation env
+      [R]. This makes:
+
+      * Substitution: any value at outer R has its region rv ∈ R;
+        side condition gives rv ∈ R_in, which is what the body
+        needs after substitution.
+      * Env-shrinkage lemmas: the type T = TFunEff T1 T2 R_in R_out
+        contains R_in (not the outer R). Shrinking outer R from R
+        to remove_first rr R preserves the side condition (smaller
+        R is still a subset of R_in).
+
+      Why not R_in = R (tighter)? That ties the type to the
+      formation env, breaking env-shrinkage lemmas (the type
+      changes when env shrinks). Why not R_in unconstrained? That
+      breaks substitution (the substituted value's region might
+      not be in R_in).
+
+      The R_in ⊇ R reading: "the body has access to AT LEAST the
+      formation regions, possibly more (declared up front)." Natural
+      and compositional. An explicit weakening for use at different
+      call-site Rs ships in slice 3 (T_App_L1_Eff).
+
+      Per the L3 wiring playbook (parallel-rule strategy): existing
+      [TFun]-typed programs continue to type via [T_Lam_L1_Linear] /
+      [T_Lam_L1_Affine] unchanged. New code uses these [_Eff] rules
+      to opt into effect-typed lambdas. *)
+
+  | T_Lam_L1_Linear_Eff : forall R G T1 T2 e R_in R_out,
+      (forall r, In r R -> In r R_in) ->
+      R_in ; ctx_extend G T1 |=L1[Linear] e : T2 -| R_out ; (T1, true) :: G ->
+      R ; G                  |=L1[Linear] ELam T1 e : TFunEff T1 T2 R_in R_out -| R ; G
+
+  | T_Lam_L1_Affine_Eff : forall R G T1 T2 e u R_in R_out,
+      (forall r, In r R -> In r R_in) ->
+      R_in ; ctx_extend G T1 |=L1[Affine] e : T2 -| R_out ; (T1, u) :: G ->
+      R ; G                  |=L1[Affine] ELam T1 e : TFunEff T1 T2 R_in R_out -| R ; G
 
   | T_App_L1 : forall m R R1 R2 G G' G'' e1 e2 T1 T2,
       R  ; G  |=L1[m] e1 : TFun T1 T2 -| R1 ; G' ->
@@ -286,13 +260,9 @@ Inductive has_type_l1
       R ; G |=L1[m] e : T2 -| R' ; G' ->
       R ; G |=L1[m] EInr T1 e : TSum T1 T2 -| R' ; G'
 
-  (** T_Case — MODE-SPLIT:
-      Linear: both branches must agree on (R_out, G_out) exactly.
-      Affine: branches may end with the bound binding in different
-        usage states; we use the same shape but allow per-branch
-        [u_i : bool] for the bound flag. (Full meet-on-outputs
-        deferred to L2-β.) *)
-
+  (** T_Case — MODE-SPLIT: Linear requires branch agreement; Affine
+      allows per-branch binding-flag disagreement (full meet-on-
+      outputs deferred to L2-β). *)
   | T_Case_L1_Linear : forall R R1 R_final G G' G_final e e1 e2 T1 T2 T,
       R  ; G                |=L1[Linear] e  : TSum T1 T2 -| R1 ; G' ->
       R1 ; ctx_extend G' T1 |=L1[Linear] e1 : T -| R_final ; (T1, true) :: G_final ->
@@ -305,12 +275,7 @@ Inductive has_type_l1
       R1 ; ctx_extend G' T2 |=L1[Affine] e2 : T -| R_final ; (T2, u2) :: G_final ->
       R  ; G                |=L1[Affine] ECase e e1 e2 : T -| R_final ; G_final
 
-  (** ===== Conditionals — MODE-SPLIT =====
-      Same rationale as T_Case: Linear requires branch agreement;
-      Affine relaxes (currently still requires (R_out, G_out) match
-      on this Bool-conditional since there is no binder to disagree
-      about; left as a separate constructor for symmetry and to
-      allow future per-branch G' relaxation). *)
+  (** ===== Conditionals — MODE-SPLIT (symmetric with Case) ===== *)
 
   | T_If_L1_Linear : forall R R1 R2 G G' G'' e1 e2 e3 T,
       R  ; G  |=L1[Linear] e1 : TBase TBool -| R1 ; G' ->
@@ -340,6 +305,38 @@ Inductive has_type_l1
       R ; G |=L1[m] e : T -| R_body ; G' ->
       R ; G |=L1[m] ERegion r e : T -| remove_first_L1 r R_body ; G'
 
+  (** ===== L3-aware Region typing — parallel rules =====
+
+      [T_Region_L1_Echo] and [T_Region_Active_L1_Echo] mirror their
+      legacy counterparts above but output [TEcho T] instead of [T].
+      Programs choose at typing time which path they're on:
+
+      * Legacy path: [T_Region_L1] outputs [T], paired with the
+        legacy [S_Region_Exit] step that produces the bare value.
+      * L3 path: [T_Region_L1_Echo] outputs [TEcho T], paired with
+        the (slice 3c) [S_Region_Exit_Echo] step that produces
+        [EEcho T v]. The program then [EObserve]s the residue to
+        recover unit and discharge the irreversibility obligation
+        — see [T_Observe_L1] (slice 2) and [Echo.v]
+        ([no_section_collapse_to_residue]).
+
+      The two paths are non-deterministic at the rule-application
+      level; preservation_l3 (slice 4) will dispatch per-rule. *)
+
+  | T_Region_L1_Echo : forall m R R_body G G' r e T,
+      ~ In r R ->
+      ~ In r (Typing.free_regions T) ->
+      In r R_body ->
+      (r :: R) ; G |=L1[m] e : T -| R_body ; G' ->
+      R ; G |=L1[m] ERegion r e : TEcho T -| remove_first_L1 r R_body ; G'
+
+  | T_Region_Active_L1_Echo : forall m R R_body G G' r e T,
+      In r R ->
+      ~ In r (Typing.free_regions T) ->
+      In r R_body ->
+      R ; G |=L1[m] e : T -| R_body ; G' ->
+      R ; G |=L1[m] ERegion r e : TEcho T -| remove_first_L1 r R_body ; G'
+
   (** ===== Borrowing ===== *)
 
   | T_Borrow_L1 : forall m R G i T,
@@ -353,37 +350,103 @@ Inductive has_type_l1
 
   (** ===== Explicit Resource Management =====
 
-      T_Drop_L1: modality-polymorphic. In Linear mode this is the
-      sole way to discharge an unused linear binding; in Affine
-      mode it remains available (explicit drop), and the implicit-
-      drop semantics is provided by T_Forget_Affine_L1 below.
+      T_Drop_L1 is modality-polymorphic. In Linear it is the sole
+      way to discharge an unused linear binding; in Affine it remains
+      available (explicit drop) and the implicit-drop semantics is
+      provided by T_Lam_L1_Affine's flexible binding-output flag and
+      T_Case_L1_Affine's per-branch disagreement.
 
-      L3 echo residue: the output [TBase TUnit] here is a residue
-      placeholder. Full residue mechanisation deferred to L3
-      (PRESERVATION-DESIGN.md §6). *)
+      L3 echo residue: output [TBase TUnit] is a residue placeholder;
+      full residue mechanisation is L3 (PRESERVATION-DESIGN.md §6). *)
 
   | T_Drop_L1 : forall m R R' G G' e T,
       is_linear_ty T = true ->
       R ; G |=L1[m] e : T -| R' ; G' ->
       R ; G |=L1[m] EDrop e : TBase TUnit -| R' ; G'
 
+  (** L3-aware Drop typing — parallel rule. [T_Drop_L1_Echo] outputs
+      [TEcho T] instead of [TBase TUnit]; pairs with (slice 3c)
+      [S_Drop_Echo] which produces [EEcho T v] rather than [EUnit].
+      Same modality polymorphism and same linearity premise as
+      [T_Drop_L1]. *)
+
+  | T_Drop_L1_Echo : forall m R R' G G' e T,
+      is_linear_ty T = true ->
+      R ; G |=L1[m] e : T -| R' ; G' ->
+      R ; G |=L1[m] EDrop e : TEcho T -| R' ; G'
+
   | T_Copy_L1 : forall m R R' G G' e T,
       is_linear_ty T = false ->
       R ; G |=L1[m] e : T -| R' ; G' ->
       R ; G |=L1[m] ECopy e : TProd T T -| R' ; G'
 
-  (** ===== Affine implicit-drop =====
+  (** ===== L3 — Echo / residue value typing =====
 
-      The affine "implicit drop" of an unused binding is modelled at
-      the binders themselves (T_Lam_L1_Affine, T_Let_L1_Affine,
-      T_LetLin_L1_Affine, T_Case_L1_Affine: the bound variable's output
-      flag is a free [u : bool] rather than forced [true]). The earlier
-      free-floating [T_Forget_Affine_L1] rule was removed: it prepended
-      an extra binding to the output context, breaking length
-      preservation and value-typing invariants. See PRESERVATION-
-      DESIGN.md §5 and the T_Let/T_LetLin block above. *)
+      [T_Echo_L1] types the runtime [EEcho T v] residue at [TEcho T],
+      provided the witness [v] is itself a value typed at [T]. This
+      is the typing-side counterpart of the (forthcoming, slice 3b /
+      3c) step rules that emit echoes at irreversible boundaries:
+      [S_Region_Exit_Echo] and [S_Drop_Echo] will both produce
+      [EEcho T v_pre] residues which must be typable for preservation
+      to hold.
+
+      Modality-polymorphic: holds in both [Linear] and [Affine]. The
+      [is_value v] premise mirrors [T_Borrow_Val_L1] — echoes are
+      runtime-only values, not surface syntax. *)
+
+  | T_Echo_L1 : forall m R G v T,
+      is_value v ->
+      R ; G |=L1[m] v : T -| R ; G ->
+      R ; G |=L1[m] EEcho T v : TEcho T -| R ; G
+
+  (** ===== L3 — Echo / residue observation =====
+
+      [T_Observe_L1] discharges an echo by witnessing it. The rule is
+      modality-polymorphic: it fires in both [Linear] and [Affine].
+      What differs across modes is the *obligation* shape, not the
+      rule:
+
+      * Under Linear discipline, an unobserved [TEcho T] in scope is
+        a typing failure (the echo must be threaded into [T_Observe]
+        somewhere). The mandatoriness will be enforced via [is_linear_ty]
+        once [TEcho] is registered as linear — deferred to a subsequent
+        slice (the present rule is the necessary precondition).
+
+      * Under Affine discipline, an unobserved [TEcho T] is permitted
+        (implicit lowering); the runtime collapses the residue
+        silently. [T_Observe_L1] remains available as an explicit
+        observation site.
+
+      The observation returns [TBase TUnit]: the L3 layer's
+      contribution is *type-theoretic accountability of the
+      irreversible step*, not recovery of the erased witness. The
+      witness is, by construction, irrecoverable — see
+      [Echo.no_section_collapse_to_residue] (Qed) and
+      [PRESERVATION-DESIGN.md §6.0.2.3]. *)
+
+  | T_Observe_L1 : forall m R R' G G' e T,
+      R ; G |=L1[m] e : TEcho T -| R' ; G' ->
+      R ; G |=L1[m] EObserve e : TBase TUnit -| R' ; G'
 
 where "R ';' G '|=L1[' m ']' e ':' T '-|' R' ';' G'" := (has_type_l1 m R G e T R' G').
+
+(** Legacy [|=L1] notation: shorthand for the Linear specialisation
+    [has_type_l1 Linear ...]. Pre-L2 lemmas in [Semantics_L1.v]
+    state the Linear case via this alias; the [|=L1[m]] form is
+    used where genuine modality polymorphism is required (e.g.
+    [linear_to_affine], [preservation_l1]). *)
+
+(** [has_type_l1_linear] is a NOTATION (not a Definition) so that
+    [induction Ht] on a [has_type_l1_linear] hypothesis unfolds
+    transparently to [has_type_l1 Linear] and the inductive
+    principle fires. *)
+
+Notation has_type_l1_linear := (has_type_l1 Linear) (only parsing).
+
+Notation "R ';' G '|=L1' e ':' T '-|' R' ';' G'"
+  := (has_type_l1 Linear R G e T R' G')
+  (at level 70, G at next level, e at next level, T at next level, R' at next level)
+  : type_scope.
 
 (** ** Trivial sanity check on the new judgment.
 
@@ -404,24 +467,26 @@ Proof.
   - apply T_I32_L1.
 Qed.
 
-(** ** L2 weakening: Linear ⇒ Affine.
+(** ** L2 headline: Linear ⇒ Affine weakening.
 
     Every derivation in [has_type_l1 Linear ...] is also a derivation
     in [has_type_l1 Affine ...]. This is the modality weakening
     promised by PRESERVATION-DESIGN.md §5 — the "thin-poset
-    decoration" lemma, mirror of [EchoLinear.agda:38-58] [weaken :
-    LEcho linear → LEcho affine].
+    decoration" lemma, mirror of [echo-types/proofs/agda/EchoLinear.agda:38-58]
+    [weaken : LEcho linear → LEcho affine].
 
-    Proof structure: induction on the Linear derivation.
-    20 modality-polymorphic constructors close via [econstructor;
-    eauto]. The mode-split constructors (T_Lam_L1_Linear,
-    T_Case_L1_Linear, T_If_L1_Linear) re-apply the corresponding
-    Affine variant — for T_Lam this means choosing [u := true]
-    (the Affine rule's binding-output flag), since the Linear rule
-    fixed that to [true]. T_Case_L1_Affine takes [u1 := true; u2 :=
-    true] similarly.
+    Proof: induction on the Linear derivation. 21 modality-polymorphic
+    constructors close via [econstructor; eauto]; the 3 mode-split
+    Linear constructors (T_Lam_L1_Linear, T_Case_L1_Linear,
+    T_If_L1_Linear) re-apply their Affine variants with binding
+    flags chosen by Coq's [eauto] existential-resolution.
 
-    This closes success criterion #2 from the L2 task. *)
+    Closed under the global context (no axioms used). This satisfies
+    success criterion #2 of the L2 task spec.
+
+    Disambiguation: this is L2 of ephapax's internal four-layer
+    redesign. ephapax-affine != AffineScript (separate project;
+    shares only the typed-wasm target). *)
 
 Lemma linear_to_affine :
   forall R G e T R' G',

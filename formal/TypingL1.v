@@ -199,16 +199,40 @@ Inductive has_type_l1
 
   (** ===== Let Bindings ===== *)
 
-  | T_Let_L1 : forall m R R1 R2 G G' G'' e1 e2 T1 T2,
-      R  ; G                  |=L1[m] e1 : T1 -| R1 ; G' ->
-      R1 ; ctx_extend G' T1   |=L1[m] e2 : T2 -| R2 ; (T1, true) :: G'' ->
-      R  ; G                  |=L1[m] ELet e1 e2 : T2 -| R2 ; G''
+  (** ===== Let Bindings — MODE-SPLIT =====
 
-  | T_LetLin_L1 : forall m R R1 R2 G G' G'' e1 e2 T1 T2,
+      Mirrors the T_Lam / T_Case split (PRESERVATION-DESIGN.md §5).
+      Linear: the let-bound variable must be consumed — body output
+      head flag forced to [true]. Affine: the body may leave it unused
+      ([u : bool] free), which is the affine "implicit drop" of an
+      unused binding at the point it goes out of scope. This replaces
+      the earlier free-floating [T_Forget_Affine_L1] structural rule,
+      which was length-non-preserving (it prepended an extra binding
+      to the output context, falsifying [typing_preserves_length_l1]
+      and [value_R_G_preserving_l1]). Modelling implicit-drop here, at
+      the binder, keeps every rule length-preserving. *)
+
+  | T_Let_L1_Linear : forall R R1 R2 G G' G'' e1 e2 T1 T2,
+      R  ; G                  |=L1[Linear] e1 : T1 -| R1 ; G' ->
+      R1 ; ctx_extend G' T1   |=L1[Linear] e2 : T2 -| R2 ; (T1, true) :: G'' ->
+      R  ; G                  |=L1[Linear] ELet e1 e2 : T2 -| R2 ; G''
+
+  | T_Let_L1_Affine : forall R R1 R2 G G' G'' e1 e2 T1 T2 u,
+      R  ; G                  |=L1[Affine] e1 : T1 -| R1 ; G' ->
+      R1 ; ctx_extend G' T1   |=L1[Affine] e2 : T2 -| R2 ; (T1, u) :: G'' ->
+      R  ; G                  |=L1[Affine] ELet e1 e2 : T2 -| R2 ; G''
+
+  | T_LetLin_L1_Linear : forall R R1 R2 G G' G'' e1 e2 T1 T2,
       is_linear_ty T1 = true ->
-      R  ; G                  |=L1[m] e1 : T1 -| R1 ; G' ->
-      R1 ; ctx_extend G' T1   |=L1[m] e2 : T2 -| R2 ; (T1, true) :: G'' ->
-      R  ; G                  |=L1[m] ELetLin e1 e2 : T2 -| R2 ; G''
+      R  ; G                  |=L1[Linear] e1 : T1 -| R1 ; G' ->
+      R1 ; ctx_extend G' T1   |=L1[Linear] e2 : T2 -| R2 ; (T1, true) :: G'' ->
+      R  ; G                  |=L1[Linear] ELetLin e1 e2 : T2 -| R2 ; G''
+
+  | T_LetLin_L1_Affine : forall R R1 R2 G G' G'' e1 e2 T1 T2 u,
+      is_linear_ty T1 = true ->
+      R  ; G                  |=L1[Affine] e1 : T1 -| R1 ; G' ->
+      R1 ; ctx_extend G' T1   |=L1[Affine] e2 : T2 -| R2 ; (T1, u) :: G'' ->
+      R  ; G                  |=L1[Affine] ELetLin e1 e2 : T2 -| R2 ; G''
 
   (** ===== Functions — MODE-SPLIT =====
 
@@ -347,17 +371,16 @@ Inductive has_type_l1
       R ; G |=L1[m] e : T -| R' ; G' ->
       R ; G |=L1[m] ECopy e : TProd T T -| R' ; G'
 
-  (** ===== Affine-only structural rule =====
+  (** ===== Affine implicit-drop =====
 
-      T_Forget_Affine_L1: in Affine mode, an unused linear binding
-      already at the head of G may persist in G' (i.e. the body
-      didn't have to consume it). This is the "implicit drop"
-      relaxation that distinguishes ephapax-affine from
-      ephapax-linear. Residue trace is implicit (L3 stub). *)
-
-  | T_Forget_Affine_L1 : forall R G G' e T T_unused,
-      R ; (T_unused, false) :: G |=L1[Affine] e : T -| R ; G' ->
-      R ; (T_unused, false) :: G |=L1[Affine] e : T -| R ; (T_unused, false) :: G'
+      The affine "implicit drop" of an unused binding is modelled at
+      the binders themselves (T_Lam_L1_Affine, T_Let_L1_Affine,
+      T_LetLin_L1_Affine, T_Case_L1_Affine: the bound variable's output
+      flag is a free [u : bool] rather than forced [true]). The earlier
+      free-floating [T_Forget_Affine_L1] rule was removed: it prepended
+      an extra binding to the output context, breaking length
+      preservation and value-typing invariants. See PRESERVATION-
+      DESIGN.md §5 and the T_Let/T_LetLin block above. *)
 
 where "R ';' G '|=L1[' m ']' e ':' T '-|' R' ';' G'" := (has_type_l1 m R G e T R' G').
 

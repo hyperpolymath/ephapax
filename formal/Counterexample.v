@@ -164,30 +164,31 @@ Section L1Fix.
   (** Helper: T_Loc_L1 has [R_out = R_in], [G_out = G_in]. By inversion. *)
 
   Lemma t_loc_l1_R_preserving :
-    forall R G l r R' G' T,
-      has_type_l1 R G (ELoc l r) T R' G' ->
+    forall m R G l r R' G' T,
+      has_type_l1 m R G (ELoc l r) T R' G' ->
       R' = R /\ G' = G.
   Proof.
-    intros R G l r R' G' T H.
+    intros m R G l r R' G' T H.
     inversion H; subst; split; reflexivity.
   Qed.
 
-  (** The L1 regression theorem. *)
+  (** The L1 regression theorem: the bad input is untypable in EVERY
+      modality (linear and affine alike). *)
   Lemma bad_input_untypable_l1 :
-    forall R_out G_out,
-      ~ has_type_l1 (r0 :: r1 :: nil) nil e_bad T_bad R_out G_out.
+    forall m R_out G_out,
+      ~ has_type_l1 m (r0 :: r1 :: nil) nil e_bad T_bad R_out G_out.
   Proof.
-    intros R_out G_out Htype.
+    intros m R_out G_out Htype.
     unfold e_bad, T_bad in Htype.
     (* Invert T_Pair_L1; only rule matching EPair. *)
     inversion Htype; subst.
     (* Hte1 = typing of (ERegion r1 (ELoc l0 r0)); Hte2 = typing of (ELoc l1 r1). *)
     match goal with
-    | [ H : has_type_l1 _ _ (ERegion r1 (ELoc l0 r0)) _ ?R1 _ |- _ ] =>
+    | [ H : has_type_l1 _ _ _ (ERegion r1 (ELoc l0 r0)) _ ?R1 _ |- _ ] =>
         rename H into Hte1; rename R1 into R1_e1
     end.
     match goal with
-    | [ H : has_type_l1 _ _ (ELoc l1 r1) _ _ _ |- _ ] =>
+    | [ H : has_type_l1 _ _ _ (ELoc l1 r1) _ _ _ |- _ ] =>
         rename H into Hte2
     end.
     (* From Hte2 = T_Loc_L1: In r1 R1_e1. *)
@@ -204,7 +205,7 @@ Section L1Fix.
     - (* T_Region_Active_L1: body ([ELoc l0 r0]) is a value; t_loc_l1_R_preserving
          gives body's R_out = R_in = [r0; r1].  Hence R1_e1 = remove_first_L1 r1 [r0; r1]. *)
       match goal with
-      | [ Hbody : has_type_l1 _ _ (ELoc _ _) _ ?Rbody _ |- _ ] =>
+      | [ Hbody : has_type_l1 _ _ _ (ELoc _ _) _ ?Rbody _ |- _ ] =>
           assert (HRb : Rbody = r0 :: r1 :: nil)
             by (eapply t_loc_l1_R_preserving; eassumption)
       end.

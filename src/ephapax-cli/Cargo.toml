@@ -39,6 +39,10 @@ clap.workspace = true
 colored.workspace = true
 ariadne.workspace = true
 serde_json.workspace = true
+# Structural self-validation of emitted wasm before it is written to disk
+# (the always-on floor; distinct from the optional --verify-ownership
+# semantic check). Same crate the wasm_e2e / validate-wasm gates use.
+wasmparser = "0.221"
 
 [features]
 default = ["typed-wasm-verify"]
@@ -52,5 +56,4 @@ default = ["typed-wasm-verify"]
 [dev-dependencies]
 wasmtime.workspace = true
 proptest = { workspace = true }
-wasmparser = "0.221"
 tempfile = "3"

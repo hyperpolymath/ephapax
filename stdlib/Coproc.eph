@@ -1,0 +1,121 @@
+// SPDX-License-Identifier: MPL-2.0
+// Owner: Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk>
+// Copyright (c) 2026 Jonathan D.A. Jewell (hyperpolymath) <j.d.a.jewell@open.ac.uk>
+//
+// Ephapax Coprocessor API — a THIN typed dispatch boundary (v2 grammar).
+//
+// This module implements NO coprocessor kernels. The ten capability classes
+// surface the EXISTING coprocessor suite in `Axiom.jl` (Julia) — the
+// DSP/Crypto/Math/PPU/GPU/VPU/TPU/QPU/NPU/FPGA backends behind Axiom's
+// `backend_coprocessor_*` generics. ephapax holds only a typed surface plus
+// a substructural safety gate; routing, fallback, and benchmarking stay in
+// Axiom (boundary kept clean — no porting).
+//
+// The single shared seam is a thin C ABI: `libephapax_coproc.so` (see
+// `tools/coproc/ephapax_coproc.zig`) exports flat `eph_coproc_*` symbols
+// that forward to Axiom, mirroring how Axiom itself links Zig. ephapax
+// reaches them through its ordinary `__ffi(...)` path (load with
+// `-L libephapax_coproc.so`). When the library is absent each call falls
+// through to ephapax's `[ffi:stub]` -> 0 path, so the surface stays usable
+// with no coprocessor present.
+
+module Coproc
+
+// ── Capabilities ──────────────────────────────────────────────────────────
+//
+// The ten coprocessor classes, each mapping 1:1 onto an Axiom.jl
+// CoprocessorBackend. The declaration order documents the intent; the wire
+// contract with the Zig shim is made explicit by `cap_tag` below.
+pub data Capability =
+  | Audio     // -> Axiom DSPBackend  (Audio PU / digital signal processing)
+  | Crypto    // -> Axiom CryptoBackend
+  | Maths     // -> Axiom MathBackend
+  | Physics   // -> Axiom PPUBackend  (physics processing unit)
+  | Gpu       // -> Axiom CUDA / Metal / ROCm
+  | Vector    // -> Axiom VPUBackend  (vector processing unit)
+  | Tensor    // -> Axiom TPUBackend  (tensor processing unit)
+  | Quantum   // -> Axiom QPUBackend  (quantum processing unit)
+  | Io        // -> Axiom NPUBackend / host I/O path
+  | Fpga      // -> Axiom FPGABackend
+
+// An opaque handle to a buffer living on a coprocessor. LINEAR: once
+// uploaded it must be consumed EXACTLY ONCE — by `download` (pull the
+// result) or `release` (abort). The linear checker therefore forbids
+// use-after-download, use-after-release, double device-free, and silently
+// leaking a device buffer (a dropped `CoprocBuf` is a type error, exactly
+// as for `File!` / `Buffer!`). `dispatch` consumes a buffer and returns a
+// fresh linear handle (consume-and-reborrow).
+pub data CoprocBuf =
+  | CoprocBuf(I64)
+
+// ── Capability tag ────────────────────────────────────────────────────────
+//
+// The stable i64 tag for the shim's dispatch switch. Kept explicit (not
+// reliant on the runtime's sum-discriminant encoding) so the wire contract
+// survives any change to how nullary variants are represented: Audio=0 ..
+// Fpga=9. (Returns I32 — integer literals default to I32, and `__ffi`
+// accepts any integer arg, widening to the i64 C ABI at the boundary.)
+fn cap_tag(c: Capability): I32 =
+  match c of
+    | Audio => 0
+    | Crypto => 1
+    | Maths => 2
+    | Physics => 3
+    | Gpu => 4
+    | Vector => 5
+    | Tensor => 6
+    | Quantum => 7
+    | Io => 8
+    | Fpga => 9
+  end
+
+// ── Availability probe (non-consuming) ────────────────────────────────────
+//
+// Returns 1 if the capability's coprocessor is reachable through the shim,
+// 0 otherwise (including when `libephapax_coproc.so` is not linked). Lets a
+// caller branch to a pure path BEFORE allocating any linear `CoprocBuf`.
+fn available(c: Capability): I64 =
+  __ffi("eph_coproc_available", cap_tag(c))
+
+// ── Upload: host buffer -> LINEAR device handle ───────────────────────────
+//
+// `data_ptr`/`len` describe a host-side byte buffer. Produces a linear
+// `CoprocBuf` bound to the active region.
+// (The `match raw` wrapper is a v2-grammar accommodation: a constructor
+// application is currently only accepted in match-arm tail position, the
+// same shape `decode_msg` uses in the v2 fixtures.)
+fn upload(c: Capability, data_ptr: I64, len: I64): CoprocBuf =
+  let raw = __ffi("eph_coproc_upload", cap_tag(c), data_ptr, len)
+  match raw of
+    | _ => CoprocBuf(raw)
+  end
+
+// ── Dispatch: run an op, consume-and-reborrow ─────────────────────────────
+//
+// Consumes `buf`, runs coprocessor op `op` (two i64 operands), and returns a
+// FRESH linear handle to the result buffer. Mirrors the linear reborrow of a
+// streaming retry.
+fn dispatch(buf: CoprocBuf, op: I64, arg0: I64, arg1: I64): CoprocBuf =
+  match buf of
+    | CoprocBuf(id) => CoprocBuf(__ffi("eph_coproc_dispatch", id, op, arg0, arg1))
+  end
+
+// ── Download: TERMINAL consumer that pulls the result ─────────────────────
+//
+// Consumes `buf` and copies its contents to the host buffer at `out_ptr`.
+// Returns a status code (0 = ok). After `download` the handle is gone —
+// reusing it is a static linear-use-after-consume error.
+fn download(buf: CoprocBuf, out_ptr: I64): I64 =
+  match buf of
+    | CoprocBuf(id) => __ffi("eph_coproc_download", id, out_ptr)
+  end
+
+// ── Release: TERMINAL abort consumer ──────────────────────────────────────
+//
+// Consumes `buf` and frees the device buffer WITHOUT downloading. Returns a
+// status code (0 = ok) — the abort path that still satisfies linearity so no
+// device buffer is ever leaked.
+fn release(buf: CoprocBuf): I64 =
+  match buf of
+    | CoprocBuf(id) => __ffi("eph_coproc_release", id)
+  end

@@ -1,0 +1,69 @@
+// SPDX-License-Identifier: MPL-2.0
+// Owner: Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk>
+= ephapax coprocessor boundary
+:toc: macro
+
+toc::[]
+
+== What this is
+
+A *thin typed dispatch boundary* that lets ephapax use the **existing**
+coprocessor suite in `Axiom.jl` (Julia) — the ten DSP/Crypto/Math/PPU/
+GPU/VPU/TPU/QPU/NPU/FPGA backends behind Axiom's `backend_coprocessor_*`
+generics — **without porting any kernel into ephapax**.
+
+The boundary is deliberately clean (no framework internals cross into the
+language):
+
+[cols="1,3"]
+|===
+| `stdlib/Coproc.eph` | The typed ephapax surface: a `Capability` sum type (the ten classes), a `cap_tag` wire-tag map, and a LINEAR `CoprocBuf` device-buffer handle with an `upload → dispatch* → (download \| release)` lifecycle. Type-checks under `ephapax check`.
+| `tools/coproc/ephapax_coproc.zig` | The single shared seam: a Zig shared library exporting a flat C ABI (`eph_coproc_*`, all `i64 (...) -> i64`). In a full build it forwards to Axiom via the Julia C-embedding API; the in-tree build is a STUB (reports unavailable, with one loopback for the seam test). Mirrors how Axiom itself links Zig.
+| ephapax `__ffi` path | ephapax reaches the seam through its ordinary foreign-call mechanism — no new language feature. Load with `-L libephapax_coproc.so`.
+|===
+
+== The safety story (why a language, not a library, owns this)
+
+A `CoprocBuf` is a *linear resource*. Consumers bind it with `let!`, so the
+linear checker guarantees a device buffer is consumed **exactly once** —
+no use-after-download, no double device-free, no silently-leaked buffer
+(a dropped handle is a type error). `dispatch` consumes a buffer and
+returns a fresh one (consume-and-reborrow); `download` and `release` are
+the two terminal consumers. This is the same discipline `Region!` and the
+streaming `MessageHandle` use.
+
+NOTE: In the current v2 grammar, linearity is expressed at `let!` *binding
+sites*, not via `T!` *type annotations* (see
+`docs/v2-grammar-and-codegen-gaps-2026-06-16.adoc`). `Coproc.eph` therefore
+declares plain `CoprocBuf` and relies on consumer `let!` bindings for the
+linear guarantee.
+
+== Build & use
+
+[source,sh]
+----
+# Build the (stub) seam:
+zig build-lib -dynamic -O ReleaseSafe \
+    tools/coproc/ephapax_coproc.zig -femit-bin=libephapax_coproc.so
+
+# Run an ephapax program that uses Coproc, with the seam linked:
+ephapax run myprog.eph -L libephapax_coproc.so
+----
+
+Verified end-to-end: a program calling `eph_coproc_dispatch(_, _, 20, 22)`
+returns `42` with the shim linked, and falls through to ephapax's built-in
+`[ffi:stub] -> 0` when it is not — proving the `__ffi` path reaches this
+shim.
+
+== Wiring the real Axiom backend
+
+The `// TODO(axiom)` markers in `ephapax_coproc.zig` are the exact forwarder
+points. Each `eph_coproc_*` symbol selects the Axiom `CoprocessorBackend`
+struct from its capability tag and `jl_call`s the matching
+`Axiom.backend_coprocessor_*` generic (`Axiom.jl/src/backends/abstract.jl`),
+copying nothing out of Axiom. Axiom keeps all routing, fallback, and
+benchmarking; ephapax keeps the typed surface + the linear gate.
+
+An optional `CoprocResult` round-trip proof for the status contract can be
+added to `src/abi/Ephapax/ABI/Foreign.idr` (mirroring `CompileResult`),
+checked by `abi-verify.yml`.

@@ -1,0 +1,112 @@
+// SPDX-License-Identifier: MPL-2.0
+// Owner: Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk>
+= v2 grammar & codegen gaps (found 2026-06-16)
+:toc: macro
+
+Concrete gaps in the v2 grammar / language design and the wasm backend,
+surfaced while building the coprocessor thin-FFI surface (`stdlib/Coproc.eph`
++ `tools/coproc/`). Each is reproducible with the committed toolchain.
+
+toc::[]
+
+== G1 — No linear *type* annotations (`T!`); linearity is binding-site only
+
+The compiling v2 form (the `v2_grammar_phase_*` fixtures, e.g.
+`tests/v2-grammar/fixtures/hypatia-port/bridge.eph`) expresses linearity
+exclusively at `let!` *binding* sites. A linear *type* annotation in
+parameter/return position — `fn f(b: CoprocBuf!) -> ...` — does **not**
+parse:
+
+----
+$ ephapax run stdlib/Coproc.eph   # with `CoprocBuf!` return types
+Parse error: ... 83:52  fn upload(...): CoprocBuf! =
+  = expected record_ty, unit_ty, string_ty, borrow_ty, list_ty, or product_ty
+----
+
+The `examples/error_handling/*` and `examples/linear/*` files *do* write
+`-> Buffer!` / `File!`, but those files are in the legacy syntax (see G3)
+and do not parse either, so they are not evidence the feature works.
+
+*Impact:* a resource-handle API cannot make its linearity visible in the
+type signature; callers must know to bind with `let!`. *Design question:*
+should `T!` be a first-class type qualifier (cf. the `Qual` seam in
+`src/abi/Ephapax/ABI/Types.idr`), or is binding-site `let!` the intended
+sole surface?
+
+== G2 — A constructor application is only valid as a *match-arm tail*
+
+`Ctor(expr)` cannot be a bare function body or a `let`-block tail; it parses
+only inside a match arm:
+
+----
+fn upload(...): CoprocBuf =
+  CoprocBuf(__ffi(...))            # Parse error: Unexpected atom expression: construct_expr
+
+fn upload(...): CoprocBuf =
+  let raw = __ffi(...)
+  CoprocBuf(raw)                   # Parse error: Unexpected single_expr: block_expr
+
+fn upload(...): CoprocBuf =
+  let raw = __ffi(...)
+  match raw of | _ => CoprocBuf(raw) end   # OK (the shape decode_msg uses)
+----
+
+`Coproc.eph::upload` carries the `match _ of | _ => ...` workaround with an
+inline note. *Design question:* the value grammar should accept
+`construct_expr` wherever an expression is expected (body tail, `let` tail),
+not only in match arms.
+
+== G3 — The whole stdlib is in a non-parsing legacy function syntax
+
+`stdlib/{Region,Stream,Transactions,Prelude}.eph` use
+`fn name(args) -> Type { body }`. Neither parser accepts it:
+
+----
+$ ephapax run   stdlib/Region.eph   # core parser
+Parse error: ... 19:16  fn create() -> Region! {
+$ ephapax check stdlib/Stream.eph   # surface parser
+Parse error: ... 150:27 fn topic(name: String) -> Topic {
+----
+
+The only function syntax the current toolchain parses is the v2 form
+`fn name(args): Type = body` (what `bridge.eph` compiles). So the stdlib is
+stranded in pre-v2 syntax and needs migration. `stdlib/Coproc.eph` is the
+first stdlib module authored in the parseable v2 form (it passes
+`ephapax check`).
+
+== G4 — No I64 integer-literal syntax
+
+Integer literals are always `I32`; there is no suffix (`0i64`) to write an
+`I64` literal, so a function returning `I64` from literal bodies type-errors
+(`expected Base(I64), found Base(I32)`). `Coproc.eph::cap_tag` is therefore
+typed `I32` (and `__ffi` widens to the i64 C ABI). *Design question:* add a
+literal suffix or an `I64` literal form.
+
+== G5 — wasm codegen emits an *invalid module* for any `__ffi` call
+
+Any `__ffi(...)` program type-checks but produces a structurally invalid
+wasm module:
+
+----
+$ printf 'fn t(): I64 =\n  __ffi("foo", 1)\n' > /tmp/x.eph
+$ ephapax check   /tmp/x.eph   ->  checked successfully
+$ ephapax compile /tmp/x.eph   ->  emitted wasm failed structural validation:
+                                   unknown function 100: function index out of bounds
+----
+
+*Root cause:* `src/ephapax-wasm/src/lib.rs:433` sets `next_import_idx: 100`
+and `ensure_ffi_import` (:534) hands out FFI import indices from there, but
+the module's function-index space does not have 100 entries, so the emitted
+`call 100` is out of bounds. FFI imports must be assigned indices contiguous
+with the other function imports, with defined-function indices shifted
+accordingly — not a fixed offset of 100.
+
+*Also note:* `__ffi` is semantically an interpreter / native-FFI feature
+(dlopen/dlsym); wasm is sandboxed with no dlopen. So even once the index
+math is fixed, the wasm target should either emit proper *host imports* for
+the symbols or fail with a clean "FFI unsupported in the wasm target" error
+— never an invalid module. The structural self-validation floor added in
+`fn finish_compile` now catches this as a hard error rather than silently
+writing a broken `.wasm`. This is tracked as codegen debt; the coprocessor
+surface is unaffected because it dispatches via the interpreter's `__ffi`
+path, not wasm.

@@ -238,13 +238,17 @@ to the owner**:
 ## §4. Counts + file-by-file map
 
 <!-- status-gate marker: do not move. scripts/status-gate.sh reads this line. -->
-Coq admitted proofs remaining: 4
+Coq admitted proofs remaining: 5
 
 (1 outer `Admitted.` in `formal/Semantics.v` — sacrosanct legacy
-preservation, provably false per `Counterexample.v` + 3 outer
-`Admitted.` markers in `formal/Semantics_L1.v` covering 5 internal
-`admit.` cases — all pre-existing L1 structural debt + parallel
-mirrors. See the per-file table and seam audit below.)
+preservation, provably false per `Counterexample.v` + **4** outer
+`Admitted.` markers in `formal/Semantics_L1.v` — the four open L1 lemmas
+`region_shrink` / `region_liveness` / `step_pop` / `preservation_l1`.
+**Corrected 2026-06-16 from `4`: the marker and the per-file table below were
+written 2026-06-01, predate the `step_pop_disjoint_from_type_l1` outer marker,
+and had drifted by one against `coqc`/grep ground truth. §5.2 carries the
+authoritative current line numbers and the internal-`admit.` breakdown; the
+2026-06-01 seam-audit line numbers below are superseded by it.**)
 
 ### Per-file Qed / Admitted summary (as of 2026-06-01)
 
@@ -256,7 +260,7 @@ mirrors. See the per-file table and seam audit below.)
 | `formal/Counterexample_L2.v` | **5** | 0 | ✅ Phase 4c soundness-gap witness — fresh-region scope crossing (`v_typed_at_empty`, `outer_typed`, `e_before_typed`, `e_step`, `e_after_untypable`) |
 | `formal/Counterexample_L2_nested.v` | **5** | 0 | ✅ Phase 3b soundness-gap witness — nested TFunEff (analogue structure to `Counterexample_L2.v`) |
 | `formal/TypingL1.v` | **2** | 0 | ✅ active — L1 judgment, modality-indexed |
-| `formal/Semantics_L1.v` | **37+** | **3** | ✅ active — Phase 3b Stage 1a + 1b landed via PRs #252 + #253. 3 outer `Admitted.` markers cover 4 internal `admit.` cases. See seam audit below for current line numbers. |
+| `formal/Semantics_L1.v` | **37+** | **4** | ✅ active — Phase 3b Stage 1a + 1b landed via PRs #252 + #253. **4** outer `Admitted.` markers — the four open L1 lemmas (`region_shrink` / `region_liveness` / `step_pop` / `preservation_l1`). **Corrected 2026-06-16 from `3` (the `step_pop` marker was missed). §5.2 has the authoritative current line numbers + the 13 internal `admit.` cases; the 2026-06-01 line numbers in the seam audit below are superseded.** |
 | `formal/Modality.v` | **1** | 0 | ✅ active — L2 core, zero axioms (`linear_to_affine`) |
 | `formal/Echo.v` | **12** | 0 | ✅ active — L3 calculus mechanised |
 | `formal/TypingL2.v` | **10** | 0 | ✅ active — `weaken_modality` (+ Affine_id + 3 `_le_*` variants), `preservation_l2_via_l1` (conditional on `preservation_l1`), `linear_value_retype_l1_m`, and 3 β-case lemmas (`preservation_l2_app_eff_beta_linear`, `_ground_nonlinear`, `_tfuneff` conditional on Stage 1b side conditions). NOT a wrapper. |
@@ -321,6 +325,154 @@ are all `admit.`-free.
 * `idris2 --check` is the same for `.idr` files.
 * Both are wired into `rust-ci.yml`'s "Coq proofs" and "Idris2 build"
   jobs.
+
+---
+
+## §5. Closure plan + current-branch state + foundation audit (2026-06-16)
+
+> This section is a dated **status + plan** snapshot. It does **not**
+> supersede §1–§4 (which track `main`); it records (a) the authoritative
+> ground-truthed admit set on the current proof branch, (b) the committed
+> closure route, and (c) the independent trust audit of the foundation
+> repos the route builds on. Sourced from a ground-truth sweep
+> (`coqc`/`grep`-verified, not doc-trusted), not from prose.
+>
+> **Companion design docs** `L1-REGION-REFOUNDATION-PLAN.md` and
+> `L1-ELIMINATOR-FORK.md` (referenced below) live in **PR #299**
+> (branch `docs/l1-closure-research`), pending merge to `formal/`. The
+> tropical applicability case study is `tropical-resource-typing` PR #21
+> (`docs/applications/ephapax-l1-regions.adoc`).
+
+### 5.1 Current proof branch
+
+Branch `proofs/l1-effect-typing-Aprime` (A′ effect-typed-only lambdas).
+**A′ closes 0 of 4 L1 admits** — the open obligations are region/eliminator
+cases, not lambda-rigidity cases — so its adoption-vs-revert disposition is
+still open (it is groundwork for the choreographic `S_App_Step2` case, not a
+closure).
+
+All four L1 lemmas (`region_shrink`, `region_liveness`, `step_pop`,
+`preservation_l1`) each carry an outer `Admitted.` on **both** this branch
+**and `main`** (`step_pop_disjoint_from_type_l1` is present on `main` too, at
+`Semantics_L1.v:3178`/`:3433`). So `formal/` holds **5 outer `Admitted.`**
+(1 legacy + 4 L1) on main — **but the §4 `status-gate` marker reads `4` and
+the §4 prose says "3 outer `Admitted.` in `Semantics_L1.v`": both are stale by
+one** (the true `Semantics_L1.v` count is 4 outer markers, → 5 with the
+legacy). This is a real **`main`-wide** drift, not branch-local — and exactly
+the drift the **broken + unwired** `status-gate` (see §5.7) was supposed to
+catch but couldn't. §4's marker is corrected to `5` in this PR; the companion
+`fix/proof-gates` PR repairs the script (`//`→`#`) and wires it into CI so
+future drift is flagged. (A′ shifts the line numbers but not the count.)
+
+### 5.2 The four L1 admits — authoritative classification (this branch)
+
+| # | Lemma | Site (this branch) | Internal admits | Class | Closes via |
+|---|---|---|---|---|---|
+| 1 | `region_shrink_preserves_typing_l1_gen_m` | `Semantics_L1.v:441` | `:572`, `:642` | **live structural** (list-vs-multiset tear) | **Dissolves** — carrier refactor `region_env : list` → count-map. `L1-REGION-REFOUNDATION-PLAN.md` |
+| 2 | `region_liveness_at_split_l1_gen` | `Semantics_L1.v:1904` | `:1956`, `:1976` | **provably FALSE** as written (witness `ERegion rv (EI32 5)` at `R=[rv]`) | **Repaired** — restate as graded `live R rv ∧ no-exit-of-rv ⇒ live R' rv`; prove from `count_occ_le_l1_m` monotonicity + ~13-site call audit. `L1-REGION-REFOUNDATION-PLAN.md §5` |
+| 3 | `step_pop_disjoint_from_type_l1` | `Semantics_L1.v:3106` | **~9–11** across every eliminator/erasing context (`S_App_Step2`, `S_Pair_Step2`, `S_Inl/Inr_Step`, `S_Case_Step`, `S_Let_Step`, `S_Region_Step`) — all blocked on the §4.8 lambda-rigidity gap | **the eliminator fork** | **Open research** — choreographic typing across time segments, used foundationally. `L1-ELIMINATOR-FORK.md` |
+| 4 | `preservation_l1` (capstone) | `Semantics_L1.v:3367` | `:3379` | **gated** on 1–3 | follows once 1–3 land |
+
+`preservation_l3` (`Semantics_L1.v`, **Qed**) is real and depends on **only**
+admit #1 (`region_shrink`); it flips **unconditional** the moment #1 closes.
+`L4.v` is **scaffold-unbuilt** (`ProgramMode` + round-trip mapping;
+definitions only, no theorems — not debt, just not yet built). No hidden 5th
+admit, no `Axiom`/`Parameter`/`Hypothesis` smuggled assumption, no fake-`Qed`
+was found anywhere in `formal/*.v`.
+
+### 5.3 Idris2 ABI proof needs (a separate axis from the Coq L1 admits)
+
+`src/abi/Ephapax/ABI/Invariants.idr` states six compiler-correctness
+invariants as **erased (0-quantity) postulates**, each an explicit *owed*
+forward to a discharging proof:
+
+| ID | Invariant | Status |
+|---|---|---|
+| E1 | Type preservation (operational) | **owed** — forwards to Coq `preservation` (legacy is false; real obligation is `preservation_l1`) |
+| E2 | Linear consumption across control flow | E2a position-form **DISCHARGED** (`splitLinearCoverage`, Qed, `Formal/Qualifier.idr`); E2b control-flow form **owed** |
+| E3 | No region escape | static/type-level **DISCHARGED** (`noEscapeTheorem`, Qed, `Formal/RegionLinear.idr`); operational form **owed** |
+| E4 | No runtime GC | **owed + flagged** — `noGCExtract` is a **tautological/vacuous wrapper** (returns inputs unchanged), not a proof |
+| E5 | WASM compilation correctness | **owed — no formalisation exists** (Rust backend only). Highest-leverage compiler-correctness gap; enables `compileOkImpliesWasmTyped` in `Foreign.idr` |
+| E6 | IR (S-expr) lowering correctness | **owed — no formalisation** |
+
+Real Idris Qed proofs verified clean (no `believe_me`/`assert_total`/holes):
+`splitLinearCoverage`, `noEscapeTheorem`, `orthogonalityLemma`,
+`compileResultRoundTrip`, `outlivesTransitive`. Both `abi-verify.yml` and
+`coq-build.yml` are hard CI gates (`idris2 --build`; `coq_makefile` +
+`Print Assumptions` on the Phase-D top-level results).
+
+### 5.4 Committed closure route (owner-committed 2026-06-16)
+
+1. **Clean win (deterministic):** tropical carrier refactor → dissolves #1,
+   repairs the false #2, then flips `preservation_l3` unconditional.
+   **Net 4 → 2 admits, 0 false lemmas.** (`L1-REGION-REFOUNDATION-PLAN.md`.)
+2. **Deciding experiment (cheap, do before the general theory):** the minimal
+   `EDrop (EVar j : TString rv)` choreography over two segments — does subject
+   reduction carry liveness through `S_Region_Exit rv` coherently, or relocate
+   it into a projection-coherence side-condition? (`L1-ELIMINATOR-FORK.md §6`.)
+3. **If green → choreographic-foundational re-derivation:** region liveness as
+   a tropically-graded choreography across time segments (regions = session-
+   typed resources, scopes = segments, preservation = subject reduction).
+   Closes #3 → **2 → 0**, and likely gives **L4** its dyadic (2-party
+   choreography) structure for free — one foundation, all four layers.
+
+### 5.5 Foundation trust audit (2026-06-16) — GO
+
+The route reuses proofs from three sibling repos. An independent ground-truth
+audit (cold rebuilds + kernel/flag probes, not doc-trust) cleared all three —
+the owner's "did an LLM let a blank/sorry through?" concern **did not
+materialise**:
+
+* **`epistemic-types`** (Agda 2.8.0) — **trustworthy/GO.** `agda
+  --no-libraries … All.agda` exit 0; `-W error` still exit 0; `--safe`
+  *proven enforced* (postulate-injection probe rejected, exit 42); zero
+  escape hatches; zero orphans. Caveat: its `EchoBridge` is a deliberate
+  scaffold (grade plumbing, no proven graded-loss laws).
+* **`tropical-resource-typing`** (Lean 4.13.0) — **trustworthy/GO (strongest).**
+  Cold `lake build` exit 0 ×2; kernel `#print axioms` on all 17 load-bearing
+  results → only `propext`/`Quot.sound` or none (**no `sorryAx`, no
+  `Classical.choice`**). Every lemma the route reuses is non-vacuous.
+* **`echo-types`** (Agda 2.8.0) — **trustworthy/GO, build on the WIRED layer
+  only.** 164 wired files (`--safe --without-K`, exit 0, zero postulates) vs
+  15 orphaned (~8%). Three caveats: (a) the **one** real postulate lives in
+  the orphaned, exempted exploratory `EchoImageFactorizationPropPostulated.agda`
+  (honest quarantine, imported by nothing); (b) the experimental
+  `echo-additive` **variance** suite is **orphaned + RETRACTED (R-2026-05-18)**
+  and `VarianceGate.agda` self-declares "NO proven theorems" — **do not cite
+  variance as proven**; (c) two dangling `libraries` configs cause false
+  "name not found" failures — fix before handing off.
+
+### 5.7 Gate integrity — threatened (surfaced 2026-06-16, NOT yet fixed)
+
+Two CI-gate findings threaten the "is it proved?" guarantee and are
+recorded here so they are not lost (no fix applied — surfaced for decision):
+
+* **`coq-build-gate` is implemented but NOT a *required* status check.**
+  `.github/settings.yml:113-118` requires only `hypatia-scan` + `codeql`;
+  the always-on `coq-build-gate` aggregator (PR #254) is not in
+  `required_status_checks`. **Consequence: a new `Admitted.`/`Axiom`, or a
+  proof that fails `coqc`, could merge to `main` undetected.** This is the
+  single highest-priority gate fix.
+* **`scripts/status-gate.sh` is doubly dead:** (a) line 3 is a `//` C-style
+  comment (should be `#`) → the script is syntactically invalid and aborts
+  immediately (a delimiter bug, fixable without touching the owner string);
+  (b) it is wired into no CI workflow (only `just status-gate`). So the
+  "Coq admitted proofs remaining: N" drift check in §4 never runs in CI —
+  which is also why the §5.1 count drift (4 vs 5 on this branch) was never
+  flagged automatically.
+
+(Lower-severity: `scorecard-enforcer` defaults the parsed score to `0` on a
+malformed SARIF → possible false-fail; `boj-build.yml` `continue-on-error`
+is acceptable for an external service.)
+
+### 5.6 Bottom line
+
+ephapax's remaining proof work = the 4 L1 admits (→ 2 by the deterministic
+clean win, → 0 if the eliminator-fork experiment goes green) + the unbuilt L4
++ the owed Idris ABI obligations (E1, E2b, E3-operational, E4, E5, E6, with
+E5 the highest leverage). The legacy `Semantics.v preservation` is **not
+debt** — it is a deliberate, witnessed false result. The plan is staged,
+ground-truthed, and the foundation it builds on is independently verified.
 
 ---
 

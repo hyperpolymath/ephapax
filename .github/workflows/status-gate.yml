@@ -1,0 +1,44 @@
+# SPDX-License-Identifier: MPL-2.0
+# Owner: Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk>
+# Status Gate — fail a PR when the PROOF-NEEDS.md / TEST-NEEDS.md count
+# markers drift from coqc/cargo ground truth. This wires the previously
+# broken (`//` syntax error on line 3) + unwired scripts/status-gate.sh
+# into CI so admit-count / test-count drift is caught automatically.
+# NOTE: not yet a required status check — see .github/settings.yml.
+name: Status Gate
+
+on:
+  pull_request:
+    paths:
+      - 'formal/**'
+      - 'PROOF-NEEDS.md'
+      - 'TEST-NEEDS.md'
+      - 'scripts/status-gate.sh'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - '**/Cargo.toml'
+      - '.github/workflows/status-gate.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: status-gate-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  status-gate:
+    name: status-gate
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9 # stable
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2
+      - name: Run status-gate (proof + test count drift)
+        env:
+          CARGO_INCREMENTAL: "0"
+        run: ./scripts/status-gate.sh

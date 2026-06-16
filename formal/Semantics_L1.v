@@ -9,26 +9,26 @@
   ***  This is the post-counterexample L1 redesign. Extend HERE.     ***
   ***                                                                ***
   ***  3 `Admitted` lemmas remain (down from 7 mid-chain, 9 pre-     ***
-  ***  bullet-restoration). L2-β closures so far:                    ***
+  ***  bullet-restoration). L2-β + L1 closures so far:               ***
   ***    - typing_preserves_bindings_l1 (now m-polymorphic)          ***
   ***    - unrestricted_flag_unchanged_l1                            ***
   ***    - shift_typing_gen_l1 (via shift_typing_gen_l1_m + wrapper) ***
   ***    - subst_typing_gen_l1 (via subst_typing_gen_l1_m + wrapper) ***
   ***    - count_occ_le_l1 (via count_occ_le_l1_m + wrapper)         ***
-  ***    - region_shrink_preserves_typing_l1_gen (via                ***
-  ***      region_shrink_preserves_typing_l1_gen_m + wrapper)        ***
+  ***    - region_shrink_msperm + region_shrink_{neutral,value}      ***
+  ***      (Qed, axiom-free, 2026-06-16) — the multiset-perm         ***
+  ***      generalisation; CLOSES the former region_shrink admit     ***
+  ***      (the false general form is pinned in                      ***
+  ***      Counterexample_RegionShrink.v).                           ***
   ***    - typing_preserves_length_l1, output_shape_at_l1,           ***
   ***      loc_retype_at_R_l1 all generalised to m-polymorphic       ***
   ***                                                                ***
   ***  Residual admits (L2-β follow-up):                             ***
-  ***    1. region_shrink_preserves_typing_l1_gen_m — list-vs-       ***
-  ***       multiset structural mismatch in T_Region_Active_L1       ***
-  ***       shadowed case (1 internal admit). Bullet structure       ***
-  ***       restored 2026-05-27; only the structural sub-case        ***
-  ***       remains.                                                 ***
-  ***    2. region_liveness_at_split_l1_gen — 1 narrow admit in the  ***
+  ***    1. region_liveness_at_split_l1_gen — 1 narrow admit in the  ***
   ***       T_Region_Active_L1 [r = rv] sub-case (genuinely false    ***
   ***       per documented counterexample ERegion rv (EI32 5))       ***
+  ***    2. step_pop_disjoint_from_type_l1 — congruence cases        ***
+  ***       (S_Let_Step etc.) blocked on §4.8 lambda-rigidity        ***
   ***    3. preservation_l1 — capstone; depends on closing (1)+(2)   ***
   ***       under L2 dispatch + lambda-rigidity gap resolution       ***
   ***                                                                ***
@@ -68,12 +68,12 @@
     - [remove_first_eq_l1] — Qed (trivial).
     - [value_R_G_preserving_l1] — Qed (L1.A, PR #158). Induction on
       [is_value] with nested IH for EInl, EInr, EPair, EBorrow.
-    - [region_shrink_preserves_typing_l1] — Qed (L1.B, PR #159) via
-      auxiliary [region_shrink_preserves_typing_l1_gen] which itself
-      is Admitted; 22/24 typing-rule cases close, 2 residual admits
-      in T_Region_L1 / T_Region_Active_L1 sub-cases blocked on L1
-      analogs of legacy [region_env_perm_typing] / [region_add_typing]
-      (tasks #25 / #26).
+    - [region_shrink_preserves_typing_l1] — Qed via [region_shrink_value]
+      (the value-restricted corollary of [region_shrink_msperm]; Qed,
+      axiom-free, 2026-06-16). The former auxiliary
+      [region_shrink_preserves_typing_l1_gen{,_m}] was FALSE-as-stated
+      (witness pinned in [Counterexample_RegionShrink.v]) and is
+      replaced by the multiset-permutation lemma; no residual admit here.
     - [subst_preserves_typing_l1] — Qed (L1.C) with strengthened
       statement (the original signature was demonstrably unsound — see
       the lemma's header). Depended on a single isolated sub-Axiom
@@ -232,7 +232,7 @@ Qed.
     do.
 
     Used to discharge the [T_Region_L1] shadowed sub-case of
-    [region_shrink_preserves_typing_l1_gen] as vacuous (the inner
+    [region_shrink_msperm] as vacuous (the inner
     region's output cannot contain >1 copies of the freshly-pushed
     region). *)
 
@@ -363,183 +363,234 @@ Proof.
   apply (count_occ_In string_dec). lia.
 Qed.
 
-(** ** L1 region-environment set/multiset-equivalence — design note.
+(** ** L1 region-environment shrinkage — the multiset-permutation lemma.
 
-    Legacy [region_env_perm_typing] (in [Semantics.v]) uses set-
-    equivalence between region environments to transport typings.
-    The L1 analog would say: if [forall r, In r R1 <-> In r R2] and
-    [R1; G |=L1 e : T -| R1'; G'], then there exists [R2'] with
-    [R2; G |=L1 e : T -| R2'; G'].
+    DESIGN NOTE (2026-06-16, supersedes the prior "list-vs-multiset
+    bridge is unclosable" narrative).
 
-    The L1 version is fundamentally weaker than legacy because L1's
-    [T_Region_L1] and [T_Region_Active_L1] rules pop a *specific
-    list occurrence* (the FIRST one) of the named region via
-    [remove_first_L1]. So the output [R2'] depends on the *list
-    structure* of [R2], not just its membership.
+    The naive general statement — [region_shrink] for an ARBITRARY
+    output [R'] — is FALSE. Witness: [ERegion r (ERegion r EUnit)]
+    types at [[r;r]] |- ... -| [[]] and is [expr_strictly_free_of_region r]
+    (the predicate descends through [ERegion] unconditionally), yet it
+    does NOT type at [remove_first r [r;r] = [r]]: it consumes two
+    ambient copies of [r]. The machine-checked refutation is pinned in
+    [Counterexample_RegionShrink.v] ([region_shrink_is_FALSE], Qed).
 
-    Concretely: legacy outputs are not threaded ([R_out] = [R_in]
-    typing-wise), so legacy never needs to transport an *output* —
-    only inputs. L1's R-threading exposes this gap.
+    The TRUE generalisation threads a MULTISET-PERMUTATION hypothesis
+    on the output env instead of demanding list equality. This:
 
-    The [T_Region_Active_L1]-shadowed sub-case of
-    [region_shrink_preserves_typing_l1_gen] below requires bridging
-    a body derivation from [R] to [remove_first r R] (in some
-    sub-case where [In r (remove_first r R)], i.e., R has [r] twice
-    or more). The bridge would need to preserve outputs *with
-    list-structure agreement*, which set-equivalence (and even
-    multiset-equivalence in some sub-sub-cases) does not provide.
+      * passes through every compound rule — the intermediate env [R1]
+        is a multiset-perm of [R] by the monotonicity squeeze
+        ([count_occ_le_l1_m] in both directions), so the IH applies
+        WITHOUT needing list (order) equality — the previously-feared
+        list-vs-multiset wall never bites; and
 
-    Resolution: this sub-case remains an internal [admit] in
-    [region_shrink_preserves_typing_l1_gen_m] (the m-polymorphic
-    helper). The Linear wrapper [_gen] and the value-restricted
-    wrapper [region_shrink_preserves_typing_l1] (used by
-    [preservation_l1]'s S_Region_Exit case) both still depend on
-    it: an earlier note here suggested the value-wrapper could
-    bypass [_gen_m] by induction on [is_value], but that fails on
-    [VLam] — the lambda body is a non-value whose internal
-    [ERegion r' e'] subterm may shadow the outer [r], hitting the
-    same structural residual. Closure options are listed in the
-    case's own comment within [_gen_m]. *)
+      * makes the [T_Region_Active_L1] (and [_Echo]) shadowed sub-case
+        — the exact point where the false general lemma collapsed —
+        ENTIRELY VACUOUS: an active region strictly drops its r-count
+        ([remove_first_L1] decrements by one with [In r R_body]), so
+        its output can never be a multiset-perm of its input.
 
-(** Auxiliary general L1 region-shrinkage lemma — no [is_value] or
-    [~ In r (free_regions T)] premises, mirroring the legacy
-    [Semantics.region_shrink_preserves_typing]. The L1
-    region-permutation infrastructure (analog of [region_env_perm_typing]
-    and [region_add_typing]) is not yet built; the [T_Region_L1] and
-    [T_Region_Active_L1] sub-cases need them. The two [admit]s inside
-    this helper are the genuine residual blocking the [T_Lam_L1_Linear] case
-    of the targeted lemma below.
+    The R-neutral ([region_shrink_neutral]) and value-restricted
+    ([region_shrink_value]) corollaries follow immediately, the latter
+    via [value_R_G_preserving_l1] (values preserve the env as a LIST,
+    hence as a multiset). [region_shrink_value] is what the
+    S_Region_Exit / preservation_l3 call sites actually need — region
+    shrinkage is only ever applied to VALUES, whose typing is R-neutral.
 
-    Once the L1 permutation infrastructure lands, this helper closes to
-    Qed and the targeted lemma follows in one line. *)
+    Closed axiom-free; [Print Assumptions] on all three lemmas reports
+    "Closed under the global context" (see the audit block at the end
+    of this file). Validated by the four [_wf_probe*] scratch probes
+    (2026-06-16); this replaces the former admitted
+    [region_shrink_preserves_typing_l1_gen_m] / [_gen]. *)
 
-(** ** Modality-polymorphic generalisation.
+(** [cntD] mirrors the file's [cnt] (= [count_occ string_dec]); kept
+    local so the verified probe proof ports verbatim. *)
+Definition cntD (r : region_name) (R : region_env) : nat := count_occ string_dec R r.
 
-    Mirrors the L2-β pattern used by [subst_typing_gen_l1_m] and
-    [shift_typing_gen_l1_m]: the structural shrinkage lemma is
-    mode-blind (region operations don't depend on the modality),
-    so we prove it once at arbitrary [m] and derive the Linear
-    specialisation as a wrapper.
+Definition multiset_perm (R1 R2 : region_env) : Prop :=
+  forall r, cntD r R1 = cntD r R2.
 
-    One genuine residual [admit] remains — the [T_Region_Active_L1]
-    [rr = r] shadowed sub-case, documented as the list-vs-multiset
-    bridge in PROOF-NEEDS.md §2 and in the design-note comment
-    above this lemma block. The L1 region-permutation infrastructure
-    (analog of [region_env_perm_typing] and [region_add_typing])
-    is needed to close it; bridging options are listed in the
-    case's own comment. *)
-(** Migrated to [expr_strictly_free_of_region] as the precondition
-    (blocker 5 reformulation, 2026-05-28). The strict predicate gives
-    the body strictly MORE information than the weak one — in
-    particular, the [T_Region_*_L1] cases no longer rely on a
-    shadow-short-circuited [True] in the [rr = r] subcase. The
-    residual [admit] at the [T_Region_Active_L1] [rr = r] sub-case
-    is blocked by a list-vs-multiset structural mismatch (Phase D
-    work, NOT by predicate weakness — strengthening the predicate
-    does not close it). The [admit] remains; see the case's own
-    comment for resolution options. *)
-Lemma region_shrink_preserves_typing_l1_gen_m :
-  forall m R G e T R' G',
-    R ; G |=L1[m] e : T -| R' ; G' ->
-    forall r,
-      expr_strictly_free_of_region r e ->
-      remove_first r R ; G |=L1[m] e : T -| remove_first r R' ; G'.
+(** count of [remove_first_L1], combined form (from the library facts). *)
+Lemma remove_first_L1_count_general :
+  forall r r0 R,
+    count_occ string_dec (remove_first_L1 r R) r0
+    = (if string_dec r r0 then count_occ string_dec R r0 - 1 else count_occ string_dec R r0).
 Proof.
-  intros m R G e T R' G' Ht.
-  induction Ht; intros rr Hfree; simpl in Hfree.
-  - (* T_Unit_L1 *) apply T_Unit_L1.
-  - (* T_Bool_L1 *) apply T_Bool_L1.
-  - (* T_I32_L1 *) apply T_I32_L1.
-  - (* T_Var_Lin_L1 *) eapply T_Var_Lin_L1; eauto.
-  - (* T_Var_Unr_L1 *) eapply T_Var_Unr_L1; eauto.
-  - (* T_Loc_L1 *)
-    apply T_Loc_L1.
-    apply remove_first_preserves_other; [exact Hfree | exact H].
-  - (* T_StringNew_L1 *)
-    apply T_StringNew_L1.
-    apply remove_first_preserves_other; [exact Hfree | exact H].
-  - (* T_StringConcat_L1 *)
+  intros r r0 R. destruct (string_dec r r0) as [He|Hne].
+  - subst r0. pose proof (remove_first_L1_count_eq_self r R) as H. unfold cnt in H. exact H.
+  - pose proof (remove_first_L1_count_other r r0 R Hne) as H. unfold cnt in H. exact H.
+Qed.
+
+(** intermediate env of a two-premise rule is a multiset-perm of the
+    input, derived by squeezing the two monotonicity bounds against the
+    overall multiset-perm hypothesis. *)
+Ltac squeeze_mid Ht1 Ht2 Hmp :=
+  let rq := fresh "rq" in
+  intro rq;
+  pose proof (count_occ_le_l1_m _ _ _ _ _ _ _ Ht1 rq) as Hsa;
+  pose proof (count_occ_le_l1_m _ _ _ _ _ _ _ Ht2 rq) as Hsb;
+  specialize (Hmp rq); unfold cntD, multiset_perm, cnt in *; lia.
+
+Lemma region_shrink_msperm :
+  forall m R G e T Rout G_out,
+    has_type_l1 m R G e T Rout G_out ->
+    multiset_perm Rout R ->
+    forall rr, expr_strictly_free_of_region rr e ->
+      has_type_l1 m (remove_first rr R) G e T (remove_first rr Rout) G_out.
+Proof.
+  intros m R G e T Rout G_out Ht.
+  induction Ht; intros Hmp rr Hfree; simpl in Hfree.
+
+  - apply T_Unit_L1.
+  - apply T_Bool_L1.
+  - apply T_I32_L1.
+  - eapply T_Var_Lin_L1; eauto.
+  - eapply T_Var_Unr_L1; eauto.
+  - apply T_Loc_L1. apply remove_first_preserves_other; [exact Hfree|exact H].
+  - apply T_StringNew_L1. apply remove_first_preserves_other; [exact Hfree|exact H].
+
+  - (* StringConcat *)
     destruct Hfree as [Hf1 Hf2].
-    eapply T_StringConcat_L1; [eapply IHHt1; auto | eapply IHHt2; auto].
-  - (* T_StringLen_L1 *)
-    eapply T_StringLen_L1. eapply IHHt; auto.
-  - (* T_Let_L1 *)
+    assert (Hmp1 : multiset_perm R1 R) by (squeeze_mid Ht1 Ht2 Hmp).
+    assert (Hmp2 : multiset_perm R2 R1)
+      by (intro rq; specialize (Hmp rq); specialize (Hmp1 rq);
+          unfold cntD, multiset_perm in *; lia).
+    eapply T_StringConcat_L1;
+      [ eapply IHHt1; [exact Hmp1|exact Hf1] | eapply IHHt2; [exact Hmp2|exact Hf2] ].
+
+  - (* StringLen *)
+    eapply T_StringLen_L1. eapply IHHt; [exact Hmp|exact Hfree].
+
+  - (* Let *)
     destruct Hfree as [Hf1 Hf2].
-    eapply T_Let_L1; [eapply IHHt1; auto | eapply IHHt2; auto].
-  - (* T_LetLin_L1 *)
+    assert (Hmp1 : multiset_perm R1 R) by (squeeze_mid Ht1 Ht2 Hmp).
+    assert (Hmp2 : multiset_perm R2 R1)
+      by (intro rq; specialize (Hmp rq); specialize (Hmp1 rq);
+          unfold cntD, multiset_perm in *; lia).
+    eapply T_Let_L1;
+      [ eapply IHHt1; [exact Hmp1|exact Hf1] | eapply IHHt2; [exact Hmp2|exact Hf2] ].
+
+  - (* LetLin *)
     destruct Hfree as [Hf1 Hf2].
-    eapply T_LetLin_L1; [exact H | eapply IHHt1; auto | eapply IHHt2; auto].
-  - (* T_Lam_L1_Linear *)
-    apply T_Lam_L1_Linear. eapply IHHt; auto.
-  - (* T_Lam_L1_Affine *)
-    eapply T_Lam_L1_Affine. eapply IHHt; auto.
-  - (* T_Lam_L1_Linear_Eff — body's R_in is separate from outer R, but
-       the side condition [forall r, In r R -> In r R_in] survives
-       outer shrinkage (smaller outer R ⊆ original R ⊆ R_in). The body
-       typing at R_in is unchanged. *)
-    eapply T_Lam_L1_Linear_Eff; [|eassumption].
-    intros r0 Hin0. apply H. eapply remove_first_subset. exact Hin0.
-  - (* T_Lam_L1_Affine_Eff — same pattern. *)
-    eapply T_Lam_L1_Affine_Eff; [|eassumption].
-    intros r0 Hin0. apply H. eapply remove_first_subset. exact Hin0.
-  - (* T_App_L1 *)
+    assert (Hmp1 : multiset_perm R1 R) by (squeeze_mid Ht1 Ht2 Hmp).
+    assert (Hmp2 : multiset_perm R2 R1)
+      by (intro rq; specialize (Hmp rq); specialize (Hmp1 rq);
+          unfold cntD, multiset_perm in *; lia).
+    eapply T_LetLin_L1;
+      [ exact H | eapply IHHt1; [exact Hmp1|exact Hf1] | eapply IHHt2; [exact Hmp2|exact Hf2] ].
+
+  - (* Lam Linear: body genuinely neutral (R -> R) by rule *)
+    apply T_Lam_L1_Linear. eapply IHHt; [intro rq; reflexivity | exact Hfree].
+  - (* Lam Affine *)
+    eapply T_Lam_L1_Affine. eapply IHHt; [intro rq; reflexivity | exact Hfree].
+
+  - (* Lam Linear Eff: body lives in type, reused verbatim *)
+    eapply T_Lam_L1_Linear_Eff;
+      [ intros r' Hin'; apply H; eapply remove_first_subset; exact Hin' | exact Ht ].
+  - (* Lam Affine Eff *)
+    eapply T_Lam_L1_Affine_Eff;
+      [ intros r' Hin'; apply H; eapply remove_first_subset; exact Hin' | exact Ht ].
+
+  - (* App *)
     destruct Hfree as [Hf1 Hf2].
-    eapply T_App_L1; [eapply IHHt1; auto | eapply IHHt2; auto].
-  - (* T_Pair_L1 *)
+    assert (Hmp1 : multiset_perm R1 R) by (squeeze_mid Ht1 Ht2 Hmp).
+    assert (Hmp2 : multiset_perm R2 R1)
+      by (intro rq; specialize (Hmp rq); specialize (Hmp1 rq);
+          unfold cntD, multiset_perm in *; lia).
+    eapply T_App_L1;
+      [ eapply IHHt1; [exact Hmp1|exact Hf1] | eapply IHHt2; [exact Hmp2|exact Hf2] ].
+
+  - (* Pair *)
     destruct Hfree as [Hf1 Hf2].
-    eapply T_Pair_L1; [eapply IHHt1; auto | eapply IHHt2; auto].
-  - (* T_Fst_L1 *)
-    eapply T_Fst_L1; [eapply IHHt; auto | exact H].
-  - (* T_Snd_L1 *)
-    eapply T_Snd_L1; [eapply IHHt; auto | exact H].
-  - (* T_Inl_L1 *)
-    eapply T_Inl_L1. eapply IHHt; auto.
-  - (* T_Inr_L1 *)
-    eapply T_Inr_L1. eapply IHHt; auto.
-  - (* T_Case_L1_Linear *)
+    assert (Hmp1 : multiset_perm R1 R) by (squeeze_mid Ht1 Ht2 Hmp).
+    assert (Hmp2 : multiset_perm R2 R1)
+      by (intro rq; specialize (Hmp rq); specialize (Hmp1 rq);
+          unfold cntD, multiset_perm in *; lia).
+    eapply T_Pair_L1;
+      [ eapply IHHt1; [exact Hmp1|exact Hf1] | eapply IHHt2; [exact Hmp2|exact Hf2] ].
+
+  - eapply T_Fst_L1; [eapply IHHt; [exact Hmp|exact Hfree] | exact H].
+  - eapply T_Snd_L1; [eapply IHHt; [exact Hmp|exact Hfree] | exact H].
+  - apply T_Inl_L1. eapply IHHt; [exact Hmp|exact Hfree].
+  - apply T_Inr_L1. eapply IHHt; [exact Hmp|exact Hfree].
+
+  - (* Case Linear *)
     destruct Hfree as [Hf1 [Hf2 Hf3]].
+    assert (Hmp1 : multiset_perm R1 R) by (squeeze_mid Ht1 Ht2 Hmp).
+    assert (Hmp2 : multiset_perm R_final R1)
+      by (intro rq; specialize (Hmp rq); specialize (Hmp1 rq);
+          unfold cntD, multiset_perm in *; lia).
     eapply T_Case_L1_Linear;
-      [eapply IHHt1; auto | eapply IHHt2; auto | eapply IHHt3; auto].
-  - (* T_Case_L1_Affine *)
+      [ eapply IHHt1; [exact Hmp1|exact Hf1]
+      | eapply IHHt2; [exact Hmp2|exact Hf2]
+      | eapply IHHt3; [exact Hmp2|exact Hf3] ].
+
+  - (* Case Affine *)
     destruct Hfree as [Hf1 [Hf2 Hf3]].
+    assert (Hmp1 : multiset_perm R1 R) by (squeeze_mid Ht1 Ht2 Hmp).
+    assert (Hmp2 : multiset_perm R_final R1)
+      by (intro rq; specialize (Hmp rq); specialize (Hmp1 rq);
+          unfold cntD, multiset_perm in *; lia).
     eapply T_Case_L1_Affine;
-      [eapply IHHt1; auto | eapply IHHt2; auto | eapply IHHt3; auto].
-  - (* T_If_L1_Linear *)
+      [ eapply IHHt1; [exact Hmp1|exact Hf1]
+      | eapply IHHt2; [exact Hmp2|exact Hf2]
+      | eapply IHHt3; [exact Hmp2|exact Hf3] ].
+
+  - (* If Linear *)
     destruct Hfree as [Hf1 [Hf2 Hf3]].
+    assert (Hmp1 : multiset_perm R1 R) by (squeeze_mid Ht1 Ht2 Hmp).
+    assert (Hmp2 : multiset_perm R2 R1)
+      by (intro rq; specialize (Hmp rq); specialize (Hmp1 rq);
+          unfold cntD, multiset_perm in *; lia).
     eapply T_If_L1_Linear;
-      [eapply IHHt1; auto | eapply IHHt2; auto | eapply IHHt3; auto].
-  - (* T_If_L1_Affine *)
+      [ eapply IHHt1; [exact Hmp1|exact Hf1]
+      | eapply IHHt2; [exact Hmp2|exact Hf2]
+      | eapply IHHt3; [exact Hmp2|exact Hf3] ].
+
+  - (* If Affine *)
     destruct Hfree as [Hf1 [Hf2 Hf3]].
+    assert (Hmp1 : multiset_perm R1 R) by (squeeze_mid Ht1 Ht2 Hmp).
+    assert (Hmp2 : multiset_perm R2 R1)
+      by (intro rq; specialize (Hmp rq); specialize (Hmp1 rq);
+          unfold cntD, multiset_perm in *; lia).
     eapply T_If_L1_Affine;
-      [eapply IHHt1; auto | eapply IHHt2; auto | eapply IHHt3; auto].
-  - (* T_Region_L1: ERegion r e (fresh r).
-       Shadowed sub-case (rr = r) closes via count-monotonicity
-       vacuity; descend sub-case (rr <> r) via the
-       remove_first/remove_first_L1 commutation rewrite. *)
+      [ eapply IHHt1; [exact Hmp1|exact Hf1]
+      | eapply IHHt2; [exact Hmp2|exact Hf2]
+      | eapply IHHt3; [exact Hmp2|exact Hf3] ].
+
+  (* ======================= REGION RULES — the crux ======================= *)
+
+  - (* T_Region_L1 (FRESH): ~In r R, ~In r (free T), In r R_body,
+       body (r::R) -> R_body, Rout = remove_first_L1 r R_body, msperm Rout R. *)
+    assert (Hmpb : multiset_perm R_body (r :: R)).
+    { intro r0. specialize (Hmp r0).
+      unfold cntD, multiset_perm in *.
+      pose proof (remove_first_L1_count_general r r0 R_body) as Hg.
+      unfold cnt in Hg. simpl.
+      destruct (string_dec r r0) as [He|Hne].
+      - subst r0.
+        rewrite Hg in Hmp.
+        apply (count_occ_not_In string_dec) in H. rewrite H in *.
+        apply (count_occ_In string_dec) in H1.
+        lia.
+      - rewrite Hg in Hmp. exact Hmp. }
     destruct (String.eqb rr r) eqn:Heq.
-    + (* rr = r: shadowed. Hfree is True (irrelevant). *)
+    + (* rr = r : shadowed. *)
       apply String.eqb_eq in Heq. subst r.
       rewrite (remove_first_not_in_id _ _ H).
-      destruct (in_dec string_dec rr (remove_first_L1 rr R_body)) as [Hin | Hnotin].
-      * (* Multiple rr's in R_body — VACUOUS by count monotonicity.
-           Body is typed at (rr :: R) with ~In rr R, so the body input
-           has count_occ rr = 1. By count_occ_le_l1_m, count_occ rr R_body
-           <= 1. But Hin says count_occ rr R_body >= 2. Contradiction. *)
-        exfalso.
+      destruct (in_dec string_dec rr (remove_first_L1 rr R_body)) as [Hin|Hnotin].
+      * exfalso.
         pose proof (count_occ_le_l1_m _ _ _ _ _ _ _ Ht rr) as Hle.
         unfold cnt in Hle. simpl in Hle.
         destruct (string_dec rr rr) as [_|Hbad]; [|apply Hbad; reflexivity].
         apply (count_occ_In string_dec) in Hin.
         pose proof (remove_first_L1_count_eq_self rr R_body) as Hself.
         unfold cnt in Hself. rewrite Hself in Hin.
-        apply (count_occ_not_In string_dec) in H.
-        lia.
-      * (* At most one rr in R_body. Then
-           remove_first rr (remove_first_L1 rr R_body) =
-           remove_first_L1 rr R_body. *)
-        rewrite (remove_first_not_in_id _ _ Hnotin).
+        apply (count_occ_not_In string_dec) in H. lia.
+      * rewrite (remove_first_not_in_id _ _ Hnotin).
         eapply T_Region_L1; eauto.
-    + (* rr <> r: descend. *)
+    + (* rr <> r : descend via commutation. *)
       apply String.eqb_neq in Heq.
       assert (Hgoal_eq : remove_first rr (remove_first_L1 r R_body) =
                         remove_first_L1 r (remove_first rr R_body)).
@@ -551,69 +602,49 @@ Proof.
       * intro Hin. apply H. eapply remove_first_subset; exact Hin.
       * exact H0.
       * apply remove_first_preserves_other; [intro Hbad; apply Heq; exact Hbad | exact H1].
-      * (* Strict-predicate migration: [Hfree] is uniformly the body's
-           strict-freedom (no conditional to discharge). Still need
-           [simpl in IHHt] to unfold [remove_first rr (r :: R)] into
-           [r :: remove_first rr R] via the [rr <> r] guard. *)
-        specialize (IHHt rr Hfree).
+      * specialize (IHHt Hmpb rr Hfree).
         simpl in IHHt.
         destruct (String.eqb rr r) eqn:Heq2.
         -- exfalso. apply String.eqb_eq in Heq2. apply Heq. exact Heq2.
         -- exact IHHt.
-  - (* T_Region_Active_L1: ERegion r e (r currently active). *)
+
+  - (* T_Region_Active_L1: THE PREVIOUSLY-STUCK CASE (death of the false
+       general lemma). Under the multiset-perm hypothesis the WHOLE case
+       is VACUOUS: an active region strictly drops the r-count, so its
+       output can never be a multiset-permutation of its input. *)
+    exfalso.
+    specialize (Hmp r).
+    pose proof (remove_first_L1_count_eq_self r R_body) as Hself.
+    pose proof (count_occ_le_l1_m _ _ _ _ _ _ _ Ht r) as Hle.
+    apply (count_occ_In string_dec) in H1.
+    unfold cntD, cnt in *. lia.
+
+  - (* T_Region_L1_Echo (FRESH) — identical structure to T_Region_L1 *)
+    assert (Hmpb : multiset_perm R_body (r :: R)).
+    { intro r0. specialize (Hmp r0).
+      unfold cntD, multiset_perm in *.
+      pose proof (remove_first_L1_count_general r r0 R_body) as Hg.
+      unfold cnt in Hg. simpl.
+      destruct (string_dec r r0) as [He|Hne].
+      - subst r0. rewrite Hg in Hmp.
+        apply (count_occ_not_In string_dec) in H. rewrite H in *.
+        apply (count_occ_In string_dec) in H1. lia.
+      - rewrite Hg in Hmp. exact Hmp. }
     destruct (String.eqb rr r) eqn:Heq.
-    + (* rr = r: shadowed; Hfree True. RESIDUAL — structural
-         list-vs-multiset mismatch documented in PROOF-NEEDS.md §2
-         and in the design-note comment above this lemma block.
-         Bridging requires either:
-         (a) a stronger L1 perm lemma that produces specifically-shaped
-             outputs (requires reformulating output as a function of
-             input + derivation shape), or
-         (b) a reformulation of [remove_first_L1] to be multiset-based
-             (lose ordering), or
-         (c) a redesign of the L1 [T_Region_*_L1] rules to not depend on
-             first-occurrence semantics. *)
-      admit.
-    + (* rr <> r: descend. *)
-      apply String.eqb_neq in Heq.
-      assert (Hgoal_eq : remove_first rr (remove_first_L1 r R_body) =
-                        remove_first_L1 r (remove_first rr R_body)).
-      { rewrite (remove_first_eq_l1 r R_body).
-        rewrite (remove_first_eq_l1 r (remove_first rr R_body)).
-        apply remove_first_comm. }
-      rewrite Hgoal_eq.
-      eapply T_Region_Active_L1.
-      * apply remove_first_preserves_other; [intro Hbad; apply Heq; exact Hbad | exact H].
-      * exact H0.
-      * apply remove_first_preserves_other; [intro Hbad; apply Heq; exact Hbad | exact H1].
-      * eapply IHHt. exact Hfree.
-  - (* T_Region_L1_Echo — structurally identical to T_Region_L1
-       modulo the output-type [TEcho T] vs [T]. Both subcases close
-       directly (shadowed via count-monotonicity vacuity, descend
-       via remove_first/remove_first_L1 commutation). Closed in
-       slice 4 to honor the "no parallel-rule admit-debt" seam-audit
-       directive — the original T_Region_L1 case has zero admits,
-       so its mirror has zero admits too. *)
-    destruct (String.eqb rr r) eqn:Heq.
-    + (* rr = r: shadowed. *)
-      apply String.eqb_eq in Heq. subst r.
+    + apply String.eqb_eq in Heq. subst r.
       rewrite (remove_first_not_in_id _ _ H).
-      destruct (in_dec string_dec rr (remove_first_L1 rr R_body)) as [Hin | Hnotin].
-      * (* Multiple rr's in R_body — VACUOUS by count monotonicity. *)
-        exfalso.
+      destruct (in_dec string_dec rr (remove_first_L1 rr R_body)) as [Hin|Hnotin].
+      * exfalso.
         pose proof (count_occ_le_l1_m _ _ _ _ _ _ _ Ht rr) as Hle.
         unfold cnt in Hle. simpl in Hle.
         destruct (string_dec rr rr) as [_|Hbad]; [|apply Hbad; reflexivity].
         apply (count_occ_In string_dec) in Hin.
         pose proof (remove_first_L1_count_eq_self rr R_body) as Hself.
         unfold cnt in Hself. rewrite Hself in Hin.
-        apply (count_occ_not_In string_dec) in H.
-        lia.
-      * (* At most one rr in R_body. *)
-        rewrite (remove_first_not_in_id _ _ Hnotin).
+        apply (count_occ_not_In string_dec) in H. lia.
+      * rewrite (remove_first_not_in_id _ _ Hnotin).
         eapply T_Region_L1_Echo; eauto.
-    + (* rr <> r: descend. *)
-      apply String.eqb_neq in Heq.
+    + apply String.eqb_neq in Heq.
       assert (Hgoal_eq : remove_first rr (remove_first_L1 r R_body) =
                         remove_first_L1 r (remove_first rr R_body)).
       { rewrite (remove_first_eq_l1 r R_body).
@@ -624,70 +655,73 @@ Proof.
       * intro Hin. apply H. eapply remove_first_subset; exact Hin.
       * exact H0.
       * apply remove_first_preserves_other; [intro Hbad; apply Heq; exact Hbad | exact H1].
-      * (* Strict-predicate migration: same as T_Region_L1 above —
-           [simpl in IHHt] still needed to unfold [remove_first]. *)
-        specialize (IHHt rr Hfree).
-        simpl in IHHt.
+      * specialize (IHHt Hmpb rr Hfree). simpl in IHHt.
         destruct (String.eqb rr r) eqn:Heq2.
         -- exfalso. apply String.eqb_eq in Heq2. apply Heq. exact Heq2.
         -- exact IHHt.
-  - (* T_Region_Active_L1_Echo — parallels T_Region_Active_L1.
-       The descend sub-case closes directly; the shadowed sub-case
-       (rr = r) is the same list-vs-multiset structural residual as
-       in T_Region_Active_L1 above. Per slice 4 seam audit: the
-       shadowed sub-case admit is a TRUE MIRROR of the pre-existing
-       L1 structural admit at line 553. The descend sub-case is
-       closed Qed-style in slice 4 (not an admit). *)
-    destruct (String.eqb rr r) eqn:Heq.
-    + (* rr = r: shadowed — list-vs-multiset mirror of line 553.
-         Resolution path is identical to its non-Echo counterpart:
-         option (a) L1 perm lemma, (b) multiset reformulation, or
-         (c) T_Region_*_L1 redesign. See line 542-552 design note. *)
-      admit.
-    + (* rr <> r: descend. *)
-      apply String.eqb_neq in Heq.
-      assert (Hgoal_eq : remove_first rr (remove_first_L1 r R_body) =
-                        remove_first_L1 r (remove_first rr R_body)).
-      { rewrite (remove_first_eq_l1 r R_body).
-        rewrite (remove_first_eq_l1 r (remove_first rr R_body)).
-        apply remove_first_comm. }
-      rewrite Hgoal_eq.
-      eapply T_Region_Active_L1_Echo.
-      * apply remove_first_preserves_other; [intro Hbad; apply Heq; exact Hbad | exact H].
-      * exact H0.
-      * apply remove_first_preserves_other; [intro Hbad; apply Heq; exact Hbad | exact H1].
-      * eapply IHHt. exact Hfree.
-  - (* T_Borrow_L1 *)
-    eapply T_Borrow_L1. exact H.
-  - (* T_Borrow_Val_L1 *)
-    eapply T_Borrow_Val_L1; [exact H | eapply IHHt; auto].
-  - (* T_Drop_L1 *)
-    eapply T_Drop_L1; [exact H | eapply IHHt; auto].
-  - (* T_Drop_L1_Echo — parallel rule; identical proof shape (output
-       type is [TEcho T] instead of [TBase TUnit], otherwise the same). *)
-    eapply T_Drop_L1_Echo; [exact H | eapply IHHt; auto].
-  - (* T_Copy_L1 *)
-    eapply T_Copy_L1; [exact H | eapply IHHt; auto].
-  - (* T_Echo_L1 — region shrink under an echo value preserves the
-     value structure (region-free witness implies a region-free echo). *)
-    eapply T_Echo_L1.
-    + exact H.
-    + eapply IHHt; auto.
-  - (* T_Observe_L1 — region shrink commutes with the witness sub-expression *)
-    eapply T_Observe_L1. eapply IHHt; auto.
-Admitted.
 
-Lemma region_shrink_preserves_typing_l1_gen :
-  forall R G e T R' G',
-    has_type_l1_linear R G e T R' G' ->
-    forall r,
-      expr_strictly_free_of_region r e ->
-      has_type_l1_linear (remove_first r R) G e T (remove_first r R') G'.
-Proof.
-  intros R G e T R' G' Ht r Hfree.
-  apply (region_shrink_preserves_typing_l1_gen_m Linear); auto.
+  - (* T_Region_Active_L1_Echo — same VACUITY as T_Region_Active_L1. *)
+    exfalso.
+    specialize (Hmp r).
+    pose proof (remove_first_L1_count_eq_self r R_body) as Hself.
+    pose proof (count_occ_le_l1_m _ _ _ _ _ _ _ Ht r) as Hle.
+    apply (count_occ_In string_dec) in H1.
+    unfold cntD, cnt in *. lia.
+
+  (* ======================= TAIL RULES ======================= *)
+
+  - (* T_Borrow_L1: EBorrow (EVar i), R->R *)
+    apply T_Borrow_L1. exact H.
+  - (* T_Borrow_Val_L1: value, R->R *)
+    apply T_Borrow_Val_L1; [exact H | eapply IHHt; [exact Hmp|exact Hfree]].
+  - (* T_Drop_L1: e R->R' *)
+    eapply T_Drop_L1; [exact H | eapply IHHt; [exact Hmp|exact Hfree]].
+  - (* T_Drop_L1_Echo *)
+    eapply T_Drop_L1_Echo; [exact H | eapply IHHt; [exact Hmp|exact Hfree]].
+  - (* T_Copy_L1 *)
+    eapply T_Copy_L1; [exact H | eapply IHHt; [exact Hmp|exact Hfree]].
+  - (* T_Echo_L1: value, R->R *)
+    apply T_Echo_L1; [exact H | eapply IHHt; [exact Hmp|exact Hfree]].
+  - (* T_Observe_L1: e R->R' *)
+    eapply T_Observe_L1; eapply IHHt; [exact Hmp|exact Hfree].
 Qed.
 
+(** R-NEUTRAL corollary (output env = input env as a LIST): list
+    equality implies multiset-perm, so this is immediate. *)
+Lemma region_shrink_neutral :
+  forall m R G e T G_out,
+    has_type_l1 m R G e T R G_out ->
+    forall rr, expr_strictly_free_of_region rr e ->
+      has_type_l1 m (remove_first rr R) G e T (remove_first rr R) G_out.
+Proof.
+  intros m R G e T G_out Ht rr Hfree.
+  apply (region_shrink_msperm m R G e T R G_out Ht).
+  - intro r. reflexivity.
+  - exact Hfree.
+Qed.
+
+(** VALUE corollary. Values preserve R as a LIST
+    ([value_R_G_preserving_l1]), hence are neutral, hence shrink holds.
+    This is the form the S_Region_Exit / preservation_l3 call sites use. *)
+Lemma region_shrink_value :
+  forall m R G v T R_out G_out,
+    has_type_l1 m R G v T R_out G_out ->
+    is_value v ->
+    forall rr, expr_strictly_free_of_region rr v ->
+      has_type_l1 m (remove_first rr R) G v T (remove_first rr R_out) G_out.
+Proof.
+  intros m R G v T R_out G_out Ht Hv rr Hfree.
+  pose proof (value_R_G_preserving_l1 _ _ _ _ _ _ _ Hv Ht) as [HR HG]. subst R_out G_out.
+  apply (region_shrink_msperm m R G v T R G Ht).
+  - intro r. reflexivity.
+  - exact Hfree.
+Qed.
+
+(** Linear value-restricted wrapper — preserves the legacy call-site
+    name [region_shrink_preserves_typing_l1] (used by preservation_l1's
+    S_Region_Exit case). Now a thin corollary of [region_shrink_value];
+    the [~ In r (free_regions T)] premise is retained for call-site
+    compatibility but is not needed by the proof. *)
 Lemma region_shrink_preserves_typing_l1 :
   forall R G v T R' G' r,
     is_value v ->
@@ -697,7 +731,7 @@ Lemma region_shrink_preserves_typing_l1 :
     has_type_l1_linear (remove_first r R) G v T (remove_first r R') G'.
 Proof.
   intros R G v T R' G' r Hv Ht HnotT Hfree.
-  eapply region_shrink_preserves_typing_l1_gen; eauto.
+  exact (region_shrink_value Linear R G v T R' G' Ht Hv r Hfree).
 Qed.
 
 (** ** Helper: substitution preserves the L1 typing.
@@ -3238,13 +3272,13 @@ Qed.
       [count_occ r R_body >= 1] from typing premise contradicts
       [count_occ r R0' = 0] from [~In r R0']).
 
-    The [region_shrink_preserves_typing_l1_gen]'s two internal
-    admits were also partly resolved in L1.E:
-    - [T_Region_L1 shadowed] case is CLOSED as vacuous via
-      [count_occ_le_l1].
-    - [T_Region_Active_L1 shadowed] case REMAINS admitted, blocked
-      by a list-vs-multiset structural mismatch (see the lemma's
-      design note).
+    The former [region_shrink_preserves_typing_l1_gen]'s two
+    internal admits are now BOTH CLOSED (2026-06-16) by the
+    multiset-perm generalisation [region_shrink_msperm]:
+    - [T_Region_L1 shadowed] case is vacuous via [count_occ_le_l1].
+    - [T_Region_Active_L1 shadowed] case is vacuous under the
+      multiset-perm hypothesis (an active region strictly drops its
+      r-count, so its output cannot be a multiset-perm of its input).
 
     Until the lambda-rigidity gap is resolved (likely via effect-
     typed lambdas as an L2/L3 extension), [preservation_l1] remains
@@ -3605,17 +3639,14 @@ Admitted.
       - introduces ZERO new [Admitted.] or [Axiom] declarations;
       - does NOT patch legacy [Semantics.v] preservation;
       - re-uses already-proved infrastructure
-        ([value_R_G_preserving_l1] Qed,
-         [region_shrink_preserves_typing_l1_gen_m] — admitted at
-         the L1 layer for the T_Region_Active_L1 shadowed
-         sub-case; cross-layer dependency annotated in
-         PRESERVATION-DESIGN.md §5.1).
+        ([value_R_G_preserving_l1] Qed, [region_shrink_value] Qed —
+         the value corollary of [region_shrink_msperm], axiom-free).
 
-    Cross-layer accounting: the [region_shrink_preserves_typing_l1_gen_m]
-    dependency is a pre-existing L1 structural admit (closes at
-    L2-effect-typed-TFun per design doc §5.1). Slice 4 does NOT
-    widen, duplicate, or open it — preservation_l3 is
-    *conditionally* Qed under that pre-existing L1 obligation. *)
+    Cross-layer accounting (UPDATED 2026-06-16): the region-shrink
+    dependency is now [region_shrink_value] (Qed, axiom-free); the
+    former admitted [region_shrink_preserves_typing_l1_gen_m] is
+    gone. [preservation_l3] is therefore now UNCONDITIONALLY
+    axiom-free (confirmed by [Print Assumptions] below). *)
 
 (** *** Case 1: [S_Region_Exit_Echo] paired with
     [T_Region_Active_L1_Echo].
@@ -3662,8 +3693,9 @@ Proof.
   apply T_Echo_L1; [ exact Hv | ].
   (* Goal: (remove_first r R); G |- v : T
                               -| (remove_first r R); G
-     This is exactly region shrinkage at [v] (free of [r]). *)
-  apply (region_shrink_preserves_typing_l1_gen_m m _ _ _ _ _ _ Htbody _ Hfree).
+     This is exactly region shrinkage at the VALUE [v] (free of [r]);
+     [region_shrink_value] (Qed, axiom-free) is precisely this shape. *)
+  apply (region_shrink_value m _ _ _ _ _ _ Htbody Hv _ Hfree).
 Qed.
 
 (** *** Case 2: [S_Drop_Echo] paired with [T_Drop_L1_Echo].
@@ -3723,25 +3755,26 @@ Qed.
 
    Expected per the design:
 
-   - [region_shrink_preserves_typing_l1_gen_m]  Admitted at
-     :678 → surfaces itself as an axiom (its outer Admitted is
-     listed). Once the list-vs-multiset gap closes, this drops.
+   - [region_shrink_msperm] / [region_shrink_neutral] /
+     [region_shrink_value]  Qed, axiom-free (2026-06-16, the
+     multiset-perm closure). The former admitted
+     [region_shrink_preserves_typing_l1_gen_m] is GONE; its false
+     general statement is pinned in [Counterexample_RegionShrink.v].
 
-   - [region_liveness_at_split_l1_gen]  Admitted at :2028 →
+   - [region_liveness_at_split_l1_gen]  Admitted →
      surfaces itself. Provably-false-as-stated in the residual
-     [binder = rv] sub-case (counterexample documented in source
-     at :1923-:1926); closure requires Phase D reformulation.
+     [binder = rv] sub-case (counterexample documented in source);
+     closure requires Phase D reformulation.
 
-   - [preservation_l1]  Admitted at :3133 → surfaces itself plus
+   - [preservation_l1]  Admitted → surfaces itself plus
      any structural debt its conditional Qed-portion already
      pulls in.
 
    - [preservation_l3] / [preservation_l3_region_active_echo] /
-     [preservation_l3_drop_echo]  surface
-     [region_shrink_preserves_typing_l1_gen_m] only (the L1
-     structural admit they're conditional on). [drop_echo] is
-     additionally expected to be axiom-free (it doesn't traverse
-     region-shrink).
+     [preservation_l3_drop_echo]  are now UNCONDITIONALLY
+     axiom-free: with [region_shrink_value] (Qed) discharging the
+     region-shrink step, [Print Assumptions] reports "Closed under
+     the global context" for all three.
 
    - [subst_typing_gen_l1_m_tfuneff] (Phase 3b Stage 1b) should
      be zero-axiom under its three side conditions (P1+P2+P3) —
@@ -3775,9 +3808,10 @@ Print Assumptions preservation_l3.
 
     [Print Assumptions] will list the lemma itself as an axiom (the
     Admitted form). When all internal admits close, this directive
-    will show only the file's pre-existing axiom +
-    [region_liveness_at_split_l1_gen] +
-    [region_shrink_preserves_typing_l1_gen_m]'s structural admit. *)
+    will show only the remaining residual axioms
+    ([region_liveness_at_split_l1_gen] and the capstone
+    [preservation_l1]); the former region_shrink admit is now
+    closed (region_shrink_msperm, Qed). *)
 
 Print Assumptions step_pop_disjoint_from_type_l1.
 

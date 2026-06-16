@@ -13,6 +13,7 @@ Semantics.v
 Semantics_L1.v
 L1ChoreoExperiment.v
 Counterexample.v
+Counterexample_RegionShrink.v
 Echo.v
 Modality.v
 TypingL2.v

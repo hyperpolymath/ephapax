@@ -10,13 +10,21 @@ use ephapax_parser::parse;
 use ephapax_typing::TypeChecker;
 use ephapax_wasm::Codegen;
 
-/// Full pipeline: parse -> type-check -> compile to WASM bytes
+/// Full pipeline: parse -> type-check -> compile to WASM bytes.
+///
+/// Asserts the emitted module passes structural validation. This is the
+/// in-process (wasmparser) twin of the `wasm-tools validate` gate run by
+/// `just validate-wasm` / CI, so EVERY e2e program is checked for
+/// structural validity here — not only the subset that `run()`
+/// instantiates via wasmtime.
 fn compile(source: &str) -> Vec<u8> {
     let expr = parse(source).expect("parse failed");
     let mut tc = TypeChecker::new();
     tc.check(&expr).expect("type-check failed");
     let mut codegen = Codegen::new();
-    codegen.compile_program(&expr)
+    let wasm = codegen.compile_program(&expr);
+    wasmparser::validate(&wasm).expect("emitted wasm failed wasmparser validation");
+    wasm
 }
 
 /// Compile and run via wasmtime, asserting no traps.

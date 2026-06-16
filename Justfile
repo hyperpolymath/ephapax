@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: MPL-2.0
-// Owner: Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk>
+# Owner: Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk>
 # Ephapax build recipes
 
 # Default recipe
@@ -14,6 +14,34 @@ build:
 # Build for WASM
 build-wasm:
     cargo build --target wasm32-unknown-unknown
+
+# Structurally validate emitted wasm for the known-good fixture corpus.
+# Compiles each top-level .eph fixture and runs `wasm-tools validate`,
+# failing on any structurally invalid module. This is the authoritative
+# CLI twin of the in-process wasmparser assertion in the wasm_e2e tests.
+# Excludes tests/v2-grammar/fixtures/hypatia-port/ (bridge.eph) until the
+# ADT-construct / match call-arity codegen bug (ephapax#43 follow-up) lands;
+# the glob is top-level only, so the subdir is left out by construction.
+validate-wasm:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    command -v wasm-tools >/dev/null 2>&1 || { echo "wasm-tools not found — cargo install wasm-tools"; exit 1; }
+    CARGO_INCREMENTAL=0 cargo build -q -p ephapax-cli
+    BIN=target/debug/ephapax
+    FAIL=0
+    for f in tests/v2-grammar/fixtures/*.eph; do
+        out="$(mktemp --suffix=.wasm)"
+        if ! "$BIN" compile "$f" -o "$out" >/dev/null 2>&1; then
+            echo "  [compile-fail] $f"; FAIL=1; rm -f "$out"; continue
+        fi
+        if wasm-tools validate "$out" 2>/dev/null; then
+            echo "  [valid]   $f"
+        else
+            echo "  [INVALID] $f"; wasm-tools validate "$out" 2>&1 | sed 's/^/      /'; FAIL=1
+        fi
+        rm -f "$out"
+    done
+    if [ "$FAIL" -eq 0 ]; then echo "validate-wasm: all modules structurally valid"; else echo "validate-wasm: FAILED"; exit 1; fi
 
 # Run all tests
 test:
@@ -127,7 +155,7 @@ tour:
     echo "═══════════════════════════════════════════════════"
     echo ""
     echo '// SPDX-License-Identifier: MPL-2.0'
-// Owner: Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk>
+    echo '// Owner: Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk>'
     echo ""
     echo "Key directories:"
     echo "  src/                      Source code" 

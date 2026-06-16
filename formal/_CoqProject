@@ -6,6 +6,7 @@
 -R . Ephapax
 
 Syntax.v
+RegionEnvL1.v
 Typing.v
 TypingL1.v
 Semantics.v

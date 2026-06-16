@@ -403,7 +403,11 @@ fn decode_decl(expr: &SExpr) -> Result<Decl, SExprError> {
     }
 }
 
-fn expr_to_sexpr(expr: &Expr) -> SExpr {
+/// Encode an expression as an S-expression (the canonical "AST as data"
+/// representation). Inverse of [`decode_expr`]. Public so reflective tools
+/// (e.g. `ephapax-meta`'s metainterpreter) can quote syntax without a
+/// second encoding.
+pub fn expr_to_sexpr(expr: &Expr) -> SExpr {
     match &expr.kind {
         ExprKind::Lit(lit) => SExpr::List(vec![SExpr::Atom("lit".into()), lit_to_sexpr(lit)]),
         ExprKind::Var(name) => SExpr::List(vec![
@@ -636,7 +640,9 @@ fn pattern_to_sexpr(pattern: &ephapax_syntax::Pattern) -> SExpr {
     }
 }
 
-fn decode_expr(expr: &SExpr) -> Result<Expr, SExprError> {
+/// Decode an S-expression back into an expression AST. Inverse of
+/// [`expr_to_sexpr`]; public for reflective tools (`ephapax-meta`).
+pub fn decode_expr(expr: &SExpr) -> Result<Expr, SExprError> {
     let list = match expr {
         SExpr::List(items) => items,
         _ => return Err(SExprError::Invalid("expected expr list".into())),

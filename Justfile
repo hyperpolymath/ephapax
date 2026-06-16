@@ -15,13 +15,13 @@ build:
 build-wasm:
     cargo build --target wasm32-unknown-unknown
 
-# Structurally validate emitted wasm for the known-good fixture corpus.
-# Compiles each top-level .eph fixture and runs `wasm-tools validate`,
-# failing on any structurally invalid module. This is the authoritative
-# CLI twin of the in-process wasmparser assertion in the wasm_e2e tests.
-# Excludes tests/v2-grammar/fixtures/hypatia-port/ (bridge.eph) until the
-# ADT-construct / match call-arity codegen bug (ephapax#43 follow-up) lands;
-# the glob is top-level only, so the subdir is left out by construction.
+# Structurally validate emitted wasm for the compilable fixture corpus.
+# Compiles each fixture and runs `wasm-tools validate`, failing on any
+# structurally invalid module. Authoritative CLI twin of the in-process
+# wasmparser assertion in the wasm_e2e tests. Includes the hypatia
+# bridge.eph integration target (its multi-arg call-arity codegen bug is
+# fixed). hypatia_gui.eph is excluded — it is an import-only module pulled
+# in via bridge.eph's `import`, not a standalone program.
 validate-wasm:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -29,7 +29,7 @@ validate-wasm:
     CARGO_INCREMENTAL=0 cargo build -q -p ephapax-cli
     BIN=target/debug/ephapax
     FAIL=0
-    for f in tests/v2-grammar/fixtures/*.eph; do
+    for f in tests/v2-grammar/fixtures/*.eph tests/v2-grammar/fixtures/hypatia-port/bridge.eph; do
         out="$(mktemp --suffix=.wasm)"
         if ! "$BIN" compile "$f" -o "$out" >/dev/null 2>&1; then
             echo "  [compile-fail] $f"; FAIL=1; rm -f "$out"; continue

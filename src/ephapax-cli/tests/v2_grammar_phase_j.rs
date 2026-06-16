@@ -76,10 +76,10 @@ fn bridge_eph_compiles_end_to_end() {
         bytes.len()
     );
 
-    // NOTE: full `wasmparser::validate` does not yet pass on this
-    // output — the ADT-encoding codegen for `Construct(Navigate(...))`
-    // and the match-arm result paths can produce a wasm stack mismatch
-    // ("expected i32, nothing on stack"). The codegen issue is tracked
-    // separately on #43 follow-up; the parse + typecheck stack is
-    // already covered by the earlier phase tests.
+    // bridge.eph now passes full structural validation. The earlier
+    // stack mismatch ("expected i32, nothing on stack" at func 22 / the
+    // `run` TEA loop) was a call-arity bug: saturated multi-arg user-fn
+    // calls were lowered as curried closure applications against a flat
+    // wasm signature. Fixed in fix(wasm) "flat direct Call".
+    wasmparser::validate(&bytes).expect("bridge.eph emitted an invalid wasm module");
 }

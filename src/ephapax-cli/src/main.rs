@@ -566,6 +566,13 @@ fn finish_compile(
         wasm_bytes
     };
 
+    // Always-on structural validation floor: never write an invalid
+    // module to disk. In-process (wasmparser) twin of the `wasm-tools
+    // validate` gate; distinct from the optional semantic
+    // `--verify-ownership` (L7/L10) check below.
+    wasmparser::validate(&wasm_bytes)
+        .map_err(|e| format!("emitted wasm failed structural validation: {}", e))?;
+
     // Run the typed-wasm L7+L10 verifier on the emitted module if
     // requested. Fails the build with a non-zero exit if any
     // ownership violation is found. Gated by the `typed-wasm-verify`
@@ -686,6 +693,11 @@ fn compile_sexpr_file(
 
     let wasm = ephapax_wasm::compile_sexpr_module(&content)
         .map_err(|e| format!("Codegen error: {}", e))?;
+
+    // Structural validation floor (see finish_compile): never write an
+    // invalid module to disk.
+    wasmparser::validate(&wasm)
+        .map_err(|e| format!("emitted wasm failed structural validation: {}", e))?;
 
     let output_path = output.unwrap_or_else(|| path.with_extension("wasm"));
     fs::write(&output_path, &wasm)

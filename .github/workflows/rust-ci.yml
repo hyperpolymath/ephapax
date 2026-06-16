@@ -57,3 +57,42 @@ jobs:
           echo "Proves the typed-wasm-verify feature is genuinely optional:" >> "$GITHUB_STEP_SUMMARY"
           echo "ephapax-cli builds + tests with zero git dep on the" >> "$GITHUB_STEP_SUMMARY"
           echo "hyperpolymath/typed-wasm repo." >> "$GITHUB_STEP_SUMMARY"
+
+  wasm-validate:
+    name: wasm-tools validate (emitted modules)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    if: hashFiles('Cargo.toml') != ''
+
+    # Structurally validates every module ephapax emits for the fixture
+    # corpus (`just validate-wasm`), catching codegen that produces an
+    # invalid wasm binary before it can land. Mirrors the in-process
+    # wasmparser assertion in the wasm_e2e tests and the CLI's always-on
+    # self-validation floor. The recipe pins CARGO_INCREMENTAL=0 to dodge a
+    # known rustc-incremental ICE on ephapax-parser.
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9 # stable
+
+      - name: Cache cargo registry and build
+        uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2
+        with:
+          key: wasm-validate
+
+      - name: Install just + wasm-tools
+        run: cargo install just wasm-tools --locked
+
+      - name: Validate emitted wasm (just validate-wasm)
+        run: just validate-wasm
+
+      - name: Write summary
+        if: always()
+        run: |
+          echo "## wasm-tools validate" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "Every module ephapax emits for the fixture corpus passes" >> "$GITHUB_STEP_SUMMARY"
+          echo "wasm-tools validate (structural validity gate), including" >> "$GITHUB_STEP_SUMMARY"
+          echo "the hypatia bridge.eph integration target." >> "$GITHUB_STEP_SUMMARY"

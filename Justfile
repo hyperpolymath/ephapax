@@ -15,6 +15,23 @@ build:
 build-wasm:
     cargo build --target wasm32-unknown-unknown
 
+# Build ephapax's own coprocessor seam (libephapax_coproc.so).
+# This is the native C-ABI seam ephapax reaches via __ffi (-L); it is NOT
+# coupled to any external framework. NOTE: the typed `Coproc` stdlib API is
+# not yet consumable by .eph programs (no module-import / qualified-access
+# in the v2 grammar — see docs/v2-grammar-and-codegen-gaps-2026-06-16.adoc);
+# today the seam is reachable only via raw `__ffi("eph_coproc_*", …)`.
+build-coproc:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    command -v zig >/dev/null 2>&1 || { echo "zig not found"; exit 1; }
+    zig build-lib -dynamic -O ReleaseSafe tools/coproc/ephapax_coproc.zig -femit-bin=libephapax_coproc.so
+    echo "built libephapax_coproc.so (run: ephapax run prog.eph -L libephapax_coproc.so)"
+
+# Run the coprocessor seam's own unit tests (Zig).
+test-coproc:
+    zig test tools/coproc/ephapax_coproc.zig
+
 # Structurally validate emitted wasm for the compilable fixture corpus.
 # Compiles each fixture and runs `wasm-tools validate`, failing on any
 # structurally invalid module. Authoritative CLI twin of the in-process

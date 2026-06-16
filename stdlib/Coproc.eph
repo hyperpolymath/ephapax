@@ -4,39 +4,40 @@
 //
 // Ephapax Coprocessor API — a THIN typed dispatch boundary (v2 grammar).
 //
-// This module implements NO coprocessor kernels. The ten capability classes
-// surface the EXISTING coprocessor suite in `Axiom.jl` (Julia) — the
-// DSP/Crypto/Math/PPU/GPU/VPU/TPU/QPU/NPU/FPGA backends behind Axiom's
-// `backend_coprocessor_*` generics. ephapax holds only a typed surface plus
-// a substructural safety gate; routing, fallback, and benchmarking stay in
-// Axiom (boundary kept clean — no porting).
+// This module implements NO coprocessor kernels and depends on NO external
+// framework. It is ephapax's OWN coprocessor dispatch surface. Its DESIGN —
+// typed capability classes, a linear device-buffer lifecycle, and a thin
+// C-ABI seam — follows the pattern Axiom.jl established (which demonstrated
+// this shape across the full range of coprocessor types). ephapax models
+// that pattern; it does NOT import, depend on, co-own, or forward to Axiom.
+// ephapax owns its own seam end-to-end.
 //
-// The single shared seam is a thin C ABI: `libephapax_coproc.so` (see
+// The shared seam is a thin C ABI: `libephapax_coproc.so` (see
 // `tools/coproc/ephapax_coproc.zig`) exports flat `eph_coproc_*` symbols
-// that forward to Axiom, mirroring how Axiom itself links Zig. ephapax
-// reaches them through its ordinary `__ffi(...)` path (load with
-// `-L libephapax_coproc.so`). When the library is absent each call falls
-// through to ephapax's `[ffi:stub]` -> 0 path, so the surface stays usable
-// with no coprocessor present.
+// that dispatch to whatever native coprocessor backend is linked behind
+// them. ephapax reaches them through its ordinary `__ffi(...)` path (load
+// with `-L libephapax_coproc.so`). When the library is absent each call
+// falls through to ephapax's `[ffi:stub]` -> 0 path, so the surface stays
+// usable with no coprocessor present.
 
 module Coproc
 
 // ── Capabilities ──────────────────────────────────────────────────────────
 //
-// The ten coprocessor classes, each mapping 1:1 onto an Axiom.jl
-// CoprocessorBackend. The declaration order documents the intent; the wire
-// contract with the Zig shim is made explicit by `cap_tag` below.
+// The ten coprocessor classes (the coverage this design targets). The
+// declaration order documents the intent; the wire contract with the Zig
+// shim is made explicit by `cap_tag` below.
 pub data Capability =
-  | Audio     // -> Axiom DSPBackend  (Audio PU / digital signal processing)
-  | Crypto    // -> Axiom CryptoBackend
-  | Maths     // -> Axiom MathBackend
-  | Physics   // -> Axiom PPUBackend  (physics processing unit)
-  | Gpu       // -> Axiom CUDA / Metal / ROCm
-  | Vector    // -> Axiom VPUBackend  (vector processing unit)
-  | Tensor    // -> Axiom TPUBackend  (tensor processing unit)
-  | Quantum   // -> Axiom QPUBackend  (quantum processing unit)
-  | Io        // -> Axiom NPUBackend / host I/O path
-  | Fpga      // -> Axiom FPGABackend
+  | Audio     // digital signal processing (audio PU)
+  | Crypto    // cryptographic acceleration
+  | Maths     // general numeric / math acceleration
+  | Physics   // physics processing unit
+  | Gpu       // general-purpose GPU
+  | Vector    // vector processing unit
+  | Tensor    // tensor processing unit
+  | Quantum   // quantum processing unit
+  | Io        // I/O / host offload path
+  | Fpga      // field-programmable gate array
 
 // An opaque handle to a buffer living on a coprocessor. LINEAR: once
 // uploaded it must be consumed EXACTLY ONCE — by `download` (pull the

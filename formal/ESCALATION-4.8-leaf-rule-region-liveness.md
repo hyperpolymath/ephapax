@@ -6,6 +6,54 @@
 **Status:** OPEN — needs an owner design decision before any further L1
 preservation proof work. Raised 2026-06-16.
 
+> ## ⚠️ UPDATE 2026-06-16 — path (3) **proven insufficient**; the real fork is effect typing
+>
+> An implementation attempt of path (3) below (strengthen `T_Var_*_L1` with
+> `In r (free_regions T) -> In r R`) was carried to a coqc-verified
+> intermediate and **disproved**. Path (3) closes the variable leaf and every
+> *type-preserving* constructor, but `region_shrink_preserves_typing_l1_gen_m`
+> becomes a **false statement** at *type-erasing eliminators*.
+>
+> **Counterexample (coqc-checked shape).** `EDrop (EVar j)` with
+> `j : TString rr`, at `R = [rr]`:
+> - types via `T_Drop_L1` (TString is linear) + strengthened `T_Var` (which
+>   forces `In rr R`, satisfied by `In rr [rr]`); output type is `TUnit`;
+> - `expr_strictly_free_of_region rr (EDrop (EVar j)) = True` (no syntactic `rr`);
+> - `~ In rr (free_regions TUnit)` holds trivially (the Tofte-Talpin premise
+>   path (3)/region_shrink can supply);
+> - **yet** shrinking `rr` to `R = []` leaves the inner `EVar j : TString rr`
+>   untypable (`In rr [] = False`). So `region_shrink` is *false* here.
+>
+> The same shape hides inside a **lambda value** whose body uses-and-drops a
+> captured `TString rr` variable, so an `is_value` restriction does not rescue
+> it. **Root cause:** a closure / eliminator can depend on a region *without
+> exposing it in its result type*; the `~ In r (free_regions T)` premise
+> constrains only the *result* type, which these rules erase. This same gap
+> blocks all four targets (region_liveness's ~13 `subst_typing_gen_l1_m` call
+> sites thread the *substituted location's* region, which need not appear in
+> the sub-expression's output type; step_pop's 9 admits are the same "inner
+> step pops a region free in the sibling/outer type").
+>
+> **Therefore the decision is now sharper than (A)/(B)/(C) below:**
+> - **(A′) Adopt effect typing** — deprecate the bare-`TFun` lambda rules
+>   (`T_Lam_L1_Linear`/`_Affine`) and keep only the effect-typed
+>   `T_Lam_L1_*_Eff` (`TFunEff … R_in R_out`), whose `free_regions` already
+>   includes `R_in ++ R_out`. Then every region dependency is type-visible and
+>   the threading composes through eliminators. This is path (1), already
+>   half-built (the TFunEff "live line"). **Recommended — but it changes the
+>   accepted surface language: it rejects region-capturing bare-`TFun`
+>   closures. That rejection is the owner's call.**
+> - **(B′) A context-region-freedom precondition** on `region_shrink`
+>   ("no variable position `e` reads carries `rr` in its type"), a new
+>   predicate over `e × G` threaded from call sites. Heavier; no surface change.
+> - **(C′) Leave the four admits** — but note the path-(3) `T_Var` premise
+>   **cannot coexist with a green build** without (A′)/(B′), so status-quo means
+>   *also reverting* the `T_Var` strengthening (done — `formal/` is back to
+>   clean green-with-one-axiom).
+>
+> No code from the attempt remains; `formal/` is clean green-with-admits. The
+> recommendation below (plain "(A)") is **superseded** by (A′) above.
+
 **Why this is an escalation and not a patch.** `CLAUDE.md` →
 *Anti-pattern detector* lists "strengthened lemma signatures within the
 current judgment shape" and "sibling-region-disjointness side conditions"

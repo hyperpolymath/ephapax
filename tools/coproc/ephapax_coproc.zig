@@ -1,27 +1,27 @@
 // SPDX-License-Identifier: MPL-2.0
 // Owner: Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk>
 //
-// libephapax_coproc — the thin shared seam between ephapax and Axiom.jl's
-// coprocessor suite.
+// libephapax_coproc — ephapax's OWN coprocessor dispatch seam.
 //
-// This is the ONE place ephapax and Axiom meet for coprocessor dispatch. It
-// exports a flat C ABI (`eph_coproc_*`, all `i64 (...)-> i64`) that ephapax
-// reaches through its ordinary `__ffi(...)` path (see `stdlib/Coproc.eph`),
-// and that — in a full build — forwards to Axiom's already-public
-// `backend_coprocessor_*` generics via the Julia C-embedding API
-// (jl_init / jl_eval_string / jl_call), selecting the Axiom
-// CoprocessorBackend struct from the capability tag. It mirrors how Axiom
-// itself already links Zig (`Axiom.jl/src/backends/zig_ffi.jl`).
+// This is the single C-ABI boundary between ephapax and a native coprocessor
+// backend. It exports a flat C ABI (`eph_coproc_*`, all `i64 (...)-> i64`)
+// that ephapax reaches through its ordinary `__ffi(...)` path (see
+// `stdlib/Coproc.eph`), and that dispatches to whatever native backend is
+// linked behind it.
 //
-// BOUNDARY (locked): this shim copies NO kernel out of Axiom. ephapax holds
-// a typed dispatch surface + a linear safety gate; all routing, fallback,
-// and benchmarking stay in Axiom.
+// DESIGN PROVENANCE: the capability-class + linear-buffer + thin-C-ABI shape
+// follows the pattern Axiom.jl demonstrated. ephapax models that pattern; it
+// does NOT import, depend on, co-own, or forward to Axiom. There is no Julia
+// embedding and no Axiom runtime — this seam is ephapax's own.
 //
-// This file is the STUB build: with no Axiom runtime linked it reports every
+// BOUNDARY (locked): ephapax holds a typed dispatch surface + a linear safety
+// gate; the backend behind this seam owns routing/fallback/kernels.
+//
+// This file is the STUB build: with no backend linked it reports every
 // capability as unavailable and returns benign stub statuses, so ephapax's
 // `Coproc` surface type-checks and runs (falling through to the host path)
-// with no coprocessor present. The `// TODO(axiom)` markers are the exact
-// points where the Julia-embedding forwarder is wired in the full build.
+// with no coprocessor present. The `// TODO(backend)` markers are the exact
+// points where a real native backend is wired in.
 //
 // Build (stub):
 //   zig build-lib -dynamic -O ReleaseSafe tools/coproc/ephapax_coproc.zig \
@@ -33,16 +33,16 @@ const std = @import("std");
 
 /// Capability tags — MUST match `cap_tag` in `stdlib/Coproc.eph`.
 pub const Capability = enum(i64) {
-    audio = 0, // Axiom DSPBackend
-    crypto = 1, // Axiom CryptoBackend
-    maths = 2, // Axiom MathBackend
-    physics = 3, // Axiom PPUBackend
-    gpu = 4, // Axiom CUDA/Metal/ROCm
-    vector = 5, // Axiom VPUBackend
-    tensor = 6, // Axiom TPUBackend
-    quantum = 7, // Axiom QPUBackend
-    io = 8, // Axiom NPUBackend / host
-    fpga = 9, // Axiom FPGABackend
+    audio = 0, // digital signal processing (audio PU)
+    crypto = 1, // cryptographic acceleration
+    maths = 2, // numeric / math acceleration
+    physics = 3, // physics processing unit
+    gpu = 4, // general-purpose GPU
+    vector = 5, // vector processing unit
+    tensor = 6, // tensor processing unit
+    quantum = 7, // quantum processing unit
+    io = 8, // I/O / host offload
+    fpga = 9, // field-programmable gate array
 };
 
 /// Status codes shared with `stdlib/Coproc.eph` (and, in the full build, the
@@ -51,18 +51,18 @@ pub const STATUS_OK: i64 = 0;
 pub const STATUS_UNAVAILABLE: i64 = -1;
 
 /// Is the coprocessor for `cap_tag` reachable? Returns 1 if available, 0 if
-/// not. The stub always returns 0 (no Axiom backend linked).
+/// not. The stub always returns 0 (no backend linked).
 export fn eph_coproc_available(cap_tag: i64) i64 {
-    // TODO(axiom): jl_call Axiom._coprocessor_required / backend probe for
-    // the CoprocessorBackend selected by `cap_tag`; return 1 when live.
+    // TODO(backend): probe the native backend selected by `cap_tag`;
+    // return 1 when a live coprocessor is present.
     _ = cap_tag;
     return 0;
 }
 
 /// Upload a host buffer to a coprocessor; returns an opaque device-buffer id.
 export fn eph_coproc_upload(cap_tag: i64, data_ptr: i64, len: i64) i64 {
-    // TODO(axiom): marshal the host buffer to Axiom and reserve a device
-    // buffer on the backend selected by `cap_tag`; return its handle.
+    // TODO(backend): marshal the host buffer to the backend and reserve a
+    // device buffer on the unit selected by `cap_tag`; return its handle.
     _ = cap_tag;
     _ = data_ptr;
     _ = len;
@@ -72,8 +72,8 @@ export fn eph_coproc_upload(cap_tag: i64, data_ptr: i64, len: i64) i64 {
 /// Dispatch op `op` (two i64 operands) on a device buffer, returning a fresh
 /// device-buffer id for the result (consume-and-reborrow).
 export fn eph_coproc_dispatch(buf_id: i64, op: i64, arg0: i64, arg1: i64) i64 {
-    // TODO(axiom): route (buf_id, op, arg0, arg1) to the matching
-    // Axiom.backend_coprocessor_<op> generic; return the result handle.
+    // TODO(backend): route (buf_id, op, arg0, arg1) to the backend's matching
+    // kernel; return the result handle.
     //
     // Stub loopback: a no-op "coprocessor" that returns arg0 + arg1. This is
     // a benign placeholder AND the oracle for the end-to-end seam test
@@ -88,7 +88,7 @@ export fn eph_coproc_dispatch(buf_id: i64, op: i64, arg0: i64, arg1: i64) i64 {
 /// Download a device buffer's contents to the host buffer at `out_ptr`;
 /// terminal consumer. Returns a status code (0 = ok).
 export fn eph_coproc_download(buf_id: i64, out_ptr: i64) i64 {
-    // TODO(axiom): copy the Axiom-side result back to `out_ptr`, free the
+    // TODO(backend): copy the device-side result back to `out_ptr`, free the
     // device buffer, return STATUS_OK.
     _ = buf_id;
     _ = out_ptr;
@@ -98,7 +98,7 @@ export fn eph_coproc_download(buf_id: i64, out_ptr: i64) i64 {
 /// Free a device buffer without downloading; terminal abort consumer.
 /// Returns a status code (0 = ok).
 export fn eph_coproc_release(buf_id: i64) i64 {
-    // TODO(axiom): free the Axiom-side device buffer for `buf_id`.
+    // TODO(backend): free the device-side buffer for `buf_id`.
     _ = buf_id;
     return STATUS_OK;
 }

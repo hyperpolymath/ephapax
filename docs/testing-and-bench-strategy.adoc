@@ -1,0 +1,419 @@
+// SPDX-License-Identifier: MPL-2.0
+// Owner: Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk>
+= ephapax Test & Bench Strategy
+:toc: left
+:toclevels: 3
+:sectnums:
+:icons: font
+
+== 1. Introduction: two axes
+
+This strategy is organised on two orthogonal axes. Read any obligation as a cell `(level, aspect)`.
+
+*Axis A — LEVELS* (the granularity of the seam under test):
+
+[horizontal]
+unit:: a single function / type / proof lemma in isolation.
+P2P (point-to-point):: two adjacent components across one seam (e.g. `parse -> typecheck`, `codec <-> codec`).
+E2E (end-to-end):: the whole pipeline `source -> parse -> type -> codegen -> validate -> run`.
+endpoint:: the externally-observable contract (CLI exit codes + diagnostics, emitted-wasm wire format, custom-section bytes, LSP/DAP protocol, C-ABI symbols).
+benches:: not a level — a cross-cutting measurement family hung off each aspect.
+
+*Axis B — ASPECTS* (the quality the obligation defends):
+
+. *Functionality* — correctness across parse/type/desugar/codegen/run, layer-stratified (L1 regions / L2 modality / L3 echo / L4 dyadic mode).
+. *Performance* — the no-GC region memory model as headline, incremental recompile, VRAM cache, wasm exec speed, coproc seam.
+. *Dependability* — reliability/fault-tolerance/safety, tests + formal proofs jointly and *honestly* (one proof is deliberately false).
+. *Security* — substructural elimination of memory-error classes before codegen + three trust boundaries (FFI/dlopen, ownership-section seam, wasm sandbox).
+. *Accessibility* — developer accessibility: diagnostic quality, the "picturable" error UX, LSP/REPL/DAP, docs/site a11y.
+. *Interoperability* — the five seams where ownership has to survive a trust boundary into code that does not understand linear types.
+. *Maintainability / supply-chain / compliance* — the gates that keep the gestating proof/grammar/seam machine honest.
+
+*How to read the matrix.* The matrix (§2) is the index: each cell names the 2–3 highest-value obligations. The per-aspect sections (§3) expand a cell across all levels and list its benches. Three transverse sections then consolidate the cross-aspect story: *Interoperability* (§4), *Risk transfer* (§5 — the load-bearing section), and *Today vs blocked* (§6). §7 is the prioritised rollout.
+
+*Honesty preamble (non-negotiable).* The formal evidence is partially open and one piece is *deliberately false*: `formal/Semantics.v`'s legacy `Theorem preservation` is `Admitted` and `formal/Counterexample.v` *Qed-proves it false*. The four-layer redesign (L1–L4) is mid-build with 4 outer L1 admits. The suite must (a) carry the weight the open/false proofs cannot yet bear, and (b) *pin the proof-debt state itself* as a tested invariant. No test or doc may claim soundness coverage the proofs do not provide. Per CLAUDE.md fences: do not close legacy preservation or patch admits with proof tricks.
+
+== 2. The matrix
+
+The highest-value 2–3 items per cell. `(•)` marks an obligation that is *blocked* on a toolchain keystone (see §6); `(!)` marks a *currently false-green or broken* gate the suite must first make trustworthy.
+
+[cols="1,2,2,2,2,2,2,2", options="header", frame=all, grid=all]
+|===
+| | Functionality | Performance | Dependability | Security | Accessibility | Interoperability | Maint/Supply/Compliance
+
+| *unit*
+a| • per-`TypeError` fire/no-fire witnesses
+• `demands_consumption()` truth table
+• desugar binary-sum encoding
+a| • region-exit O(1) bulk-free (K∈{1,1e2,1e4})
+• `gen_bump_alloc` 8-instr shape
+• (!) `VramCache` byte-accounting eviction bug
+a| • parser/typechecker crash-freedom (fuzz)
+• codec lenient-decode no-panic
+• (!) proof-debt ledger pin test
+a| • LinearChecker negative corpus per variant
+• `Print Assumptions` axiom-budget seal
+• ownership `from_byte` byte-map pin
+a| • diagnostic Display: no `Base(`/`Unif(`
+• ariadne caret/snippet render
+• `format_ty` round-trip
+a| • P59 codec retraction
+• cap-tag agreement (all 10)
+• Idris2 `compileResultRoundTrip`
+a| • (!) `must-spdx-headers` `head -20` bug
+• status-gate admit-count = 4 (not 0)
+• (!) licence single-source contradiction
+
+| *P2P*
+a| • (•) `conformance/{valid,invalid}` data-driven (dead today)
+• typecheck↔ephapax-linear verdict agreement
+• typecheck→ownership param-for-param
+a| • parse→type recompute-skip (`recompute_count`)
+• codegen→runtime region pairing
+• (•) VRAM cache in front of `compile_module`
+a| • parser→typechecker fault = typecheck-phase not panic
+• codec↔codec + byte-flip fault injection
+• interp↔wasm differential
+a| • typecheck→codegen ownership lowering (P60)
+• codec↔codec cross-seam + name-constant agree
+• interp→dlopen reaches shim vs stub
+a| • SpannedTypeError→line:col (no byte offsets)
+• (•) parse→ariadne wiring (missing)
+• type-err→LSP non-(0,0) range
+a| • codec↔codec exhaustive both directions
+• extern-import→emission index alignment
+• Idris2 ctor-order ↔ Rust discriminant
+a| • contractile source→`contractile.just` byte-equality
+• status-gate ↔ live build counts
+• `reuse lint` ↔ LICENSES/ tree
+
+| *E2E*
+a| • *interp-vs-wasm differential oracle (THE gap)*
+• value-correctness (not just no-trap)
+• v2 phase-J `bridge.eph` + result assert
+a| • *no-GC vs GC churn (headline)*
+• cold compile-time/LOC (hyperfine)
+• incremental edit-loop recompute ratio
+a| • full-corpus no-trap (98 `.eph`)
+• negative: every `invalid/` rejected pre-codegen
+• graceful `[ffi:stub]` degrade vs live shim
+a| • memory-safety rejection pipeline (unsafe never reaches codegen)
+• ownership survives whole pipeline → sibling decode
+• (•) coproc linear lifecycle over real FFI
+a| • diagnostic golden corpus over `invalid/`
+• LSP edit→diagnostic loop
+• REPL transcript legibility
+a| • full ownership E2E (per-fn equality)
+• cross-runtime parity wasmtime+wasmi
+• (•) coproc Zig build→dispatch==42
+a| • clean-room repro (`pixi`/`guix`)
+• doc-truth `just status-gate` red on mutation
+• `validate-wasm` corpus floor
+
+| *endpoint*
+a| • golden-CLI per subcommand (exit + diagnostic)
+• emitted-wasm validity gate
+• `typedwasm.ownership` wire contract
+a| • `ephapax compile` p99 budget
+• emitted-module preamble size = O(1)
+• LSP didChange→diagnostics p95 < 50ms
+a| • CLI exit-code stability
+• wasm-tools validate gate
+• Idris2 ABI E1/E5 stated-as-OWED
+a| • `--verify-ownership` clean/off/corrupt
+• `#![forbid(unsafe_code)]` never removed
+• (!) no `cargo-deny`/SBOM job
+a| • `<file>:<line>:<col>` grammar
+• `NO_COLOR` plain-ASCII path
+• LSP capabilities = exactly implemented
+a| • section-name byte-identical (3 producers)
+• coproc symbol presence (`nm`)
+• emitted host-import surface stable
+a| • `reuse lint` exit code
+• scorecard MIN_SCORE=5 (!score-parse bug)
+• status-gate marker exactly-one
+|===
+
+== 3. Per-aspect coverage
+
+=== 3.1 Functionality — layer-stratified correctness
+
+A "right result" must be right at L1 (regions), L2 (modality), L3 (echo residue), L4 (dyadic mode), not merely operationally. The pipeline is PEG parser (`ephapax.pest`) → v2 surface→desugar→core → dyadic typechecker (`ephapax-typing`, single source of truth `CtxEntry::demands_consumption()` in `discipline.rs`) → substructural cross-check (`ephapax-linear`) → wasm codegen / interpreter → `typedwasm.ownership` section.
+
+*unit.* One test per `TypeError` variant asserting it fires on a minimal witness *and* does not fire on the adjacent legal program (extend `conformance.rs` past its ~25 string cases). Exercise the `demands_consumption()` truth table directly (`LetBang→true`, `Let→false`, `Param→ty.is_linear()`) across all `BaseTy`/`Ty`. Assert the right-nested binary-sum desugaring literally (`Red=inl(())`, `Green=inr(inl(()))`, `Blue=inr(inr(()))`). Per-`ExprKind` codegen lowering with `wasmparser::validate` on each single-construct module. `ownership.rs` P60 (`ty_to_ownership_kind` monotone in linearity) and P61 (full `OwnershipEntry` round-trip) — both named-but-unproven today (only P59 is tested).
+
+*P2P.* Promote `conformance/valid|invalid/*.eph` (on disk, *zero test references today*) into a data-driven harness: valid must type-check; invalid must fail with the *specific* `TypeError` the filename implies. Run the same corpus through `ephapax_typing::TypeChecker` *and* `ephapax-linear`, asserting verdicts agree (make `discipline.rs`'s correspondence table executable). `typecheck→codegen→ownership`: a Linear param ⟹ byte 1, `&mut` ⟹ 3, `&` ⟹ 2.
+
+*E2E.* The *differential interp-vs-wasm oracle* is the single highest-value missing test: for every `conformance/valid` + supported `examples/*.eph`, run `Interpreter::eval` and the wasmtime module and assert *identical* result. Today `wasm_e2e.rs` asserts only "does not trap" — there is no functional oracle that the two agree. Upgrade no-trap to value-correctness (`if true then 1 else 2 ⟹ 1`).
+
+*endpoint.* Golden-CLI per subcommand (`check`, `compile-eph`/`-affine`, `run`, `tokens`, `parse`, `verify-ownership`) — exit code *and* specific diagnostic. Emitted-wasm validity gate (`just validate-wasm` + in-process `wasmparser::validate`). The `typedwasm.ownership` wire contract against `typed-wasm-verify` with pinned variant bytes 0/1/2/3. `idris2 --check` ABI round-trip proofs as a build gate.
+
+*benches.* Type-check throughput (µs/1k AST nodes, gate +20%); codegen latency + output size (bytes/LOC); fuzz execs/sec + time-to-first-crash (target 0 crashes over N=10M); differential-oracle agreement rate (target 100% on supported subset, unsupported subset *listed not skipped*); conformance coverage ratio (productions×variants exercised); `wasm-tools validate` pass-rate (FFI-codegen fixtures *quarantined and counted*, not hidden).
+
+=== 3.2 Performance — the no-GC region model
+
+"Performance" has an operational definition in three instruction sequences in `ephapax-runtime`: `__ephapax_bump_alloc` (O(1) pointer-add), `__ephapax_region_enter` (push bump_ptr), `__ephapax_region_exit` (single pointer write that bulk-frees everything since enter, O(1) regardless of object count — *the GC-killer property*). The claim reduces to: alloc is constant-time and count-independent; region-exit cost is independent of live-object count; peak resident returns to the pre-enter watermark; incremental recompile skips work proportional to actual change; the VRAM IR cache turns a 50–100ms compile into ~1ms; emitted wasm runs competitively; the coproc seam offloads rather than adding swamping overhead.
+
+*unit.* Region allocator instruction-count invariant (bump_ptr advances by exactly `size`, returns OLD pointer — today `test_string_from_char` is a *stub asserting nothing*). Region-exit O(1) bulk-free: enter, K allocations (K∈{1,100,10000}), exit, assert post-exit bump_ptr == pre-enter *identically for all K*. `MAX_REGION_DEPTH=64` bound. `gen_bump_alloc` emits exactly the 8-instruction sequence (no loop, no call) — pin that codegen never regresses the allocator into something non-constant-time. *(!) `VramCache` byte-accounting bug*: `current_size_bytes` is never decremented on eviction (`break` before subtract) so eviction-by-bytes is broken — pin the bug then the fix.
+
+*P2P.* parse→type recompute coupling (an EQUAL `Module` must not retrigger `type_check_module`); typecheck→codegen skip on whitespace-only edit; codegen→runtime region pairing (emitted `region_enter`/`exit` leave bump_ptr at pre-region value); VRAM cache in front of `compile_module` (today a "documented extension point, not built") benched with *real IR payload*, not the synthetic `vec![0u8; size]`.
+
+*E2E.* The *headline bench*: allocation-heavy program (tight string loop in a region) compiled and run under wasmtime, measuring wall-time, peak pages grown, and absence of pause — against an equivalent GC'd wasm baseline (AssemblyScript/TinyGo). ephapax peak pages return to baseline at region exit with no count-dependent latency spike; GC shows sawtooth + pauses. Cold compile-time/LOC via hyperfine; incremental edit-loop (`recompute_count` grows 1 / ~3 / full per comment / body / signature edit).
+
+*endpoint.* `ephapax compile` p99 wall-clock budget (regression gate); emitted-module preamble size = fixed small constant (O(1) code-size overhead vs an embedded GC); LSP didChange→publishDiagnostics p95 < 50ms; VramCache `avg_hit_latency_us` SLO ceiling + hit_rate floor.
+
+*benches.* Region free cost vs alloc count (*THE proof bench*: flat line, slope ~0); bump-alloc throughput (within a small constant of raw pointer-add); peak resident across region lifecycle (post-exit == pre-enter); cold compile/LOC; incremental recompute ratio (~1/3 for body edit); VRAM hit vs miss; parser MB/s; ownership-codec ns; wasm-exec vs hand-WAT (bounded constant overhead); coproc crossover buffer size.
+
+=== 3.3 Dependability — tests + proofs, honestly
+
+The joint claim: the compiler never crashes on input it accepts or rejects; the resource discipline is real (linear = exactly-once, region = no-escape); emitted bytes are valid wasm the sibling agrees on; it degrades gracefully. The honesty constraint dominates: `Counterexample.v` Qed-proves the legacy `preservation` *false* (5 Qed lemmas); `Semantics_L1.v` has 7 `Admitted` / 4 outer admits (48 Qed) with 4 proof-debt classes (L1.B list-vs-multiset *tractable*, L1.D-StringConcat *tractable*, L1.D-App and L1.D-Pair *genuine soundness gaps*, L1.C region-liveness); L3 (`Echo.v`, ~20 Qed) is forward-looking and *not wired into* `has_type_l1`.
+
+*unit.* Parser/typechecker crash-freedom (`parse_fuzzer`/`typecheck_fuzzer`, un-run in CI — promote to a gated `cargo-fuzz` job with a committed corpus seeded from the 14 conformance files + regression dir). Ownership codec lenient-decode safety (proptest over arbitrary `&[u8]` 0..4096, never panic, never index past buf — bounds guards at `ownership.rs:148,157` are safety-critical). Discipline soundness witnesses (every `valid/` yields 0 violations, every `invalid/` ≥1). Interpreter graceful degradation (`__ffi` with no library returns `Ok(I64(0))` + `[ffi:stub]` line, not trap; `DivisionByZero` returns `RuntimeError` not panic). *The proof-debt ledger pin*: a host test re-deriving the admit/axiom census from the `.v` files that *fails if the false legacy theorem gets "fixed" or an admit silently appears/disappears* — making the honest-gap state itself a tested, version-controlled invariant.
+
+*P2P.* parser→typechecker fault propagation (malformed-but-parseable ⟹ typecheck-phase `Err` + non-empty diagnostic, never panic); codec↔codec + a *fault-injection variant* (flip one byte in a tw-built payload, assert `LenientReader` degrades deterministically); interp↔wasm differential (the interpreter *is* the reference for the literal/let/if/arith subset).
+
+*E2E.* Full-pipeline no-trap over *all* `conformance/valid` + supported `examples` (the open gap `TEST-NEEDS.md` flags: "compile and run all 98 `.eph` — not automated"); negative E2E (every `invalid/` rejected pre-codegen with non-empty diagnostic); graceful-degradation pair (`[ffi:stub]→0` with no shim; `dispatch(_,_,20,22)==42` with the shim); crash-resistance on 10k-nested inputs (exit error code, not SIGSEGV).
+
+*endpoint.* CLI exit-code stability; emitted-wasm validity (external engines instantiate without error); the `OWNERSHIP_SECTION_NAME` constant as a CI invariant; Idris2 ABI seam *with E1/E5 honestly marked OWED* (erased 0-quantity postulates citing the Coq `Admitted` — the contract is they remain stated-as-owed, never silently asserted proven).
+
+*benches.* Fuzz throughput + crash-yield (0 new crashes / 24h before claiming CRG-A coverage); codec decode-safety throughput (constant memory on a forged `u32` count); parser/typechecker latency under depth; E2E compile+validate budget (+20% gate); `coqc` proof-check wall-clock (a runaway proof build is an evidence regression); `idris2 --check` ABI budget.
+
+=== 3.4 Security — eliminate memory-error classes pre-codegen
+
+Security is the claim that the substructural type system mechanically eliminates whole memory-error classes *before codegen* (`ephapax-linear` forbids contraction = double-free, weakening = leak, use-after-consume = UAF, region-escape), plus the integrity of three trust boundaries where the guarantee can leak: the FFI/dlopen path (transmute onto *any* symbol, no arity/signature/null check), the ownership-section seam, and the wasm sandbox. The trusted base is real and testable: `#![forbid(unsafe_code)]` on `ephapax-linear` + `ephapax-wasm`, and `Print Assumptions` seals in `TypingL2.v` asserting `weaken_modality`/`linear_to_affine` close with *zero axioms*.
+
+*unit.* LinearChecker negative corpus, one focused test per `DisciplineViolation` asserting the *exact* enum (not merely non-empty) and that no false-negative path returns `Ok`. AffineChecker parity (double-use still `Contraction`; unconsumed binding allowed — pins the L2-modality boundary so affine relaxation can never re-admit contraction). Branch-agreement merge soundness (property test over N-arm `match`: the arm[0]-vs-arm[i] formulation must not miss a disagreement that exists only between arm[2] and arm[3]). The *axiom-budget unit*: `Print Assumptions weaken_modality`/`linear_to_affine` print NO axioms, and `preservation_l1` lists *exactly* the known admits and no NEW axiom name — turning the no-new-axioms directive into a diffable artifact.
+
+*P2P.* typecheck→codegen ownership lowering (P60: a Linear param surfaces as `OwnershipKind::Linear` in the artifact, not erased); codec↔codec cross-seam + `OWNERSHIP_SECTION_NAME` byte-identical across crates; interp→dlopen seam reaches the real shim (`dispatch(_,_,20,22)==42`) *and* a non-existent symbol hits the stub returning 0 without UB.
+
+*E2E.* The headline: a `.eph` that double-uses a `CoprocBuf`/`File!` → lex → parse → desugar → linear checker → emits `Contraction`, produces *no* `.wasm`. Use `stdlib/Coproc.eph`'s documented invariants as the spec. Safe-pipeline + sandbox: a correct linear program compiles, validates, runs. Ownership survives the whole pipeline → independent sibling decoder re-derives "this param is Linear".
+
+*endpoint.* `ephapax compile --verify-ownership` (clean → exit 0; feature off → warn+skip, no false "clean"; corrupted section → reject non-zero); `#![forbid(unsafe_code)]` as a grep/compile gate that can never be removed; cap-tag byte-match `.eph` ↔ Zig enum (a mismatch routes a buffer to the *wrong* coprocessor — a security-relevant misdispatch); *supply-chain*: `cargo-deny`/`cargo-audit` (currently *no such job* — highest-value add given the `libloading` unsafe surface), `#![forbid]` invariant, commit-signature verification.
+
+*benches.* Checker rejection latency (linear in AST, no quadratic blowup from per-branch HashMap snapshot/restore clone); snapshot/restore cost under branch nesting; ownership-codec throughput; wasm-validation gate cost; fuzz coverage/throughput (coverage must not drop release-to-release; add an ownership-section fuzz target); *proof-check wall-time + axiom COUNT* (the security-load-bearing number: `weaken_modality=0`, `linear_to_affine=0`, `preservation_l1` axiom set frozen to the 3 known admits).
+
+=== 3.5 Accessibility — the picturable error UX
+
+Accessibility here is overwhelmingly *developer* accessibility with one dominant shape: can a programmer who hits a substructural error understand *what*, *where*, and *why*? The owner explicitly values "picturable" error UX. The machinery exists but is *unwired*: `ephapax-parser/src/error.rs` has a complete ariadne `Report` renderer (caret labels, colour, snippet) — yet `main.rs:933 report_parse_error` prints flat byte offsets and `main.rs:12` carries the comment "ariadne removed for now". Type errors interpolate `Ty` with `{:?}` Debug, so users see `expected Base(I32), found Unif(0)` instead of `I32` / `?0` (the `format_ty` in `lsp/main.rs:688` already knows the pretty form). The DAP defines a genuinely picturable model (qualifier ● linear / ○ affine, region owner, owned|borrowed|consumed) but has *no protocol wiring*. `ephapax-doc` is a README stub; `docs/accessibility/README.adoc` is a *stale copy-paste from the Burble voice-chat repo* (describes push-to-talk — wrong product entirely).
+
+*unit.* Diagnostic Display golden tests: forbid Debug-shaped substrings `Base(` / `Unif(` in user-facing output; assert types render via a shared pretty-printer. ariadne `Report` render tests (source line text, caret at byte span, "Expected … found … instead", no panic on a 0..0 span). `format_ty` round-trip over every `Ty` variant. LSP hover for the substructural keywords (`let!` hover must contain "consumed exactly once"). DAP `VariableDisplay` glyph lock (● linear / ○ affine).
+
+*P2P.* SpannedTypeError → CLI report with correct line:col and the named variable, *no byte offsets*; the currently-*missing* parse→ariadne wiring (write the test now, mark it failing/ignored to document the gap); type-error→LSP `Diagnostic` with a non-(0,0) range (contrast the parse-error branch which *degrades every parse error to 0:0*); offset↔position round-trip stable under multibyte/CJK/emoji.
+
+*E2E.* Diagnostic golden corpus over the 5 `conformance/invalid/` files: snapshot complete stderr, assert each names the right error class, points at the right line:col, names the offending variable/region, and is free of Debug-shaped type syntax. LSP edit→diagnostic loop (introduce + clear). REPL transcript legibility.
+
+*endpoint.* `<file>:<line>:<col>: <kind>: <human-message>` stable grammar (parse errors must conform too); `NO_COLOR` plain-ASCII degradation (screen-reader + CI-log accessibility); LSP capabilities advertise *exactly* what is implemented (advertising an unimplemented capability is itself an accessibility regression — the editor offers an action that silently no-ops); content-sanity test asserting the a11y docs mention "ephapax"/"compiler"/"diagnostics" and *not* "push-to-talk".
+
+*benches.* Diagnostic latency to first error (ariadne path within 2× flat-printer); LSP keystroke-to-diagnostic (< 50ms p95 for < 200 LOC, with/without QueryDb reuse); *diagnostic-quality score* (rubric /5: line:col, names symbol, names type in human form, caret/snippet, suggests fix — baseline ~2/5, target 5/5); hover/completion coverage (100% of v2 keywords); docs a11y violation count (target 0).
+
+=== 3.6 Interoperability — see §4
+
+Consolidated in the dedicated Interoperability section below.
+
+=== 3.7 Maintainability / supply-chain / compliance — keeping the machine honest
+
+This layer keeps the four-layer-proof / dyadic-grammar / typed-wasm-seam machine honest as it gestates. Several gates are *currently false-green or broken*, so the suite's first job is to make the gates themselves trustworthy.
+
+*unit.* status-gate drift logic (`scripts/status-gate.sh`): assert the admit grep returns the *expected 4* (not 0) and does *not* count the deliberately-false `Theorem preservation` as closeable; a fixture with 5 Admitted must FAIL when `PROOF-NEEDS.md` claims 4. *(!) `must-spdx-headers` is structurally broken* — it pipes through `head -20`, scanning only the first 20 files; a missing-header file ranked ≥21 passes silently, and it never scans `.eph`/`.idr`/`.v`. Replace with a full-corpus check; a fixture where file #25 lacks a header must FAIL. SPDX comment-leader correctness (`guix.scm`/`pixi.toml`/`stapeln.toml` carry C-style `// Owner:` which is *wrong for Scheme/TOML* and a genuine `guix shell -f` parse hazard). Licence single-source: `guix/pixi/stapeln` say PMPL-1.0-or-later, 255 headers say MPL-2.0, only `LICENSES/MPL-2.0.txt` exists — a 3-way contradiction the test must *report* (any FIX is owner-manual, file-by-file; the test must not auto-edit).
+
+*P2P.* contractile source → `contractile.just` byte-equality (catches generator/source drift); status-gate ↔ live `cargo test --list` + Coq admit grep ↔ `TEST-NEEDS.md`/`PROOF-NEEDS.md`; `pixi` tasks ↔ Justfile recipes (flag the lint asymmetry: pixi runs `clippy -D warnings`, Justfile has none); `reuse lint` ↔ LICENSES/ tree (would FAIL today: PMPL referenced but no `LICENSES/PMPL-*.txt`).
+
+*E2E.* Clean-room repro (`pixi run build && pixi run test`; `guix shell -f guix.scm -- cargo build` — flag that `guix.scm` has `(source #f)` so it only provisions a shell, *not a reproducible build*); doc-truth `just status-gate` (exit 0 with counts matching docs; mutate a stray `Admitted` → red); governance PR E2E (drop SPDX header / add unpinned action / bump version without CHANGELOG → each gate fires); `validate-wasm` corpus floor.
+
+*endpoint.* `reuse lint` exit code (SBOM-consumable attestation); scorecard MIN_SCORE=5 (*but the SARIF score-parse currently defaults to 0 via a `// 0` fallback — a false sense of coverage the test must expose*); status-gate markers exactly-one occurrence; Containerfile pinning contract; `boj-build` trigger payload (currently *malformed JSON*, unbalanced quotes/braces, `continue-on-error: true` swallows failures).
+
+*benches.* Gate latency (`status-gate` list-only path < 30s on warm cache, must not trigger a full rebuild); cold reproducible-build time (+20% gate); validate-wasm corpus throughput (count of `[valid]` fixtures should *monotonically rise*); SPDX/REUSE coverage ratio (hard number: `.rs` 68/68, `.idr` 20/20, `.v` 12/12, `.eph` 113/117 — 4 missing); admit/drift ledger (declared vs actual `Admitted.`, should trend *down*, never silently up); pinned-action freshness.
+
+== 4. Interoperability (consolidated)
+
+Interop is where ephapax's one load-bearing feature — substructural ownership — must survive crossing a trust boundary into code that does *not* understand linear types. There are *five concrete seams*, all real today.
+
+[cols="1,3,2", options="header"]
+|===
+| Seam | What crosses | Maturity / test target
+
+| (1) `typedwasm.ownership` codec
+| `ephapax-wasm/src/ownership.rs` is a deliberate byte-for-byte *in-tree mirror* of the independent `typed-wasm-verify::section` crate. ephapax emits, typed-wasm verifies; the two are maintained separately and *can silently drift*. ephapax does NOT depend on the verifier in codegen (boundary note).
+| *Mature, well-tested.* `typed_wasm_seam_conformance.rs` is the *only* test crossing the real seam (everything else round-trips one codec against itself). Shared `OWNERSHIP_SECTION_NAME` with AffineScript — a single rename desyncs *three* producers, so `section_name_constants_agree` is a CI invariant.
+
+| (2) Coproc C-ABI
+| `tools/coproc/ephapax_coproc.zig` exports flat `eph_coproc_* : i64(...)->i64`; `stdlib/Coproc.eph` reaches them via `__ffi`. The Zig `dispatch` stub returns `arg0+arg1` as the oracle for `dispatch(_,_,20,22)==42`. Deliberately *thin*: ephapax holds only a typed dispatch surface + linear safety gate; kernels stay in Axiom.jl.
+| *Stub backend.* The `[ffi:stub]→0` fallback gives graceful degradation when the native side is absent — benches/tests must *report which mode they ran in*. Real DSP/GPU dispatch untestable until the full Axiom.jl build lands.
+
+| (3) Generic FFI C-ABI
+| Interpreter `find_ffi_symbol` dlopens a fixed *6-arg, all-i64, single-i64-return* `unsafe extern "C" fn`. The i64-only signature makes the boundary *untyped at the C level* — all safety must be proven on the ephapax side before the call.
+| *Contract-tested, not proven.* Strings passed as i64 pointers; no floats/structs/>6 args. The residual UB (wrong arity, malicious `.so`) is *not* transferred away by any test — contained only by the linear gate + a load-time trust contract that sits with the operator.
+
+| (4) WASM runtime portability
+| Emitted modules must pass `wasmparser::validate` (in-process) AND `wasm-tools validate` (CLI gate), and run under wasmtime with `env::print_i32`/`print_string` host imports.
+| *Single-engine today.* Wiring a second pure-Rust engine (`wasmi`) is unblocked and the cheapest next step — converts "runs under wasmtime" into "portable across ≥2 runtimes". Browser/node parity needs a JS harness not present.
+
+| (5) Idris2 ABI contract
+| `src/abi/Ephapax/ABI/{Types,Foreign,Invariants}.idr` re-states the Rust boundary types, proves `compileResultRoundTrip` (Qed) and *OWES* `compileOkImpliesWasmTyped` (declared `0`-erased, no witness — PROOF-NEEDS E5). Exists so a SPARK/Ada consumer sees the obligation interface — "Rust is never the ABI".
+| *Round-trip proven; correctness OWED.* `idris2 --build` gate keeps the result-code bijection from rotting to `believe_me`. The honesty discipline travels the seam: E1/E5 cite the Coq `Admitted` rather than asserting preservation, so no downstream consumer is misled.
+|===
+
+*Portability invariants.* The wire format is endian-pinned LE + byte-aligned specifically so a SPARK/Ada/browser/node consumer can read it without the Rust crate. Seam-name agreement is a CI invariant. The accessibility seams are *protocol* seams (LSP/DAP JSON-RPC, tested black-box over the wire so any client interoperates; keep the LSP keyword list and `tree-sitter` `highlights.scm` in sync). Docs interop is with the open web (WCAG 2.1 AA via pa11y/axe-core — independently checkable, not self-asserted). `NO_COLOR` is the cross-tool knob for terminal/screen-reader/CI-log degradation. A perf number is only meaningful for a module that *validates and runs* on a standard engine — emitted-wasm validity is a prerequisite of every E2E/endpoint bench.
+
+== 5. Risk transfer (the load-bearing section)
+
+Each artifact *moves* a class of failure from a late/expensive boundary to an earlier/cheaper one. The honest ledger distinguishes risk *extinguished* (impossible-by-construction), risk *transferred to CI/seam* (loud break instead of silent field failure), and risk *recorded but not yet discharged* (debt stated at the seam, still carried by trust).
+
+[cols="3,2,2,1", options="header"]
+|===
+| Test / proof | Risk class | From → to | Status
+
+| Linear/affine checker negative corpus (`ephapax-linear` + `conformance/invalid`)
+| use-after-free / double-free / leak / region-escape
+| runtime crash → *extinguished pre-codegen* (program cannot be emitted)
+| ✅ strongest transfer in the project
+
+| L1–L4 Coq Qed lemmas (`linear_to_affine` zero-axiom, region-threading fragment)
+| soundness over *all* programs the judgment accepts
+| "tested on examples" → "proven" — *for the closed layers only*
+| ⚠ partial
+
+| `Counterexample.v` (5 Qed)
+| *false security* from trusting `Semantics.v`'s `Admitted` theorem
+| silent false-confidence → *proven-false* (load-bearing negative knowledge)
+| ✅
+
+| Proof-debt ledger pin test
+| regression on the *evidence* (a silently-closed admit or "fixed" false theorem)
+| invisible drift → loud CI break
+| ✅ (new — build this)
+
+| `typed_wasm_seam_conformance.rs` + P59/P60/P61 round-trip
+| wire-format drift; "did the safety annotation survive codegen?"
+| silent mis-decoded ownership downstream → CI failure at the byte boundary
+| ✅
+
+| `wasmparser::validate` (always-on CLI path) + `wasm-tools validate` gate
+| malformed / sandbox-escaping emitted module
+| runtime instantiation trap on a user's engine → build-time error
+| ✅ (caught FFI gap G5: out-of-bounds `call 100`)
+
+| Region free-cost bench + L1 region-liveness proof
+| unbounded GC-pause latency; leak
+| tail-risk to monitor → measured+regression-gated (bench) → impossible (proof)
+| ⚠ bench ✅, proof OWED (L1.C admit)
+
+| `recompute_count` integer assertions (`ephapax-query`)
+| interactive latency regression
+| noisy machine-dependent wall-clock → *deterministic* CI integer
+| ✅
+
+| Fuzzers (`parse_fuzzer`, `typecheck_fuzzer`)
+| crash / panic / DoS / adversarial-input blowup
+| user-discovered field crash → reproducible CI corpus artifact
+| ⚠ capability exists, *un-run in CI* — gate it
+
+| `idris2 --check` ABI round-trip; `compileResultRoundTrip` Qed
+| C-ABI integer-meaning aliasing (consumer reads "2" as the wrong error)
+| interop-debugging → totality-checked proof + build gate
+| ✅
+
+| `Print Assumptions` axiom seal
+| axiom-budget drift (a new axiom sneaks in)
+| prose directive → CI-diffable artifact
+| ✅
+
+| Cross-runtime (wasmtime+wasmi) parity bench
+| engine-specific portability
+| single-engine assumption → measured number
+| ⚠ wasmi not wired
+
+| Coproc linearity tests
+| device-buffer leak / use-after-free of a *foreign* resource
+| native-side crash → static ephapax type error (dropped `CoprocBuf` rejected like dropped `File!`)
+| ⚠ blocked on module-import for idiomatic form
+
+| Diagnostic Display / golden / ariadne / `format_ty` / `NO_COLOR` / WCAG gates
+| user-misreads-the-compiler; screen-reader / low-vision exclusion
+| human confusion → CI string-assertion / lint
+| ✅ (orthogonal to soundness — proofs guarantee the error *exists*, a11y tests that it is *understandable*)
+
+| `status-gate.sh`
+| proof/test *doc-drift* (false "done")
+| undetected-until-audit → caught every PR (count-honesty only, not proof correctness)
+| ✅
+
+| `cargo-deny` / SBOM (proposed)
+| supply-chain tamper (mutable-tag hijack, dependency confusion)
+| field compromise → CI gate
+| ❌ *no job exists* — highest-value cheap add
+
+| scorecard-enforcer (as-shipped)
+| supply-chain health
+| *ILLUSORY today* — SARIF score parses to 0 via `// 0` fallback, gate passes vacuously
+| ❌ transfer does NOT fire — expose it
+|===
+
+*Risks that do NOT transfer (carried by trust, stated honestly).*
+
+* `compileOkImpliesWasmTyped` (E5) is declared `0`-erased and *unwitnessed*: "the compiler never hands back Ok for a module that isn't actually well-typed wasm" is *trust, not proof*. The codec tests prove byte-*agreement* on the wire, not that the wire reflects a verified typing derivation.
+* No Coq/Idris model of `compile_term` exists — codegen correctness is entirely untested-by-proof; it rests on `wasm_e2e.rs` fixtures + validation.
+* The FFI `unsafe extern "C" fn(i64×6)` transmute is untyped at C; the residual UB risk sits with the *operator*, not the type system.
+* Whole-language preservation is provably-false-as-stated; only per-layer fragments transfer, and only over the fragment each layer models. *Test design must not claim soundness coverage the proofs don't yet provide.*
+
+== 6. What we can test today vs blocked
+
+Three toolchain keystones gate large swaths of the suite. Naming them once:
+
+[horizontal]
+*K1 — module-import / qualified-access*:: does not exist beyond a single-module-index hack for `bridge.eph`. `stdlib` (incl. the typed `Coproc.eph` API) is *unconsumable across modules*.
+*K2 — v2 grammar gaps (G1–G5)*:: linear *type* annotations (`CoprocBuf!` in signatures) don't parse (linearity is binding-site `let!` only); bare `Ctor(expr)` only parses as a match-arm tail; 4 of 5 stdlib modules are in non-parsing pre-v2 syntax; no I64 literals (G4).
+*K3 — wasm-FFI codegen is broken by design (G5)*:: any `__ffi` program type-checks but emits an *invalid* module (`next_import_idx:100` → out-of-bounds `call 100`).
+
+[cols="1,2,2", options="header"]
+|===
+| | Testable today (unblocked) | Blocked (and on what)
+
+| *Functionality*
+| Differential interp-vs-wasm oracle (both backends present — *highest-value missing test, blocked on nothing but writing the harness*); per-`TypeError` witnesses; data-driven `conformance/` loader; P60/P61 ownership proofs.
+| Cross-module E2E (K1); full-language generative codegen (K2/codegen coverage); effect-discipline runtime tests (`Perform`/`Handle` unlowered).
+
+| *Performance*
+| Region allocator unit harness (raw `Vec<u8>` base — no external dep); `recompute_count` ratios; cold compile/LOC; VramCache byte-accounting fix.
+| no-GC *vs GC* headline (needs a vendored baseline runtime); VRAM cache wiring + GPU runner; multi-module rebuild bench (K1); FFI-exec speed (K3); coproc-offload (Zig+Axiom in CI).
+
+| *Dependability*
+| Crash-freedom fuzzers (gate them + commit a corpus); lenient-decode safety; graceful `[ffi:stub]` degrade; proof-debt ledger pin; full-corpus no-trap over the *interpreter* path.
+| Multi-file E2E (K1); compiled-wasm FFI validity (K3); end-to-end echo-residue (L3 unwired, no interp instrumentation); LSP/DAP crash-freedom (no harness yet).
+
+| *Security*
+| LinearChecker negative corpus; axiom-budget seal; codec cross-seam; `--verify-ownership` clean/corrupt; `cargo-deny` (cheap, *flag-only — licence/SPDX edits owner-manual*).
+| Idiomatic coproc-leak-rejection (K1 — only hand-desugared `__ffi` today); wasm-side FFI security story (K3); sandboxed dlopen (none exists); affine soundness proof (needs L2).
+
+| *Accessibility*
+| Display golden tests; `format_ty` round-trip; LSP hover/completion; REPL transcripts; content-sanity (catch the wrong-product Burble text now).
+| Picturable parse-error E2E (ariadne *built but unwired* — small CLI change); human type-error rendering (needs `format_ty` extracted to a shared crate); DAP endpoints (types-only, no request loop); docs-a11y/WCAG (`ephapax-doc` + site don't emit HTML).
+
+| *Interoperability*
+| Ownership E2E (narrow fixture set); codec cross-seam exhaustive; wasmtime+wasmi parity (unblocked, cheapest next step); Idris2 ABI build gate.
+| FFI-over-wasm E2E (K3); idiomatic coproc-over-imports (K1); linearity-in-signature contract (K2/G1); real Axiom.jl dispatch parity (stub backend).
+
+| *Maint/Supply/Compliance*
+| Fix + test `must-spdx-headers` (`head -20` bug); status-gate admit-count pin; contractile byte-equality; `reuse lint` *reporting* (fix owner-manual); validate-wasm floor.
+| Hermetic guix build (`source #f`); language-wide codegen repro (K3); package-graph multi-module repro (K1); CI execution itself (estate Actions *billing wall* — owner-only; bag-of-actions escape, but `boj-build` payload is malformed); SBOM (no job); READINESS.md (absent → CRG badge vacuously `X`).
+|===
+
+== 7. Prioritised rollout (given codegen-audit task #12)
+
+Sequence honours the estate directive *truth → fix → only then build*: make false-green gates trustworthy first, then build the one oracle that carries the most transferred risk, then widen.
+
+. *Tier 0 — make the gates honest (do first, days).* These currently lie. (a) Fix `must-spdx-headers` `head -20`; (b) pin the status-gate admit-count to the *exact* expected (4 L1 admits + the 1 deliberately-false legacy = documented total, *not zero*); (c) build the proof-debt ledger pin test; (d) expose the scorecard SARIF `// 0` score-parse so the supply-chain gate stops passing vacuously. *Why first:* §5 shows two of these are illusory transfers — they must fire before anything downstream trusts them.
+
+. *Tier 1 — the differential interp-vs-wasm oracle (the keystone test).* Both backends exist; blocked on nothing. This single E2E (Functionality/E2E) carries the most-transferred functional risk: it converts codegen-miscompilation from a silent wrong-answer into a CI failure. *Directly serves codegen-audit task #12* — it is the executable definition of "does codegen compute the right value", not just "does it validate". Pair with upgrading `wasm_e2e.rs` from no-trap to value-correctness.
+
+. *Tier 2 — wire the dead fixtures + cross-checks (high value, low cost).* Data-drive `conformance/{valid,invalid}` (zero test references today → false confidence); make `typecheck ↔ ephapax-linear` verdict-agreement executable; strengthen `typed_wasm_seam_conformance` to full per-function ownership equality; extend cross-codec to the full `n_params:u8` range.
+
+. *Tier 3 — the no-GC proof bench + region allocator units.* Region-exit O(1)-bulk-free unit (replace the asserting-nothing stub) and the flat-line free-cost bench — the headline performance claim. Fix the `VramCache` eviction byte-accounting bug under test. Defer the GC-*baseline* comparison until a fair runtime is vendored.
+
+. *Tier 4 — accessibility quick wins.* Forbid `Base(`/`Unif(` Debug leakage in diagnostics; the content-sanity test for the wrong-product Burble docs; `NO_COLOR` path. Write the parse→ariadne wiring test as failing-now to document the unwired renderer.
+
+. *Tier 5 — portability widening + supply-chain.* Wire `wasmi` for cross-runtime parity (cheapest interop win); add `cargo-deny`/`cargo-audit` (report-only) and an SBOM job. Gate the fuzzers in CI with a committed corpus.
+
+. *Tier 6 — blocked-but-specced.* Park behind K1/K2/K3: idiomatic coproc-over-imports, linearity-in-signature contracts, FFI-over-wasm E2E, DAP endpoints, `ephapax-doc` WCAG gate, hermetic guix. Keep each as an `#[ignore]`d test with a "blocked: <keystone>" note so the gap is visible and un-claimable.
+
+*Guardrails.* No automated licence/SPDX edits — every compliance test is *report-only*; the PMPL-vs-MPL contradiction is surfaced, never auto-resolved (owner-manual, file-by-file). The proof-debt boundary (admits + the deliberately-false theorem) is a *tested, version-controlled invariant* — do not "fix" the false theorem or patch admits with proof tricks.

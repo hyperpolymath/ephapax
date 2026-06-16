@@ -110,3 +110,30 @@ the symbols or fail with a clean "FFI unsupported in the wasm target" error
 writing a broken `.wasm`. This is tracked as codegen debt; the coprocessor
 surface is unaffected because it dispatches via the interpreter's `__ffi`
 path, not wasm.
+
+== G6 — no working module-import + qualified-member access (THE keystone)
+
+A program cannot consume another module's API:
+
+----
+$ printf 'import Coproc\nfn t(): I64 =\n  Coproc.available(Coproc.Tensor)\n' > c.eph; ephapax check c.eph
+Parse error: Unexpected atom expression: construct_expr    # `Coproc.Tensor` (qualified) won't parse
+
+$ printf 'import Coproc\nfn t(): I64 =\n  available(Tensor)\n' > c.eph; ephapax check c.eph
+desugar error: unknown constructor `Tensor`               # `import` doesn't bring members into scope
+----
+
+So `import M; M.f(...)` neither parses (qualified `M.member` is rejected as a
+`construct_expr`) nor resolves (an `import` does not make `M`'s types /
+constructors / functions visible, even unqualified). This is the **keystone
+gap**: every stdlib module (`Region`, `Stream`, `Transactions`, `Prelude`,
+`Coproc`, …) is a typed surface that **nothing can consume**. It is why the
+coprocessor seam is reachable today only through raw `__ffi("eph_coproc_*",
+…)` rather than the typed `Coproc.upload`/`dispatch`/… API.
+
+*This is the single highest-leverage v2 toolchain item:* module-import +
+qualified-member access (the import resolver in
+`src/ephapax-cli/src/import_resolver.rs` already loads the import graph for
+multi-file `compile`, but the surface parser/desugarer does not expose
+imported members). Landing it unblocks consumption of the entire stdlib at
+once.

@@ -1,10 +1,15 @@
 # SPDX-License-Identifier: MPL-2.0
 # Owner: Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk>
-# Status Gate — fail a PR when the PROOF-NEEDS.md / TEST-NEEDS.md count
-# markers drift from coqc/cargo ground truth. This wires the previously
-# broken (`//` syntax error on line 3) + unwired scripts/status-gate.sh
-# into CI so admit-count / test-count drift is caught automatically.
-# NOTE: not yet a required status check — see .github/settings.yml.
+# Status Gate — fail when the PROOF-NEEDS.md / TEST-NEEDS.md count markers
+# drift from coqc/cargo ground truth.
+#
+# Split into two independent jobs so the slow one is cancellable without
+# losing the core gate:
+#   * status-gate-core  — proof-count only (grep, ~1s, no toolchain). This is
+#                         the CORE drift gate; this is the one to keep required.
+#   * status-gate-tests — test-count only (full `cargo` build, minutes). Slow,
+#                         doc-hygiene-only; SAFE TO CANCEL if you're in a rush
+#                         (it emits a ::notice:: saying so when it starts).
 name: Status Gate
 
 on:
@@ -28,10 +33,26 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  status-gate:
-    name: status-gate
+  # CORE — fast, no toolchain. Keep this one required: a new Admitted that
+  # isn't reflected in PROOF-NEEDS.md fails here in ~1 second.
+  status-gate-core:
+    name: status-gate-core
     runs-on: ubuntu-latest
     steps:
+      - name: Checkout repository
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+      - name: Proof-count drift (grep only — no build)
+        run: ./scripts/status-gate.sh --proofs
+
+  # SLOW — full cargo build to count tests. Cancellable: the core gate above
+  # is independent, so cancelling this never lets soundness/admit drift through.
+  status-gate-tests:
+    name: status-gate-tests (slow · cancellable)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Notice — this is the slow, skippable job
+        run: |
+          echo "::notice title=Slow check — safe to cancel::status-gate-tests runs a full cargo build just to verify the TEST-NEEDS.md test count. The core proof-count gate (status-gate-core) is a separate, independent job and is already enforced. If you're in a rush you can cancel THIS job without letting any core gating go."
       - name: Checkout repository
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
       - name: Install Rust toolchain
@@ -40,7 +61,7 @@ jobs:
           toolchain: stable   # required input when the action is SHA-pinned (the `stable` ref's default is not inherited by SHA)
       - name: Cache cargo
         uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2
-      - name: Run status-gate (proof + test count drift)
+      - name: Test-count drift (full build — slow)
         env:
           CARGO_INCREMENTAL: "0"
-        run: ./scripts/status-gate.sh
+        run: ./scripts/status-gate.sh --tests

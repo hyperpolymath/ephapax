@@ -115,6 +115,10 @@ branches:
         contexts:
           - "hypatia-scan"
           - "codeql"
+          # Added 2026-06-16: make the always-on Coq aggregator (PR #254) a
+          # required check so a broken proof / new Admitted cannot merge to
+          # main undetected. Owner: confirm this branch-protection change.
+          - "coq-build-gate"
       enforce_admins: true
       required_signatures: true
       restrictions: null

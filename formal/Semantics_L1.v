@@ -1936,6 +1936,134 @@ Qed.
     Refs PR #178 (design-branch original; superseded by main's
     L2-hybrid #176). *)
 
+(** ** HONEST restatement (ADMIT 2 closure, 2026-06-16).
+
+    The Axiom-shaped [region_liveness_at_split_l1_gen] below is FALSE
+    ([In rv R -> In rv R'] with no side condition; witness
+    [ERegion rv (EI32 5)] at [R = [rv]] pops the only [rv]). The honest
+    fact is: a typing that performs no region-EXIT of [rv] preserves
+    [rv]'s count exactly. A region is only ever popped by an [ERegion rv]
+    subterm (via [remove_first_L1 rv] in [T_Region_*_L1]); if [e] has no
+    [ERegion rv] subterm, [cnt rv] is invariant across the derivation.
+
+    [expr_no_exit_of_region rv e] is the honest side condition the false
+    statement silently dropped. (Allocation [EStringNew rv] and the value
+    [ELoc _ rv] REQUIRE [rv] live but never pop it, so they are
+    unconstrained here — only [ERegion rv] exits.) *)
+
+Fixpoint expr_no_exit_of_region (rv : region_name) (e : expr) : Prop :=
+  match e with
+  | EUnit | EBool _ | EI32 _ | EVar _ => True
+  | EStringNew _ _ => True
+  | ELoc _ _ => True
+  | EStringConcat e1 e2 | ELet e1 e2 | ELetLin e1 e2
+  | EApp e1 e2 | EPair e1 e2 =>
+      expr_no_exit_of_region rv e1 /\ expr_no_exit_of_region rv e2
+  | EStringLen e' | EFst e' | ESnd e' | EInl _ e' | EInr _ e'
+  | EBorrow e' | EDeref e' | EDrop e' | ECopy e' | ELam _ e'
+  | EEcho _ e' | EObserve e' =>
+      expr_no_exit_of_region rv e'
+  | EIf e1 e2 e3 | ECase e1 e2 e3 =>
+      expr_no_exit_of_region rv e1 /\ expr_no_exit_of_region rv e2
+      /\ expr_no_exit_of_region rv e3
+  | ERegion r e' => r <> rv /\ expr_no_exit_of_region rv e'
+  end.
+
+(** The TRUE liveness lemma: no exit of [rv] ⇒ [cnt rv] preserved.
+    Proved from [remove_first_L1_count_other] (the region cases, which
+    pop a region [r <> rv]) + IH threading (compound cases). Qed. *)
+Lemma cnt_preserved_no_exit_l1_gen :
+  forall m R G e T R' G' rv,
+    has_type_l1 m R G e T R' G' ->
+    expr_no_exit_of_region rv e ->
+    cnt rv R' = cnt rv R.
+Proof.
+  intros m R G e T R' G' rv Ht. revert rv.
+  induction Ht; intros rv Hne; simpl in Hne;
+    (* value / atomic rules: R' = R *)
+    try reflexivity;
+    (* single-subterm compound rules: thread IH *)
+    try (apply IHHt; exact Hne);
+    (* two-subterm compound rules: transitivity through the split *)
+    try (destruct Hne as [Hne1 Hne2];
+         rewrite (IHHt2 rv Hne2); apply (IHHt1 rv Hne1));
+    (* three-subterm rules (If/Case): the first two children thread R *)
+    try (destruct Hne as [Hne1 [Hne2 Hne3]];
+         rewrite (IHHt2 rv Hne2); apply (IHHt1 rv Hne1)).
+  - (* T_Region_L1 (fresh, region r): r <> rv from Hne; body at r::R *)
+    destruct Hne as [Hrne Hne'].
+    specialize (IHHt rv Hne').
+    rewrite (remove_first_L1_count_other r rv R_body Hrne).
+    rewrite IHHt. unfold cnt. simpl.
+    destruct (string_dec r rv) as [Heq|Hd]; [contradiction (Hrne Heq) | reflexivity].
+  - (* T_Region_Active_L1 (region r): body at R *)
+    destruct Hne as [Hrne Hne'].
+    specialize (IHHt rv Hne').
+    rewrite (remove_first_L1_count_other r rv R_body Hrne).
+    exact IHHt.
+  - (* T_Region_L1_Echo: same as fresh *)
+    destruct Hne as [Hrne Hne'].
+    specialize (IHHt rv Hne').
+    rewrite (remove_first_L1_count_other r rv R_body Hrne).
+    rewrite IHHt. unfold cnt. simpl.
+    destruct (string_dec r rv) as [Heq|Hd]; [contradiction (Hrne Heq) | reflexivity].
+  - (* T_Region_Active_L1_Echo: same as active *)
+    destruct Hne as [Hrne Hne'].
+    specialize (IHHt rv Hne').
+    rewrite (remove_first_L1_count_other r rv R_body Hrne).
+    exact IHHt.
+Qed.
+
+(** Membership corollary: no exit of [rv] ⇒ liveness preserved. This is
+    the honest replacement for the false [In rv R -> In rv R']. *)
+Lemma region_liveness_no_exit_l1_gen :
+  forall m R G e T R' G' rv,
+    has_type_l1 m R G e T R' G' ->
+    expr_no_exit_of_region rv e ->
+    In rv R -> In rv R'.
+Proof.
+  intros m R G e T R' G' rv Ht Hne Hin.
+  apply (count_occ_In string_dec).
+  pose proof (cnt_preserved_no_exit_l1_gen _ _ _ _ _ _ _ rv Ht Hne) as Heq.
+  unfold cnt in Heq. rewrite Heq.
+  apply (count_occ_In string_dec). exact Hin.
+Qed.
+
+(** ===== 2026-06-16 CALL-SITE AUDIT RESULT (ADMIT 2) =====
+
+    The false [region_liveness_at_split_l1_gen] below is consumed at 13
+    sites in [subst_typing_gen_l1_m] (all of the form: after substituting
+    a linear [ELoc lv rv], retype it at the inner env [R1] via
+    [loc_retype_at_R_l1_m], which needs [In rv R1]). At each site the only
+    available hypothesis is [Hregv : In rv R] (the value's region live at
+    the OUTER env, from [linear_value_is_loc_l1]); [output_shape_at_l1]
+    carries NO region information. So every site bridges [In rv R] to
+    [In rv R1] through this lemma — and NONE can supply the honest
+    [expr_no_exit_of_region rv e1] side condition from local context (the
+    sub-expression [e1] is an opaque induction variable).
+
+    Verdict: ALL 13 sites are class-3 — they genuinely depend on the false
+    generality. The obligation they smuggle ("the substituted value's
+    region stays live through the preceding sub-expression") is precisely
+    the dangling-region / eliminator-fork problem. ADMIT 2 is therefore
+    NOT independently closable: its consumers need the same
+    region-liveness-through-reduction invariant as [region_shrink]
+    (ADMIT 1), [step_pop] (ADMIT 3) and [preservation_l1] (ADMIT 4). The
+    four L1 admits are four faces of ONE missing invariant.
+
+    HONEST closure path (4 -> 3, relocates the obligation correctly):
+    add [expr_no_exit_of_region rv e] as a hypothesis to
+    [subst_typing_gen_l1_m], discharge the 13 sites via the TRUE
+    [region_liveness_no_exit_l1_gen] above (each [e1] is a sub-term of
+    [e], so its no-exit follows from [e]'s by [destruct]), DELETE this
+    false lemma + its wrapper, and thread the no-exit hypothesis up to
+    [preservation_l1] (the capstone, already Admitted, where
+    region-liveness-through-[S_Region_Exit] is the actual theorem). This
+    is a signature change threaded through a ~30-case induction +
+    preservation; staged as a follow-on, not a drive-by.
+
+    See [formal/L1-REGION-REFOUNDATION-PLAN.md] (ADMIT 2 section). *)
+
 (** Generalised over the modality parameter [m]. The wrapper below
     matches the original Linear-only Axiom signature for the
     existing call sites in [subst_typing_gen_l1]. *)

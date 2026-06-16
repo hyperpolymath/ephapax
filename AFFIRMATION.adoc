@@ -1,0 +1,272 @@
+// SPDX-License-Identifier: MPL-2.0 OR CC-BY-SA-4.0
+// Owner: Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk>
+// SPDX-FileCopyrightText: 2026 Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk>
+// Authoring standard: hyperpolymath/standards docs/AFFIRMATION-STANDARD.adoc
+= AFFIRMATION — ephapax, as of 2026-06-16
+:toc: macro
+:toclevels: 2
+
+_the No-Bullshit file: what we affirm was true and checkable at this moment_
+
+[NOTE]
+====
+*Genre.* An *affirmation* is a solemn declaration of the truth of a statement,
+made by someone who _declines to swear an oath_. That is exactly what this is:
+our truth-as-best-believed at a stamped instant — binding on our honesty, not a
+claim of infallibility. It is not the README and not the EXPLAINME:
+
+[cols="1,3,2",options="header"]
+|===
+| File | Answers | Tense
+| `README`      | _Where is this going, and why?_ — state of thinking, steering, intent | future / aspirational
+| `EXPLAINME`   | _How is it built, and what's the evidence?_ — engineering underpinnings | descriptive / mechanism
+| *`AFFIRMATION`* (this file) | _What can we honestly affirm was *true and checkable* at a stamped moment?_ | a frozen instant, falsifiable
+|===
+
+It is deliberately small, dated, and signed, so a reader can hold us to exactly
+what we affirmed, when we affirmed it.
+====
+
+toc::[]
+
+== What this is, and how it is designed to work
+
+*What it is.* A short, dated, jointly-signed snapshot of what we can _honestly
+and verifiably_ claim about this repo at one exact commit. Nothing here is
+marketing and nothing is a promise about the future — both of those live in the
+README. This file is the receipt.
+
+*How it is designed to work.* Three moving parts make it trustworthy:
+
+. *Ground truth, not memory.* Every claim below was produced by _running the
+  tool in the session that wrote this file_ — the Coq build, the Rust test
+  suite, the WASM validator, the Idris build. Status docs (`PROOF-NEEDS.md`,
+  `TEST-NEEDS.md`), memory, and prior sessions are *not* evidence; where the
+  live run disagreed with them, the run wins and we flag it.
+. *A frozen anchor.* The file names the exact commit SHA, branch, UTC timestamp,
+  and toolchain (see <<Verifiable anchor>>), so "true" always means "true _at
+  this point_". Move the SHA and the file becomes a draft until re-run.
+. *A real signature.* It is landed by a *signed git commit*; that signature over
+  this content at the anchored SHA is what makes the affirmation tamper-evident
+  and attributable — not the prose alone.
+
+*We are fallible.* We can be wrong, stale, or simply mistaken about our own
+work. This file is our best honest belief, not a proof of its own correctness.
+Treat it as a falsifiable claim, not gospel.
+
+== The epistemic contract (read this before you trust _or_ attack)
+
+This document records our *best joint belief* at the timestamp below. It is
+*not a guarantee of correctness.* We may be wrong. We may have missed something
+— a hole, a stale doc, a proof that checks a calculus we then fail to match in
+the implementation.
+
+*No intentional overclaim.* That is the only guarantee here: we have not
+_knowingly_ inflated anything. Where something is tested-but-not-proved, we say
+so. Where a proof covers an idealised core and _not_ the production code, we say
+so. Where something is refuted, vacuous, or does not even build right now, we
+say so. An honest claim that turns out false is an error to fix — not a lie.
+
+*Standing invitation to refute.* You are _invited_ to bulldoze any claim here.
+We want that. The fair form of the attack is:
+
+. Read this file at the stamped commit.
+. Reproduce (or fail to reproduce) the checks in <<reproduce,Reproduce it yourself>>.
+. _Then_ tell us where the discrepancy is, against the artefact as it stood at
+  this moment — so we can either justify it or concede it on the record.
+
+An attack that skips steps 1–2 is attacking a strawman of a different date.
+
+*No fights before the facts are cleared up.* We are not interested in a dispute
+over a claim until the discrepancy has actually been checked against the
+artefact at this commit and we have had the chance to either justify it or
+concede it on the record. Good faith both ways: bring a reproducible
+discrepancy and we will fix the claim, the doc, or the code — promptly and
+without defensiveness. The goal is a corrected record, not a won argument.
+
+== Verifiable anchor
+
+[cols="1,3"]
+|===
+| *Repo*        | `hyperpolymath/ephapax` (the Rust + Coq + Idris2 language, `.eph`, `Cargo.toml` at root — *not* `hyperpolymath/affinescript`, and the internal `ephapax-affine` sublanguage is *not* AffineScript)
+| *Branch*      | `main`
+| *Commit (HEAD)* | `2c2df186dea3907a7f7eea1376216f869e04be1b` (the `//`→`--` Idris-header build fix; this affirmation is committed as its child, so the SHA here is this file's parent)
+| *Permalink*   | https://github.com/hyperpolymath/ephapax/tree/2c2df186dea3907a7f7eea1376216f869e04be1b
+| *Verified (UTC)* | 2026-06-16, 11:52Z–12:07Z (this session). Coq + Rust + WASM first ran cold at 11:52; after the Idris fix all four were re-confirmed green *at this commit* at 12:07:04Z–12:07:09Z (warm caches make the re-confirmation fast — a cold reproduce rebuilds from scratch).
+| *Working-tree delta at verification* | one *untracked* directory `docs/reports/perf/` (not build/test/proof relevant), plus this file being added. The results below are this commit + that delta.
+| *Toolchain*   | Coq 8.18.0 · Idris2 0.8.0 · Rust (cargo/rustc) 1.95.0 · wasm-tools 1.249.0 · just 1.50.0
+|===
+
+[IMPORTANT]
+If you are reading this at a _later_ commit, the claims may have drifted.
+Re-run <<reproduce>> and write a fresh affirmation; do not trust a stale one.
+
+== Companion documents and repo metadata (cross-check)
+
+Read this affirmation against the repo's own public claims. Where they drift
+from what we verified, we say so here rather than leave the reader to find out.
+
+* *`README.adoc`* — present (sells the language; the aspirational view).
+* *`EXPLAINME.adoc`* — present (the engineering-evidence document). The estate
+  README / EXPLAINME / AFFIRMATION trio is therefore complete for this repo.
+* *GitHub repo description* — _"Dyadic linear+affine type system for
+  compile-time WASM memory safety — no use-after-free, no leaks, region-based
+  allocation. *Mechanically proved in Coq and Idris2.*"_ Honest caveats on the
+  emphasised phrase:
+** *Coq:* the development *does* build green this session (5 `Admitted.`
+   remain — 4 open L1 region obligations + 1 deliberately-false legacy
+   theorem; see below). The memory-safety theorems proved are about the
+   *calculus*, not the Rust implementation.
+** *Idris2:* **builds green this session** — both `src/abi/ephapax-abi.ipkg`
+   and `src/formal/ephapax-formal.ipkg` (`idris2 --build`, exit 0), restored at
+   the anchor commit by a `//`→`--` header fix. So both halves of "mechanically
+   proved in Coq and Idris2" now build. The Idris ABI register it carries is
+   *partial*, though: E2a/E3-static are discharged, but E5 (wasm-compilation
+   correctness) / E6 (IR lowering) are unformalised and E4 is a vacuous wrapper
+   (see <<outstanding>>).
+* *GitHub topics* — `coq`, `memory-safety`, `type-system`, `affine-types`,
+  *`agda`*, `compiler`, `formal-verification`, `idris2`, `programming-language`.
+  Cross-check: **`agda` is drift** — ephapax's proofs are *Coq + Idris2*; Agda
+  belongs to the upstream foundation repos (echo-types / epistemic-types), not
+  to ephapax itself. `formal-verification` is *earned for the Coq core* (built
+  green here), qualified by the open admits and the broken Idris build.
+
+== The honest state (one breath)
+
+*ephapax is a dyadic substructural-typed research language (a linear core and an
+affine companion sublanguage) compiling to WebAssembly, with a genuinely
+machine-checked Coq metatheory core — yet pre-1.0: the Rust implementation is
+not proved to match that calculus, the L1 region layer carries 4 open admits,
+the Idris2 proof side does not currently build, and the module system (its
+keystone) is not wired, so the stdlib and coprocessor API cannot be consumed and
+no real multi-module program can be written yet.*
+
+=== What is solid (and how we checked)
+
+* *The Coq metatheory builds green, this session.* `just proofs`
+  (`coq_makefile` + `make`, Coq 8.18.0) exits *0*. Machine-checked (`Qed`):
+  L2 modality `linear_to_affine` (zero axioms); the L3 echo preservation
+  capstone (`preservation_l3`, conditional on one L1 admit); the L1 support
+  lemmas; and the regression witnesses in `Counterexample{,_L2,_L2_nested}.v`.
+* *The Idris2 ABI + formal proofs typecheck, this session.* `idris2 --build`
+  (Idris2 0.8.0) exits *0* for both `src/formal/ephapax-formal.ipkg`
+  (`Region` / `Qualifier` / `RegionLinear`) and `src/abi/ephapax-abi.ipkg`
+  (`Types` / `Invariants` / `Foreign`) — so the Idris-side proofs
+  (`noEscapeTheorem`, `splitLinearCoverage`, `compileResultRoundTrip`,
+  `outlivesTransitive`) machine-check here. (One harmless deprecation warning
+  about ipkg version-number format; build is green.)
+* *The Rust pipeline builds and its tests pass.* `cargo test --workspace`
+  (`CARGO_INCREMENTAL=0`, Rust 1.95.0) exits *0*: *489 passed, 0 failed,
+  0 ignored* across the workspace.
+* *Every WASM module ephapax emits is structurally valid.* `just validate-wasm`
+  (wasm-tools 1.249.0) exits *0* — every fixture in `tests/v2-grammar/fixtures/`
+  plus the `hypatia-port/bridge.eph` integration target passes
+  `wasm-tools validate`.
+
+=== The honest nuance you must not lose
+
+The Coq proofs establish properties of an *idealised four-layer calculus*
+(L1 region capabilities / L2 modality / L3 echo residue / L4 dyadic mode). They
+do *not* prove that the Rust implementation (`ephapax-linear/src/{linear,affine}.rs`,
+the codegen) _refines_ that calculus. "Proved core" + "tested implementation" is
+exactly that — two things, with an unverified bridge between them. Anyone
+claiming "ephapax is proven memory-safe" full-stop is overclaiming.
+
+=== Known-incomplete but honestly fenced (loud failure, never silent miscompile)
+
+* *Algebraic effects (`perform`/`handle`)* are unimplemented in both the
+  interpreter and the wasm backend: they emit a WASM `unreachable` / a runtime
+  "not yet implemented" — they *refuse*, they do not silently miscompile.
+* *Named-field access and record types* are rejected at parse with an explicit
+  "not yet supported", not mis-lowered.
+
+[#outstanding]
+=== Outstanding / weak / refuted (no spin)
+
+* *Provenance note (Idris build):* at the *parent* of the anchor commit
+  (`818492f3…`) the Idris build was *broken* — `//` header delimiters on line 2
+  of 8 ABI/formal files made `idris2 --build` die at tokenisation
+  (`Error: Can't recognise token`). It was repaired *this session* by the
+  anchor commit's delimiter-only `//`→`--` fix and re-runs green (see
+  <<Solid,What is solid>>). Recorded so the history is honest, not hidden.
+* *Four open L1 region admits* (`formal/Semantics_L1.v`):
+  `region_shrink_preserves_typing_l1_gen_m` (:441),
+  `region_liveness_at_split_l1_gen` (:1942 — *provably false as written*),
+  `step_pop_disjoint_from_type_l1` (:3178 — the eliminator fork, ~9 internal
+  cases), `preservation_l1` (:3439 — capstone). Closure route is committed
+  (tropical-graded carrier refactor → choreographic-over-time-segments) but
+  *not yet done*.
+* *The legacy `formal/Semantics.v` `preservation` is deliberately false —
+  refuted on purpose.* `Counterexample.v` `Qed`-proves a configuration that
+  types, steps, and lands untypable. Its single `Admitted.` is *correct* and
+  durable; that is a _result_, not a gap. (1 of the 5 `Admitted.`)
+* *L4 dyadic semantics: scaffold only* (`ProgramMode` + round-trip mapping;
+  definitions, no theorems).
+* *ABI E5 (WASM compilation correctness) and E6 (IR lowering correctness):
+  unformalised;* E4 (`noGCExtract`) is a tautological wrapper, not a proof.
+* *The module system — `import M; M.f()` — is not wired,* so the `.eph` stdlib
+  (only 2 of 9 files parse) and the typed coprocessor API cannot be consumed.
+  This is the keystone gap between ephapax and "actually usable".
+* *Count-marker note:* `TEST-NEEDS.md` records *486* all-target tests (via
+  `cargo test --all-targets -- --list`); this session's `cargo test --workspace`
+  reports *489* passed. The two count slightly different target sets; neither
+  shows a failure. Flagged, not hidden.
+
+[#reproduce]
+== Reproduce it yourself
+
+From the repo root, at the commit above:
+
+[source,sh]
+----
+just proofs             # Coq: expect exit 0 (5 Admitted. = 4 open L1 + 1 deliberately-false legacy)
+cargo test --workspace  # expect exit 0; 489 passed, 0 failed, 0 ignored  (CARGO_INCREMENTAL=0)
+just validate-wasm      # expect: "validate-wasm: all modules structurally valid"
+----
+
+The Idris side (green at the anchor commit; both packages):
+
+[source,sh]
+----
+( cd src/formal && idris2 --build ephapax-formal.ipkg )  # expect exit 0
+( cd src/abi    && idris2 --build ephapax-abi.ipkg )      # expect exit 0
+----
+
+== One-line characterisation (quote this)
+
+[quote]
+____
+"A dyadic linear+affine → WebAssembly research language with a machine-checked
+*Coq + Idris2 core* (Coq L2 + L3 + L1-support `Qed`, and both Idris2 ABI/formal
+packages, all build green this session) over a *tested — not proved-to-match* —
+Rust implementation (489 tests pass); every emitted WASM module is structurally
+valid; four open L1 region admits (one provably false as written) with a
+committed closure route; the module-system keystone is not yet wired, so it is
+not usable end-to-end. A serious verified-core research artifact, not a
+production language. No intentional overclaim."
+____
+
+== Joint attestation
+
+We, the undersigned, assert that *to the best of our joint belief at the
+timestamp above, every claim in this file is true and was checked as described*
+— with no intentional overclaim, and with the open gaps stated rather than
+hidden.
+
+* *Engineering party (AI):* Claude Opus 4.8 (`claude-opus-4-8[1m]`) — ran the
+  Coq build, both `idris2 --build` packages, the `cargo test --workspace` suite,
+  and `just validate-wasm` recorded here (this session: first cold run 11:52Z,
+  all four re-confirmed green at the anchor commit 12:07Z) and stands behind the
+  wording above as a faithful report of those runs.
+* *Owner / maintainer:* Jonathan D.A. Jewell — _signs by committing this file
+  with `-S` (`id_ed25519_signing`); the git commit signature over this content,
+  at the commit SHA recorded above, is the cryptographic form of this
+  affirmation._
++
+Signed-off-date: 2026-06-16
+
+[TIP]
+The authoritative, tamper-evident signature is the *signed git commit* that
+lands this file. If the SHA in <<Verifiable anchor>> matches the parent of that
+commit and the commit verifies, this affirmation is anchored. If they don't
+match, treat the file as a draft.

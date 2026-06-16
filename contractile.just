@@ -3,7 +3,7 @@
 # Re-generate with: contractile gen-just --dir contractiles
 #
 # SPDX-License-Identifier: MPL-2.0
-// Owner: Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk>
+# Owner: Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk>
 
 # === DUST (Recovery & Rollback) ===
 # Source: Dustfile.a2ml

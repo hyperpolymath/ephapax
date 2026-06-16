@@ -2139,15 +2139,37 @@ impl Codegen {
     fn compile_app(&mut self, func: &mut Function, fn_expr: &Expr, arg: &Expr) {
         // Try to recognise the head of a curried call chain:
         //   `f(a, b, c)` parses to `App(App(App(f, a), b), c)`.
-        // If the head is a user fn name (with arity 1) or an extern
-        // import (any arity), emit a direct `Call` with the args
-        // pushed in order. Multi-arg user fns currently fall through
-        // to the indirect closure path below to preserve existing
-        // behaviour — that path can be promoted to direct calls later.
+        // If the head is a known user fn name applied to its FULL arity,
+        // or an extern import (any arity), emit a direct `Call` with the
+        // args pushed in order.
+        //
+        // User fns are *defined* with a flat wasm signature
+        // (`collect_user_fns` maps each param to a `ValType`), so a
+        // saturated call must match that flat shape: push every arg in
+        // order and `Call` the function index — exactly the path multi-arg
+        // externs already take below. Matching the call to the definition
+        // is what keeps the recursive self-call in a `@tail_recursive` loop
+        // (e.g. `run(win2, ch2, model)`) and any other saturated multi-arg
+        // call from being mis-lowered as a curried closure application,
+        // which would `Call` the flat function with too few args on the
+        // stack (the func-22 stack-underflow bug).
+        //
+        // Only PARTIAL applications (`args.len() < arity`) and first-class
+        // function values fall through to the indirect closure path below;
+        // those genuinely need the curried representation.
+        //
+        // Nullary calls: the parser lowers `f()` to `App(f, ())`, so a
+        // zero-arity callee arrives here with a single synthetic `Unit`
+        // arg. `effective_call_args` drops that placeholder so the args
+        // pushed match the function's flat wasm signature (zero params),
+        // rather than pushing a stray `()` and over-filling the stack.
         if let Some((head, args)) = flatten_app_chain(fn_expr, arg) {
-            if args.len() == 1 {
-                if let Some(info) = self.user_fns.get(head).cloned() {
-                    self.compile_expr(func, args[0]);
+            if let Some(info) = self.user_fns.get(head).cloned() {
+                let arity = info.param_names.len();
+                if let Some(call_args) = effective_call_args(&args, arity) {
+                    for a in call_args {
+                        self.compile_expr(func, a);
+                    }
                     func.instruction(&Instruction::Call(info.wasm_fn_idx));
                     return;
                 }
@@ -2156,7 +2178,15 @@ impl Codegen {
             // Extern fns are wasm imports — their index lives in
             // `extern_fn_indices` after `collect_extern_imports` runs.
             if let Some(&import_idx) = self.extern_fn_indices.get(head) {
-                for a in args {
+                // A lone synthetic `()` is the nullary-call placeholder
+                // (`f()` → `App(f, ())`); push no args for it. Otherwise
+                // push every real arg in order.
+                let call_args: &[&Expr] = if is_unit_placeholder(&args) {
+                    &[]
+                } else {
+                    &args
+                };
+                for a in call_args {
                     self.compile_expr(func, a);
                 }
                 func.instruction(&Instruction::Call(import_idx));
@@ -2977,6 +3007,31 @@ fn flatten_app_chain<'a>(
             }
             _ => return None,
         }
+    }
+}
+
+/// True when `args` is the single synthetic `()` the parser inserts for a
+/// zero-arg call (`f()` lowers to `App(f, ())`). Used to recognise nullary
+/// applications of named functions so no placeholder arg is pushed.
+fn is_unit_placeholder(args: &[&Expr]) -> bool {
+    matches!(args, [a] if matches!(a.kind, ExprKind::Lit(Literal::Unit)))
+}
+
+/// Resolve a flattened `App`-chain arg list against a known callee `arity`
+/// for a *saturated, direct* `Call`, or `None` when the call should fall
+/// through to the curried closure path.
+///
+/// - exact match (`args.len() == arity`) → those args, in order;
+/// - nullary callee invoked as `f()` (one synthetic `()`, arity 0) → no args;
+/// - anything else (partial application, over-application) → `None`, so the
+///   indirect closure path handles the genuine currying.
+fn effective_call_args<'a, 'e>(args: &'a [&'e Expr], arity: usize) -> Option<&'a [&'e Expr]> {
+    if args.len() == arity {
+        Some(args)
+    } else if arity == 0 && is_unit_placeholder(args) {
+        Some(&[])
+    } else {
+        None
     }
 }
 

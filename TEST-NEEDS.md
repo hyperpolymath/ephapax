@@ -15,8 +15,8 @@
 - Contract/invariant tests: `src/ephapax-cli/tests/contract_tests.rs` (type system invariants, 13 tests)
 - Aspect tests: `src/ephapax-cli/tests/aspect_tests.rs` (security, performance, correctness, 13 tests)
 - Benchmarks: `src/ephapax-parser/benches/parse_bench.rs`, `src/ephapax-vram-cache/benches/cache_bench.rs`
-- Total: **467 tests pass / 0 fail** (`cargo test --workspace --all-targets`)
-- Documented all-target tests: 467
+- Total: **486 tests** (`cargo test --workspace --all-targets`); pass/fail enforced by `rust-ci.yml`
+- Documented all-target tests: 486
 
 ## CRG Testing Taxonomy — Status
 

@@ -1,0 +1,17 @@
+# SPDX-License-Identifier: MPL-2.0
+# Owner: Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk>
+# SPDX-FileCopyrightText: 2026 Jonathan D.A. Jewell
+[package]
+name = "ephapax-meta"
+version = "0.1.0"
+edition = "2021"
+license = "MPL-2.0"
+description = "Metainterpreter + metacompiler foundation for ephapax (reflection + staging)"
+
+[dependencies]
+ephapax-syntax = { path = "../ephapax-syntax" }
+ephapax-ir = { path = "../ephapax-ir" }
+ephapax-interp = { path = "../ephapax-interp" }
+ephapax-wasm = { path = "../ephapax-wasm" }
+wasmtime.workspace = true
+wasmparser = "0.221"

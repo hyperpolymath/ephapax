@@ -854,6 +854,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "ephapax-meta"
+version = "0.1.0"
+dependencies = [
+ "ephapax-interp",
+ "ephapax-ir",
+ "ephapax-syntax",
+ "ephapax-wasm",
+ "wasmparser 0.221.3",
+ "wasmtime",
+]
+
+[[package]]
 name = "ephapax-package"
 version = "0.1.0"
 dependencies = [

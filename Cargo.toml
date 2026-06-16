@@ -22,6 +22,7 @@ members = [
     "ephapax-linear",
     "src/ephapax-surface",
     "src/ephapax-desugar",
+    "src/ephapax-query",
     "tests/fuzz",
     # "src/ephapax-vram-cache",  # Disabled: requires ephapax-proven repo
 ]
@@ -50,6 +51,7 @@ ephapax-repl = { path = "src/ephapax-repl" }
 ephapax-stdlib = { path = "src/ephapax-stdlib" }
 ephapax-lsp = { path = "src/ephapax-lsp" }
 ephapax-package = { path = "src/ephapax-package" }
+ephapax-query = { path = "src/ephapax-query" }
 ephapax-vram-cache = { path = "src/ephapax-vram-cache" }
 
 # Sibling-repo crates.

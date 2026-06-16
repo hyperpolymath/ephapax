@@ -27,6 +27,7 @@ ephapax-wasm.workspace = true
 ephapax-interp.workspace = true
 ephapax-repl.workspace = true
 ephapax-package.workspace = true
+ephapax-query.workspace = true
 # `typed-wasm-verify` is optional: it powers `ephapax compile
 # --verify-ownership`, which is a post-codegen L7+L10 verifier. With
 # the feature OFF the CLI builds + runs without any reference to the

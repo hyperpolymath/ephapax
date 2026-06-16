@@ -1,0 +1,15 @@
+# SPDX-License-Identifier: MPL-2.0
+# Owner: Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk>
+# SPDX-FileCopyrightText: 2026 Jonathan D.A. Jewell
+[package]
+name = "ephapax-query"
+version = "0.1.0"
+edition = "2021"
+license = "MPL-2.0"
+description = "Demand-driven incremental query engine for the ephapax compile pipeline"
+
+[dependencies]
+ephapax-syntax = { path = "../ephapax-syntax" }
+ephapax-parser = { path = "../ephapax-parser" }
+ephapax-typing = { path = "../ephapax-typing" }
+ephapax-wasm = { path = "../ephapax-wasm" }

@@ -761,6 +761,7 @@ dependencies = [
  "ephapax-lexer",
  "ephapax-package",
  "ephapax-parser",
+ "ephapax-query",
  "ephapax-repl",
  "ephapax-surface",
  "ephapax-syntax",
@@ -884,6 +885,16 @@ dependencies = [
  "pest_derive",
  "smol_str",
  "thiserror 2.0.18",
+]
+
+[[package]]
+name = "ephapax-query"
+version = "0.1.0"
+dependencies = [
+ "ephapax-parser",
+ "ephapax-syntax",
+ "ephapax-typing",
+ "ephapax-wasm",
 ]
 
 [[package]]

@@ -259,8 +259,16 @@ fn run_file(path: &PathBuf, ffi_libs: &[String], verbose: bool) -> Result<(), St
 
     let filename = path.to_str().unwrap_or("input");
 
+    // Drive parse + type-check through the demand-driven query engine.
+    // For a single-shot `ephapax run` this is just a thin pass-through (the
+    // db is discarded after one query), but it routes the real CLI path
+    // through `ephapax-query` and is exactly the surface a long-lived
+    // `QueryDb` in the LSP/REPL holds to skip re-work across edits.
+    let mut db = ephapax_query::QueryDb::new();
+    db.set_source_text(filename, content.clone());
+
     // Parse as module
-    let module = parse_module(&content, filename).map_err(|errors| {
+    let module = db.parsed(filename).map_err(|errors| {
         for error in &errors {
             report_parse_error(filename, &content, error);
         }
@@ -272,7 +280,7 @@ fn run_file(path: &PathBuf, ffi_libs: &[String], verbose: bool) -> Result<(), St
     }
 
     // Type check
-    type_check_module(&module).map_err(|e| {
+    db.typed(filename).map_err(|e| {
         report_type_error(filename, &content, &e);
         format!("Type error: {}", e)
     })?;

@@ -11,6 +11,12 @@
 //! require a parsed AST, making it suitable for use in the standalone LSP,
 //! BoJ lsp-mcp cartridge, and CI pipelines.
 
+// hypatia: allow code_safety/unwrap_dangerous_default -- `line.find(&pat).unwrap_or(0) + 1`
+// computes a 1-based column for a diagnostic caret. The pattern is extracted from the same
+// line just above, so find() effectively always succeeds; the 0 fallback (-> column 1) is a
+// benign "point at line start" default, never a masked fault. Tooling crate (linter); a wrong
+// caret column cannot corrupt analysis output.
+
 use std::collections::{HashMap, HashSet};
 
 /// Lint severity levels.

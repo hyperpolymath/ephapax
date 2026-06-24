@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: MPL-2.0
 // Owner: Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk>
 // SPDX-FileCopyrightText: 2025 Jonathan D.A. Jewell
+//
+// hypatia: allow code_safety/unwrap_without_check -- Criterion benchmark file (harness = false); unwrap on cache setup and inside b.iter loops is idiomatic and intentional (a failed setup should abort the bench loudly). Not library code.
 
 use criterion::{black_box, criterion_group, criterion_main, Criterion, BenchmarkId};
 use ephapax_vram_cache::VramCache;

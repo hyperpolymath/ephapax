@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MPL-2.0
 // Owner: Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk>
 //! SPDX-FileCopyrightText: 2025 Jonathan D.A. Jewell
+// hypatia: allow code_safety/unwrap_dangerous_default -- the single `data_info...unwrap_or(0)` site (see inline note) uses 0 as a benign sentinel (None => non-data scrutinee), never a masked fault.
 
 //! Ephapax WASM Code Generator (Dyadic: Affine + Linear modes)
 //!
@@ -2402,6 +2403,7 @@ impl Codegen {
         let payload_local = self.locals.temp();
         let tag_local = self.locals.temp();
 
+        // hypatia: allow code_safety/unwrap_dangerous_default -- 0 is a benign sentinel, not a masked fault: `data_info` is None for non-data scrutinees (Bool/Pair/Tuple/Unit/Int); a real data type always has total = constructors.len() >= 1, so 0 unambiguously means "no multi-ctor tag walk" and is routed correctly by the `total >= 2` check below.
         let total = data_info.as_ref().map(|(_, t)| *t).unwrap_or(0);
         if total >= 2 {
             let cur_local = self.locals.temp();

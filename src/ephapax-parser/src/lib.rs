@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MPL-2.0
 // Owner: Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk>
 // SPDX-FileCopyrightText: 2025 Jonathan D.A. Jewell
+// hypatia: allow code_safety/unwrap_dangerous_default -- the two integer-literal `parse().unwrap_or(0)` sites (see inline notes) only fall back on i64 overflow in a fn returning `Literal` (no Result); 0 is a deliberate lossy fallback pending the parse_literal Result refactor.
 
 //! Ephapax Parser
 //!
@@ -953,6 +954,7 @@ fn parse_literal_value_core(pair: pest::iterators::Pair<Rule>) -> Literal {
         Rule::boolean => Literal::Bool(pair.as_str() == "true"),
         Rule::float => Literal::F64(pair.as_str().parse().unwrap_or(0.0)),
         Rule::integer => {
+            // hypatia: allow code_safety/unwrap_dangerous_default -- grammar `integer = ASCII_DIGIT+` (ephapax.pest) means parse() can only fail on i64 overflow; this fn returns `Literal` (no Result), so 0 is a deliberate lossy fallback. TODO: propagate overflow as ParseError (ripples to callers at lib.rs:896/978).
             let n: i64 = pair.as_str().parse().unwrap_or(0);
             if n > i32::MAX as i64 || n < i32::MIN as i64 {
                 Literal::I64(n)
@@ -1993,6 +1995,7 @@ fn parse_literal(pair: pest::iterators::Pair<Rule>) -> Result<Expr, ParseError> 
             Literal::F64(n)
         }
         Rule::integer => {
+            // hypatia: allow code_safety/unwrap_dangerous_default -- as above: parse() only fails on i64 overflow and there is no Result to propagate here, so 0 is a deliberate lossy fallback pending the parse_literal Result refactor.
             let n: i64 = inner.as_str().parse().unwrap_or(0);
             if n > i32::MAX as i64 || n < i32::MIN as i64 {
                 Literal::I64(n)

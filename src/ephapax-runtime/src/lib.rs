@@ -240,6 +240,12 @@ pub unsafe extern "C" fn __ephapax_string_eq(h1: StringHandle, h2: StringHandle)
         return 1; // Both empty
     }
 
+    // SAFETY: Both handles are valid string handles (function contract above), so
+    // `ptr1`/`ptr2` and `len1`/`len2` are matched ptr+len pairs as written by
+    // `__ephapax_string_new`, each pointing at `len` valid bytes. The `len1 == 0`
+    // early-return above guarantees `len > 0` here, and the `len1 != len2` guard
+    // makes the two slices equal length. The slices are read-only and never escape
+    // this function.
     let slice1 = core::slice::from_raw_parts(ptr1 as *const u8, len1 as usize);
     let slice2 = core::slice::from_raw_parts(ptr2 as *const u8, len2 as usize);
 

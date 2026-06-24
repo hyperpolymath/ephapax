@@ -1,6 +1,8 @@
 (* SPDX-License-Identifier: MPL-2.0 *)
 (* Owner: Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk> *)
 (* SPDX-FileCopyrightText: 2026 Jonathan D.A. Jewell *)
+(* hypatia: allow code_safety/admitted -- FALSE POSITIVE: this file has no Coq admit/Admitted/Axiom; all proofs are Qed-closed. The scanner substring-matched prose in the doc comment that NEGATES their presence ("No new [Axiom] or [Admitted] markers"). *)
+(* hypatia: allow coq_admit_tactic -- same false positive: substring match on documentation prose, not a Coq tactic. *)
 
 (** * Soundness gap (L2): preservation_l2 fails for nested-TFunEff
       substituends — the gap Phase 3b Stage 1's [tfuneff_lambda_free]

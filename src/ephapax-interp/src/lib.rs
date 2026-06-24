@@ -357,6 +357,10 @@ impl Interpreter {
     /// Loading shared libraries is inherently unsafe. The caller must
     /// ensure the library is trustworthy.
     pub fn load_ffi_library(&mut self, path: &str) -> Result<(), RuntimeError> {
+        // SAFETY: Loading a shared library is unsafe because the loaded code
+        // is unverified; caller trust is documented in this fn's `# Safety`
+        // section. The handle is stored in `self.ffi_libraries` and kept alive
+        // until the interpreter is dropped, so no symbol outlives its library.
         let lib = unsafe {
             libloading::Library::new(path).map_err(|e| {
                 RuntimeError::Unimplemented(format!("Failed to load FFI library '{}': {}", path, e))
@@ -373,6 +377,9 @@ impl Interpreter {
     ) -> Option<libloading::Symbol<'a, unsafe extern "C" fn(i64, i64, i64, i64, i64, i64) -> i64>>
     {
         for lib in &self.ffi_libraries {
+            // SAFETY: `lib` is a live, owned library handle borrowed from
+            // `self.ffi_libraries` for `'a`; the returned Symbol is tied to that
+            // borrow, so it cannot outlive the library it was resolved from.
             if let Ok(sym) = unsafe { lib.get(name.as_bytes()) } {
                 return Some(sym);
             }
@@ -533,6 +540,11 @@ impl Interpreter {
                 if let Some(func) = self.find_ffi_symbol(symbol) {
                     // Pad args to 6 (max C ABI args we support)
                     let a = |i: usize| *c_args.get(i).unwrap_or(&0);
+                    // SAFETY: `func` was resolved via find_ffi_symbol from a
+                    // loaded library to the 6-arg i64 C-ABI signature it is
+                    // called with here; args are padded to 6 so all params are
+                    // supplied. Soundness ultimately rests on the caller having
+                    // loaded a trustworthy library (see load_ffi_library).
                     let result = unsafe { func(a(0), a(1), a(2), a(3), a(4), a(5)) };
                     Ok(Value::I64(result))
                 } else {
@@ -1233,6 +1245,10 @@ impl Interpreter {
                 // until the FFI call completes.
                 match std::ffi::CString::new(data.as_str()) {
                     Ok(cstr) => {
+                        // SAFETY: the raw pointer stays valid because `cstr` is
+                        // immediately moved into `cstrings` (kept alive until the
+                        // FFI call completes) on the next line, so `ptr` never
+                        // dangles for the duration of its use.
                         let ptr = cstr.as_ptr() as i64;
                         cstrings.push(cstr);
                         ptr

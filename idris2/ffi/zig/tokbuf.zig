@@ -1,3 +1,7 @@
+// SPDX-License-Identifier: MPL-2.0
+// Owner: Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk>
+// SPDX-FileCopyrightText: 2026 Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk>
+
 const std = @import("std");
 
 const Tok = struct {
@@ -85,6 +89,13 @@ export fn eph_tokbuf_str_ptr(buf: *TokBuf, idx: i32) [*:0]const u8 {
     const i = @as(usize, @intCast(idx));
     const t = buf.items[i];
     if (t.str_ptr) |p| {
+        // SAFETY: p is [*]u8 (align 1); cast to the [*:0]const u8 return
+        // type is alignment- and provenance-preserving and only narrows
+        // mutability (adds const). The :0 sentinel is upheld by the
+        // producer copyStr (allocates len+1 and writes a trailing NUL) and
+        // required by the consumer (Idris FFI binds this to `String`, which
+        // reads a NUL-terminated C string). The cast asserts, not checks,
+        // the sentinel; the invariant is guaranteed at the copyStr seam.
         return @ptrCast(p);
     }
     return "";

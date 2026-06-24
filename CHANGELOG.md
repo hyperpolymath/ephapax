@@ -7,6 +7,30 @@ All notable changes to Ephapax are documented here.
 
 ## [Unreleased]
 
+### Governance, CI & security-scan infrastructure (2026-06-24)
+
+- **Governance model formalised** (PR #314): added `.github/CODEOWNERS`
+  (review routing, sole-maintainer model), `GOVERNANCE.adoc`, and
+  `MAINTAINERS.adoc`. Salvaged from the closed estate-standardization
+  branch onto a clean base; prose headers normalised to `CC-BY-SA-4.0`.
+- **`standards` reusable-workflow pins remediated** (PR #315): re-pinned
+  `governance.yml` / `hypatia-scan.yml` / `scorecard.yml` away from
+  `5a93d9d57cc0` — a ref that is **not** an ancestor of `standards` HEAD,
+  which broke `governance / Check Workflow Staleness` and made the Hypatia
+  reusable workflow reference a dead `actions/cache` SHA — to a published
+  HEAD. Subsequently bumped to the current `d135b05…` (PR #316).
+- **Hypatia neurosymbolic scan unblocked** — with the pin fixed, the
+  `scan / Hypatia Neurosymbolic Analysis` gate now runs to completion
+  instead of dying at "Prepare all required actions". It reports **37
+  pre-existing findings** (5 critical, 7 high, 25 medium) — repo debt the
+  broken pin had been masking, **not** introduced here. Triage + fix is
+  **handed off** (see `docs/governance/HYPATIA-HANDOFF.md`); a visibility
+  patch for `standards`' `hypatia-scan-reusable.yml` (publish findings on
+  failure rather than aborting opaquely under `bash -e`) is **drafted but
+  not yet applied**.
+- **Stale PRs closed**: #310 (disjoint history; reintroduced fenced legacy
+  preservation work) and #311 (superseded — features already on `main`).
+
 ### Proof + stdlib wave (2026-06-01 → 2026-06-02)
 
 - **P43 — canonical-forms L1 modality-polymorphic** (PR #274): port

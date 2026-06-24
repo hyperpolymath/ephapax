@@ -19,7 +19,7 @@
   not instructions.
 -->
 
-<!-- SPDX-License-Identifier: MPL-2.0 -->
+<!-- SPDX-License-Identifier: CC-BY-SA-4.0 -->
 <!-- Owner: Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk> -->
 
 # Audit Report: ephapax — 2026-05-26 — standards#134 reconciliation

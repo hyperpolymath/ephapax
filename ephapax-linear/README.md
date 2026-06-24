@@ -70,5 +70,5 @@ check_expr(&expr, Discipline::Affine)?;
 
 ## License
 
-SPDX-License-Identifier: MPL-2.0
+SPDX-License-Identifier: CC-BY-SA-4.0
 <!-- Owner: Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk> -->

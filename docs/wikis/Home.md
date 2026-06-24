@@ -77,6 +77,7 @@ The four layers and their current state:
 
 ## Governance
 
+- **Governance model**: sole-maintainer — [GOVERNANCE.adoc](https://github.com/hyperpolymath/ephapax/blob/main/GOVERNANCE.adoc), [MAINTAINERS.adoc](https://github.com/hyperpolymath/ephapax/blob/main/MAINTAINERS.adoc), [CODEOWNERS](https://github.com/hyperpolymath/ephapax/blob/main/.github/CODEOWNERS)
 - **Licence**: MPL-2.0
 - **Machine-readable state**: [`.machine_readable/6a2/`](https://github.com/hyperpolymath/ephapax/tree/main/.machine_readable/6a2/)
 - **Contractiles**: 6-verb governance in [`.machine_readable/contractiles/`](https://github.com/hyperpolymath/ephapax/tree/main/.machine_readable/contractiles/)

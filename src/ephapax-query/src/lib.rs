@@ -135,10 +135,11 @@ impl QueryDb {
     /// text.
     pub fn parsed(&mut self, id: &str) -> ParsedResult {
         let dep = self.input_changed_at(id);
-        if let Some(m) = self.parsed.get(id) {
+        let rev = self.revision;
+        if let Some(m) = self.parsed.get_mut(id) {
             if dep <= m.verified_at {
                 let value = m.value.clone();
-                self.parsed.get_mut(id).unwrap().verified_at = self.revision;
+                m.verified_at = rev;
                 return value;
             }
         }
@@ -161,10 +162,11 @@ impl QueryDb {
     pub fn typed(&mut self, id: &str) -> TypedResult {
         let parsed = self.parsed(id);
         let dep = self.parsed.get(id).map(|m| m.changed_at).unwrap_or_default();
-        if let Some(m) = self.typed.get(id) {
+        let rev = self.revision;
+        if let Some(m) = self.typed.get_mut(id) {
             if dep <= m.verified_at {
                 let value = m.value.clone();
-                self.typed.get_mut(id).unwrap().verified_at = self.revision;
+                m.verified_at = rev;
                 return value;
             }
         }
@@ -195,10 +197,11 @@ impl QueryDb {
         let dep_parsed = self.parsed.get(id).map(|m| m.changed_at).unwrap_or_default();
         let dep_typed = self.typed.get(id).map(|m| m.changed_at).unwrap_or_default();
         let dep = dep_parsed.max(dep_typed);
-        if let Some(m) = self.wasm.get(id) {
+        let rev = self.revision;
+        if let Some(m) = self.wasm.get_mut(id) {
             if dep <= m.verified_at {
                 let value = m.value.clone();
-                self.wasm.get_mut(id).unwrap().verified_at = self.revision;
+                m.verified_at = rev;
                 return value;
             }
         }

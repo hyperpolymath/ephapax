@@ -30,3 +30,47 @@
 cicd_rules/banned_language_file:formal/Makefile.coq
 cicd_rules/banned_language_file:formal/Makefile.coq.conf
 cicd_rules/banned_language_file:formal/Makefile.conf
+
+# ─── Coq proof archaeology — legacy preservation admit (2026-06-24 triage) ─────
+#
+# formal/Semantics.v carries the LEGACY `preservation` Theorem (declared :8556),
+# closed with a DELIBERATE `Admitted.` (:9258). The theorem is provably FALSE —
+# formal/Counterexample.v discharges its falsity with 5 Qed lemmas — so the admit
+# is owner-mandated (CLAUDE.md 2026-05-27 fence + in-file ARCHAEOLOGY/DO-NOT-EXTEND
+# banner). It must never be "fixed"; the principled work is the four-layer redesign
+# in formal/PRESERVATION-DESIGN.md (preservation re-derived per layer). File-scoped:
+# the whole file is fenced legacy archaeology where any admit re-detection is the
+# same accepted non-defect. (Semantics_L1.v / Counterexample_L2_nested.v admits are
+# handled by in-file `hypatia: allow` directives, not here.)
+code_safety/admitted:formal/Semantics.v
+
+# ─── Stale duplicate linter (lib/linter.rs) ────────────────────────────────────
+#
+# lib/linter.rs (178 lines) is a stale/legacy sibling of the live
+# src/ephapax-tools/src/linter.rs (920 lines). Its two `line.find(..).unwrap_or(0)+1`
+# sites compute 1-based diagnostic columns; 0 is a benign "column 1" default, not a
+# masked fault. Exempted pending an owner decision on whether to remove the duplicate.
+code_safety/unwrap_dangerous_default:lib/linter.rs
+
+# ─── SD009: legacy OCaml files without SPDX headers (src/*.ml) ──────────────────
+#
+# src/{lexer,parser,ast,typecheck}.ml are legacy OCaml artefacts in a Rust/Coq/Idris
+# project (the live type checker is Rust). Adding licence headers is an SPDX edit,
+# which estate policy reserves for the owner (no-automated-licence-edits). Flag-only:
+# exempted here and surfaced to the owner — these are also candidates for removal.
+structural_drift/SD009:src/lexer.ml
+structural_drift/SD009:src/parser.ml
+structural_drift/SD009:src/ast.ml
+structural_drift/SD009:src/typecheck.ml
+
+# ─── SD022: doc references to pre-restructure directories (deferred doc refresh) ─
+#
+# EXPLAINME/README/ROADMAP.adoc + tests/fuzz/FUZZING_GUIDE.md reference dirs
+# (src/core, src/Burble, src/Ephapax, src/parse_fuzzer, src/typecheck_fuzzer) that
+# predate the move to the `src/ephapax-*` cargo workspace. This is real (deferred)
+# doc-drift, not a false positive; exempted pending an owner doc-refresh
+# (prose = CC-BY-SA-4.0, not auto-edited in this security-triage PR).
+structural_drift/SD022:EXPLAINME.adoc
+structural_drift/SD022:README.adoc
+structural_drift/SD022:ROADMAP.adoc
+structural_drift/SD022:tests/fuzz/FUZZING_GUIDE.md

@@ -1,6 +1,9 @@
 (* SPDX-License-Identifier: MPL-2.0 *)
 (* SPDX-FileCopyrightText: 2026 Jonathan D.A. Jewell *)
 
+(* hypatia: allow code_safety/admitted -- TRACKED v2 proof-debt, not an honest-completion gap. The 3 Admitted lemmas (region_liveness_at_split_l1_gen, step_pop_disjoint_from_type_l1, preservation_l1) and their internal `admit.` tactics are documented in PROOF-NEEDS.md and owner-fenced by CLAUDE.md (directive 2026-05-27): closing or extending them is a banned anti-pattern. region_liveness is provably FALSE as stated; step_pop is open eliminator-fork research; preservation_l1 is the capstone gated on the others. Build truth is the `Print Assumptions` CI gate, not this comment. *)
+(* hypatia: allow coq_admit_tactic -- see preceding directive; same tracked admits. *)
+
 (**
 
   *********************************************************************

@@ -1,0 +1,29 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <defs>
+    <filter id="glow" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur in="SourceGraphic" stdDeviation="4" result="blur"/>
+      <feMerge>
+        <feMergeNode in="blur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+  </defs>
+
+  <!-- Transparent background: mark only, for favicon / app icon / overlay -->
+
+  <!-- Region (L1 capability) -->
+  <circle cx="256" cy="256" r="128" fill="none" stroke="#e8a33d" stroke-width="8" opacity="0.9" filter="url(#glow)"/>
+
+  <!-- Affine companion (at-most-once): dashed, fades before exit -->
+  <path d="M 96,296 L 180,296 Q 230,296 256,280"
+        fill="none" stroke="#c47e3a" stroke-width="7" stroke-linecap="round"
+        stroke-dasharray="2 18" opacity="0.8" filter="url(#glow)"/>
+
+  <!-- Linear thread (exactly once) -->
+  <path d="M 96,232 L 188,232 Q 230,232 256,256 Q 282,280 324,232 L 392,232"
+        fill="none" stroke="#e8a33d" stroke-width="11" stroke-linecap="round" stroke-linejoin="round"
+        filter="url(#glow)"/>
+  <circle cx="96" cy="232" r="11" fill="#e8a33d" filter="url(#glow)"/>
+  <path d="M 392,232 l -20,-13 l 0,26 z" fill="#e8a33d" filter="url(#glow)"/>
+  <circle cx="256" cy="256" r="6" fill="#e8a33d" opacity="0.55"/>
+</svg>

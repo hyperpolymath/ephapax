@@ -1,0 +1,68 @@
+// SPDX-License-Identifier: CC-BY-SA-4.0
+= Ephapax Brand Pack
+:toc:
+
+== Mark
+
+The Ephapax mark is a single unbroken amber stroke that enters a region,
+threads through it, and exits — *used exactly once*. A second, lighter
+dashed stroke runs alongside it: the *affine* companion that may be used
+once **or dropped**. Together they state the language's dyad in one glyph:
+**linear** (exactly once) beside **affine** (at most once).
+
+The name itself is the symbolism: _ephapax_ (Greek *ἐφάπαξ*) means
+"once, for all" — the linear-logic promise that a resource is consumed
+exactly one time and never again.
+
+|===
+| File | Use
+
+| `icon.svg` | Primary mark with dark background (rounded corners). README, docs, about screens.
+| `icon-square.svg` | Transparent background mark. Favicon, app icon, overlay on custom backgrounds.
+| `social-preview.svg` | GitHub / Open Graph social preview (1280x640). "ephapax" wordmark + mark.
+| `marr-levels.svg` | Explainer: the project at David Marr's three levels of analysis.
+| `sandler-submarine.svg` | Impact / case-making: the seven sealed compartments of adoption.
+|===
+
+== Colours
+
+[cols="1,1,2"]
+|===
+| Name | Hex | Use
+
+| Linear Amber | `#e8a33d` | Primary brand colour. The linear (exactly-once) stroke, active states, headings.
+| Affine Copper | `#c47e3a` | Secondary. The affine (at-most-once) companion stroke, muted accents.
+| Background | `#0d1117` | Dark surfaces. GitHub-dark compatible.
+| Foreground | `#e6edf3` | Text on dark background.
+| Glow | `#2a1d06` | Radial background glow behind the mark.
+|===
+
+== Typography
+
+Wordmark uses the system font stack: `system-ui, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif` at weight 300 (light), lowercase. The Greek subtitle _ἐφάπαξ_ is set at the same stack, weight 300.
+
+No custom font is required. All text is set in the SVG, not a separate font file.
+
+== Rules
+
+- The mark always shows the linear stroke passing through the region **once** and the affine companion alongside it (dashed). Never duplicate the linear stroke — that would deny linearity.
+- The amber must be `#e8a33d` — do not approximate with other ambers/oranges.
+- The wordmark is always lowercase `ephapax`.
+- On light backgrounds, invert: amber `#b9791f` strokes and `#1b1f24` text on white/light grey.
+- The Greek _ἐφάπαξ_ subtitle is the etymology, not a marketing strapline; it may appear on repository assets. Sales/marketing straplines never appear on repository assets.
+
+== Generating raster assets
+
+[source,shell]
+----
+# Requires Inkscape or rsvg-convert (librsvg)
+
+# Favicon (64x64 PNG)
+rsvg-convert -w 64 -h 64 icon-square.svg > favicon-64.png
+
+# App icon (512x512 PNG)
+rsvg-convert -w 512 -h 512 icon.svg > icon-512.png
+
+# Social preview (1280x640 PNG for GitHub)
+rsvg-convert -w 1280 -h 640 social-preview.svg > social-preview.png
+----

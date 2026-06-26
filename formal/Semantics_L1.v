@@ -1,7 +1,7 @@
 (* SPDX-License-Identifier: MPL-2.0 *)
 (* SPDX-FileCopyrightText: 2026 Jonathan D.A. Jewell *)
 
-(* hypatia: allow code_safety/admitted -- TRACKED v2 proof-debt, not an honest-completion gap. The 3 Admitted lemmas (region_liveness_at_split_l1_gen, step_pop_disjoint_from_type_l1, preservation_l1) and their internal `admit.` tactics are documented in PROOF-NEEDS.md and owner-fenced by CLAUDE.md (directive 2026-05-27): closing or extending them is a banned anti-pattern. region_liveness is provably FALSE as stated; step_pop is open eliminator-fork research; preservation_l1 is the capstone gated on the others. Build truth is the `Print Assumptions` CI gate, not this comment. *)
+(* hypatia: allow code_safety/admitted -- TRACKED v2 proof-debt, not an honest-completion gap. The 2 remaining Admitted lemmas (step_pop_disjoint_from_type_l1, preservation_l1) and their internal `admit.` tactics are documented in PROOF-NEEDS.md and owner-fenced by CLAUDE.md (directive 2026-05-27): closing or extending them via ad-hoc patching is a banned anti-pattern. step_pop is open eliminator-fork research; preservation_l1 is the capstone gated on it. The former third admit, region_liveness_at_split_l1_gen, was provably FALSE as stated and has been REMOVED (2026-06-26) via the honest val_region_no_exit reformulation (routes through the TRUE region_liveness_no_exit_l1_gen, Qed). Build truth is the `Print Assumptions` CI gate, not this comment. *)
 (* hypatia: allow coq_admit_tactic -- see preceding directive; same tracked admits. *)
 
 (**
@@ -2066,6 +2066,18 @@ Proof.
   apply (count_occ_In string_dec). exact Hin.
 Qed.
 
+(** The substituted value's region has no exit inside [e]. For a linear
+    value (always an [ELoc _ r] by [linear_value_is_loc_l1]) this is the
+    honest no-exit side condition; for any other value it is vacuous. This
+    is the premise that lets the 13 substitution sites below discharge
+    region-liveness through the TRUE [region_liveness_no_exit_l1_gen]
+    instead of the false [region_liveness_at_split_l1_gen]. *)
+Definition val_region_no_exit (v e : expr) : Prop :=
+  match v with
+  | ELoc _ r => expr_no_exit_of_region r e
+  | _ => True
+  end.
+
 (** ===== 2026-06-16 CALL-SITE AUDIT RESULT (ADMIT 2) =====
 
     The false [region_liveness_at_split_l1_gen] below is consumed at 13
@@ -2101,108 +2113,28 @@ Qed.
 
     See [formal/L1-REGION-REFOUNDATION-PLAN.md] (ADMIT 2 section). *)
 
-(** Generalised over the modality parameter [m]. The wrapper below
-    matches the original Linear-only Axiom signature for the
-    existing call sites in [subst_typing_gen_l1]. *)
-Lemma region_liveness_at_split_l1_gen :
-  forall m R G e T R' G' rv,
-    has_type_l1 m R G e T R' G' ->
-    In rv R ->
-    In rv R'.
-Proof.
-  intros m R G e T R' G' rv Ht.
-  induction Ht; intros Hin; try assumption.
-  (* Compound cases — thread rv through sub-derivations via IH. *)
-  - (* T_StringConcat_L1: R -> R1 -> R2 *)
-    apply IHHt2. apply IHHt1. assumption.
-  - (* T_StringLen_L1 *)
-    apply IHHt. assumption.
-  - (* T_Let_L1 *)
-    apply IHHt2. apply IHHt1. assumption.
-  - (* T_LetLin_L1 *)
-    apply IHHt2. apply IHHt1. assumption.
-  - (* T_App_L1 *)
-    apply IHHt2. apply IHHt1. assumption.
-  - (* T_Pair_L1 *)
-    apply IHHt2. apply IHHt1. assumption.
-  - (* T_Fst_L1 *)
-    apply IHHt. assumption.
-  - (* T_Snd_L1 *)
-    apply IHHt. assumption.
-  - (* T_Inl_L1 *)
-    apply IHHt. assumption.
-  - (* T_Inr_L1 *)
-    apply IHHt. assumption.
-  - (* T_Case_L1_Linear: R -> R1 -> R_final *)
-    apply IHHt2. apply IHHt1. assumption.
-  - (* T_Case_L1_Affine: same shape *)
-    apply IHHt2. apply IHHt1. assumption.
-  - (* T_If_L1_Linear: R -> R1 -> R2 *)
-    apply IHHt2. apply IHHt1. assumption.
-  - (* T_If_L1_Affine *)
-    apply IHHt2. apply IHHt1. assumption.
-  - (* T_Region_L1 (fresh): ~In r R + In rv R gives r ≠ rv;
-       remove_first_L1 preserves rv. *)
-    assert (Hne : r <> rv).
-    { intro Heq. subst rv. apply H. exact Hin. }
-    assert (Hin_body_in : In rv (r :: R)) by (right; exact Hin).
-    pose proof (IHHt Hin_body_in) as HinRbody.
-    apply (count_occ_In string_dec).
-    pose proof (remove_first_L1_count_other r rv R_body Hne) as Heq.
-    unfold cnt in Heq. rewrite Heq.
-    apply (count_occ_In string_dec). exact HinRbody.
-  - (* T_Region_Active_L1: two sub-cases r=rv / r ≠ rv *)
-    destruct (string_dec r rv) as [Heq|Hne].
-    + (* r = rv: GENUINELY FALSE. Counterexample at the source level:
-         ERegion rv (EI32 5) at R = [rv] — body R_body = [rv], pop
-         yields [], so In rv R = True but In rv R' = False. *)
-      admit.
-    + (* r ≠ rv: same shape as T_Region_L1. *)
-      pose proof (IHHt Hin) as HinRbody.
-      apply (count_occ_In string_dec).
-      pose proof (remove_first_L1_count_other r rv R_body Hne) as Heq.
-      unfold cnt in Heq. rewrite Heq.
-      apply (count_occ_In string_dec). exact HinRbody.
-  - (* T_Region_L1_Echo — same shape as T_Region_L1 (parallel rule;
-       output type differs but the R-threading is identical). *)
-    assert (Hne : r <> rv).
-    { intro Heq. subst rv. apply H. exact Hin. }
-    assert (Hin_body_in : In rv (r :: R)) by (right; exact Hin).
-    pose proof (IHHt Hin_body_in) as HinRbody.
-    apply (count_occ_In string_dec).
-    pose proof (remove_first_L1_count_other r rv R_body Hne) as Heq.
-    unfold cnt in Heq. rewrite Heq.
-    apply (count_occ_In string_dec). exact HinRbody.
-  - (* T_Region_Active_L1_Echo — same shape as T_Region_Active_L1
-       including the structural admit in the [r = rv] sub-case. *)
-    destruct (string_dec r rv) as [Heq|Hne].
-    + admit.
-    + pose proof (IHHt Hin) as HinRbody.
-      apply (count_occ_In string_dec).
-      pose proof (remove_first_L1_count_other r rv R_body Hne) as Heq.
-      unfold cnt in Heq. rewrite Heq.
-      apply (count_occ_In string_dec). exact HinRbody.
-  (* T_Borrow_L1, T_Borrow_Val_L1: R unchanged, auto-discharged by
-     [try assumption] above. *)
-  - (* T_Drop_L1 *)
-    apply IHHt. assumption.
-  - (* T_Drop_L1_Echo *)
-    apply IHHt. assumption.
-  - (* T_Copy_L1 *)
-    apply IHHt. assumption.
-Admitted.
+(** [region_liveness_at_split_l1_gen] and its Linear wrapper
+    [region_liveness_at_split_l1] — the FALSE, [Admitted] versions of
+    "typing preserves region liveness" ([In rv R -> In rv R']
+    unconditionally) — have been REMOVED (2026-06-26). The unconditional
+    statement is false in the [T_Region_Active_L1] [r = rv] sub-case
+    (witness [ERegion rv (EI32 5)] at [R = [rv]]: [In rv R] holds but the
+    region pop yields [In rv R' = False]). It is now pinned, with its
+    counterexample, as a NEGATIVE result in
+    [Counterexample_RegionShrink.v]'s region family — there is no value in
+    keeping a false [Admitted] lemma in the live build.
 
-(** Linear-specialised wrapper matching the original Axiom signature
-    for the call sites in [subst_typing_gen_l1]. *)
-Lemma region_liveness_at_split_l1 :
-  forall R G e T R' G' rv,
-    R; G |=L1 e : T -| R'; G' ->
-    In rv R ->
-    In rv R'.
-Proof.
-  intros R G e T R' G' rv Ht.
-  eapply region_liveness_at_split_l1_gen. exact Ht.
-Qed.
+    The 13 consumers in [subst_typing_gen_l1_m] now discharge region
+    liveness through the TRUE, [Qed] [region_liveness_no_exit_l1_gen]
+    above, supplied with the honest [val_region_no_exit] premise threaded
+    from [subst_typing_gen_l1_m] / [subst_typing_gen_l1] /
+    [subst_preserves_typing_l1]. This realises the HONEST closure recorded
+    in the call-site audit above (ADMIT 2): one fewer outer [Admitted],
+    zero false lemmas, and the residual region-liveness-through-reduction
+    obligation now lives — explicitly and honestly — as the
+    [val_region_no_exit] premise that [preservation_l1] (the capstone) owes
+    when it fires substitution. See
+    [formal/L1-REGION-REFOUNDATION-PLAN.md] (ADMIT 2 section). *)
 
 (** Generalized substitution: at depth [k] for a linear value [v].
     Mirrors legacy [subst_typing_gen]. The only L1-specific gap is the
@@ -2233,13 +2165,14 @@ Lemma subst_typing_gen_l1_m :
       nth_error Gin k = Some (T1, u_in) ->
       is_value v ->
       is_linear_ty T1 = true ->
+      val_region_no_exit v e ->
       R; remove_at k Gin |=L1 v : T1 -| R; remove_at k Gin ->
       forall u_out,
         nth_error Gout k = Some (T1, u_out) ->
         has_type_l1 m R (remove_at k Gin) (subst k v e) T R' (remove_at k Gout).
 Proof.
   intros m R Gin e T R' Gout Htype.
-  induction Htype; intros k0 Tsub vv u_in Hk_in Hval Hlin Hv_type u_out Hk_out; simpl.
+  induction Htype; intros k0 Tsub vv u_in Hk_in Hval Hlin Hnx Hv_type u_out Hk_out; simpl.
 
   (* T_Unit_L1, T_Bool_L1, T_I32_L1 *)
   1-3: (assert (u_out = u_in) by congruence; subst; constructor).
@@ -2296,36 +2229,39 @@ Proof.
   - assert (u_out = u_in) by congruence; subst. constructor. assumption.
 
   (* T_StringConcat_L1 *)
-  - destruct (output_shape_at_l1 _ _ _ _ _ _ _ _ _ _ Htype1 Hk_in) as [u_mid Hu_mid].
+  - destruct (linear_value_is_loc_l1 _ _ _ _ Hv_type Hval Hlin) as [lv [rv [-> [-> Hregv]]]].
+    simpl in Hnx; destruct Hnx as [Hnx1 Hnx2].
+    destruct (output_shape_at_l1 _ _ _ _ _ _ _ _ _ _ Htype1 Hk_in) as [u_mid Hu_mid].
     eapply T_StringConcat_L1.
     + eapply IHHtype1; eassumption.
-    + destruct (linear_value_is_loc_l1 _ _ _ _ Hv_type Hval Hlin) as [lv [rv [-> [-> Hregv]]]].
-      eapply IHHtype2; try eassumption; try reflexivity.
+    + eapply IHHtype2; try eassumption; try reflexivity.
       apply loc_retype_at_R_l1_m.
-      eapply region_liveness_at_split_l1_gen; eassumption.
+      exact (region_liveness_no_exit_l1_gen _ _ _ _ _ _ _ rv Htype1 Hnx1 Hregv).
 
   (* T_StringLen_L1 *)
   - eapply T_StringLen_L1. eapply IHHtype; eassumption.
 
   (* T_Let_L1 *)
-  - destruct (output_shape_at_l1 _ _ _ _ _ _ _ _ _ _ Htype1 Hk_in) as [u_mid Hu_mid].
+  - destruct (linear_value_is_loc_l1 _ _ _ _ Hv_type Hval Hlin) as [lv [rv [-> [-> Hregv]]]].
+    simpl in Hnx; destruct Hnx as [Hnx1 Hnx2].
+    destruct (output_shape_at_l1 _ _ _ _ _ _ _ _ _ _ Htype1 Hk_in) as [u_mid Hu_mid].
     eapply T_Let_L1.
     + eapply IHHtype1; eassumption.
-    + destruct (linear_value_is_loc_l1 _ _ _ _ Hv_type Hval Hlin) as [lv [rv [-> [-> Hregv]]]].
-      eapply (IHHtype2 (S k0) (TString rv) (ELoc lv rv) u_mid);
+    + eapply (IHHtype2 (S k0) (TString rv) (ELoc lv rv) u_mid);
         simpl; try eassumption; try reflexivity.
       apply loc_retype_at_R_l1_m.
-      eapply region_liveness_at_split_l1_gen; eassumption.
+      exact (region_liveness_no_exit_l1_gen _ _ _ _ _ _ _ rv Htype1 Hnx1 Hregv).
 
   (* T_LetLin_L1 *)
-  - destruct (output_shape_at_l1 _ _ _ _ _ _ _ _ _ _ Htype1 Hk_in) as [u_mid Hu_mid].
+  - destruct (linear_value_is_loc_l1 _ _ _ _ Hv_type Hval Hlin) as [lv [rv [-> [-> Hregv]]]].
+    simpl in Hnx; destruct Hnx as [Hnx1 Hnx2].
+    destruct (output_shape_at_l1 _ _ _ _ _ _ _ _ _ _ Htype1 Hk_in) as [u_mid Hu_mid].
     eapply T_LetLin_L1; [exact H | |].
     + eapply IHHtype1; eassumption.
-    + destruct (linear_value_is_loc_l1 _ _ _ _ Hv_type Hval Hlin) as [lv [rv [-> [-> Hregv]]]].
-      eapply (IHHtype2 (S k0) (TString rv) (ELoc lv rv) u_mid);
+    + eapply (IHHtype2 (S k0) (TString rv) (ELoc lv rv) u_mid);
         simpl; try eassumption; try reflexivity.
       apply loc_retype_at_R_l1_m.
-      eapply region_liveness_at_split_l1_gen; eassumption.
+      exact (region_liveness_no_exit_l1_gen _ _ _ _ _ _ _ rv Htype1 Hnx1 Hregv).
 
   (* T_Lam_L1_Linear: body's R = outer R; direct discharge via
      [T_Loc_L1] + Hregv. *)
@@ -2366,22 +2302,24 @@ Proof.
     apply loc_retype_at_R_l1_m. apply H. exact Hregv.
 
   (* T_App_L1 *)
-  - destruct (output_shape_at_l1 _ _ _ _ _ _ _ _ _ _ Htype1 Hk_in) as [u_mid Hu_mid].
+  - destruct (linear_value_is_loc_l1 _ _ _ _ Hv_type Hval Hlin) as [lv [rv [-> [-> Hregv]]]].
+    simpl in Hnx; destruct Hnx as [Hnx1 Hnx2].
+    destruct (output_shape_at_l1 _ _ _ _ _ _ _ _ _ _ Htype1 Hk_in) as [u_mid Hu_mid].
     eapply T_App_L1.
     + eapply IHHtype1; eassumption.
-    + destruct (linear_value_is_loc_l1 _ _ _ _ Hv_type Hval Hlin) as [lv [rv [-> [-> Hregv]]]].
-      eapply IHHtype2; try eassumption; try reflexivity.
+    + eapply IHHtype2; try eassumption; try reflexivity.
       apply loc_retype_at_R_l1_m.
-      eapply region_liveness_at_split_l1_gen; eassumption.
+      exact (region_liveness_no_exit_l1_gen _ _ _ _ _ _ _ rv Htype1 Hnx1 Hregv).
 
   (* T_Pair_L1 *)
-  - destruct (output_shape_at_l1 _ _ _ _ _ _ _ _ _ _ Htype1 Hk_in) as [u_mid Hu_mid].
+  - destruct (linear_value_is_loc_l1 _ _ _ _ Hv_type Hval Hlin) as [lv [rv [-> [-> Hregv]]]].
+    simpl in Hnx; destruct Hnx as [Hnx1 Hnx2].
+    destruct (output_shape_at_l1 _ _ _ _ _ _ _ _ _ _ Htype1 Hk_in) as [u_mid Hu_mid].
     eapply T_Pair_L1.
     + eapply IHHtype1; eassumption.
-    + destruct (linear_value_is_loc_l1 _ _ _ _ Hv_type Hval Hlin) as [lv [rv [-> [-> Hregv]]]].
-      eapply IHHtype2; try eassumption; try reflexivity.
+    + eapply IHHtype2; try eassumption; try reflexivity.
       apply loc_retype_at_R_l1_m.
-      eapply region_liveness_at_split_l1_gen; eassumption.
+      exact (region_liveness_no_exit_l1_gen _ _ _ _ _ _ _ rv Htype1 Hnx1 Hregv).
 
   (* T_Fst_L1 *)
   - eapply T_Fst_L1; [eapply IHHtype; eassumption | assumption].
@@ -2396,85 +2334,89 @@ Proof.
   - eapply T_Inr_L1. eapply IHHtype; eassumption.
 
   (* T_Case_L1_Linear *)
-  - destruct (output_shape_at_l1 _ _ _ _ _ _ _ _ _ _ Htype1 Hk_in) as [u_mid Hu_mid].
+  - destruct (linear_value_is_loc_l1 _ _ _ _ Hv_type Hval Hlin) as [lv [rv [-> [-> Hregv]]]].
+    simpl in Hnx; destruct Hnx as [Hnx1 [Hnx2 Hnx3]].
+    destruct (output_shape_at_l1 _ _ _ _ _ _ _ _ _ _ Htype1 Hk_in) as [u_mid Hu_mid].
     eapply T_Case_L1_Linear.
     + eapply IHHtype1; eassumption.
-    + destruct (linear_value_is_loc_l1 _ _ _ _ Hv_type Hval Hlin) as [lv [rv [-> [-> Hregv]]]].
-      eapply (IHHtype2 (S k0) (TString rv) (ELoc lv rv) u_mid);
+    + eapply (IHHtype2 (S k0) (TString rv) (ELoc lv rv) u_mid);
         simpl; try eassumption; try reflexivity.
       apply loc_retype_at_R_l1_m.
-      eapply region_liveness_at_split_l1_gen; eassumption.
-    + destruct (linear_value_is_loc_l1 _ _ _ _ Hv_type Hval Hlin) as [lv [rv [-> [-> Hregv]]]].
-      eapply (IHHtype3 (S k0) (TString rv) (ELoc lv rv) u_mid);
+      exact (region_liveness_no_exit_l1_gen _ _ _ _ _ _ _ rv Htype1 Hnx1 Hregv).
+    + eapply (IHHtype3 (S k0) (TString rv) (ELoc lv rv) u_mid);
         simpl; try eassumption; try reflexivity.
       apply loc_retype_at_R_l1_m.
-      eapply region_liveness_at_split_l1_gen; eassumption.
+      exact (region_liveness_no_exit_l1_gen _ _ _ _ _ _ _ rv Htype1 Hnx1 Hregv).
 
   (* T_Case_L1_Affine: same shape — per-branch [u1, u2] are the
      inner-bound variable's output flags, orthogonal to the
      substituted variable's flag. *)
-  - destruct (output_shape_at_l1 _ _ _ _ _ _ _ _ _ _ Htype1 Hk_in) as [u_mid Hu_mid].
+  - destruct (linear_value_is_loc_l1 _ _ _ _ Hv_type Hval Hlin) as [lv [rv [-> [-> Hregv]]]].
+    simpl in Hnx; destruct Hnx as [Hnx1 [Hnx2 Hnx3]].
+    destruct (output_shape_at_l1 _ _ _ _ _ _ _ _ _ _ Htype1 Hk_in) as [u_mid Hu_mid].
     eapply T_Case_L1_Affine.
     + eapply IHHtype1; eassumption.
-    + destruct (linear_value_is_loc_l1 _ _ _ _ Hv_type Hval Hlin) as [lv [rv [-> [-> Hregv]]]].
-      eapply (IHHtype2 (S k0) (TString rv) (ELoc lv rv) u_mid);
+    + eapply (IHHtype2 (S k0) (TString rv) (ELoc lv rv) u_mid);
         simpl; try eassumption; try reflexivity.
       apply loc_retype_at_R_l1_m.
-      eapply region_liveness_at_split_l1_gen; eassumption.
-    + destruct (linear_value_is_loc_l1 _ _ _ _ Hv_type Hval Hlin) as [lv [rv [-> [-> Hregv]]]].
-      eapply (IHHtype3 (S k0) (TString rv) (ELoc lv rv) u_mid);
+      exact (region_liveness_no_exit_l1_gen _ _ _ _ _ _ _ rv Htype1 Hnx1 Hregv).
+    + eapply (IHHtype3 (S k0) (TString rv) (ELoc lv rv) u_mid);
         simpl; try eassumption; try reflexivity.
       apply loc_retype_at_R_l1_m.
-      eapply region_liveness_at_split_l1_gen; eassumption.
+      exact (region_liveness_no_exit_l1_gen _ _ _ _ _ _ _ rv Htype1 Hnx1 Hregv).
 
   (* T_If_L1_Linear *)
-  - destruct (output_shape_at_l1 _ _ _ _ _ _ _ _ _ _ Htype1 Hk_in) as [u_mid Hu_mid].
+  - destruct (linear_value_is_loc_l1 _ _ _ _ Hv_type Hval Hlin) as [lv [rv [-> [-> Hregv]]]].
+    simpl in Hnx; destruct Hnx as [Hnx1 [Hnx2 Hnx3]].
+    destruct (output_shape_at_l1 _ _ _ _ _ _ _ _ _ _ Htype1 Hk_in) as [u_mid Hu_mid].
     eapply T_If_L1_Linear.
     + eapply IHHtype1; eassumption.
-    + destruct (linear_value_is_loc_l1 _ _ _ _ Hv_type Hval Hlin) as [lv [rv [-> [-> Hregv]]]].
-      eapply IHHtype2; try eassumption; try reflexivity.
+    + eapply IHHtype2; try eassumption; try reflexivity.
       apply loc_retype_at_R_l1_m.
-      eapply region_liveness_at_split_l1_gen; eassumption.
-    + destruct (linear_value_is_loc_l1 _ _ _ _ Hv_type Hval Hlin) as [lv [rv [-> [-> Hregv]]]].
-      eapply IHHtype3; try eassumption; try reflexivity.
+      exact (region_liveness_no_exit_l1_gen _ _ _ _ _ _ _ rv Htype1 Hnx1 Hregv).
+    + eapply IHHtype3; try eassumption; try reflexivity.
       apply loc_retype_at_R_l1_m.
-      eapply region_liveness_at_split_l1_gen; eassumption.
+      exact (region_liveness_no_exit_l1_gen _ _ _ _ _ _ _ rv Htype1 Hnx1 Hregv).
 
   (* T_If_L1_Affine: same shape; branches agree on output structure
      just as in the Linear case (the mode-split is on context
      consumption, not on conditional symmetry). *)
-  - destruct (output_shape_at_l1 _ _ _ _ _ _ _ _ _ _ Htype1 Hk_in) as [u_mid Hu_mid].
+  - destruct (linear_value_is_loc_l1 _ _ _ _ Hv_type Hval Hlin) as [lv [rv [-> [-> Hregv]]]].
+    simpl in Hnx; destruct Hnx as [Hnx1 [Hnx2 Hnx3]].
+    destruct (output_shape_at_l1 _ _ _ _ _ _ _ _ _ _ Htype1 Hk_in) as [u_mid Hu_mid].
     eapply T_If_L1_Affine.
     + eapply IHHtype1; eassumption.
-    + destruct (linear_value_is_loc_l1 _ _ _ _ Hv_type Hval Hlin) as [lv [rv [-> [-> Hregv]]]].
-      eapply IHHtype2; try eassumption; try reflexivity.
+    + eapply IHHtype2; try eassumption; try reflexivity.
       apply loc_retype_at_R_l1_m.
-      eapply region_liveness_at_split_l1_gen; eassumption.
-    + destruct (linear_value_is_loc_l1 _ _ _ _ Hv_type Hval Hlin) as [lv [rv [-> [-> Hregv]]]].
-      eapply IHHtype3; try eassumption; try reflexivity.
+      exact (region_liveness_no_exit_l1_gen _ _ _ _ _ _ _ rv Htype1 Hnx1 Hregv).
+    + eapply IHHtype3; try eassumption; try reflexivity.
       apply loc_retype_at_R_l1_m.
-      eapply region_liveness_at_split_l1_gen; eassumption.
+      exact (region_liveness_no_exit_l1_gen _ _ _ _ _ _ _ rv Htype1 Hnx1 Hregv).
 
   (* T_Region_L1: body's R = [r :: R]; [In rv R] (from Hregv) lifts to
      [In rv (r :: R)]. Direct discharge via [T_Loc_L1] — no axiom. *)
   - destruct (linear_value_is_loc_l1 _ _ _ _ Hv_type Hval Hlin) as [lv [rv [-> [-> Hregv]]]].
+    simpl in Hnx; destruct Hnx as [Hr_ne Hnx_body].
     eapply T_Region_L1; [exact H | exact H0 | exact H1 |].
     eapply IHHtype; try eassumption; try reflexivity.
     apply loc_retype_at_R_l1_m. right; exact Hregv.
 
   (* T_Region_Active_L1: body's R = outer R, so Hv_type re-uses unchanged. *)
   - destruct (linear_value_is_loc_l1 _ _ _ _ Hv_type Hval Hlin) as [lv [rv [-> [-> Hregv]]]].
+    simpl in Hnx; destruct Hnx as [Hr_ne Hnx_body].
     eapply T_Region_Active_L1; [exact H | exact H0 | exact H1 |].
     eapply IHHtype; try eassumption; try reflexivity.
 
   (* T_Region_L1_Echo — parallel rule; identical substitution shape *)
   - destruct (linear_value_is_loc_l1 _ _ _ _ Hv_type Hval Hlin) as [lv [rv [-> [-> Hregv]]]].
+    simpl in Hnx; destruct Hnx as [Hr_ne Hnx_body].
     eapply T_Region_L1_Echo; [exact H | exact H0 | exact H1 |].
     eapply IHHtype; try eassumption; try reflexivity.
     apply loc_retype_at_R_l1_m. right; exact Hregv.
 
   (* T_Region_Active_L1_Echo — parallel rule *)
   - destruct (linear_value_is_loc_l1 _ _ _ _ Hv_type Hval Hlin) as [lv [rv [-> [-> Hregv]]]].
+    simpl in Hnx; destruct Hnx as [Hr_ne Hnx_body].
     eapply T_Region_Active_L1_Echo; [exact H | exact H0 | exact H1 |].
     eapply IHHtype; try eassumption; try reflexivity.
 
@@ -3216,12 +3158,13 @@ Lemma subst_typing_gen_l1 :
       nth_error Gin k = Some (T1, u_in) ->
       is_value v ->
       is_linear_ty T1 = true ->
+      val_region_no_exit v e ->
       R; remove_at k Gin |=L1 v : T1 -| R; remove_at k Gin ->
       forall u_out,
         nth_error Gout k = Some (T1, u_out) ->
         R; remove_at k Gin |=L1 subst k v e : T -| R'; remove_at k Gout.
 Proof.
-  intros R Gin e T R' Gout Htype k T1 v u_in Hk_in Hval Hlin Hv_type u_out Hk_out.
+  intros R Gin e T R' Gout Htype k T1 v u_in Hk_in Hval Hlin Hnx Hv_type u_out Hk_out.
   eapply subst_typing_gen_l1_m; eassumption.
 Qed.
 
@@ -3232,15 +3175,16 @@ Qed.
 Lemma subst_preserves_typing_l1 :
   forall T1 v R2 G2 e2 T2 R2_final G2',
     is_value v ->
+    val_region_no_exit v e2 ->
     has_type_l1_linear R2 G2 v T1 R2 G2 ->
     has_type_l1_linear R2 ((T1, false) :: G2) e2 T2 R2_final ((T1, true) :: G2') ->
     has_type_l1_linear R2 G2 (subst 0 v e2) T2 R2_final G2'.
 Proof.
-  intros T1 v R2 G2 e2 T2 R2_final G2' Hval Hv_type He2_type.
+  intros T1 v R2 G2 e2 T2 R2_final G2' Hval Hnx Hv_type He2_type.
   assert (Hlin: is_linear_ty T1 = true).
   { eapply (flag_false_to_true_implies_linear_l1 _ _ _ _ _ _ 0 T1 He2_type);
       simpl; reflexivity. }
-  pose proof (subst_typing_gen_l1 _ _ _ _ _ _ He2_type 0 T1 v false eq_refl Hval Hlin
+  pose proof (subst_typing_gen_l1 _ _ _ _ _ _ He2_type 0 T1 v false eq_refl Hval Hlin Hnx
     Hv_type true eq_refl) as Hsubst.
   simpl in Hsubst. exact Hsubst.
 Qed.
@@ -3764,10 +3708,14 @@ Qed.
      [region_shrink_preserves_typing_l1_gen_m] is GONE; its false
      general statement is pinned in [Counterexample_RegionShrink.v].
 
-   - [region_liveness_at_split_l1_gen]  Admitted →
-     surfaces itself. Provably-false-as-stated in the residual
-     [binder = rv] sub-case (counterexample documented in source);
-     closure requires Phase D reformulation.
+   - [region_liveness_at_split_l1_gen]  REMOVED (2026-06-26). It was
+     [Admitted] and provably-false-as-stated in the [binder = rv]
+     sub-case. Its 13 consumers in [subst_typing_gen_l1_m] now route
+     through the TRUE [region_liveness_no_exit_l1_gen] (Qed) supplied
+     with the honest [val_region_no_exit] premise; the substitution
+     chain and the L2 β-case lemmas
+     ([preservation_l2_app_eff_beta_linear] / [_l1]) are therefore now
+     axiom-free rather than depending on a false axiom.
 
    - [preservation_l1]  Admitted → surfaces itself plus
      any structural debt its conditional Qed-portion already

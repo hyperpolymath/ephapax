@@ -238,17 +238,32 @@ to the owner**:
 ## §4. Counts + file-by-file map
 
 <!-- status-gate marker: do not move. scripts/status-gate.sh reads this line. -->
-Coq admitted proofs remaining: 5
+Coq admitted proofs remaining: 3
 
 (1 outer `Admitted.` in `formal/Semantics.v` — sacrosanct legacy
-preservation, provably false per `Counterexample.v` + **4** outer
-`Admitted.` markers in `formal/Semantics_L1.v` — the four open L1 lemmas
-`region_shrink` / `region_liveness` / `step_pop` / `preservation_l1`.
-**Corrected 2026-06-16 from `4`: the marker and the per-file table below were
-written 2026-06-01, predate the `step_pop_disjoint_from_type_l1` outer marker,
-and had drifted by one against `coqc`/grep ground truth. §5.2 carries the
-authoritative current line numbers and the internal-`admit.` breakdown; the
-2026-06-01 seam-audit line numbers below are superseded by it.**)
+preservation, provably false per `Counterexample.v` + **2** outer
+`Admitted.` markers in `formal/Semantics_L1.v` — the two open L1 lemmas
+`step_pop` / `preservation_l1`.
+**Updated 2026-06-26 (this branch) against rebuilt `coqc 8.18.0` +
+`scripts/status-gate.sh --proofs` ground truth. Two closures dropped the
+count 5 → 3:**
+**(a) `region_shrink_preserves_typing_l1_gen_m` was *dissolved* (the
+2026-06-16 multiset-perm closure) — its general form is proven false and
+pinned in `formal/Counterexample_RegionShrink.v`, the surviving value
+corollary `region_shrink_value` is `Qed`/axiom-free, and `preservation_l3`
+is consequently UNCONDITIONALLY axiom-free.**
+**(b) `region_liveness_at_split_l1_gen` — the provably-false
+`In rv R -> In rv R'` lemma — was *removed*. Its 13 consumers in
+`subst_typing_gen_l1_m` now route through the TRUE, `Qed`
+`region_liveness_no_exit_l1_gen`, supplied with the honest
+`val_region_no_exit` premise threaded through `subst_typing_gen_l1_m` /
+`subst_typing_gen_l1` / `subst_preserves_typing_l1` and the L2 β-case
+lemmas (`preservation_l2_app_eff_beta_linear` / `_l1`) — all of which
+`Print Assumptions` now reports as "Closed under the global context"
+(axiom-free) instead of depending on a false axiom.**
+The two remaining outer markers are `step_pop_disjoint_from_type_l1` and
+`preservation_l1` (capstone, gated on `step_pop`); §5's line numbers are
+earlier-branch snapshots, superseded here.)
 
 ### Per-file Qed / Admitted summary (as of 2026-06-01)
 
@@ -260,7 +275,7 @@ authoritative current line numbers and the internal-`admit.` breakdown; the
 | `formal/Counterexample_L2.v` | **5** | 0 | ✅ Phase 4c soundness-gap witness — fresh-region scope crossing (`v_typed_at_empty`, `outer_typed`, `e_before_typed`, `e_step`, `e_after_untypable`) |
 | `formal/Counterexample_L2_nested.v` | **5** | 0 | ✅ Phase 3b soundness-gap witness — nested TFunEff (analogue structure to `Counterexample_L2.v`) |
 | `formal/TypingL1.v` | **2** | 0 | ✅ active — L1 judgment, modality-indexed |
-| `formal/Semantics_L1.v` | **37+** | **4** | ✅ active — Phase 3b Stage 1a + 1b landed via PRs #252 + #253. **4** outer `Admitted.` markers — the four open L1 lemmas (`region_shrink` / `region_liveness` / `step_pop` / `preservation_l1`). **Corrected 2026-06-16 from `3` (the `step_pop` marker was missed). §5.2 has the authoritative current line numbers + the 13 internal `admit.` cases; the 2026-06-01 line numbers in the seam audit below are superseded.** |
+| `formal/Semantics_L1.v` | **54** | **2** | ✅ active — Phase 3b Stage 1a + 1b landed via PRs #252 + #253. **2** outer `Admitted.` markers — the two open L1 lemmas (`step_pop_disjoint_from_type_l1` / `preservation_l1`). **Updated 2026-06-26: `region_shrink…gen_m` dissolved (2026-06-16) and `region_liveness_at_split_l1_gen` removed (this branch) via the honest `val_region_no_exit` reformulation — see the §4 marker note. `preservation_l3` and the L2 β-case lemmas are now unconditionally axiom-free. Counts are rebuilt `coqc 8.18.0` ground truth on this branch.** |
 | `formal/Modality.v` | **1** | 0 | ✅ active — L2 core, zero axioms (`linear_to_affine`) |
 | `formal/Echo.v` | **12** | 0 | ✅ active — L3 calculus mechanised |
 | `formal/TypingL2.v` | **10** | 0 | ✅ active — `weaken_modality` (+ Affine_id + 3 `_le_*` variants), `preservation_l2_via_l1` (conditional on `preservation_l1`), `linear_value_retype_l1_m`, and 3 β-case lemmas (`preservation_l2_app_eff_beta_linear`, `_ground_nonlinear`, `_tfuneff` conditional on Stage 1b side conditions). NOT a wrapper. |

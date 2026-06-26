@@ -429,12 +429,13 @@ Lemma preservation_l2_app_eff_beta_linear_l1 :
   forall m R R1 G G' G'' v2 T1 T2 R_in R_out ebody,
     is_value v2 ->
     is_linear_ty T1 = true ->
+    val_region_no_exit v2 ebody ->
     TypingL1.has_type_l1 m R  G  (ELam T1 ebody)
                                  (TFunEff T1 T2 R_in R_out) R1 G' ->
     TypingL1.has_type_l1 m R1 G' v2 T1 R_in G'' ->
     TypingL1.has_type_l1 m R  G  (subst 0 v2 ebody) T2 R_out G''.
 Proof.
-  intros m R R1 G G' G'' v2 T1 T2 R_in R_out ebody Hval Hlin Hlam Harg.
+  intros m R R1 G G' G'' v2 T1 T2 R_in R_out ebody Hval Hlin Hnx Hlam Harg.
   inversion Hlam; subst.
   - (* T_Lam_L1_Linear_Eff: body at R_in / (T1,false)::G'' → R_out / (T1,true)::G''
        (R and G eliminated by inversion equalities; R_in and G'' remain. Use
@@ -450,6 +451,7 @@ Proof.
     + reflexivity.
     + exact Hval.
     + exact Hlin.
+    + exact Hnx.
     + exact Harg.
     + reflexivity.
   - (* T_Lam_L1_Affine_Eff: body output is [(T1, u) :: G''] for some [u]
@@ -465,6 +467,7 @@ Proof.
     + reflexivity.
     + exact Hval.
     + exact Hlin.
+    + exact Hnx.
     + apply (linear_value_retype_l1_m Affine Linear); assumption.
     + reflexivity.
 Qed.
@@ -473,12 +476,13 @@ Lemma preservation_l2_app_eff_beta_linear :
   forall m R R1 G G' G'' v2 T1 T2 R_in R_out ebody,
     is_value v2 ->
     is_linear_ty T1 = true ->
+    val_region_no_exit v2 ebody ->
     has_type_l2 m R  G  (ELam T1 ebody)
                         (TFunEff T1 T2 R_in R_out) R1 G' ->
     has_type_l2 m R1 G' v2 T1 R_in G'' ->
     has_type_l2 m R  G  (subst 0 v2 ebody) T2 R_out G''.
 Proof.
-  intros m R R1 G G' G'' v2 T1 T2 R_in R_out ebody Hval Hlin Hlam Harg.
+  intros m R R1 G G' G'' v2 T1 T2 R_in R_out ebody Hval Hlin Hnx Hlam Harg.
   (* Lambda inversion: [T_App_L2_Eff]'s expression is [EApp _ _],
      not [ELam _ _], so it discriminates; only [L2_lift_l1] remains. *)
   inversion Hlam as [m0 R0 G0 e0 T0 R0' G0' Hlam_l1 | ]; subst.

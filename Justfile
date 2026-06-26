@@ -72,6 +72,12 @@ conformance:
 status-gate:
     ./scripts/status-gate.sh
 
+# Provision all provers (Coq / Idris2 / Zig) the -iser way: curl+tar from
+# vendor/codeload over HTTPS, never git; idempotent + fail-soft. Same entry
+# point the SessionStart hook and the devcontainer postCreate use.
+bootstrap:
+    bash scripts/bootstrap-provers.sh
+
 # Build Idris2 formal proofs
 idris-build:
     cd src/formal && idris2 --build ephapax-formal.ipkg

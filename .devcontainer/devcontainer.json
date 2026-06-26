@@ -1,0 +1,12 @@
+{
+  "name": "ephapax",
+  "image": "mcr.microsoft.com/devcontainers/base:ubuntu-24.04",
+  "features": {
+    "ghcr.io/devcontainers/features/rust:1": {},
+    "ghcr.io/devcontainers/features/common-utils:2": {}
+  },
+  "postCreateCommand": "bash scripts/bootstrap-provers.sh",
+  "remoteEnv": {
+    "PATH": "${containerEnv:HOME}/.idris2/bin:${containerEnv:PATH}"
+  }
+}

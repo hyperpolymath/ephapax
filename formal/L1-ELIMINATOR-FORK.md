@@ -153,3 +153,41 @@ relocate the difficulty into projection coherence, and the sequential-language
 foundation is non-standard. The §5/§6 experiment is the inexpensive way to
 learn which — and it is the recommended next step on the eliminator fork, run in
 parallel with (not blocking) the clean-win carrier refactor.
+
+## 8. Result of the §6 experiment (2026 — run in Coq)
+
+The §6 deciding experiment was run against the live judgment. Outcome: the
+verdict is the predicted **"no" — it relocates** — but the experiment also
+produced a concrete simplification worth keeping.
+
+**(a) `step_pop_disjoint_from_type_l1` reduces from 11 admits to 1.** Driving
+the proof by `step_R_change_shape` (every step leaves `R` fixed, prepends a
+fresh region, or removes exactly one) makes all ten eliminator/erasing
+congruences trivial — a region free in the result type survives unless the
+step exits *that exact* region. The 255-line induction with eleven `admit`s
+becomes ~15 lines with one. (Landed; `coqc 8.18.0` + `Print Assumptions`
+verified; outer `Admitted` count unchanged.)
+
+**(b) The single residual obligation, exactly:** the step exits `r0` while
+`r0 ∈ free_regions(T)` ⟹ `cnt r0 R ≥ 2` (i.e. `In r0 (remove_first r0 R)`).
+Its **direct-exit** sub-case is *vacuous* — a head redex `ERegion r0 v` is
+typed by `T_Region_Active_L1`, whose `~In r0 (free_regions T)` premise
+contradicts `r0 ∈ free_regions(T)`. The residue is the **congruence-exit**
+case (`ERegion r0` under an eliminator; `r0` from a sibling's type — a
+distinct occurrence).
+
+**(c) Why it relocates (the §2 wall, mechanically reconfirmed).** Discharging
+the congruence case needs the sibling's `r0` proved a *distinct* occurrence
+from the exiting one — exactly the temporal/segment coherence the snapshot
+env + result type cannot express. Every closure route tried
+(`free_regions ⊆ R_out`, `count_occ_le_l1_m`, linking the dynamic exit to the
+static output) collapses to connecting the dynamic step to the static typing
+output, which *is* preservation. Circular.
+
+**(d) The §4.8 framing was wrong** and is corrected in the source: the
+obstruction is not lambda-rigidity (the witness has no lambda) but
+region-count coherence at a region exit. **Net: ADMIT 3 stays open at the
+honest count (still 2 outer `Admitted`), but is now ONE minimal, precisely
+characterised obligation** — the cleanest possible target for the §3 / §5.1
+tropically-graded choreography. That choreographic closure is the
+unchanged recommended next step.

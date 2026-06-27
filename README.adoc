@@ -4,7 +4,7 @@ image:https://img.shields.io/badge/Philosophy-Palimpsest-indigo.svg[Palimpsest,l
 image:https://github.com/hyperpolymath/ephapax/actions/workflows/codeql.yml/badge.svg?branch=main[CodeQL,link="https://github.com/hyperpolymath/ephapax/actions/workflows/codeql.yml"]
 image:https://api.thegreenwebfoundation.org/greencheckimage/ephapax.org[Green Hosting,link="https://www.thegreenwebfoundation.org/green-web-check/?url=ephapax.org"]
 
-image::brand/social-preview.svg[ephapax,align="center"]
+image::brand/hero/social-profile.png[ephapax,align="center",width=460]
 
 // SPDX-License-Identifier: CC-BY-SA-4.0
 // Owner: Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk>

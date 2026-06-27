@@ -57,7 +57,7 @@ For the architectural background see
 | L1 judgment indexed by modality `m : Modality` | `formal/TypingL1.v` | landed via PRs #176 + #177 |
 | L2 modality core (`Modality.v`, `linear_to_affine`) | `formal/Modality.v` | 1 Qed, zero axioms |
 | L3 calculus (echo / residue fiber + degrade + no-section proof) | `formal/Echo.v` | 12 Qed, 0 admits |
-| Linear-mode forward progress lemmas | `formal/Semantics_L1.v` | 37 Qed; 3 outer `Admitted.` markers cover 5 internal `admit.` cases at current lines 576/646/1994/2014/3132. Phase 3b Stage 1a (#252, MERGED 2026-05-30: `tfuneff_lambda_free` + `Counterexample_L2_nested.v`) and Stage 1b (#253, MERGED 2026-05-31: closed-value substitution + `preservation_l2_app_eff_beta` β-case for TFunEff). Slice 4 L3 wiring delivered `preservation_l3_region_active_echo` / `preservation_l3_drop_echo` / `preservation_l3` umbrella. |
+| Linear-mode forward progress lemmas | `formal/Semantics_L1.v` | 37 Qed; **2** outer `Admitted.` markers (`step_pop_disjoint_from_type_l1` / `preservation_l1`) cover **2** internal `admit.` cases at current lines 3315/3336 (rebuilt `coqc 8.18.0` ground truth 2026-06-27; the earlier 5-internal / lines-576/646/1994/2014/3132 figure is pre-dissolution, superseded by the §4 marker = 3 total). Phase 3b Stage 1a (#252, MERGED 2026-05-30: `tfuneff_lambda_free` + `Counterexample_L2_nested.v`) and Stage 1b (#253, MERGED 2026-05-31: closed-value substitution + `preservation_l2_app_eff_beta` β-case for TFunEff). Slice 4 L3 wiring delivered `preservation_l3_region_active_echo` / `preservation_l3_drop_echo` / `preservation_l3` umbrella. |
 | L2 β-case lemmas (Stage 1b) | `formal/TypingL2.v` | 10 Qed total: `weaken_modality` family (5), `preservation_l2_via_l1` (conditional on `preservation_l1`), `linear_value_retype_l1_m`, and 3 `preservation_l2_app_eff_beta_*` variants (Linear / ground_nonlinear / tfuneff conditional on Stage 1b side conditions P1+P2+P3). Stage 2/3/4 (#240/#241/#242) drop the conditions. |
 | L4 labelling scaffold (Phase A, 2026-05-28) | `formal/L4.v` | `ProgramMode` enum (`PModeLinear` / `PModeAffine` / `PModeBoundaryMix`) + `program_mode_to_modality` round-trip. Definitions only — no theorems, zero axioms. |
 | Counterexample_L2 regression witnesses (Phase 4c + 3b) | `formal/Counterexample_L2.v`, `formal/Counterexample_L2_nested.v` | 5 + 5 Qed pinning the Phase 4c (fresh-region scope crossing) and Phase 3b (nested TFunEff) soundness-gap classes |
@@ -425,11 +425,29 @@ Real Idris Qed proofs verified clean (no `believe_me`/`assert_total`/holes):
    `EDrop (EVar j : TString rv)` choreography over two segments — does subject
    reduction carry liveness through `S_Region_Exit rv` coherently, or relocate
    it into a projection-coherence side-condition? (`L1-ELIMINATOR-FORK.md §6`.)
+   **DONE** (`formal/L1ChoreoExperiment.v`): verdict **relocates** — and it
+   sharpened *why* (the naive model collapses projection onto the scalar
+   predicate, which is false at re-entry; the real fork lives in the
+   **congruence** cases, not the clean `ERegion` exit).
+2b. **Congruence experiment (non-collapsed model):** **DONE**
+   (`formal/L1ChoreoExperiment2.v`, `L1-ELIMINATOR-FORK.md §9`). A trace model
+   that keeps subterm-relative **order** (not just the scalar balance)
+   **closes — in the model** — the obligation `step_pop` relocates to:
+   `sibling_use_keeps_region_live` is `Qed`, axiom-free, non-circular, and
+   unprovable from the snapshot alone. The congruence verdict is upgraded from
+   "relocates" to "closes in the trace model, reduced to **one wiring lemma**"
+   (`wiring_obligation`: typing ⇒ `valid` trace at `k = cnt rv R`). Experiment
+   1's re-entry failure mode provably does not recur. **Closes no admit yet**
+   (honest count still 3); it is the consolidation step that names the precise
+   next target.
 3. **If green → choreographic-foundational re-derivation:** region liveness as
    a tropically-graded choreography across time segments (regions = session-
    typed resources, scopes = segments, preservation = subject reduction).
    Closes #3 → **2 → 0**, and likely gives **L4** its dyadic (2-party
-   choreography) structure for free — one foundation, all four layers.
+   choreography) structure for free — one foundation, all four layers. **Next
+   concrete step:** discharge `wiring_obligation` (plausibly a structural
+   induction on the typing derivation — each trace `Close`/`Use` `>= 1` premise
+   mirrors a local `In r R` premise in `T_Region_Active_L1` / `T_Loc_L1`).
 
 ### 5.5 Foundation trust audit (2026-06-16) — GO
 

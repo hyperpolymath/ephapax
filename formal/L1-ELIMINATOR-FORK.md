@@ -191,3 +191,61 @@ honest count (still 2 outer `Admitted`), but is now ONE minimal, precisely
 characterised obligation** — the cleanest possible target for the §3 / §5.1
 tropically-graded choreography. That choreographic closure is the
 unchanged recommended next step.
+
+## 9. Result of experiment 2 (2026 — `formal/L1ChoreoExperiment2.v`)
+
+Experiment 1 (§5/§6, `L1ChoreoExperiment.v`) returned **"relocates"**, but its
+own "honest gaps" §2 recorded *why* and prescribed the next move: it had
+**collapsed** the projection onto the scalar predicate
+`expr_no_exit_of_region` (discarding subterm-relative order) and had targeted
+the **clean** `ERegion rv` exit (already `Qed`) rather than the genuinely-open
+**congruence** cases (`S_Let_Step` / `S_App_Step2` / `S_Pair_Step2` /
+`S_Case_Step` — *inner pop erased from the outer result type*). Experiment 2
+builds the minimal **non-collapsed** apparatus that gap asked for and aims it at
+the congruence boundary.
+
+**The model.** One region `rv`'s lifecycle is a `Trace` of events
+(`Open`/`Close`/`Use`) *relative to the subterm structure*, run from an initial
+balance `k = cnt rv R`. The trace keeps the same open/close balance the scalar
+`cnt rv R` keeps — but, unlike a snapshot, it keeps the **order**. `valid k t`
+is the local well-nesting condition (a `Close` or `Use` requires balance `>= 1`
+at that point).
+
+**The decisive result (all `Qed`, axiom-free — `Print Assumptions` clean).**
+The order is exactly enough to separate two configurations the snapshot
+*conflates* at the `e1`/`e2` boundary:
+
+- **Internal scope** — the stepping sibling is `rv`-net-neutral
+  (`final_balance k t1 = k`): the surviving sibling is coherent at the original
+  `k`, independent of `t1`'s internal region activity
+  (`congruence_internal_scope_carries`).
+- **Escaping close** — the stepping sibling closes an outer `rv` while the
+  surviving sibling still uses it: **impossible in a coherent trace**. If the
+  surviving sibling's dependence is a `Use` ordered after `t1`, the post-`t1`
+  balance is forced `>= 1` (`sibling_use_keeps_region_live`). This is precisely
+  the obligation `step_pop_disjoint_from_type_l1` *relocates to*
+  (`In rv (free_regions T) -> In rv R -> In rv R'`), and it is proved here as a
+  pure structural fact — **non-circularly**, with no appeal to preservation.
+  The snapshot cannot state it because it carries only the final balance, not
+  the witness that the `Use` is *ordered after* the stepping sibling.
+
+**Verdict.** For the congruence cases — where experiment 1 located the
+genuinely-open fork — the non-collapsed trace model **closes** the relocated
+obligation *in the model*, and reduces the open question to **one wiring
+lemma**: that `has_type_l1` of a congruence redex induces a `valid` trace at
+`k = cnt rv R` with the surviving sibling's `rv`-dependence as a trailing
+`Use` (`wiring_obligation`, stated honestly, never faked — mirroring
+experiment 1's `close_derives_coherence`). Crucially, experiment 1's specific
+failure mode (the relocated predicate is *false* at re-entry) **provably does
+not recur**: the trace's `valid` is *defined* to permit re-entry (nested
+`Open`/`Close`, balance `> 1`). So the verdict for the congruence boundary is
+upgraded from **"relocates"** to **"closes in the trace model, reduced to one
+wiring lemma"**, and the wiring lemma is named as the precise next target.
+
+This experiment closes **no** admit and adds **no** axiom (honest count
+unchanged); it is the consolidation+sharpening step, not the closure. The
+remaining gate to an actual ADMIT-3 closure is `wiring_obligation` — extract a
+`valid` trace from a typing derivation — which, unlike experiment 1's dead end,
+is plausibly a *structural induction* on the typing derivation (each `Close` /
+`Use` event's `>= 1` premise mirrors a local `In r R` premise in
+`T_Region_Active_L1` / `T_Loc_L1`), not a preservation-strength obligation.

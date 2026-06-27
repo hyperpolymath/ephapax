@@ -14,7 +14,7 @@
     [region_name -> nat] (re-entry depth per region; 0 = dead), reasoned
     up to a **pointwise-equality setoid** [renv_eq].
 
-    Axiom budget: this file is axiom-free. We use a setoid relation
+    On the axiom budget: this file is axiom-free. We use a setoid relation
     ([renv_eq]) rather than [functional_extensionality], so [Print
     Assumptions] stays clean — order-insensitivity is *definitional*
     (the carrier is a function; permutation collapses to [renv_eq]),

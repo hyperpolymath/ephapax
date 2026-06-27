@@ -3244,301 +3244,77 @@ Qed.
     the post-step env [R'] via [loc_retype_at_R_l1] /
     [loc_retype_at_R_l1_m].
 
-    **Status (P06, this commit).** STATED + partial proof landed
-    Qed for the EASY cases (atomic non-region rules, S_Region_Enter,
-    S_Region_Exit / Exit_Echo, R-preserving congruences, S_StringConcat
-    congruences, S_Fst/Snd/Borrow/Copy congruences via subtype-
-    inclusion of [free_regions] on inner-vs-outer). The HARD cases
-    remain [admit] inside the lemma body: S_Let_Step, S_LetLin_Step,
-    S_App_Step2, S_If_Step, S_Pair_Step1/2 (when [r] is in the
-    sibling type's free regions), S_Inl_Step, S_Inr_Step,
-    S_Case_Step, S_Region_Step's [T_Region_L1] sub-case.
+    **Status (2026 — §6 eliminator-fork experiment).** The proof is
+    rebuilt around [step_R_change_shape] (Semantics.v, Qed): every step
+    either leaves [R] unchanged, prepends a fresh region, or removes
+    exactly one region. So a region [r0] free in the result type [T]
+    survives the step UNLESS the step exits [r0] itself. This collapses
+    the original 255-line induction's ELEVEN internal admits (the
+    Let / LetLin / App2 / If / Pair / Inl / Inr / Case / Region
+    eliminator-erasing congruences) to ONE: the [r = r0] exit case,
+    whose obligation is exactly [cnt r0 R >= 2] (equivalently
+    [In r0 (remove_first r0 R)]).
 
-    **Why the hard cases admit.** The inner step's typing-rule type
-    [T_inner] is NOT necessarily related to the outer type [T_outer]
-    by free_regions inclusion. E.g., T_Let_L1's outer type [T2] is
-    independent of the inner [T1]: the inner step can pop a region
-    that's in [free_regions T2] without violating any inner-typing
-    side condition. Operationally that's the §4.8 soundness gap
-    (lambda-rigidity / variable-typing permissive at L1) surfacing —
-    same family of obstacles as S_App_Step2 / S_Pair_Step2 / S_Let
-    cases in [preservation_l1] itself.
+    **Diagnosis corrected.** The residual obstruction is NOT the §4.8
+    lambda-rigidity gap — the minimal witness [EDrop (EVar j : TString
+    rv)] (L1-ELIMINATOR-FORK.md §1) has no lambda. Within the single
+    remaining admit, the DIRECT-exit sub-case is vacuous: a head redex
+    [ERegion r0 v] is typed by [T_Region_Active_L1], whose
+    [~In r0 (free_regions T)] premise contradicts [r0 ∈ free_regions T].
+    The residue is the CONGRUENCE-exit case — the exiting [ERegion r0]
+    sits under an eliminator and [r0] is supplied by a *sibling's* type,
+    a DISTINCT occurrence. Establishing that distinctness is region-count
+    coherence at a region exit: the temporal/segment structure the
+    snapshot env + result type cannot express. Every route
+    ([free_regions ⊆ R_out], [count_occ_le_l1_m], linking the dynamic
+    exit to the static output) collapses to connecting the dynamic step
+    to the static typing output — preservation itself (the §2 "same
+    wall").
 
-    **Closure path (per PRESERVATION-DESIGN.md §4.8.1 + §5.1).** The
-    §4.8 path-(3) strengthening of [T_Var_*_L1] (premise
-    [forall r, In r (free_regions T) -> In r R]) propagates the
-    region constraint into variable-use sites and would discharge
-    most of these admits via structural induction on the typing
-    derivation. Path (1) — effect-typed lambdas / TFunEff (PR #200)
-    — also helps for S_App_Step2 specifically. Tracked at ephapax
-    issues #240 / #241 / #242 (Phase 3b Stage 2 / 3 / 4).
-
-    **Effect on P06's downstream goal.** Because the lemma is
-    [Admitted] (not Qed), USING it to close
-    [preservation_l1]'s S_StringConcat_Step2 case would only relay
-    the admit one level up — no net axiom-count improvement. We
-    therefore keep [preservation_l1]'s single outer [admit.] in
-    place; this commit's value is (a) the lemma statement
-    crystallises the obligation in mechanised form, (b) the Qed'd
-    sub-proofs cover ~70% of the step-rule cases (concretely:
-    atomic rules + the 5 EASY congruences listed above), and
-    (c) the admit comments map cleanly to ephapax issues
-    #240 / #241 / #242 for follow-up. *)
+    **Verdict (§6).** RELOCATES, not closes — but now to ONE minimal,
+    precisely-stated obligation (count-coherence at a congruence region
+    exit), not eleven scattered §4.8 admits. The closure route is the
+    tropically-graded choreography over time segments in
+    [formal/L1-ELIMINATOR-FORK.md] §3–§7. The single outer [Admitted]
+    and [preservation_l1]'s [admit] are unchanged; this is a clarity +
+    isolation improvement, not an axiom-count reduction. *)
 Lemma step_pop_disjoint_from_type_l1 :
   forall mu R e mu' R' e' m G T R_final G',
     (mu, R, e) -->> (mu', R', e') ->
     has_type_l1 m R G e T R_final G' ->
     forall r, In r (Typing.free_regions T) -> In r R -> In r R'.
 Proof.
-  intros mu R e mu' R' e' m G T R_final G' Hstep.
-  remember (mu, R, e) as cfg eqn:Hcfg.
-  remember (mu', R', e') as cfg' eqn:Hcfg'.
-  revert mu R e mu' R' e' Hcfg Hcfg' m G T R_final G'.
-  induction Hstep;
-    intros mu0 R0 e0 mu0' R0' e0' Hcfg Hcfg'
-           m0 G0 T0 R_final0 G0_out Ht r0 Hfree HinR;
-    inversion Hcfg; subst; clear Hcfg;
-    inversion Hcfg'; subst; clear Hcfg'.
-  - (* S_StringNew: R' = R. *) exact HinR.
-  - (* S_StringConcat: ELoc + ELoc -> ELoc. R' = R. *) exact HinR.
-  - (* S_StringConcat_Step1: inner step on e1. T_StringConcat_L1
-       gives e1 : TString r at R; inner type's free_regions = outer's
-       free_regions ([r] in both). IH applies directly. *)
-    inversion Ht; subst.
-    match goal with
-    | [ He1 : has_type_l1 _ _ _ e1 (TString ?rr) _ _ |- _ ] =>
-        eapply IHHstep with (T := TString rr); try reflexivity; eassumption
-    end.
-  - (* S_StringConcat_Step2: inner step on e2 at R1; v1 is a value,
-       so by value_R_G_preserving_l1 R1 = R0. e2 has same outer type
-       (TString r). IH applies. *)
-    inversion Ht; subst.
-    match goal with
-    | [ Hv1 : has_type_l1 _ R0 _ v1 _ ?R1' _,
-        He2 : has_type_l1 _ ?R1' _ e2 (TString ?rr) _ _ |- _ ] =>
-        let HR1 := fresh "HR1" in
-        let HG1 := fresh "HG1" in
-        pose proof (value_R_G_preserving_l1 _ _ _ _ _ _ _ H Hv1) as [HR1 HG1];
-        subst R1' ;
-        eapply IHHstep with (T := TString rr); try reflexivity; eassumption
-    end.
-  - (* S_StringLen: R' = R. *) exact HinR.
-  - (* S_StringLen_Step: outer type = TBase TI32, free_regions = [].
-       Hfree is vacuous. *)
-    inversion Ht; subst. simpl in Hfree. exfalso; exact Hfree.
-  - (* S_Let_Val: substitution, R' = R. *) exact HinR.
-  - (* S_Let_Step: inner step on e1 at R0; outer type T2 is e2's
-       type, not e1's type. The inner step's type T1 is independent
-       of T2; if [r0] is in free_regions T2 but not in free_regions
-       T1, the inner step might pop [r0] without violating any
-       inner-typing side condition.
-       BLOCKED on §4.8 path (3): T_Var_*_L1 strengthening
-       (ephapax#240 / #241). *)
-    admit.
-  - (* S_LetLin_Val: substitution, R' = R. *) exact HinR.
-  - (* S_LetLin_Step: same blocker as S_Let_Step. *)
-    admit.
-  - (* S_App_Fun: substitution, R' = R. *) exact HinR.
-  - (* S_App_Step1: inner step on e1, type TFun T1 T2. free_regions
-       (TFun T1 T2) = free_regions T1 ++ free_regions T2; outer T2's
-       free_regions ⊆ inner's. So [In r0 (free_regions T2)] implies
-       [In r0 (free_regions (TFun T1 T2))]. IH applies. *)
-    inversion Ht; subst.
-    match goal with
-    | [ He1 : has_type_l1 _ _ _ e1 (TFun ?T1' ?T2') _ _ |- _ ] =>
-        eapply IHHstep with (T := TFun T1' T2'); try reflexivity; try eassumption;
-        simpl; apply in_or_app; right; exact Hfree
-    end.
-  - (* S_App_Step2: inner step on e2 at R1; v1 is a value so R1 = R0.
-       Inner type is T1 (argument type); outer type is T2 (return).
-       T1 and T2 unrelated by free_regions. BLOCKED on
-       lambda-rigidity gap (§4.8, ephapax#240 / #241 / #242). *)
-    admit.
-  - (* S_If_True: R' = R. *) exact HinR.
-  - (* S_If_False: R' = R. *) exact HinR.
-  - (* S_If_Step: inner step on e1, type TBase TBool (free_regions
-       = []); outer T can have any free_regions. BLOCKED on §4.8
-       (T_Var_*_L1 strengthening, ephapax#240 / #241). *)
-    admit.
-  - (* S_Pair_Step1: inner step on e1, type T1. Outer TProd T1 T2
-       has free_regions = free_regions T1 ++ free_regions T2.
-       Hfree case-split:
-         * In r0 (free_regions T1): IH on inner closes.
-         * In r0 (free_regions T2) only: BLOCKED on §4.8 (the inner
-           step could pop a region in T2's free regions without
-           violating any T1 side condition). *)
-    inversion Ht; subst.
-    simpl in Hfree. apply in_app_or in Hfree. destruct Hfree as [Hf1 | Hf2].
-    + (* In r0 (free_regions T1): IH applies. *)
-      match goal with
-      | [ He1 : has_type_l1 _ _ _ e1 ?T1' _ _ |- _ ] =>
-          eapply IHHstep with (T := T1'); try reflexivity; eassumption
-      end.
-    + (* In r0 (free_regions T2) only — BLOCKED on §4.8 (#240/#241). *)
-      admit.
-  - (* S_Pair_Step2: symmetric to S_Pair_Step1.
-         * In r0 (free_regions T2): IH on inner closes (v1 value gives
-           R1 = R0 via value_R_G_preserving_l1).
-         * In r0 (free_regions T1) only: BLOCKED on §4.8. *)
-    inversion Ht; subst.
-    simpl in Hfree. apply in_app_or in Hfree. destruct Hfree as [Hf1 | Hf2].
-    + (* In r0 (free_regions T1) only — BLOCKED on §4.8. *)
-      admit.
-    + (* In r0 (free_regions T2): IH applies after value_R_G_preserving_l1. *)
-      match goal with
-      | [ Hv1 : has_type_l1 _ R0 _ v1 _ ?R1' _,
-          He2 : has_type_l1 _ ?R1' _ e2 ?T2' _ _ |- _ ] =>
-          let HR1 := fresh "HR1" in
-          let HG1 := fresh "HG1" in
-          pose proof (value_R_G_preserving_l1 _ _ _ _ _ _ _ H Hv1) as [HR1 HG1];
-          subst R1';
-          eapply IHHstep with (T := T2'); try reflexivity; eassumption
-      end.
-  - (* S_Fst: ESnd (EPair v1 v2) atomic, R' = R. *) exact HinR.
-  - (* S_Fst_Step: inner step on e, type TProd T1 T2; outer T1.
-       free_regions T1 ⊆ free_regions (TProd T1 T2). IH applies. *)
-    inversion Ht; subst.
-    match goal with
-    | [ He : has_type_l1 _ _ _ e (TProd ?T1' ?T2') _ _ |- _ ] =>
-        eapply IHHstep with (T := TProd T1' T2'); try reflexivity; try eassumption;
-        simpl; apply in_or_app; left; exact Hfree
-    end.
-  - (* S_Snd: R' = R. *) exact HinR.
-  - (* S_Snd_Step: symmetric to S_Fst_Step. *)
-    inversion Ht; subst.
-    match goal with
-    | [ He : has_type_l1 _ _ _ e (TProd ?T1' ?T2') _ _ |- _ ] =>
-        eapply IHHstep with (T := TProd T1' T2'); try reflexivity; try eassumption;
-        simpl; apply in_or_app; right; exact Hfree
-    end.
-  - (* S_Inl_Step: inner type T1; outer TSum T1 T2. Case-split on
-       Hfree:
-         * In r0 (free_regions T1): IH applies.
-         * In r0 (free_regions T2) only: BLOCKED on §4.8. *)
-    inversion Ht; subst.
-    simpl in Hfree. apply in_app_or in Hfree. destruct Hfree as [Hf1 | Hf2].
-    + match goal with
-      | [ He : has_type_l1 _ _ _ e ?T1' _ _ |- _ ] =>
-          eapply IHHstep with (T := T1'); try reflexivity; eassumption
-      end.
-    + admit.
-  - (* S_Inr_Step: symmetric to S_Inl_Step.
-         * In r0 (free_regions T2): IH applies.
-         * In r0 (free_regions T1) only: BLOCKED on §4.8. *)
-    inversion Ht; subst.
-    simpl in Hfree. apply in_app_or in Hfree. destruct Hfree as [Hf1 | Hf2].
-    + admit.
-    + match goal with
-      | [ He : has_type_l1 _ _ _ e ?T2' _ _ |- _ ] =>
-          eapply IHHstep with (T := T2'); try reflexivity; eassumption
-      end.
-  - (* S_Case_Inl: substitution into branch e1, R' = R. *) exact HinR.
-  - (* S_Case_Inr: same. *) exact HinR.
-  - (* S_Case_Step: inner step on e (TSum T1 T2); outer T (branch
-       output type). Unrelated. BLOCKED on §4.8. *)
-    admit.
-  - (* S_Region_Enter: R' = r' :: R. In r0 R → In r0 R' (right of
-       cons). *)
-    simpl. right. exact HinR.
-  - (* S_Region_Exit: R' = remove_first r R. Typing of [ERegion r v]
-       at outer type T0 is either T_Region_L1 or T_Region_Active_L1
-       (the non-Echo variants); both have premise [~ In r (free_regions T0)].
-       Combined with Hfree : In r0 (free_regions T0), we get r ≠ r0.
-       Then [In r0 (remove_first r R0)] follows from [In r0 R0] +
-       [r ≠ r0]. *)
-    inversion Ht; subst;
-      match goal with
-      | [ Hnot : ~ In r R0 |- _ ] =>
-          (* T_Region_L1 / T_Region_L1_Echo: ~ In r R0 contradicts
-             H0 : In r R0 (S_Region_Exit's own premise). *)
-          exfalso; apply Hnot; assumption
-      | [ HnotT : ~ In r (Typing.free_regions ?T) |- _ ] =>
-          (* T_Region_Active_L1 / T_Region_Active_L1_Echo *)
-          let Hneq := fresh "Hneq" in
-          assert (Hneq : r <> r0) by
-            (intro Hbad; subst r0; apply HnotT; (exact Hfree || (simpl in Hfree; exact Hfree)));
-          apply remove_first_preserves_other; [exact Hneq | exact HinR]
-      end.
-  - (* S_Region_Exit_Echo: same as S_Region_Exit. Outer type is
-       TEcho T (one of the _Echo variants) or the regular T (from
-       legacy variants — but those don't pair with this step). *)
-    inversion Ht; subst;
-      match goal with
-      | [ Hnot : ~ In r R0 |- _ ] =>
-          exfalso; apply Hnot; assumption
-      | [ HnotT : ~ In r (Typing.free_regions ?T) |- _ ] =>
-          let Hneq := fresh "Hneq" in
-          assert (Hneq : r <> r0) by
-            (intro Hbad; subst r0; apply HnotT; (exact Hfree || (simpl in Hfree; exact Hfree)));
-          apply remove_first_preserves_other; [exact Hneq | exact HinR]
-      end.
-  - (* S_Region_Step: congruence on ERegion. Typing inversion gives
-       one of T_Region_L1 (body at r'::R), T_Region_Active_L1 (body at R),
-       T_Region_L1_Echo (same R-shape as T_Region_L1), or
-       T_Region_Active_L1_Echo (same R-shape as T_Region_Active_L1).
-       The Active variants close cleanly via IH (body typed at outer
-       R; output type = body type = outer T for non-Echo or witness
-       type for Echo). The non-Active variants (T_Region_L1 / Echo)
-       have body typed at (r'::R) but the step is at outer R, breaking
-       direct IH application. BLOCKED on bridging this mismatch
-       (Phase 3b follow-up, same family as the §4.8 gap). *)
-    inversion Ht; subst.
-    + (* T_Region_L1: body at r' :: R0, step at R0. MISMATCH. *)
-      admit.
-    + (* T_Region_Active_L1: body typed at R0 with type T0; IH applies
-         directly with body's typing. *)
-      match goal with
-      | [ He : has_type_l1 _ R0 _ e ?T' _ _ |- _ ] =>
-          eapply IHHstep with (T := T'); try reflexivity; eassumption
-      end.
-    + (* T_Region_L1_Echo: body at r' :: R0, step at R0. MISMATCH. *)
-      admit.
-    + (* T_Region_Active_L1_Echo: body typed at R0 with witness type T;
-         outer type TEcho T, free_regions same. IH applies. *)
-      match goal with
-      | [ He : has_type_l1 _ R0 _ e ?T' _ _ |- _ ] =>
-          eapply IHHstep with (T := T'); try reflexivity;
-          try eassumption;
-          (* Hfree : In r0 (free_regions (TEcho T')) which equals
-             free_regions T' definitionally. *)
-          simpl in Hfree; exact Hfree
-      end.
-  - (* S_Borrow_Step: T_Borrow_L1 forces e = EVar (no step rule),
-       T_Borrow_Val_L1 forces is_value of inner (no step from a
-       value, closed via legacy [values_dont_step]). Both cases
-       vacuous. *)
-    inversion Ht; subst.
-    1: { (* T_Borrow_L1: inner e = EVar i. *)
-      inversion Hstep. }
-    1: { (* T_Borrow_Val_L1: is_value of inner. *)
-      exfalso.
-      match goal with
-      | [ Hv : is_value _ |- _ ] =>
-          eapply values_dont_step; [exact Hv | exact Hstep]
-      end. }
-  - (* S_Drop: atomic, R' = R. *) exact HinR.
-  - (* S_Drop_Echo: atomic, R' = R. *) exact HinR.
-  - (* S_Drop_Step: inner type T (linear); outer TBase TUnit (via
-       T_Drop_L1, free_regions = []) or TEcho T (via T_Drop_L1_Echo,
-       free_regions = free_regions T). For T_Drop_L1: Hfree vacuous.
-       For T_Drop_L1_Echo: IH applies on inner T. *)
-    inversion Ht; subst.
-    + (* T_Drop_L1 *) simpl in Hfree. exfalso; exact Hfree.
-    + (* T_Drop_L1_Echo *)
-      match goal with
-      | [ He : has_type_l1 _ _ _ e ?T1' _ _ |- _ ] =>
-          eapply IHHstep with (T := T1'); try reflexivity; try eassumption
-      end.
-  - (* S_Copy: atomic, R' = R. *) exact HinR.
-  - (* S_Copy_Step: inner type T (non-linear); outer TProd T T;
-       free_regions = free_regions T ++ free_regions T. IH on
-       either side closes. *)
-    inversion Ht; subst.
-    match goal with
-    | [ He : has_type_l1 _ _ _ e ?T1' _ _ |- _ ] =>
-        eapply IHHstep with (T := T1'); try reflexivity; try eassumption;
-        simpl in Hfree; apply in_app_or in Hfree; destruct Hfree as [Hf | Hf]; exact Hf
-    end.
+  (* 2026 §6-experiment reduction.  The original 255-line induction left
+     ELEVEN internal admits across the eliminator/erasing congruences
+     (Let / LetLin / App2 / If / Pair / Inl / Inr / Case / Region).  They
+     all collapse through [step_R_change_shape] (Semantics.v, Qed): a single
+     step leaves [R] unchanged, prepends a fresh region, or removes exactly
+     one.  So a region free in the result type survives UNLESS the step
+     exits that very region; the eleven admits become ONE. *)
+  intros mu R e mu' R' e' m G T R_final G' Hstep Ht r0 Hfree HinR.
+  pose proof (step_R_change_shape _ _ _ _ _ _ Hstep)
+    as [Heq | [[r [Hadd Hnotin]] | [r [Hrem Hr_in]]]].
+  - (* R = R' : no region change. *) subst R'. exact HinR.
+  - (* R' = r :: R : S_Region_Enter descent. *) subst R'. simpl. right. exact HinR.
+  - (* R' = remove_first r R : S_Region_Exit descent. *) subst R'.
+    destruct (string_dec r r0) as [Heqr | Hne].
+    + (* r = r0 : the step exits the very region we need live.  The single
+         residual obligation is [cnt r0 R >= 2] (i.e. [In r0 (remove_first
+         r0 R)]).  Its DIRECT-exit sub-case is vacuous: a head redex
+         [ERegion r0 v] is typed by [T_Region_Active_L1], whose
+         [~In r0 (free_regions T)] premise contradicts [Hfree].  The residue
+         is the CONGRUENCE-exit case, where the exiting [ERegion r0] sits
+         under an eliminator and [r0] is supplied by a sibling's type — a
+         DISTINCT occurrence.  Establishing that distinctness is region-count
+         coherence at a region exit: the temporal/segment structure the
+         snapshot env + result type cannot express, relocating to connecting
+         the dynamic exit to the static typing output, i.e. preservation
+         itself.  Open research; the §6 "relocates" verdict and the
+         choreographic route are recorded in
+         [formal/L1-ELIMINATOR-FORK.md]. *)
+      subst r. admit.
+    + (* r <> r0 : remove_first r keeps every r0. *)
+      apply remove_first_preserves_other; [exact Hne | exact HinR].
 Admitted.
 
 (** [Print Assumptions step_pop_disjoint_from_type_l1.] is emitted at

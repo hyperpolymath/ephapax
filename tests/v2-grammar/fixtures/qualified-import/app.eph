@@ -1,0 +1,13 @@
+// SPDX-License-Identifier: MPL-2.0
+// Owner: Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk>
+// G6: qualified module-member access — `lib.inc` (function) and `lib.On`
+// (constructor) reached via the `M.member` syntax. Composes with phase I:
+// the inner `inc` is the same function reached unqualified.
+
+module app
+
+import lib
+
+fn bump(n: I32): I32 = lib.inc(inc(n))
+
+fn check(): I32 = lib.is_on(lib.On)

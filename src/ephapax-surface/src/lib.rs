@@ -93,7 +93,10 @@ pub enum SurfaceTy {
     },
 
     /// Second-class borrow `&T` (shared) or `&mut T` (exclusive).
-    Borrow { inner: Box<SurfaceTy>, mutable: bool },
+    Borrow {
+        inner: Box<SurfaceTy>,
+        mutable: bool,
+    },
 
     /// Type variable (bound by data declaration)
     Var(TyVar),
@@ -325,7 +328,10 @@ pub enum SurfaceExprKind {
         name: RegionName,
         body: Box<SurfaceExpr>,
     },
-    Borrow { inner: Box<SurfaceExpr>, mutable: bool },
+    Borrow {
+        inner: Box<SurfaceExpr>,
+        mutable: bool,
+    },
     Deref(Box<SurfaceExpr>),
     Drop(Box<SurfaceExpr>),
     Copy(Box<SurfaceExpr>),
@@ -378,6 +384,18 @@ pub enum SurfaceExprKind {
         scrutinee: Box<SurfaceExpr>,
         /// Match arms (pattern → body)
         arms: Vec<MatchArm>,
+    },
+
+    /// Qualified module-member access: `M.member`, where `M` is an
+    /// imported module (referred to by the last segment of its import
+    /// path). Desugars to the unqualified member — a constructor
+    /// (`Construct`) when `member` is upper-case, otherwise a function /
+    /// value reference (`Var`) — resolved in the importer's shared scope.
+    FieldAccess {
+        /// The qualifier expression (a bare module name).
+        base: Box<SurfaceExpr>,
+        /// The member being selected.
+        field: SmolStr,
     },
 }
 

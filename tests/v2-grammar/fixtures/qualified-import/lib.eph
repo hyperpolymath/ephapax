@@ -1,0 +1,12 @@
+// SPDX-License-Identifier: MPL-2.0
+// Owner: Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk>
+// Library module for the G6 qualified-access fixture. Published at `lib`;
+// exposes a public function, a public data type, and a consumer of it.
+
+module lib
+
+pub data Flag = On | Off
+
+pub fn inc(n: I32): I32 = n + 1
+
+pub fn is_on(f: Flag): I32 = match f of | On => 1 | Off => 0 end

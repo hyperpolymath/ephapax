@@ -345,7 +345,7 @@ postfix_op = {
 call_op = { "(" ~ call_args? ~ ")" }
 call_args = { expression ~ ("," ~ expression)* }
 index_op = { "[" ~ expression ~ "]" }
-member_op = { "." ~ (integer | identifier) }
+member_op = { "." ~ (integer | identifier | constructor_name) }
 
 // ============================================================================
 // Atomic Expressions

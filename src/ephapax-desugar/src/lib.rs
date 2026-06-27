@@ -54,7 +54,7 @@
 //! Some(x) ⟹ inr(x)
 //! ```
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use ephapax_surface::{
     ConstructorDef, DataDecl, MatchArm, Pattern, Span, SurfaceDecl, SurfaceExpr, SurfaceExprKind,
@@ -69,6 +69,28 @@ fn lower_visibility(v: SurfaceVisibility) -> Visibility {
         SurfaceVisibility::Public => Visibility::Public,
         SurfaceVisibility::Private => Visibility::Private,
     }
+}
+
+/// The qualifier name of a `base.member` access, if `base` is a bare
+/// module name — a `Var(m)` (lower-case module) or a nullary
+/// `Construct { ctor: m }` (upper-case module). Anything else (a value,
+/// a call result, …) has no module qualifier.
+fn module_qualifier_of(base: &SurfaceExpr) -> Option<SmolStr> {
+    match &base.kind {
+        SurfaceExprKind::Var(v) => Some(v.clone()),
+        SurfaceExprKind::Construct { ctor, args } if args.is_empty() => Some(ctor.clone()),
+        _ => None,
+    }
+}
+
+/// The last `/`- or `.`-separated segment of an import path
+/// (`lib/math` → `math`, `Foo.Bar` → `Bar`, `Coproc` → `Coproc`). This is
+/// the name a `M.member` qualifier must use.
+fn last_segment(path: &str) -> SmolStr {
+    path.rsplit(|c| c == '/' || c == '.')
+        .next()
+        .unwrap_or(path)
+        .into()
 }
 
 /// Desugaring errors.
@@ -99,6 +121,12 @@ pub enum DesugarError {
 
     #[error("empty match expression")]
     EmptyMatch,
+
+    #[error("qualified access `{qualifier}.{member}`: `{qualifier}` is not an imported module (record field access is not yet supported)")]
+    QualifiedAccessUnknownModule { qualifier: String, member: String },
+
+    #[error("member access on a non-module expression is not supported (only `Module.member` qualified access)")]
+    FieldAccessOnNonModule,
 }
 
 // =========================================================================
@@ -217,6 +245,11 @@ impl DataRegistry {
 /// [`DataRegistry`] and uses it to transform `Construct` and `Match` nodes.
 pub struct Desugarer {
     registry: DataRegistry,
+    /// Last-segment names of the importer's modules (e.g. `math` for
+    /// `import lib/math`), used to recognise a `M.member` qualifier as a
+    /// module reference at desugar time. Reset per-module by
+    /// [`Desugarer::desugar_module`].
+    module_qualifiers: HashSet<SmolStr>,
 }
 
 impl Desugarer {
@@ -224,12 +257,16 @@ impl Desugarer {
     pub fn new() -> Self {
         Self {
             registry: DataRegistry::new(),
+            module_qualifiers: HashSet::new(),
         }
     }
 
     /// Create a new desugarer with a pre-populated registry.
     pub fn with_registry(registry: DataRegistry) -> Self {
-        Self { registry }
+        Self {
+            registry,
+            module_qualifiers: HashSet::new(),
+        }
     }
 
     /// Desugar a complete surface module to a core module.
@@ -237,6 +274,15 @@ impl Desugarer {
     /// First pass: collect all data declarations into the registry.
     /// Second pass: desugar all declarations.
     pub fn desugar_module(&mut self, module: &SurfaceModule) -> Result<Module, DesugarError> {
+        // Record this module's import qualifiers (the last path segment of
+        // each `import`), so qualified `M.member` access resolves against
+        // them. Reset per module — qualifiers are not inherited.
+        self.module_qualifiers = module
+            .imports
+            .iter()
+            .map(|i| last_segment(i.module.as_str()))
+            .collect();
+
         // First pass: register all data types and extern types
         for decl in &module.decls {
             match decl {
@@ -523,9 +569,48 @@ impl Desugarer {
             SurfaceExprKind::Match { scrutinee, arms } => {
                 return self.desugar_match(scrutinee, arms, span);
             }
+
+            SurfaceExprKind::FieldAccess { base, field } => {
+                return self.desugar_field_access(base, field, span);
+            }
         };
 
         Ok(Expr::new(kind, span))
+    }
+
+    /// Desugar qualified module-member access `M.member`.
+    ///
+    /// `M` must be an imported module (matched by the last segment of its
+    /// import path); phase-I import resolution has already made `M`'s
+    /// public items visible in the importer's shared scope, so the member
+    /// resolves *unqualified*: an upper-case `member` is a constructor
+    /// (`Construct`), otherwise a function / value reference (`Var`).
+    /// Record field access on a value is not yet supported.
+    fn desugar_field_access(
+        &self,
+        base: &SurfaceExpr,
+        field: &SmolStr,
+        span: Span,
+    ) -> Result<Expr, DesugarError> {
+        let qualifier = module_qualifier_of(base).ok_or(DesugarError::FieldAccessOnNonModule)?;
+        if !self.module_qualifiers.contains(&qualifier) {
+            return Err(DesugarError::QualifiedAccessUnknownModule {
+                qualifier: qualifier.to_string(),
+                member: field.to_string(),
+            });
+        }
+        let resolved = if field.chars().next().is_some_and(|c| c.is_ascii_uppercase()) {
+            SurfaceExpr::new(
+                SurfaceExprKind::Construct {
+                    ctor: field.clone(),
+                    args: Vec::new(),
+                },
+                span,
+            )
+        } else {
+            SurfaceExpr::new(SurfaceExprKind::Var(field.clone()), span)
+        };
+        self.desugar_expr(&resolved)
     }
 
     // =====================================================================
@@ -770,7 +855,9 @@ impl Desugarer {
         let (_, ctor_defs) = self
             .registry
             .get_type_ctors(info.data_name.as_str())
-            .ok_or_else(|| DesugarError::UnknownType { name: info.data_name.to_string() })?;
+            .ok_or_else(|| DesugarError::UnknownType {
+                name: info.data_name.to_string(),
+            })?;
         let ctors = ctor_defs.clone();
 
         // Wrap in inl/inr chain based on index
@@ -935,8 +1022,12 @@ impl Desugarer {
         // Find the data type from constructor patterns
         let data_name = self.find_data_type_from_arms(arms)?;
 
-        let (_, ctor_defs) = self.registry.get_type_ctors(data_name.as_str())
-            .ok_or_else(|| DesugarError::UnknownType { name: data_name.to_string() })?;
+        let (_, ctor_defs) = self
+            .registry
+            .get_type_ctors(data_name.as_str())
+            .ok_or_else(|| DesugarError::UnknownType {
+                name: data_name.to_string(),
+            })?;
         let ctors = ctor_defs.clone();
 
         // Build an ordered map: constructor index → (pattern bindings, body)
@@ -1856,15 +1947,24 @@ mod tests {
         };
         // The two fn items end up at indexes 2 and 3 (after the two
         // type items at 0 and 1).
-        let ExternItem::Fn { ret_ty: window_ret, .. } = &items[2] else {
+        let ExternItem::Fn {
+            ret_ty: window_ret, ..
+        } = &items[2]
+        else {
             panic!("expected ExternItem::Fn at index 2");
         };
-        let ExternItem::Fn { ret_ty: ipc_ret, .. } = &items[3] else {
+        let ExternItem::Fn {
+            ret_ty: ipc_ret, ..
+        } = &items[3]
+        else {
             panic!("expected ExternItem::Fn at index 3");
         };
         assert_eq!(*window_ret, Ty::Var("Window".into()));
         assert_eq!(*ipc_ret, Ty::Var("IpcChannel".into()));
-        assert_ne!(window_ret, ipc_ret, "distinct nominal types must not be equal");
+        assert_ne!(
+            window_ret, ipc_ret,
+            "distinct nominal types must not be equal"
+        );
     }
 
     /// `SurfaceDecl::Extern` lowers to `Decl::Extern` with item types
@@ -1903,7 +2003,12 @@ mod tests {
                     &items[0],
                     ExternItem::Type { name } if name.as_str() == "Window"
                 ));
-                if let ExternItem::Fn { name, params, ret_ty } = &items[1] {
+                if let ExternItem::Fn {
+                    name,
+                    params,
+                    ret_ty,
+                } = &items[1]
+                {
                     assert_eq!(name.as_str(), "window_open");
                     assert_eq!(params.len(), 1);
                     assert_eq!(params[0].0.as_str(), "title");

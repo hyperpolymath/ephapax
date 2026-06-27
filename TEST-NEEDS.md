@@ -36,9 +36,11 @@
 ### Point-to-Point (P2P)
 **Source counts:** 49 Rust (19 crates) + 98 .eph files + 17 Idris2 + 3 V
 
-**Coq admitted proofs remaining: 4** (1 outer `Admitted.` in
-`formal/Semantics.v` + 3 outer `Admitted.` markers in
-`formal/Semantics_L1.v` covering 5 internal `admit.` cases). Single-
+**Coq admitted proofs remaining: 3** (1 outer `Admitted.` in
+`formal/Semantics.v` + 2 outer `Admitted.` markers in
+`formal/Semantics_L1.v` — `step_pop_disjoint_from_type_l1` /
+`preservation_l1` — covering 2 internal `admit.` cases at lines
+3315/3336; rebuilt `coqc 8.18.0` ground truth 2026-06-27). Single-
 source breakdown lives in `PROOF-NEEDS.md §4`; `scripts/status-gate.sh`
 reads from there.
 
@@ -52,7 +54,7 @@ reads from there.
 - Example programs not verified in CI
 
 #### Known issues:
-- 4 Admitted markers in Coq (1 in `Semantics.v` — provably-false legacy preservation, sacrosanct; 3 in `Semantics_L1.v` covering 5 inner `admit.` cases — pre-existing L1 structural debt + parallel mirrors per PROOF-NEEDS.md §4)
+- 3 Admitted markers in Coq (1 in `Semantics.v` — provably-false legacy preservation, sacrosanct; 2 in `Semantics_L1.v` — `step_pop_disjoint_from_type_l1` + `preservation_l1`, the eliminator-fork invariant + its gated capstone, per PROOF-NEEDS.md §4)
 - 5 remaining tasks (#15-#19) from type checker audit
 - interp env-leak fix was made 2026-03-28
 

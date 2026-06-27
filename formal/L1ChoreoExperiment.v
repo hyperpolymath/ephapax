@@ -187,6 +187,10 @@ Qed.
        ([S_Let_Step] / [S_App_Step2] / [S_Pair_Step2] / [S_Case_Step],
        [Semantics_L1.v:3271-3284], inner pop erased from outer type) —
        NOT the clean [ERegion rv] exit, which is already Qed.
+       STARTED in [L1ChoreoExperiment2.v]: the non-collapsed trace model
+       aimed at the congruence boundary CLOSES the relocated obligation
+       in-model ([sibling_use_keeps_region_live], Qed, axiom-free) and
+       reduces the fork to one wiring lemma. See [L1-ELIMINATOR-FORK.md] §9.
 
     3. The tropical/Lean side has the monotonicity backbone
        ([matStar_mono], [id_le_star], [parametric_resource_transport]) but

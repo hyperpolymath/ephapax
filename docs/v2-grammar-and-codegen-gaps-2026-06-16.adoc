@@ -113,6 +113,26 @@ path, not wasm.
 
 == G6 — no working module-import + qualified-member access (THE keystone)
 
+[NOTE]
+.RESOLVED (2026)
+====
+Both halves now work. *Bringing members into scope* (the second snippet)
+landed with phase I (`#43`): the multi-file resolver walks the `import`
+graph and a shared `DataRegistry` + module scope makes an imported
+module's public items visible *unqualified*. *Qualified `M.member`
+access* (the first snippet) now parses and desugars: `member_op` accepts
+a `constructor_name`, a new `SurfaceExprKind::FieldAccess` node carries
+`base.member`, and the desugarer resolves it against the importer's
+imports (`M` = the last path segment of an `import`) to the unqualified
+member — a constructor for an upper-case member, a function/value
+otherwise. So `lib.inc(...)` (function) and `lib.On` (constructor) both
+compile end-to-end (see `tests/v2-grammar/fixtures/qualified-import/` and
+`src/ephapax-cli/tests/v2_grammar_phase_k_qualified.rs`). Remaining
+follow-ups: qualified constructor application with args
+(`M.Ctor(x)` currently lowers to `App(Ctor, x)`, not `Construct{Ctor,[x]}`)
+and record field access on values (still unsupported).
+====
+
 A program cannot consume another module's API:
 
 ----

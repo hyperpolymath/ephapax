@@ -193,11 +193,10 @@ fn parse_extern_item(pair: pest::iterators::Pair<Rule>) -> Result<SurfaceExternI
                                         .next()
                                         .ok_or_else(|| ParseError::missing("extern param name"))?,
                                 );
-                                let pt = parse_type(
-                                    parts
-                                        .next()
-                                        .ok_or_else(|| ParseError::missing("extern param type"))?,
-                                )?;
+                                let pt =
+                                    parse_type(parts.next().ok_or_else(|| {
+                                        ParseError::missing("extern param type")
+                                    })?)?;
                                 params.push((pn, pt));
                             }
                         }
@@ -498,7 +497,10 @@ fn parse_seq_expr(pair: pest::iterators::Pair<Rule>) -> Result<SurfaceExpr, Pars
     // If only one expression, return it directly (no sequencing)
     if parsed.len() == 1 {
         // invariant: len() == 1 guarantees next() returns Some
-        return Ok(parsed.into_iter().next().expect("invariant: parsed.len() == 1"));
+        return Ok(parsed
+            .into_iter()
+            .next()
+            .expect("invariant: parsed.len() == 1"));
     }
 
     // Desugar e1 ; e2 ; ... ; eN into nested lets:
@@ -944,7 +946,10 @@ fn parse_match_arm(pair: pest::iterators::Pair<Rule>) -> Result<MatchArm, ParseE
         (Some(Box::new(guard_expr)), body)
     } else if exprs.len() == 1 {
         // invariant: len() == 1 guarantees pop() returns Some
-        (None, parse_expression(exprs.pop().expect("invariant: exprs.len() == 1"))?)
+        (
+            None,
+            parse_expression(exprs.pop().expect("invariant: exprs.len() == 1"))?,
+        )
     } else {
         return Err(ParseError::missing("match arm body"));
     };
@@ -1355,10 +1360,23 @@ fn parse_postfix_expr(pair: pest::iterators::Pair<Rule>) -> Result<SurfaceExpr, 
                                 );
                             }
                         }
+                        Rule::identifier | Rule::constructor_name => {
+                            // Named member access `base.member` — qualified
+                            // module-member access (`M.f`, `M.Ctor`). The
+                            // desugarer resolves it against the imported
+                            // modules.
+                            let field: SmolStr = member.as_str().into();
+                            result = SurfaceExpr::new(
+                                SurfaceExprKind::FieldAccess {
+                                    base: Box::new(result),
+                                    field,
+                                },
+                                span,
+                            );
+                        }
                         _ => {
-                            // Field access — not yet in surface AST, treat as error
                             return Err(ParseError::Syntax {
-                                message: "Named field access not yet supported".into(),
+                                message: "unexpected member access form".into(),
                                 span: span_from_pair(&member),
                             });
                         }
@@ -1507,7 +1525,10 @@ fn parse_atom_expr(pair: pest::iterators::Pair<Rule>) -> Result<SurfaceExpr, Par
             };
             let inner_expr = parse_unary_expr(operand_pair)?;
             Ok(SurfaceExpr::new(
-                SurfaceExprKind::Borrow { inner: Box::new(inner_expr), mutable },
+                SurfaceExprKind::Borrow {
+                    inner: Box::new(inner_expr),
+                    mutable,
+                },
                 span,
             ))
         }
@@ -1600,7 +1621,10 @@ fn parse_atom_expr(pair: pest::iterators::Pair<Rule>) -> Result<SurfaceExpr, Par
                 0 => Ok(SurfaceExpr::new(SurfaceExprKind::Lit(Literal::Unit), span)),
                 1 => {
                     // invariant: match arm 1 guarantees len() == 1, so next() returns Some
-                    Ok(exprs.into_iter().next().expect("invariant: exprs.len() == 1"))
+                    Ok(exprs
+                        .into_iter()
+                        .next()
+                        .expect("invariant: exprs.len() == 1"))
                 }
                 2 => {
                     let mut iter = exprs.into_iter();
@@ -1812,7 +1836,10 @@ fn parse_type_atom(pair: pest::iterators::Pair<Rule>) -> Result<SurfaceTy, Parse
                 (false, first)
             };
             let inner_ty = parse_type_atom(ty_pair)?;
-            Ok(SurfaceTy::Borrow { inner: Box::new(inner_ty), mutable })
+            Ok(SurfaceTy::Borrow {
+                inner: Box::new(inner_ty),
+                mutable,
+            })
         }
         Rule::list_ty => {
             let elem_ty = parse_type(

@@ -44,17 +44,6 @@ cicd_rules/banned_language_file:formal/Makefile.conf
 # handled by in-file `hypatia: allow` directives, not here.)
 code_safety/admitted:formal/Semantics.v
 
-# ─── SD009: legacy OCaml files without SPDX headers (src/*.ml) ──────────────────
-#
-# src/{lexer,parser,ast,typecheck}.ml are legacy OCaml artefacts in a Rust/Coq/Idris
-# project (the live type checker is Rust). Adding licence headers is an SPDX edit,
-# which estate policy reserves for the owner (no-automated-licence-edits). Flag-only:
-# exempted here and surfaced to the owner — these are also candidates for removal.
-structural_drift/SD009:src/lexer.ml
-structural_drift/SD009:src/parser.ml
-structural_drift/SD009:src/ast.ml
-structural_drift/SD009:src/typecheck.ml
-
 # ─── SD022: doc references to pre-restructure directories (deferred doc refresh) ─
 #
 # EXPLAINME/README/ROADMAP.adoc + tests/fuzz/FUZZING_GUIDE.md reference dirs

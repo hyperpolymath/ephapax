@@ -44,14 +44,6 @@ cicd_rules/banned_language_file:formal/Makefile.conf
 # handled by in-file `hypatia: allow` directives, not here.)
 code_safety/admitted:formal/Semantics.v
 
-# ─── Stale duplicate linter (lib/linter.rs) ────────────────────────────────────
-#
-# lib/linter.rs (178 lines) is a stale/legacy sibling of the live
-# src/ephapax-tools/src/linter.rs (920 lines). Its two `line.find(..).unwrap_or(0)+1`
-# sites compute 1-based diagnostic columns; 0 is a benign "column 1" default, not a
-# masked fault. Exempted pending an owner decision on whether to remove the duplicate.
-code_safety/unwrap_dangerous_default:lib/linter.rs
-
 # ─── SD009: legacy OCaml files without SPDX headers (src/*.ml) ──────────────────
 #
 # src/{lexer,parser,ast,typecheck}.ml are legacy OCaml artefacts in a Rust/Coq/Idris

@@ -38,7 +38,7 @@ fn copyStr(alloc: std.mem.Allocator, ptr: [*:0]const u8, len: i32) ?[*]u8 {
     return out.ptr;
 }
 
-export fn eph_tokbuf_new(cap: i32) *TokBuf {
+pub export fn eph_tokbuf_new(cap: i32) *TokBuf {
     const alloc = std.heap.c_allocator;
     const cap_usize = if (cap <= 0) 0 else @as(usize, @intCast(cap));
     const items = alloc.alloc(Tok, cap_usize) catch @panic("alloc failed");
@@ -47,7 +47,7 @@ export fn eph_tokbuf_new(cap: i32) *TokBuf {
     return buf;
 }
 
-export fn eph_tokbuf_free(buf: *TokBuf) void {
+pub export fn eph_tokbuf_free(buf: *TokBuf) void {
     const alloc = buf.allocator;
     var i: usize = 0;
     while (i < buf.len) : (i += 1) {
@@ -62,7 +62,7 @@ export fn eph_tokbuf_free(buf: *TokBuf) void {
     alloc.destroy(buf);
 }
 
-export fn eph_tokbuf_push(buf: *TokBuf, tag: u32, str_ptr: [*:0]const u8, str_len: i32, bool_val: u8, line: i32, col: i32) void {
+pub export fn eph_tokbuf_push(buf: *TokBuf, tag: u32, str_ptr: [*:0]const u8, str_len: i32, bool_val: u8, line: i32, col: i32) void {
     ensureCap(buf, buf.len + 1);
     const s_ptr = copyStr(buf.allocator, str_ptr, str_len);
     buf.items[buf.len] = Tok{
@@ -76,16 +76,16 @@ export fn eph_tokbuf_push(buf: *TokBuf, tag: u32, str_ptr: [*:0]const u8, str_le
     buf.len += 1;
 }
 
-export fn eph_tokbuf_len(buf: *TokBuf) i32 {
+pub export fn eph_tokbuf_len(buf: *TokBuf) i32 {
     return @as(i32, @intCast(buf.len));
 }
 
-export fn eph_tokbuf_kind(buf: *TokBuf, idx: i32) u32 {
+pub export fn eph_tokbuf_kind(buf: *TokBuf, idx: i32) u32 {
     const i = @as(usize, @intCast(idx));
     return buf.items[i].tag;
 }
 
-export fn eph_tokbuf_str_ptr(buf: *TokBuf, idx: i32) [*:0]const u8 {
+pub export fn eph_tokbuf_str_ptr(buf: *TokBuf, idx: i32) [*:0]const u8 {
     const i = @as(usize, @intCast(idx));
     const t = buf.items[i];
     if (t.str_ptr) |p| {
@@ -101,22 +101,22 @@ export fn eph_tokbuf_str_ptr(buf: *TokBuf, idx: i32) [*:0]const u8 {
     return "";
 }
 
-export fn eph_tokbuf_str_len(buf: *TokBuf, idx: i32) i32 {
+pub export fn eph_tokbuf_str_len(buf: *TokBuf, idx: i32) i32 {
     const i = @as(usize, @intCast(idx));
     return @as(i32, @intCast(buf.items[i].str_len));
 }
 
-export fn eph_tokbuf_bool(buf: *TokBuf, idx: i32) u8 {
+pub export fn eph_tokbuf_bool(buf: *TokBuf, idx: i32) u8 {
     const i = @as(usize, @intCast(idx));
     return buf.items[i].bool_val;
 }
 
-export fn eph_tokbuf_line(buf: *TokBuf, idx: i32) i32 {
+pub export fn eph_tokbuf_line(buf: *TokBuf, idx: i32) i32 {
     const i = @as(usize, @intCast(idx));
     return buf.items[i].line;
 }
 
-export fn eph_tokbuf_col(buf: *TokBuf, idx: i32) i32 {
+pub export fn eph_tokbuf_col(buf: *TokBuf, idx: i32) i32 {
     const i = @as(usize, @intCast(idx));
     return buf.items[i].col;
 }

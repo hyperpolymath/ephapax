@@ -1,0 +1,79 @@
+# SPDX-License-Identifier: MPL-2.0
+# Owner: Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk>
+# ffi-seams.yml — contract tests for the idris2 <-> zig token-buffer ABI.
+#
+# Runs `zig test` on idris2/ffi/zig/seams.zig, which exercises the @ptrCast
+# NUL-sentinel invariant + integer/bool marshalling + i32<->usize clamping
+# across the C-ABI seam (see the header of idris2/ffi/zig/seams.zig).
+#
+# Convention (per the estate CI rule): NO workflow-level `on.*.paths` on a
+# gate — a path-filtered required check is reported "Expected" forever and
+# strands PRs as blocked. Instead an always-run `changes` job decides whether
+# the heavy `test` job runs; a job skipped via `if:` counts as a passing
+# required check.
+
+name: FFI Seam Tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  changes:
+    name: Detect relevant changes
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      run: ${{ steps.detect.outputs.run }}
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          fetch-depth: 0
+      - id: detect
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE: ${{ github.base_ref }}
+          BEFORE: ${{ github.event.before }}
+        run: |
+          # Fail-safe: default to running; only set run=false when a successful
+          # diff shows nothing under idris2/ffi/zig/ changed.
+          set -uo pipefail
+          run=true
+          if [ "$EVENT" = pull_request ]; then
+            git fetch --no-tags --depth=200 origin "$BASE" 2>/dev/null \
+              && changed=$(git diff --name-only "origin/${BASE}...HEAD" 2>/dev/null) \
+              && { printf '%s\n' "$changed" | grep -qE '^idris2/ffi/zig/' && run=true || run=false; }
+          elif [ "$EVENT" = push ] && [ -n "$BEFORE" ] && [ "$BEFORE" != 0000000000000000000000000000000000000000 ]; then
+            changed=$(git diff --name-only "${BEFORE}...${GITHUB_SHA}" 2>/dev/null) \
+              && { printf '%s\n' "$changed" | grep -qE '^idris2/ffi/zig/' && run=true || run=false; }
+          fi
+          printf 'run=%s\n' "$run" >> "$GITHUB_OUTPUT"
+          echo "relevant=$run"
+
+  test:
+    name: Zig FFI seam tests
+    needs: changes
+    if: needs.changes.outputs.run == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Install Zig
+        uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2
+        with:
+          version: 0.15.2
+
+      - name: Run token-buffer seam tests
+        # -lc: tokbuf.zig allocates via std.heap.c_allocator.
+        run: zig test -lc idris2/ffi/zig/seams.zig

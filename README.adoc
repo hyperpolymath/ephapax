@@ -1,11 +1,3 @@
-image:https://img.shields.io/badge/OpenSSF-Best_Practices-green?logo=opensourcesecurity[OpenSSF Best Practices,link="https://www.bestpractices.dev/en/projects/new?repo_url=https://github.com/hyperpolymath/ephapax"]
-image:https://img.shields.io/badge/License-MPL--2.0-blue.svg[License: MPL-2.0,link="https://www.mozilla.org/MPL/2.0/"]
-image:https://img.shields.io/badge/Philosophy-Palimpsest-indigo.svg[Palimpsest,link="https://github.com/hyperpolymath/palimpsest-license"]
-image:https://github.com/hyperpolymath/ephapax/actions/workflows/codeql.yml/badge.svg?branch=main[CodeQL,link="https://github.com/hyperpolymath/ephapax/actions/workflows/codeql.yml"]
-image:https://api.thegreenwebfoundation.org/greencheckimage/ephapax.org[Green Hosting,link="https://www.thegreenwebfoundation.org/green-web-check/?url=ephapax.org"]
-
-image::brand/hero/social-profile.png[ephapax,align="center",width=460]
-
 // SPDX-License-Identifier: CC-BY-SA-4.0
 // Owner: Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk>
 // SPDX-FileCopyrightText: 2025-2026 Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk>
@@ -17,7 +9,15 @@ image::brand/hero/social-profile.png[ephapax,align="center",width=460]
 
 = Ephapax
 
+image::brand/e-mark.png[ephapax,align="center",width=150]
+
 _ἐφάπαξ — once for all._
+
+image:https://img.shields.io/badge/OpenSSF-Best_Practices-green?logo=opensourcesecurity[OpenSSF Best Practices,link="https://www.bestpractices.dev/en/projects/new?repo_url=https://github.com/hyperpolymath/ephapax"]
+image:https://img.shields.io/badge/License-MPL--2.0-blue.svg[License: MPL-2.0,link="https://www.mozilla.org/MPL/2.0/"]
+image:https://img.shields.io/badge/Philosophy-Palimpsest-indigo.svg[Palimpsest,link="https://github.com/hyperpolymath/palimpsest-license"]
+image:https://github.com/hyperpolymath/ephapax/actions/workflows/codeql.yml/badge.svg?branch=main[CodeQL,link="https://github.com/hyperpolymath/ephapax/actions/workflows/codeql.yml"]
+image:https://api.thegreenwebfoundation.org/greencheckimage/ephapax.org[Green Hosting,link="https://www.thegreenwebfoundation.org/green-web-check/?url=ephapax.org"]
 
 [IMPORTANT]
 .Not to be confused with AffineScript

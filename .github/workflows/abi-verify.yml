@@ -21,11 +21,15 @@ on:
   pull_request:
     paths:
       - 'src/abi/**'
+      - 'src/formal/**'
+      - 'idris2/**'
       - '.github/workflows/abi-verify.yml'
   push:
     branches: [main]
     paths:
       - 'src/abi/**'
+      - 'src/formal/**'
+      - 'idris2/**'
 
 permissions:
   contents: read
@@ -56,3 +60,45 @@ jobs:
           # well-typed and do NOT fail the build — they are tracked in
           # PROOF-NEEDS.md, not hidden.
           idris2 --build ephapax-abi.ipkg
+
+  idris2-formal:
+    name: Idris2 formal seam (ephapax-formal.ipkg)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    container:
+      image: snazzybucket/idris2:latest  # estate-standard Idris2 image
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v4
+
+      - name: Build (typecheck) the formal package
+        working-directory: src/formal
+        run: |
+          idris2 --version
+          idris2 --build ephapax-formal.ipkg
+
+  idris2-parse-front:
+    name: Idris2 parse front-end (ephapax-parse-tests.ipkg)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    container:
+      image: snazzybucket/idris2:latest  # estate-standard Idris2 image
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v4
+
+      - name: Build the parse front-end + test executable
+        working-directory: idris2
+        run: |
+          idris2 --version
+          # Compile-time gate only: the %foreign C bindings in
+          # Parse/ZigBuffer.idr resolve libephapax_tokbuf at RUNTIME
+          # (Chez dlopen), so building the executable needs no zig.
+          # Running it does — that path is exercised locally via
+          #   zig build-lib -dynamic -lc ffi/zig/tokbuf.zig \
+          #     -femit-bin=libephapax_tokbuf.so
+          #   LD_LIBRARY_PATH=. ./build/exec/ephapax-parse-tests
+          # and the zig side is unit-gated by ffi-seams.yml.
+          # (ephapax-affine.ipkg is NOT gated here: it depends on the
+          # external `proven` package — see PROOF-NEEDS.md.)
+          idris2 --build ephapax-parse-tests.ipkg

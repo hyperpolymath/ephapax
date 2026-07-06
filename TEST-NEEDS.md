@@ -66,6 +66,13 @@ reads from there.
 ### Build & Execution
 - [x] cargo build — compiles
 - [x] cargo test --workspace --all-targets — 467 pass, 0 fail
+- [x] idris2/ephapax-parse-tests.ipkg — compiles AND runs green (2026-07-07,
+  idris2 0.8.0 + zig-built libephapax_tokbuf.so); CI-gated compile-only by
+  abi-verify.yml `idris2-parse-front` (runtime run stays local — the estate
+  idris2 container has no zig)
+- [ ] idris2/ephapax-affine.ipkg — NOT CI-gated: depends on the external
+  `proven` Idris2 package (hyperpolymath/proven), which the estate idris2
+  image does not carry. Gate once proven is installable in CI (or vendored).
 - [ ] Compile and run all 98 .eph files — not automated
 - [ ] CLI --help works — not verified
 - [ ] Self-diagnostic — none

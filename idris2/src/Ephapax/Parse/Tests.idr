@@ -1,5 +1,5 @@
 -- SPDX-License-Identifier: MPL-2.0
-// Owner: Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk>
+-- Owner: Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk>
 -- Copyright (c) 2026 Jonathan D.A. Jewell (hyperpolymath) <j.d.a.jewell@open.ac.uk>
 --
 module Ephapax.Parse.Tests
@@ -7,10 +7,11 @@ module Ephapax.Parse.Tests
 import Data.List
 import Ephapax.Parse.Lexer
 import Ephapax.Parse.Parser
+import Ephapax.Parse.Util
 import Ephapax.Parse.ZigBuffer
 import Ephapax.IR.AST
 
-%default total
+%default covering
 
 record Failure where
   constructor MkFailure
@@ -25,24 +26,14 @@ assertEq name expected actual =
 assertTrue : String -> Bool -> List Failure
 assertTrue name ok = if ok then [] else [MkFailure name "assertion failed"]
 
-runTests : IO Int
-runTests = do
-  f1 <- pure testLexPositions
-  f2 <- testParseModule
-  f3 <- testBinaryPrecedence
-  f4 <- testParseErrorPosition
-  f5 <- testLetIfRegion
-  f6 <- testCaseInlInr
-  f7 <- testStringOps
-  let failures = concat [f1, f2, f3, f4, f5, f6, f7]
-  case failures of
-    [] => do
-      putStrLn "parse-tests: ok"
-      pure 0
-    _ => do
-      putStrLn "parse-tests: failures"
-      mapM_ (\f => putStrLn ("- " ++ f.name ++ ": " ++ f.msg)) failures
-      pure (length failures)
+parseWithBuf : List Token -> IO (Either ParseError Module)
+parseWithBuf toks = do
+  let n : Nat = length toks
+  let buf = newBuf (cast n)
+  traverse_ (\(MkToken k p) => pushTok buf k p) toks
+  let parsed = parseModuleTokens buf
+  freeBuf buf
+  pure parsed
 
 -- Tests
 
@@ -145,10 +136,22 @@ testStringOps =
             [Fn "main" [] (Base I32) _] => pure []
             _ => pure [MkFailure "string-ops" "unexpected AST"]
 
-parseWithBuf : List Token -> IO (Either ParseError Module)
-parseWithBuf toks = do
-  let buf = newBuf (length toks)
-  _ <- traverse (\\t => pushTok buf t.kind t.pos) toks
-  let parsed = parseModuleTokens buf
-  freeBuf buf
-  pure parsed
+export
+runTests : IO Int
+runTests = do
+  let f1 = testLexPositions
+  f2 <- testParseModule
+  f3 <- testBinaryPrecedence
+  f4 <- testParseErrorPosition
+  f5 <- testLetIfRegion
+  f6 <- testCaseInlInr
+  f7 <- testStringOps
+  let failures = concat [f1, f2, f3, f4, f5, f6, f7]
+  case failures of
+    [] => do
+      putStrLn "parse-tests: ok"
+      pure 0
+    _ => do
+      putStrLn "parse-tests: failures"
+      traverse_ (\f => putStrLn ("- " ++ f.name ++ ": " ++ f.msg)) failures
+      pure (cast (length failures))

@@ -1,0 +1,32 @@
+# SPDX-License-Identifier: MPL-2.0
+# Owner: Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk>
+#
+# eph-corpus-compiles.txt — the RATCHET allowlist for the .eph corpus gate
+# (src/ephapax-cli/tests/eph_corpus_gate.rs).
+#
+# Every path here MUST compile (surface-parse → desugar → typecheck →
+# wasm) — a regression on any of them fails CI. Every .eph file in the
+# repo that compiles MUST be listed here — an unexpected pass also fails
+# CI, so the list can only be updated deliberately. The gate prints the
+# known-debt count (files that do not yet compile) on every run; that
+# debt is the v1→v2 corpus-migration backlog (much of it is speculative
+# syntax for features that do not exist yet: braces-form fn bodies,
+# borrows, ADT type declarations).
+#
+# Ratchet direction: when a grammar/codegen phase lands, flip the newly
+# passing files IN THE SAME PR.
+#
+# Paths are repo-root-relative, one per line, '#' comments allowed.
+examples/pattern_matching.eph
+stdlib/Argv.eph
+tests/v2-grammar/fixtures/extern-abstract-types.eph
+tests/v2-grammar/fixtures/extern-callsite.eph
+tests/v2-grammar/fixtures/hypatia-port/bridge.eph
+tests/v2-grammar/fixtures/hypatia-port/hypatia_gui.eph
+tests/v2-grammar/fixtures/implicit-in.eph
+tests/v2-grammar/fixtures/implicit-in-tuple.eph
+tests/v2-grammar/fixtures/let-pair-explicit-in.eph
+tests/v2-grammar/fixtures/multi-module/app.eph
+tests/v2-grammar/fixtures/multi-module/lib/math.eph
+tests/v2-grammar/fixtures/qualified-import/app.eph
+tests/v2-grammar/fixtures/qualified-import/lib.eph

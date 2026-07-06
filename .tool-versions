@@ -8,5 +8,5 @@ ocaml 5.4.1
 # directly; coq is provisioned via apt (noble ships exactly 8.18.0), kept
 # here only as the documented pin.
 coq 8.18.0
-idris2 0.7.0
+idris2 0.8.0
 zig 0.14.0

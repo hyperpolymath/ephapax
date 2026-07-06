@@ -20,7 +20,7 @@
 
 set -uo pipefail
 
-IDRIS2_VERSION="${IDRIS2_VERSION:-0.7.0}"
+IDRIS2_VERSION="${IDRIS2_VERSION:-0.8.0}"
 PREFIX="${PREFIX:-$HOME/.idris2}"
 SCHEME="${SCHEME:-chezscheme}"
 

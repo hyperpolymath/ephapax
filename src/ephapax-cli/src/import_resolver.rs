@@ -64,10 +64,13 @@ impl std::error::Error for ResolveError {}
 /// Walk the import graph rooted at `root_path` and return all loaded
 /// modules in topological order — dependencies first, root last. Search
 /// for imports under `base_dir` (typically the directory containing the
-/// root file).
+/// root file), falling back to `stdlib_dir` when given — this is what
+/// lets a program anywhere on disk say `import Argv` and reach the
+/// shipped stdlib.
 pub fn load_program(
     root_path: &Path,
     base_dir: &Path,
+    stdlib_dir: Option<&Path>,
 ) -> Result<Vec<LoadedModule>, ResolveError> {
     let mut loaded: HashMap<String, LoadedModule> = HashMap::new();
     let mut order: Vec<String> = Vec::new();
@@ -80,7 +83,14 @@ pub fn load_program(
     // this map. This lets files live anywhere in the tree as long as
     // they declare their module name in a `module a/b/c` header — which
     // matches existing corpora like hypatia/src/ui/gossamer/.
-    let mod_index = scan_module_index(base_dir);
+    // The stdlib directory (when configured) contributes a THIRD tier:
+    // local files always shadow stdlib modules of the same name.
+    let mut mod_index = scan_module_index(base_dir);
+    if let Some(sd) = stdlib_dir {
+        for (name, path) in scan_module_index(sd) {
+            mod_index.entry(name).or_insert(path);
+        }
+    }
 
     let root_module_path = root_module_path_from_source(root_path)?;
     visit(

@@ -1,0 +1,11 @@
+// SPDX-License-Identifier: MPL-2.0
+// Owner: Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk>
+// Stdlib import: `import Argv` resolves via the stdlib search path
+// (--stdlib / $EPHAPAX_STDLIB / repo stdlib/), not a sibling file.
+// Qualified access to an imported extern (G6 + extern seam).
+
+module app
+
+import Argv
+
+fn main(): I32 = Argv.argv_count()

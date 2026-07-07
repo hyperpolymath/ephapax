@@ -62,7 +62,7 @@ ephapax-vram-cache = { path = "src/ephapax-vram-cache" }
 # `affinescript.ownership` → `typedwasm.ownership`). This is the
 # canonical C7 pin (cf. CHANGELOG.md "Added" / "C7 (#72)"). Re-bump
 # only if a newer `typed-wasm-verify` API change is needed.
-typed-wasm-verify = { git = "https://github.com/hyperpolymath/typed-wasm", rev = "a1935c16176567e0470de2feedf9c37a87dc0158" }
+typed-wasm-verify = { git = "https://github.com/hyperpolymath/typed-wasm", rev = "5d67603852098561d5f4e967f6d0bdf3d3e10a16", features = ["unstable-l2"] }
 
 # External dependencies
 serde = { version = "1.0", features = ["derive"] }

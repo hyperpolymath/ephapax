@@ -193,3 +193,67 @@ fn extract_ownership_section(wasm: &[u8]) -> Option<Vec<u8>> {
     }
     None
 }
+
+/// Cross-verifier conformance for the ADR-0002/ADR-0003 carriers
+/// (#251): compile a string-using program with the REAL CLI, then run
+/// typed-wasm's OWN `verify_access_sites_from_module` pass over the
+/// emitted bytes. Zero `AccessSiteError`s means the regions +
+/// access-sites sections ephapax emits are byte-compatible with the
+/// independent consumer AND every recorded offset resolves to a real
+/// typed memory op of the declared field's type.
+#[test]
+fn typed_wasm_verifies_ephapax_access_sites() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let src_path = dir.path().join("seam_access.eph");
+    std::fs::write(&src_path, "fn echo(s: String): String = s\n").expect("write source");
+    let out = dir.path().join("seam_access.wasm");
+
+    let status = std::process::Command::new(env!("CARGO_BIN_EXE_ephapax"))
+        .args(["compile"])
+        .arg(&src_path)
+        .arg("-o")
+        .arg(&out)
+        .output()
+        .expect("spawn ephapax");
+    assert!(
+        status.status.success(),
+        "compile failed:\nstdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&status.stdout),
+        String::from_utf8_lossy(&status.stderr)
+    );
+    let wasm = std::fs::read(&out).expect("read emitted wasm");
+
+    // Their parsers must accept our payloads...
+    let regions_payload = extract_custom_section(&wasm, "typedwasm.regions")
+        .expect("typedwasm.regions section present");
+    let regions = tw::section::parse_regions_section_payload(&regions_payload)
+        .expect("typed-wasm rejected ephapax's regions payload");
+    assert_eq!(regions.len(), 1, "expected the single ephapax.string region");
+
+    let access_payload = extract_custom_section(&wasm, "typedwasm.access-sites")
+        .expect("typedwasm.access-sites section present");
+    let sites = tw::section::parse_access_sites_section_payload(&access_payload)
+        .expect("typed-wasm rejected ephapax's access-sites payload");
+    assert!(!sites.is_empty(), "no access sites decoded");
+
+    // ...and their full verification pass must report zero errors.
+    let errors = tw::verify::verify_access_sites_from_module(&wasm)
+        .expect("verifier failed to parse the module");
+    assert!(
+        errors.is_empty(),
+        "typed-wasm's access-site verifier rejected ephapax's module: {errors:?}"
+    );
+}
+
+/// Find an arbitrary named custom section in a wasm module.
+fn extract_custom_section(wasm: &[u8], name: &str) -> Option<Vec<u8>> {
+    use wasmparser::{Parser, Payload};
+    for payload in Parser::new(0).parse_all(wasm) {
+        if let Payload::CustomSection(reader) = payload.ok()? {
+            if reader.name() == name {
+                return Some(reader.data().to_vec());
+            }
+        }
+    }
+    None
+}

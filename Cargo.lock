@@ -3223,10 +3223,10 @@ dependencies = [
 [[package]]
 name = "typed-wasm-verify"
 version = "0.1.0"
-source = "git+https://github.com/hyperpolymath/typed-wasm?rev=a1935c16176567e0470de2feedf9c37a87dc0158#a1935c16176567e0470de2feedf9c37a87dc0158"
+source = "git+https://github.com/hyperpolymath/typed-wasm?rev=5d67603852098561d5f4e967f6d0bdf3d3e10a16#5d67603852098561d5f4e967f6d0bdf3d3e10a16"
 dependencies = [
  "thiserror 2.0.18",
- "wasmparser 0.250.0",
+ "wasmparser 0.252.0",
 ]
 
 [[package]]
@@ -3540,9 +3540,9 @@ dependencies = [
 
 [[package]]
 name = "wasmparser"
-version = "0.250.0"
+version = "0.252.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "071d99cdfb8111603ed05500506c3298a940b58d609dd0259d3981785dd33556"
+checksum = "d3eb099dcadcde5be9eef55e3a337128efd4e44b4c93122487e4d2e4e1c6627c"
 dependencies = [
  "bitflags 2.11.0",
  "hashbrown 0.17.1",

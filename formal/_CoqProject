@@ -16,6 +16,7 @@ L1ChoreoExperiment2.v
 Counterexample.v
 Counterexample_RegionShrink.v
 Counterexample_StepPop.v
+Counterexample_PreservationL1.v
 Echo.v
 Modality.v
 TypingL2.v

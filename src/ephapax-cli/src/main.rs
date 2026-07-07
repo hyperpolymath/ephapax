@@ -21,7 +21,7 @@ use ephapax_typing::{type_check_module, type_check_module_with_registry, ModuleR
 // AST dump support (sexpr + json output)
 #[allow(unused_imports)]
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 #[derive(Parser)]
@@ -110,6 +110,13 @@ enum Commands {
         /// if any are found.
         #[arg(long)]
         verify_ownership: bool,
+
+        /// Directory searched for stdlib modules (`import Argv`, ...)
+        /// after the program's own directory. Defaults to
+        /// $EPHAPAX_STDLIB, else the repo stdlib/ when built from
+        /// source. Local files shadow stdlib modules of the same name.
+        #[arg(long)]
+        stdlib: Option<PathBuf>,
     },
 
     /// Compile an S-expression IR module to WebAssembly
@@ -193,6 +200,7 @@ fn main() -> ExitCode {
             debug,
             mode,
             verify_ownership,
+            stdlib,
         }) => compile_file(
             &file,
             output,
@@ -200,6 +208,7 @@ fn main() -> ExitCode {
             debug,
             &mode,
             verify_ownership,
+            stdlib,
             cli.verbose,
         ),
         Some(Commands::CompileSexpr { file, output }) => {
@@ -417,6 +426,7 @@ fn compile_file(
     debug: bool,
     _mode_str: &str,
     verify_ownership: bool,
+    stdlib: Option<PathBuf>,
     verbose: bool,
 ) -> Result<(), String> {
     let filename = path.to_str().unwrap_or("input").to_string();
@@ -428,11 +438,21 @@ fn compile_file(
         .map(|p| p.to_path_buf())
         .unwrap_or_else(|| PathBuf::from("."));
 
+    // Stdlib search dir: --stdlib flag > $EPHAPAX_STDLIB > the source
+    // tree's stdlib/ (dev builds). None if none of those exist.
+    let stdlib_dir = stdlib
+        .or_else(|| std::env::var_os("EPHAPAX_STDLIB").map(PathBuf::from))
+        .or_else(|| {
+            let dev = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../stdlib");
+            dev.canonicalize().ok()
+        })
+        .filter(|p| p.is_dir());
+
     // Try the multi-module pipeline first: load + parse the import graph
     // (modules returned in topological order, dependencies first, root
     // last). If the surface parser rejects the root file, fall back to
     // the legacy single-file core-parser path.
-    let loaded = match import_resolver::load_program(path, &base_dir) {
+    let loaded = match import_resolver::load_program(path, &base_dir, stdlib_dir.as_deref()) {
         Ok(l) => l,
         Err(import_resolver::ResolveError::Parse { .. }) => {
             // Surface parse failed on the root — legacy core-parser fallback.

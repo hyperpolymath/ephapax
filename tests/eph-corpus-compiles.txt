@@ -30,3 +30,4 @@ tests/v2-grammar/fixtures/multi-module/app.eph
 tests/v2-grammar/fixtures/multi-module/lib/math.eph
 tests/v2-grammar/fixtures/qualified-import/app.eph
 tests/v2-grammar/fixtures/qualified-import/lib.eph
+tests/v2-grammar/fixtures/stdlib-import/app.eph

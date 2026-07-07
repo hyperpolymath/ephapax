@@ -47,6 +47,7 @@
 //! Mode is set per-module compilation and affects how unused linear values are handled.
 
 mod debug;
+pub mod carriers;
 pub mod ownership;
 
 pub use debug::{DebugInfo, VariableMetadata};
@@ -308,6 +309,9 @@ pub struct Codegen {
 
     /// User function metadata, keyed by function name
     user_fns: HashMap<String, UserFnInfo>,
+    /// Typed string-header access sites collected while emitting the
+    /// runtime helpers, for the `typedwasm.access-sites` carrier.
+    access_sites: Vec<carriers::AccessSite>,
 
     /// Dynamically added WASM type entries beyond the fixed set.
     /// Each entry is `(params, results)` as vectors of `ValType`.
@@ -426,6 +430,7 @@ impl Codegen {
             data_entries: Vec::new(),
             data_offset: 1024, // Start string data after metadata area
             user_fns: HashMap::new(),
+            access_sites: Vec::new(),
             extra_types: Vec::new(),
             lambda_fns: Vec::new(),
             debug_info: None,
@@ -645,6 +650,7 @@ impl Codegen {
         self.module.section(&code_sec);
         self.emit_data_section();
         self.emit_ownership_section();
+        self.emit_carrier_sections();
         self.emit_debug_sections();
         self.module.clone().finish()
     }
@@ -697,6 +703,7 @@ impl Codegen {
         self.module.section(&code_sec);
         self.emit_data_section();
         self.emit_ownership_section();
+        self.emit_carrier_sections();
 
         Ok(self.module.clone().finish())
     }
@@ -1016,22 +1023,33 @@ impl Codegen {
     }
 
     /// Append the 7 runtime helper functions to the given sections.
-    fn append_runtime_funcs(&self, func_sec: &mut FunctionSection, code_sec: &mut CodeSection) {
+    fn append_runtime_funcs(&mut self, func_sec: &mut FunctionSection, code_sec: &mut CodeSection) {
         // 2: bump_alloc  (i32, i32) -> i32
         func_sec.function(TYPE_I32_I32_I32);
         code_sec.function(&self.gen_bump_alloc());
 
+        // The string helpers report their typed string-header access
+        // sites; collect them (keyed by the helper's function index)
+        // for the typedwasm.access-sites carrier.
+        self.access_sites.clear();
+
         // 3: string_new  (i32, i32) -> i32
         func_sec.function(TYPE_I32_I32_I32);
-        code_sec.function(&self.gen_string_new());
+        let (f, sites) = self.gen_string_new();
+        code_sec.function(&f);
+        self.record_access_sites(self.fn_string_new(), &sites);
 
         // 4: string_len  (i32, i32) -> i32
         func_sec.function(TYPE_I32_I32_I32);
-        code_sec.function(&self.gen_string_len());
+        let (f, sites) = self.gen_string_len();
+        code_sec.function(&f);
+        self.record_access_sites(self.fn_string_len(), &sites);
 
         // 5: string_concat  (i32, i32) -> i32
         func_sec.function(TYPE_I32_I32_I32);
-        code_sec.function(&self.gen_string_concat());
+        let (f, sites) = self.gen_string_concat();
+        code_sec.function(&f);
+        self.record_access_sites(self.fn_string_concat(), &sites);
 
         // 6: string_drop  (i32) -> ()
         func_sec.function(TYPE_I32_VOID);
@@ -1322,6 +1340,44 @@ impl Codegen {
         self.module.section(&custom);
     }
 
+    fn record_access_sites(&mut self, func_idx: u32, sites: &[(u32, u32)]) {
+        for &(field_id, byte_offset) in sites {
+            self.access_sites.push(carriers::AccessSite {
+                func_idx,
+                byte_offset,
+                region_id: carriers::REGION_STRING,
+                field_id,
+            });
+        }
+    }
+
+    /// Emit the `typedwasm.regions` + `typedwasm.access-sites` carriers
+    /// (typed-wasm ADR-0002 / ADR-0003). The regions section MUST
+    /// accompany access-sites — a verifier rejects the latter alone
+    /// with `MissingDependentCarrier`. Emission is all-or-nothing over
+    /// the module's typed string-header accesses (proposal 0002
+    /// producer obligation ¶4); the sites are collected while the
+    /// string runtime helpers are encoded, so the byte offsets are
+    /// exact for the bytes actually emitted. Ephapax runs no
+    /// post-codegen rewrite passes (no wasm-opt / snip), so emitting
+    /// here satisfies the "after any rewrite" obligation ¶1.
+    fn emit_carrier_sections(&mut self) {
+        if self.access_sites.is_empty() {
+            return;
+        }
+        let regions = wasm_encoder::CustomSection {
+            name: carriers::REGIONS_SECTION_NAME.into(),
+            data: carriers::build_regions_section_payload().into(),
+        };
+        self.module.section(&regions);
+        let payload = carriers::build_access_sites_payload(&self.access_sites);
+        let access = wasm_encoder::CustomSection {
+            name: carriers::ACCESS_SITES_SECTION_NAME.into(),
+            data: payload.into(),
+        };
+        self.module.section(&access);
+    }
+
     /// Emit debug information as custom WASM sections
     fn emit_debug_sections(&mut self) {
         if let Some(debug_info) = &self.debug_info {
@@ -1368,8 +1424,15 @@ impl Codegen {
     }
 
     /// String allocation: `(ptr: i32, len: i32) -> handle: i32`
-    fn gen_string_new(&self) -> Function {
+    /// Returns the function body plus its typed string-header access
+    /// sites as `(field_id, byte_offset)` pairs for the
+    /// `typedwasm.access-sites` carrier. `Function::byte_len()` before
+    /// emitting an instruction IS that instruction's byte offset within
+    /// the body (locals vector included), matching proposal 0002's
+    /// offset convention.
+    fn gen_string_new(&self) -> (Function, Vec<(u32, u32)>) {
         let mut f = Function::new(vec![(1, ValType::I32)]); // local for handle
+        let mut sites = Vec::new();
 
         // Allocate 8-byte header
         f.instruction(&Instruction::I32Const(STRING_SIZE as i32));
@@ -1380,30 +1443,34 @@ impl Codegen {
         // Store ptr at handle+0
         f.instruction(&Instruction::LocalGet(2));
         f.instruction(&Instruction::LocalGet(0));
+        sites.push((carriers::FIELD_PTR, f.byte_len() as u32));
         f.instruction(&Instruction::I32Store(mem_arg(0)));
 
         // Store len at handle+4
         f.instruction(&Instruction::LocalGet(2));
         f.instruction(&Instruction::LocalGet(1));
+        sites.push((carriers::FIELD_LEN, f.byte_len() as u32));
         f.instruction(&Instruction::I32Store(mem_arg(4)));
 
         // return handle
         f.instruction(&Instruction::LocalGet(2));
         f.instruction(&Instruction::End);
-        f
+        (f, sites)
     }
 
     /// Get string length: `(handle: i32, _: i32) -> len: i32`
-    fn gen_string_len(&self) -> Function {
+    fn gen_string_len(&self) -> (Function, Vec<(u32, u32)>) {
         let mut f = Function::new(vec![]);
+        let mut sites = Vec::new();
         f.instruction(&Instruction::LocalGet(0));
+        sites.push((carriers::FIELD_LEN, f.byte_len() as u32));
         f.instruction(&Instruction::I32Load(mem_arg(4)));
         f.instruction(&Instruction::End);
-        f
+        (f, sites)
     }
 
     /// Concatenate two strings: `(h1: i32, h2: i32) -> new_handle: i32`
-    fn gen_string_concat(&self) -> Function {
+    fn gen_string_concat(&self) -> (Function, Vec<(u32, u32)>) {
         let mut f = Function::new(vec![
             (1, ValType::I32), // ptr1
             (1, ValType::I32), // len1
@@ -1413,21 +1480,27 @@ impl Codegen {
             (1, ValType::I32), // new_handle
         ]);
 
+        let mut sites = Vec::new();
+
         // Load ptr1, len1 from handle1
         f.instruction(&Instruction::LocalGet(0));
+        sites.push((carriers::FIELD_PTR, f.byte_len() as u32));
         f.instruction(&Instruction::I32Load(mem_arg(0)));
         f.instruction(&Instruction::LocalSet(2));
 
         f.instruction(&Instruction::LocalGet(0));
+        sites.push((carriers::FIELD_LEN, f.byte_len() as u32));
         f.instruction(&Instruction::I32Load(mem_arg(4)));
         f.instruction(&Instruction::LocalSet(3));
 
         // Load ptr2, len2 from handle2
         f.instruction(&Instruction::LocalGet(1));
+        sites.push((carriers::FIELD_PTR, f.byte_len() as u32));
         f.instruction(&Instruction::I32Load(mem_arg(0)));
         f.instruction(&Instruction::LocalSet(4));
 
         f.instruction(&Instruction::LocalGet(1));
+        sites.push((carriers::FIELD_LEN, f.byte_len() as u32));
         f.instruction(&Instruction::I32Load(mem_arg(4)));
         f.instruction(&Instruction::LocalSet(5));
 
@@ -1468,6 +1541,7 @@ impl Codegen {
         // Store ptr
         f.instruction(&Instruction::LocalGet(7));
         f.instruction(&Instruction::LocalGet(6));
+        sites.push((carriers::FIELD_PTR, f.byte_len() as u32));
         f.instruction(&Instruction::I32Store(mem_arg(0)));
 
         // Store total len
@@ -1475,12 +1549,13 @@ impl Codegen {
         f.instruction(&Instruction::LocalGet(3));
         f.instruction(&Instruction::LocalGet(5));
         f.instruction(&Instruction::I32Add);
+        sites.push((carriers::FIELD_LEN, f.byte_len() as u32));
         f.instruction(&Instruction::I32Store(mem_arg(4)));
 
         // return new_handle
         f.instruction(&Instruction::LocalGet(7));
         f.instruction(&Instruction::End);
-        f
+        (f, sites)
     }
 
     /// Drop a string handle (no-op in bump allocator)
@@ -4651,6 +4726,87 @@ mod tests {
             }
         }
         None
+    }
+
+    /// Locate any named custom section's payload.
+    fn custom_payload(wasm: &[u8], name: &str) -> Option<Vec<u8>> {
+        use wasmparser::{Parser as WP, Payload};
+        for payload in WP::new(0).parse_all(wasm) {
+            if let Payload::CustomSection(reader) = payload.expect("wasm parse") {
+                if reader.name() == name {
+                    return Some(reader.data().to_vec());
+                }
+            }
+        }
+        None
+    }
+
+    /// The regions + access-sites carriers are emitted together, and
+    /// every access-site entry's byte offset points at an i32.load
+    /// (0x28) or i32.store (0x36) opcode in the referenced function
+    /// body — verified against the actual emitted bytes.
+    #[test]
+    fn access_sites_carrier_emitted_and_offsets_point_at_accesses() {
+        use wasmparser::{Parser as WP, Payload};
+
+        let module = AstModule {
+            name: "t".into(),
+            imports: vec![],
+            decls: vec![Decl::Fn {
+                name: "main".into(),
+                visibility: Visibility::Public,
+                type_params: vec![],
+                params: vec![],
+                ret_ty: Ty::Base(BaseTy::I32),
+                body: e(ExprKind::Lit(Literal::I32(0))),
+            }],
+        };
+        let wasm = compile_module(&module).expect("compile");
+        validate_wasm(&wasm);
+
+        let regions = custom_payload(&wasm, carriers::REGIONS_SECTION_NAME)
+            .expect("typedwasm.regions section present");
+        assert_eq!(regions, carriers::build_regions_section_payload());
+
+        let payload = custom_payload(&wasm, carriers::ACCESS_SITES_SECTION_NAME)
+            .expect("typedwasm.access-sites section present");
+        let entries = carriers::parse_access_sites_payload(&payload)
+            .expect("access-sites payload parses");
+        // string_new (2 stores) + string_len (1 load) + string_concat
+        // (4 loads + 2 stores) = 9 typed accesses.
+        assert_eq!(entries.len(), 9);
+
+        // Collect function bodies in index order + the import count so
+        // entry.func_idx (imports-included space) maps to a body.
+        let mut import_count = 0u32;
+        let mut bodies: Vec<(usize, usize)> = Vec::new(); // (start, end) in wasm
+        for payload in WP::new(0).parse_all(&wasm) {
+            match payload.expect("wasm parse") {
+                Payload::ImportSection(r) => {
+                    import_count = r.count();
+                }
+                Payload::CodeSectionEntry(body) => {
+                    let range = body.range();
+                    bodies.push((range.start, range.end));
+                }
+                _ => {}
+            }
+        }
+        for entry in &entries {
+            assert_eq!(entry.region_id, carriers::REGION_STRING);
+            assert!(entry.field_id == carriers::FIELD_PTR
+                || entry.field_id == carriers::FIELD_LEN);
+            let body_idx = (entry.func_idx - import_count) as usize;
+            let (start, end) = bodies[body_idx];
+            let opcode_at = start + entry.byte_offset as usize;
+            assert!(opcode_at < end, "offset out of body range");
+            let opcode = wasm[opcode_at];
+            assert!(
+                opcode == 0x28 || opcode == 0x36,
+                "offset {} in func {} points at 0x{:02x}, not i32.load/i32.store",
+                entry.byte_offset, entry.func_idx, opcode
+            );
+        }
     }
 
     #[test]

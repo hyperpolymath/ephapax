@@ -47,7 +47,7 @@ jobs:
       image: snazzybucket/idris2:latest  # estate-standard Idris2 image
     steps:
       - name: Checkout repository
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v4
 
       - name: Build (typecheck) the ABI seam
         working-directory: src/abi
@@ -69,7 +69,7 @@ jobs:
       image: snazzybucket/idris2:latest  # estate-standard Idris2 image
     steps:
       - name: Checkout repository
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v4
 
       - name: Build (typecheck) the formal package
         working-directory: src/formal
@@ -85,7 +85,7 @@ jobs:
       image: snazzybucket/idris2:latest  # estate-standard Idris2 image
     steps:
       - name: Checkout repository
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v4
 
       - name: Build the parse front-end + test executable
         working-directory: idris2

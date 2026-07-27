@@ -1,5 +1,5 @@
 ; SPDX-License-Identifier: MPL-2.0
-// Owner: Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk>
+;; Owner: Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk>
 ;; guix.scm — GNU Guix package definition for ephapax
 ;; Usage: guix shell -f guix.scm
 
@@ -15,5 +15,4 @@
   (synopsis "ephapax")
   (description "ephapax — part of the hyperpolymath ecosystem.")
   (home-page "https://github.com/hyperpolymath/ephapax")
-  (license ((@@ (guix licenses) license) "PMPL-1.0-or-later"
-             "https://github.com/hyperpolymath/palimpsest-license")))
+  (license mpl2.0))

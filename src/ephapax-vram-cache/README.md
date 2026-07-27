@@ -231,7 +231,7 @@ GPU Memory (4GB Quadro M2000M)
 
 ## License
 
-PMPL-1.0-or-later
+MPL-2.0
 
 ## Related
 

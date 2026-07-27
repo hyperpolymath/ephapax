@@ -383,7 +383,7 @@ fn p2p_single_consume_always_accepted_both_disciplines() {
         let expr = e(ExprKind::LetLin {
             name: name.clone().into(),
             ty: Some(Ty::Base(BaseTy::I32)),
-            value: Box::new(i32_lit(i as i32)),
+            value: Box::new(i32_lit(i)),
             body: Box::new(var(&name)),
         });
 
@@ -413,7 +413,7 @@ fn p2p_contraction_always_rejected_both_disciplines() {
         let expr = e(ExprKind::LetLin {
             name: name.clone().into(),
             ty: Some(Ty::Base(BaseTy::I32)),
-            value: Box::new(i32_lit(i as i32)),
+            value: Box::new(i32_lit(i)),
             body: Box::new(e(ExprKind::Pair {
                 left: Box::new(var(&name)),
                 right: Box::new(var(&name)),
@@ -462,7 +462,7 @@ fn p2p_weakening_linear_forbidden_affine_allowed() {
         let expr = e(ExprKind::LetLin {
             name: name.clone().into(),
             ty: Some(Ty::Base(BaseTy::I32)),
-            value: Box::new(i32_lit(i as i32)),
+            value: Box::new(i32_lit(i)),
             body: Box::new(unit()),
         });
 
@@ -485,7 +485,7 @@ fn p2p_weakening_linear_forbidden_affine_allowed() {
         let affine_expr = e(ExprKind::Let {
             name: name.clone().into(),
             ty: Some(Ty::Base(BaseTy::I32)),
-            value: Box::new(i32_lit(i as i32)),
+            value: Box::new(i32_lit(i)),
             body: Box::new(unit()),
         });
         let mut affine = AffineChecker::new();
@@ -510,7 +510,7 @@ fn p2p_unified_api_consistent_with_direct_checkers() {
         let good_expr = e(ExprKind::LetLin {
             name: name.clone().into(),
             ty: Some(Ty::Base(BaseTy::I32)),
-            value: Box::new(i32_lit(i as i32)),
+            value: Box::new(i32_lit(i)),
             body: Box::new(var(&name)),
         });
 

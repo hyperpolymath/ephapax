@@ -584,6 +584,8 @@ mod tests {
         assert_eq!(lex("12345"), vec![TokenKind::Integer(12345)]);
     }
 
+    // `3.14` here is a float literal under test, not an approximation of PI.
+    #[allow(clippy::approx_constant)]
     #[test]
     fn test_floats() {
         assert_eq!(lex("3.14"), vec![TokenKind::Float(3.14)]);
@@ -785,6 +787,9 @@ mod tests {
 mod property_tests {
     use super::*;
 
+    /// Predicate over a token kind, used by the table-driven P2P tests.
+    type TokenPredicate = fn(&TokenKind) -> bool;
+
     // -------------------------------------------------------------------------
     // P2P: round-trip token spans
     // -------------------------------------------------------------------------
@@ -891,7 +896,7 @@ mod property_tests {
     /// exactly one content token of the Integer kind.
     #[test]
     fn p2p_integer_literals_tokenise_to_one_token() {
-        let inputs: Vec<(&str, fn(&TokenKind) -> bool)> = vec![
+        let inputs: Vec<(&str, TokenPredicate)> = vec![
             ("0", |t| matches!(t, TokenKind::Integer(_))),
             ("1", |t| matches!(t, TokenKind::Integer(_))),
             ("42", |t| matches!(t, TokenKind::Integer(_))),

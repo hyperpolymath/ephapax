@@ -316,7 +316,7 @@ mod tests {
         let _ = db.wasm("m");
         let n = db.recompute_count();
 
-        db.set_source_text("m", &format!("// leading comment\n{ADD}"));
+        db.set_source_text("m", format!("// leading comment\n{ADD}"));
         let _ = db.wasm("m");
         let delta = db.recompute_count() - n;
         assert!(

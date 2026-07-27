@@ -800,9 +800,12 @@ See `formal/PRESERVATION-DESIGN.md §12` and `PROOF-NEEDS.md §3`.
 
 == Licence
 
-PMPL-1.0-or-later — see link:LICENSES/PMPL-1.0-or-later.txt[PMPL-1.0-or-later.txt].
+Code is `MPL-2.0` — see link:LICENSES/MPL-2.0.txt[MPL-2.0.txt].
 
-MPL-2.0 fallback available — see link:LICENSES/MPL-2.0.txt[MPL-2.0.txt].
+Documentation is `CC-BY-SA-4.0` — see link:LICENSES/CC-BY-SA-4.0.txt[CC-BY-SA-4.0.txt].
+
+Every file carries its own `SPDX-License-Identifier:` header, so the applicable
+licence is always the one named in the file itself.
 
 == Author
 

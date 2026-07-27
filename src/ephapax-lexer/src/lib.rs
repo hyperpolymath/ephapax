@@ -854,8 +854,14 @@ mod property_tests {
     fn p2p_empty_string_no_content_tokens_no_errors() {
         for _ in 0..20 {
             let (tokens, errors) = tokenize_no_eof("");
-            assert!(tokens.is_empty(), "P2P empty: empty source must produce no content tokens");
-            assert!(errors.is_empty(), "P2P empty: empty source must produce no errors");
+            assert!(
+                tokens.is_empty(),
+                "P2P empty: empty source must produce no content tokens"
+            );
+            assert!(
+                errors.is_empty(),
+                "P2P empty: empty source must produce no errors"
+            );
         }
     }
 
@@ -864,9 +870,7 @@ mod property_tests {
     /// The lexer skips whitespace; pure whitespace inputs should yield no content tokens.
     #[test]
     fn p2p_whitespace_only_no_content_tokens() {
-        let whitespace_inputs = [
-            " ", "  ", "\t", "\n", "\r\n", "   \t\n  ", "\n\n\n",
-        ];
+        let whitespace_inputs = [" ", "  ", "\t", "\n", "\r\n", "   \t\n  ", "\n\n\n"];
         for source in &whitespace_inputs {
             let tokens: Vec<Token> = Lexer::new(source)
                 .filter_map(|r| r.ok())
@@ -888,19 +892,23 @@ mod property_tests {
     #[test]
     fn p2p_integer_literals_tokenise_to_one_token() {
         let inputs: Vec<(&str, fn(&TokenKind) -> bool)> = vec![
-            ("0",          |t| matches!(t, TokenKind::Integer(_))),
-            ("1",          |t| matches!(t, TokenKind::Integer(_))),
-            ("42",         |t| matches!(t, TokenKind::Integer(_))),
-            ("100",        |t| matches!(t, TokenKind::Integer(_))),
-            ("999",        |t| matches!(t, TokenKind::Integer(_))),
+            ("0", |t| matches!(t, TokenKind::Integer(_))),
+            ("1", |t| matches!(t, TokenKind::Integer(_))),
+            ("42", |t| matches!(t, TokenKind::Integer(_))),
+            ("100", |t| matches!(t, TokenKind::Integer(_))),
+            ("999", |t| matches!(t, TokenKind::Integer(_))),
             ("2147483647", |t| matches!(t, TokenKind::Integer(_))),
         ];
 
         for (source, predicate) in &inputs {
             let (tokens, errors) = tokenize_no_eof(source);
-            assert!(errors.is_empty(), "P2P int[{source}]: unexpected lex errors");
+            assert!(
+                errors.is_empty(),
+                "P2P int[{source}]: unexpected lex errors"
+            );
             assert_eq!(
-                tokens.len(), 1,
+                tokens.len(),
+                1,
                 "P2P int[{source}]: expected exactly one content token"
             );
             assert!(
@@ -931,8 +939,15 @@ mod property_tests {
         );
 
         // Must contain Ident tokens for 'add', 'x', 'y'
-        let idents: Vec<&SmolStr> = tokens.iter()
-            .filter_map(|t| if let TokenKind::Ident(s) = &t.kind { Some(s) } else { None })
+        let idents: Vec<&SmolStr> = tokens
+            .iter()
+            .filter_map(|t| {
+                if let TokenKind::Ident(s) = &t.kind {
+                    Some(s)
+                } else {
+                    None
+                }
+            })
             .collect();
         assert!(
             idents.iter().any(|s| s.as_str() == "add"),
@@ -954,7 +969,7 @@ mod property_tests {
     #[test]
     fn e2e_letlin_distinguished_from_let() {
         let source_letlin = "let! x = 1 in x";
-        let source_let    = "let x = 1";
+        let source_let = "let x = 1";
 
         let (tokens_lin, errors_lin) = tokenize_no_eof(source_letlin);
         let (tokens_let, errors_let) = tokenize_no_eof(source_let);
@@ -963,7 +978,9 @@ mod property_tests {
         assert!(errors_let.is_empty(), "E2E let: no lex errors");
 
         assert!(
-            tokens_lin.iter().any(|t| matches!(t.kind, TokenKind::LetBang)),
+            tokens_lin
+                .iter()
+                .any(|t| matches!(t.kind, TokenKind::LetBang)),
             "E2E let!: must contain LetLin token"
         );
         assert!(
@@ -971,7 +988,9 @@ mod property_tests {
             "E2E let: must contain Let token"
         );
         assert!(
-            !tokens_let.iter().any(|t| matches!(t.kind, TokenKind::LetBang)),
+            !tokens_let
+                .iter()
+                .any(|t| matches!(t.kind, TokenKind::LetBang)),
             "E2E let: plain let must NOT contain LetLin token"
         );
     }
@@ -1038,7 +1057,8 @@ mod property_tests {
                 .collect();
 
             assert_eq!(
-                batch_tokens.len(), iter_tokens.len(),
+                batch_tokens.len(),
+                iter_tokens.len(),
                 "Aspect consistency[{source:?}]: batch and iterator must yield same token count"
             );
 

@@ -84,9 +84,9 @@ fn security_null_byte_in_source_handled_gracefully() {
 #[test]
 fn security_unicode_in_source_no_panic() {
     let unicode_sources = [
-        "42 (* こんにちは *)",   // CJK in comment (if comments exist, otherwise parse error OK)
-        "42",                     // baseline — must still succeed
-        "true",                   // baseline bool
+        "42 (* こんにちは *)", // CJK in comment (if comments exist, otherwise parse error OK)
+        "42",                  // baseline — must still succeed
+        "true",                // baseline bool
     ];
     for source in unicode_sources {
         // No panic is the requirement; error result is acceptable.
@@ -169,14 +169,13 @@ fn performance_batch_let_bindings() {
 #[test]
 fn correctness_parse_error_is_informative() {
     let bad_inputs = [
-        "let x =",         // truncated let
-        "@@@",             // invalid tokens
-        "fn(x:) -> x",     // missing type annotation
-        "if then else",    // missing condition
+        "let x =",      // truncated let
+        "@@@",          // invalid tokens
+        "fn(x:) -> x",  // missing type annotation
+        "if then else", // missing condition
     ];
     for source in bad_inputs {
-        let errors = parse(source)
-            .expect_err(&format!("`{source}` should fail to parse"));
+        let errors = parse(source).expect_err(&format!("`{source}` should fail to parse"));
         for e in &errors {
             let msg = format!("{e}");
             assert!(
@@ -217,16 +216,9 @@ fn correctness_type_error_is_informative() {
 /// The returned type must be serialisable (via Debug) and non-empty.
 #[test]
 fn correctness_successful_check_returns_meaningful_type() {
-    let well_typed = [
-        "42",
-        "true",
-        "()",
-        "let x = 1 in x",
-        "fn(x: I32) -> x",
-    ];
+    let well_typed = ["42", "true", "()", "let x = 1 in x", "fn(x: I32) -> x"];
     for source in well_typed {
-        let ty = check(source)
-            .unwrap_or_else(|e| panic!("type-check of `{source}` failed: {e}"));
+        let ty = check(source).unwrap_or_else(|e| panic!("type-check of `{source}` failed: {e}"));
         let ty_str = format!("{ty:?}");
         assert!(
             !ty_str.trim().is_empty(),

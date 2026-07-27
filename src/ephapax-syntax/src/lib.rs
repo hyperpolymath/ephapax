@@ -202,14 +202,21 @@ impl Ty {
                 inner: Box::new(inner.subst_var(var, replacement)),
                 mutable: *mutable,
             },
-            Ty::Effectful { param, ret, effects } => Ty::Effectful {
+            Ty::Effectful {
+                param,
+                ret,
+                effects,
+            } => Ty::Effectful {
                 param: Box::new(param.subst_var(var, replacement)),
                 ret: Box::new(ret.subst_var(var, replacement)),
                 effects: effects.clone(),
             },
             Ty::List(inner) => Ty::List(Box::new(inner.subst_var(var, replacement))),
             Ty::Tuple(elems) => Ty::Tuple(
-                elems.iter().map(|t| t.subst_var(var, replacement)).collect(),
+                elems
+                    .iter()
+                    .map(|t| t.subst_var(var, replacement))
+                    .collect(),
             ),
         }
     }
@@ -229,9 +236,7 @@ impl Ty {
             | Ty::Borrow { inner, .. }
             | Ty::List(inner)
             | Ty::ForAll { body: inner, .. } => inner.contains_unif(id),
-            Ty::Effectful { param, ret, .. } => {
-                param.contains_unif(id) || ret.contains_unif(id)
-            }
+            Ty::Effectful { param, ret, .. } => param.contains_unif(id) || ret.contains_unif(id),
             Ty::Tuple(elems) => elems.iter().any(|t| t.contains_unif(id)),
         }
     }
@@ -275,15 +280,17 @@ impl Ty {
                 var: var.clone(),
                 body: Box::new(body.resolve(solutions)),
             },
-            Ty::Effectful { param, ret, effects } => Ty::Effectful {
+            Ty::Effectful {
+                param,
+                ret,
+                effects,
+            } => Ty::Effectful {
                 param: Box::new(param.resolve(solutions)),
                 ret: Box::new(ret.resolve(solutions)),
                 effects: effects.clone(),
             },
             Ty::List(inner) => Ty::List(Box::new(inner.resolve(solutions))),
-            Ty::Tuple(elems) => Ty::Tuple(
-                elems.iter().map(|t| t.resolve(solutions)).collect(),
-            ),
+            Ty::Tuple(elems) => Ty::Tuple(elems.iter().map(|t| t.resolve(solutions)).collect()),
         }
     }
 }
@@ -355,10 +362,7 @@ pub enum Pattern {
     Tuple(Vec<Pattern>),
     /// Constructor pattern: `Some(x)`, `None`, `Ok((a, b))` (added
     /// ephapax#61 for core `match` parsing).
-    Constructor {
-        ctor: SmolStr,
-        args: Vec<Pattern>,
-    },
+    Constructor { ctor: SmolStr, args: Vec<Pattern> },
 }
 
 impl Pattern {
@@ -654,10 +658,7 @@ pub enum Decl {
     /// Extern types are opaque to the type checker (no constructors,
     /// no destructors known); extern fns get an ambient binding with
     /// the declared type.
-    Extern {
-        abi: String,
-        items: Vec<ExternItem>,
-    },
+    Extern { abi: String, items: Vec<ExternItem> },
 
     /// Algebraic data type declaration: `data Name(a, b) = C1 | C2(T) | ...`.
     ///
@@ -838,8 +839,14 @@ mod tests {
             name: "r".into(),
             inner: Box::new(unr_inner),
         };
-        assert!(lin_region.is_linear(), "Coq bridge: TRegion _ (linear) → recurse");
-        assert!(!unr_region.is_linear(), "Coq bridge: TRegion _ (unrestricted) → recurse");
+        assert!(
+            lin_region.is_linear(),
+            "Coq bridge: TRegion _ (linear) → recurse"
+        );
+        assert!(
+            !unr_region.is_linear(),
+            "Coq bridge: TRegion _ (unrestricted) → recurse"
+        );
     }
 
     #[test]
@@ -901,7 +908,10 @@ mod tests {
             body: boxed_base(),
         };
         assert!(lin_body.is_linear(), "ForAll over a linear body is linear");
-        assert!(!unr_body.is_linear(), "ForAll over an unrestricted body is unrestricted");
+        assert!(
+            !unr_body.is_linear(),
+            "ForAll over an unrestricted body is unrestricted"
+        );
     }
 
     #[test]
@@ -912,8 +922,6 @@ mod tests {
         assert!(!Ty::Var("T".into()).is_linear());
         assert!(!Ty::Unif(0).is_linear());
         assert!(!Ty::List(Box::new(Ty::String("r".into()))).is_linear());
-        assert!(
-            !Ty::Tuple(vec![Ty::String("r".into()), Ty::Base(BaseTy::I32)]).is_linear()
-        );
+        assert!(!Ty::Tuple(vec![Ty::String("r".into()), Ty::Base(BaseTy::I32)]).is_linear());
     }
 }

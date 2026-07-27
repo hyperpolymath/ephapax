@@ -83,16 +83,19 @@ fn section_name_constants_agree() {
 #[test]
 fn eph_build_decoded_by_tw_parse() {
     let entries = vec![
-        eph_entry(0, &[1], 0),          // (Linear) -> Unrestricted
-        eph_entry(7, &[0, 2, 3], 1),    // (Unrestricted, SharedBorrow, ExclBorrow) -> Linear
-        eph_entry(42, &[], 0),          // nullary -> Unrestricted
+        eph_entry(0, &[1], 0),       // (Linear) -> Unrestricted
+        eph_entry(7, &[0, 2, 3], 1), // (Unrestricted, SharedBorrow, ExclBorrow) -> Linear
+        eph_entry(42, &[], 0),       // nullary -> Unrestricted
     ];
     let payload = eph::build_ownership_section_payload(&entries);
     let decoded = tw::parse_ownership_section_payload(&payload);
 
     let want: Vec<_> = entries.iter().map(eph_norm).collect();
     let got: Vec<_> = decoded.iter().map(tw_norm).collect();
-    assert_eq!(got, want, "typed-wasm decoded ephapax-built payload differently");
+    assert_eq!(
+        got, want,
+        "typed-wasm decoded ephapax-built payload differently"
+    );
 }
 
 /// typed-wasm encodes; ephapax decodes. Symmetric agreement.
@@ -108,7 +111,10 @@ fn tw_build_decoded_by_eph_parse() {
 
     let want: Vec<_> = entries.iter().map(tw_norm).collect();
     let got: Vec<_> = decoded.iter().map(eph_norm).collect();
-    assert_eq!(got, want, "ephapax decoded typed-wasm-built payload differently");
+    assert_eq!(
+        got, want,
+        "ephapax decoded typed-wasm-built payload differently"
+    );
 }
 
 /// Exhaustive cross-codec round-trip over every ownership kind byte and a
@@ -127,14 +133,22 @@ fn cross_codec_exhaustive_roundtrip() {
             let payload = eph::build_ownership_section_payload(std::slice::from_ref(&e));
             let back = tw::parse_ownership_section_payload(&payload);
             assert_eq!(back.len(), 1);
-            assert_eq!(tw_norm(&back[0]), eph_norm(&e), "eph->tw mismatch n={n_params} ret={ret}");
+            assert_eq!(
+                tw_norm(&back[0]),
+                eph_norm(&e),
+                "eph->tw mismatch n={n_params} ret={ret}"
+            );
 
             // tw -> eph -> compare
             let t = tw_entry(func_idx, &params, ret);
             let payload2 = tw::build_ownership_section_payload(std::slice::from_ref(&t));
             let back2 = eph::parse_ownership_section_payload(&payload2);
             assert_eq!(back2.len(), 1);
-            assert_eq!(eph_norm(&back2[0]), tw_norm(&t), "tw->eph mismatch n={n_params} ret={ret}");
+            assert_eq!(
+                eph_norm(&back2[0]),
+                tw_norm(&t),
+                "tw->eph mismatch n={n_params} ret={ret}"
+            );
         }
     }
 }
@@ -228,7 +242,11 @@ fn typed_wasm_verifies_ephapax_access_sites() {
         .expect("typedwasm.regions section present");
     let regions = tw::section::parse_regions_section_payload(&regions_payload)
         .expect("typed-wasm rejected ephapax's regions payload");
-    assert_eq!(regions.len(), 1, "expected the single ephapax.string region");
+    assert_eq!(
+        regions.len(),
+        1,
+        "expected the single ephapax.string region"
+    );
 
     let access_payload = extract_custom_section(&wasm, "typedwasm.access-sites")
         .expect("typedwasm.access-sites section present");

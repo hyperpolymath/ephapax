@@ -607,11 +607,7 @@ fn sub_patterns_for(p: &Pattern, arity: usize) -> Vec<Pattern> {
 /// Specialize the matrix on `tag` with the given constructor arity.
 /// Keeps rows whose head matches the tag and any row whose head is a
 /// wildcard/var (expanded into `arity` wildcards).
-fn specialize_matrix(
-    matrix: &[Vec<Pattern>],
-    tag: &Tag,
-    arity: usize,
-) -> Vec<Vec<Pattern>> {
+fn specialize_matrix(matrix: &[Vec<Pattern>], tag: &Tag, arity: usize) -> Vec<Vec<Pattern>> {
     let mut out = Vec::with_capacity(matrix.len());
     for row in matrix {
         let head = &row[0];
@@ -669,10 +665,7 @@ fn column_type(matrix: &[Vec<Pattern>]) -> ColTy {
 /// If `col` has a finite signature, return `(Tag, arity)` for each
 /// constructor in declaration order. Returns `None` for infinite
 /// domains (integers, floats, opaque types).
-fn complete_signature(
-    col: &ColTy,
-    registry: &DataCtorRegistry,
-) -> Option<Vec<(Tag, usize)>> {
+fn complete_signature(col: &ColTy, registry: &DataCtorRegistry) -> Option<Vec<(Tag, usize)>> {
     match col {
         ColTy::Bool => Some(vec![(Tag::Bool(false), 0), (Tag::Bool(true), 0)]),
         ColTy::Unit => Some(vec![(Tag::Unit, 0)]),
@@ -740,10 +733,8 @@ fn is_useful(
                 .expect("not all_present implies a missing tag");
             let default = default_matrix(matrix);
             if let Some(tail_witness) = is_useful(&default, num_cols - 1, registry) {
-                let head = reconstruct_witness(
-                    missing_tag,
-                    vec![Witness::Wildcard; *missing_arity],
-                );
+                let head =
+                    reconstruct_witness(missing_tag, vec![Witness::Wildcard; *missing_arity]);
                 let mut out = Vec::with_capacity(num_cols);
                 out.push(head);
                 out.extend(tail_witness);
@@ -837,14 +828,26 @@ impl TypeChecker {
             // Unification variable cases
             (Ty::Unif(id), _) => {
                 if b.contains_unif(*id) {
-                    return Err(self.at(s, TypeError::TypeMismatch { expected: a, found: b }));
+                    return Err(self.at(
+                        s,
+                        TypeError::TypeMismatch {
+                            expected: a,
+                            found: b,
+                        },
+                    ));
                 }
                 self.unif_solutions.insert(*id, b);
                 Ok(())
             }
             (_, Ty::Unif(id)) => {
                 if a.contains_unif(*id) {
-                    return Err(self.at(s, TypeError::TypeMismatch { expected: a, found: b }));
+                    return Err(self.at(
+                        s,
+                        TypeError::TypeMismatch {
+                            expected: a,
+                            found: b,
+                        },
+                    ));
                 }
                 self.unif_solutions.insert(*id, a);
                 Ok(())
@@ -855,30 +858,70 @@ impl TypeChecker {
                 self.unify(s, p1, p2)?;
                 self.unify(s, r1, r2)
             }
-            (Ty::Prod { left: l1, right: r1 }, Ty::Prod { left: l2, right: r2 }) => {
+            (
+                Ty::Prod {
+                    left: l1,
+                    right: r1,
+                },
+                Ty::Prod {
+                    left: l2,
+                    right: r2,
+                },
+            ) => {
                 self.unify(s, l1, l2)?;
                 self.unify(s, r1, r2)
             }
-            (Ty::Sum { left: l1, right: r1 }, Ty::Sum { left: l2, right: r2 }) => {
+            (
+                Ty::Sum {
+                    left: l1,
+                    right: r1,
+                },
+                Ty::Sum {
+                    left: l2,
+                    right: r2,
+                },
+            ) => {
                 self.unify(s, l1, l2)?;
                 self.unify(s, r1, r2)
             }
-            (Ty::Ref { linearity: l1, inner: i1 }, Ty::Ref { linearity: l2, inner: i2 })
-                if l1 == l2 =>
-            {
-                self.unify(s, i1, i2)
-            }
-            (Ty::Region { name: n1, inner: i1 }, Ty::Region { name: n2, inner: i2 })
-                if n1 == n2 =>
-            {
-                self.unify(s, i1, i2)
-            }
-            (Ty::Borrow { inner: i1, mutable: m1 }, Ty::Borrow { inner: i2, mutable: m2 }) => {
+            (
+                Ty::Ref {
+                    linearity: l1,
+                    inner: i1,
+                },
+                Ty::Ref {
+                    linearity: l2,
+                    inner: i2,
+                },
+            ) if l1 == l2 => self.unify(s, i1, i2),
+            (
+                Ty::Region {
+                    name: n1,
+                    inner: i1,
+                },
+                Ty::Region {
+                    name: n2,
+                    inner: i2,
+                },
+            ) if n1 == n2 => self.unify(s, i1, i2),
+            (
+                Ty::Borrow {
+                    inner: i1,
+                    mutable: m1,
+                },
+                Ty::Borrow {
+                    inner: i2,
+                    mutable: m2,
+                },
+            ) => {
                 if m1 != m2 {
-                    return Err(self.at(s, TypeError::TypeMismatch {
-                        expected: a.clone(),
-                        found: b.clone(),
-                    }));
+                    return Err(self.at(
+                        s,
+                        TypeError::TypeMismatch {
+                            expected: a.clone(),
+                            found: b.clone(),
+                        },
+                    ));
                 }
                 self.unify(s, i1, i2)
             }
@@ -891,7 +934,13 @@ impl TypeChecker {
             }
 
             // Mismatch
-            _ => Err(self.at(s, TypeError::TypeMismatch { expected: a, found: b })),
+            _ => Err(self.at(
+                s,
+                TypeError::TypeMismatch {
+                    expected: a,
+                    found: b,
+                },
+            )),
         }
     }
 
@@ -1050,8 +1099,7 @@ impl TypeChecker {
             value_ty
         };
 
-        self.ctx
-            .extend(name.clone(), resolved_ty, BindingForm::Let);
+        self.ctx.extend(name.clone(), resolved_ty, BindingForm::Let);
         let body_ty = self.check(body)?;
 
         // `let` is AFFINE — unconsumed bindings are allowed (implicit drop).
@@ -1071,10 +1119,7 @@ impl TypeChecker {
 
         if let Some(entry) = self.ctx.vars.get(param) {
             if entry.demands_consumption() && !entry.used {
-                return Err(self.at(
-                    s,
-                    TypeError::LinearVariableNotConsumed(param.clone()),
-                ));
+                return Err(self.at(s, TypeError::LinearVariableNotConsumed(param.clone())));
             }
         }
 
@@ -1084,12 +1129,7 @@ impl TypeChecker {
         })
     }
 
-    fn check_app(
-        &mut self,
-        s: Span,
-        func: &Expr,
-        arg: &Expr,
-    ) -> Result<Ty, SpannedTypeError> {
+    fn check_app(&mut self, s: Span, func: &Expr, arg: &Expr) -> Result<Ty, SpannedTypeError> {
         let func_ty = self.check(func)?;
         let arg_ty = self.check(arg)?;
 
@@ -1201,7 +1241,12 @@ impl TypeChecker {
         Ok(body_ty)
     }
 
-    fn check_borrow(&mut self, s: Span, inner: &Expr, mutable: bool) -> Result<Ty, SpannedTypeError> {
+    fn check_borrow(
+        &mut self,
+        s: Span,
+        inner: &Expr,
+        mutable: bool,
+    ) -> Result<Ty, SpannedTypeError> {
         match &inner.kind {
             ExprKind::Var(name) => {
                 let ty = self
@@ -1209,11 +1254,17 @@ impl TypeChecker {
                     .lookup(name)
                     .ok_or_else(|| self.at(s, TypeError::UnboundVariable(name.clone())))?
                     .clone();
-                Ok(Ty::Borrow { inner: Box::new(ty), mutable })
+                Ok(Ty::Borrow {
+                    inner: Box::new(ty),
+                    mutable,
+                })
             }
             _ => {
                 let inner_ty = self.check(inner)?;
-                Ok(Ty::Borrow { inner: Box::new(inner_ty), mutable })
+                Ok(Ty::Borrow {
+                    inner: Box::new(inner_ty),
+                    mutable,
+                })
             }
         }
     }
@@ -1246,7 +1297,9 @@ impl TypeChecker {
 
         match inner_ty {
             Ty::String(_) => Ok(Ty::Base(BaseTy::I32)),
-            Ty::Borrow { inner: ref boxed, .. } => match boxed.as_ref() {
+            Ty::Borrow {
+                inner: ref boxed, ..
+            } => match boxed.as_ref() {
                 Ty::String(_) => Ok(Ty::Base(BaseTy::I32)),
                 _ => Err(self.at(
                     s,
@@ -1295,10 +1348,7 @@ impl TypeChecker {
         // let! bindings MUST be consumed — regardless of type.
         if let Some(entry) = self.ctx.vars.get(name) {
             if !entry.used {
-                return Err(self.at(
-                    s,
-                    TypeError::LinearVariableNotConsumed(name.clone()),
-                ));
+                return Err(self.at(s, TypeError::LinearVariableNotConsumed(name.clone())));
             }
         }
 
@@ -1321,10 +1371,9 @@ impl TypeChecker {
         match inner_ty {
             Ty::Prod { left, right } => {
                 if right.is_linear() {
-                    return Err(self.at(
-                        s,
-                        TypeError::LinearVariableNotConsumed("_pair_snd".into()),
-                    ));
+                    return Err(
+                        self.at(s, TypeError::LinearVariableNotConsumed("_pair_snd".into()))
+                    );
                 }
                 Ok(*left)
             }
@@ -1347,10 +1396,9 @@ impl TypeChecker {
         match inner_ty {
             Ty::Prod { left, right } => {
                 if left.is_linear() {
-                    return Err(self.at(
-                        s,
-                        TypeError::LinearVariableNotConsumed("_pair_fst".into()),
-                    ));
+                    return Err(
+                        self.at(s, TypeError::LinearVariableNotConsumed("_pair_fst".into()))
+                    );
                 }
                 Ok(*right)
             }
@@ -1407,10 +1455,9 @@ impl TypeChecker {
 
                 if let Some(entry) = self.ctx.vars.get(left_var) {
                     if entry.demands_consumption() && !entry.used {
-                        return Err(self.at(
-                            s,
-                            TypeError::LinearVariableNotConsumed(left_var.clone()),
-                        ));
+                        return Err(
+                            self.at(s, TypeError::LinearVariableNotConsumed(left_var.clone()))
+                        );
                     }
                 }
 
@@ -1426,10 +1473,9 @@ impl TypeChecker {
 
                 if let Some(entry) = self.ctx.vars.get(right_var) {
                     if entry.demands_consumption() && !entry.used {
-                        return Err(self.at(
-                            s,
-                            TypeError::LinearVariableNotConsumed(right_var.clone()),
-                        ));
+                        return Err(
+                            self.at(s, TypeError::LinearVariableNotConsumed(right_var.clone()))
+                        );
                     }
                 }
 
@@ -1499,8 +1545,7 @@ impl TypeChecker {
             for name in &bound {
                 if let Some(entry) = self.ctx.vars.get(name) {
                     if entry.demands_consumption() && !entry.used {
-                        return Err(self
-                            .at(s, TypeError::LinearVariableNotConsumed(name.clone())));
+                        return Err(self.at(s, TypeError::LinearVariableNotConsumed(name.clone())));
                     }
                 }
             }
@@ -1546,8 +1591,7 @@ impl TypeChecker {
         match pattern {
             Pattern::Wildcard => Ok(Vec::new()),
             Pattern::Var(name) => {
-                self.ctx
-                    .extend(name.clone(), expected, BindingForm::Param);
+                self.ctx.extend(name.clone(), expected, BindingForm::Param);
                 Ok(vec![name.clone()])
             }
             Pattern::Literal(lit) => {
@@ -1697,7 +1741,10 @@ impl TypeChecker {
             _ => Err(self.at(
                 s,
                 TypeError::TypeMismatch {
-                    expected: Ty::Borrow { inner: Box::new(Ty::Base(BaseTy::Unit)), mutable: false },
+                    expected: Ty::Borrow {
+                        inner: Box::new(Ty::Base(BaseTy::Unit)),
+                        mutable: false,
+                    },
                     found: inner_ty,
                 },
             )),
@@ -2003,8 +2050,7 @@ impl TypeChecker {
                 // Parameters get fresh unification variables
                 for param in &clause.params {
                     let param_ty = self.fresh_unif();
-                    self.ctx
-                        .extend(param.clone(), param_ty, BindingForm::Let);
+                    self.ctx.extend(param.clone(), param_ty, BindingForm::Let);
                 }
 
                 // If resume mode is specified, add a resume callback to scope
@@ -2016,10 +2062,9 @@ impl TypeChecker {
                         // linear captures is a type error
                         for (name, entry) in &self.ctx.vars {
                             if entry.demands_consumption() && !entry.used {
-                                return Err(self.at(
-                                    s,
-                                    TypeError::LinearVariableNotConsumed(name.clone()),
-                                ));
+                                return Err(
+                                    self.at(s, TypeError::LinearVariableNotConsumed(name.clone()))
+                                );
                             }
                         }
                     }
@@ -2124,15 +2169,16 @@ impl ModuleRegistry {
                                 ret: Box::new(acc),
                             })
                     };
-                    let poly_ty =
-                        type_params.iter().rev().fold(fn_ty, |acc, tv| Ty::ForAll {
-                            var: tv.clone(),
-                            body: Box::new(acc),
-                        });
+                    let poly_ty = type_params.iter().rev().fold(fn_ty, |acc, tv| Ty::ForAll {
+                        var: tv.clone(),
+                        body: Box::new(acc),
+                    });
                     entries.push((name.clone(), poly_ty, *visibility));
                 }
                 Decl::Type {
-                    name, visibility, ty,
+                    name,
+                    visibility,
+                    ty,
                 } => {
                     entries.push((name.clone(), ty.clone(), *visibility));
                 }
@@ -2163,13 +2209,13 @@ impl ModuleRegistry {
                                     ret: Box::new(ret_ty.clone()),
                                 }
                             } else {
-                                params.iter().rev().fold(
-                                    ret_ty.clone(),
-                                    |acc, (_, param_ty)| Ty::Fun {
+                                params
+                                    .iter()
+                                    .rev()
+                                    .fold(ret_ty.clone(), |acc, (_, param_ty)| Ty::Fun {
                                         param: Box::new(param_ty.clone()),
                                         ret: Box::new(acc),
-                                    },
-                                )
+                                    })
                             };
                             entries.push((name.clone(), fn_ty, Visibility::Public));
                         }
@@ -2237,9 +2283,10 @@ pub fn type_check_module_with_registry(
                 } else {
                     // Import resolution error — use dummy span since Import has no span
                     return Err(SpannedTypeError {
-                        error: TypeError::UnboundVariable(
-                            Var::from(format!("{}::{}", import.module, name)),
-                        ),
+                        error: TypeError::UnboundVariable(Var::from(format!(
+                            "{}::{}",
+                            import.module, name
+                        ))),
                         span: Span::dummy(),
                     });
                 }
@@ -2257,10 +2304,7 @@ pub fn type_check_module_with_registry(
 }
 
 /// Internal module checking logic shared by single-module and registry paths.
-fn type_check_module_inner(
-    tc: &mut TypeChecker,
-    module: &Module,
-) -> Result<(), SpannedTypeError> {
+fn type_check_module_inner(tc: &mut TypeChecker, module: &Module) -> Result<(), SpannedTypeError> {
     // Pre-pass: register all `Decl::Data` declarations so constructor
     // patterns inside function bodies can resolve via the registry.
     tc.data_registry
@@ -2327,13 +2371,13 @@ fn type_check_module_inner(
                                 ret: Box::new(ret_ty.clone()),
                             }
                         } else {
-                            params.iter().rev().fold(
-                                ret_ty.clone(),
-                                |acc, (_, param_ty)| Ty::Fun {
+                            params
+                                .iter()
+                                .rev()
+                                .fold(ret_ty.clone(), |acc, (_, param_ty)| Ty::Fun {
                                     param: Box::new(param_ty.clone()),
                                     ret: Box::new(acc),
-                                },
-                            )
+                                })
                         };
                         tc.ctx.extend(name.clone(), fn_ty, BindingForm::Let);
                     }
@@ -3061,7 +3105,10 @@ mod tests {
     fn test_span_propagation() {
         // Verify that error spans point to the right expression.
         let mut tc = TypeChecker::new();
-        let inner = Expr::new(ExprKind::Lit(Literal::String("bare".into())), Span::new(10, 25));
+        let inner = Expr::new(
+            ExprKind::Lit(Literal::String("bare".into())),
+            Span::new(10, 25),
+        );
         let outer = Expr::new(
             ExprKind::Let {
                 name: "x".into(),
@@ -3292,10 +3339,14 @@ mod tests {
         let s = Span::dummy();
 
         // Unify I32 with I32 — should succeed
-        assert!(tc.unify(s, &Ty::Base(BaseTy::I32), &Ty::Base(BaseTy::I32)).is_ok());
+        assert!(tc
+            .unify(s, &Ty::Base(BaseTy::I32), &Ty::Base(BaseTy::I32))
+            .is_ok());
 
         // Unify I32 with Bool — should fail
-        assert!(tc.unify(s, &Ty::Base(BaseTy::I32), &Ty::Base(BaseTy::Bool)).is_err());
+        assert!(tc
+            .unify(s, &Ty::Base(BaseTy::I32), &Ty::Base(BaseTy::Bool))
+            .is_err());
 
         // Unify ?0 with I32 — should succeed and solve ?0 = I32
         let u = tc.fresh_unif();
@@ -3707,7 +3758,10 @@ mod tests {
         assert_eq!(some.fields, vec![Ty::Var("a".into())]);
 
         let info = tc.data_registry.get_type("Option").unwrap();
-        assert_eq!(info.ctor_names, vec![SmolStr::from("None"), SmolStr::from("Some")]);
+        assert_eq!(
+            info.ctor_names,
+            vec![SmolStr::from("None"), SmolStr::from("Some")]
+        );
     }
 
     #[test]
@@ -3929,7 +3983,11 @@ mod tests {
         assert!(
             matches!(
                 err.error,
-                TypeError::ConstructorArityMismatch { expected: 1, got: 2, .. }
+                TypeError::ConstructorArityMismatch {
+                    expected: 1,
+                    got: 2,
+                    ..
+                }
             ),
             "got {:?}",
             err.error
@@ -4026,7 +4084,11 @@ mod tests {
             decls: vec![fn_decl("f", vec![], Ty::Base(BaseTy::I32), body)],
         };
         let err = type_check_module(&module).unwrap_err();
-        assert!(matches!(err.error, TypeError::EmptyMatch), "got {:?}", err.error);
+        assert!(
+            matches!(err.error, TypeError::EmptyMatch),
+            "got {:?}",
+            err.error
+        );
     }
 
     /// Multi-param data type with substitution: `Result(I32, Bool)`.
@@ -4186,8 +4248,7 @@ mod tests {
                 fn_decl("f", vec![], Ty::Base(BaseTy::I32), body),
             ],
         };
-        type_check_module(&module)
-            .expect("nested Option(Option(_)) should be exhaustive");
+        type_check_module(&module).expect("nested Option(Option(_)) should be exhaustive");
     }
 
     /// `Option(Option(I32))` with `None` + `Some(Some(_))` only —
@@ -4320,9 +4381,8 @@ mod tests {
                 fn_decl("f", vec![], Ty::Base(BaseTy::I32), body),
             ],
         };
-        type_check_module(&module).expect(
-            "cross product (Option, Bool) of all combinations should be exhaustive",
-        );
+        type_check_module(&module)
+            .expect("cross product (Option, Bool) of all combinations should be exhaustive");
     }
 
     /// Tuple of `(Option(I32), Bool)` missing `(Some(_), false)` —

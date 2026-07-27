@@ -173,7 +173,11 @@ impl Backend {
         if let Some(module) = &state.module {
             for d in &module.decls {
                 if let Decl::Fn {
-                    name, body, params, type_params: _, ..
+                    name,
+                    body,
+                    params,
+                    type_params: _,
+                    ..
                 } = d
                 {
                     // Check if word matches a parameter
@@ -479,9 +483,7 @@ impl LanguageServer for Backend {
             if let Some(state) = docs.get(uri) {
                 for decl in &state.declarations {
                     let kind = match decl.kind {
-                        DeclKind::Function | DeclKind::ExternFn => {
-                            CompletionItemKind::FUNCTION
-                        }
+                        DeclKind::Function | DeclKind::ExternFn => CompletionItemKind::FUNCTION,
                         DeclKind::TypeAlias | DeclKind::ExternType | DeclKind::Data => {
                             CompletionItemKind::TYPE_PARAMETER
                         }
@@ -546,7 +548,11 @@ fn extract_declarations(module: &Module, _source: &str) -> Vec<DeclInfo> {
                     return_type: Some(format_ty(ret_ty)),
                 });
             }
-            Decl::Type { name, visibility: _, ty } => out.push(DeclInfo {
+            Decl::Type {
+                name,
+                visibility: _,
+                ty,
+            } => out.push(DeclInfo {
                 name: name.to_string(),
                 kind: DeclKind::TypeAlias,
                 span: Span::dummy(),
@@ -561,7 +567,9 @@ fn extract_declarations(module: &Module, _source: &str) -> Vec<DeclInfo> {
                 signature: format!(
                     "let {} {}= ...",
                     name,
-                    ty.as_ref().map(|t| format!(": {} ", format_ty(t))).unwrap_or_default()
+                    ty.as_ref()
+                        .map(|t| format!(": {} ", format_ty(t)))
+                        .unwrap_or_default()
                 ),
                 params: Vec::new(),
                 return_type: ty.as_ref().map(|t| format_ty(t)),
@@ -702,7 +710,11 @@ fn format_ty(ty: &Ty) -> String {
         Ty::Ref { inner, .. } => format!("Ref({})", format_ty(inner)),
         Ty::String(region) => format!("String@{}", region),
         Ty::Region { name, inner } => format!("Region({}, {})", name, format_ty(inner)),
-        Ty::Borrow { inner, mutable } => format!("&{}{}", if *mutable { "mut " } else { "" }, format_ty(inner)),
+        Ty::Borrow { inner, mutable } => format!(
+            "&{}{}",
+            if *mutable { "mut " } else { "" },
+            format_ty(inner)
+        ),
         Ty::Var(name) => name.to_string(),
         Ty::ForAll { var, body } => format!("forall {}. {}", var, format_ty(body)),
         Ty::Unif(id) => format!("?{}", id),

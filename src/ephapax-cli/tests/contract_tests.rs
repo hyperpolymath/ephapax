@@ -218,10 +218,10 @@ fn invariant_nested_linear_bindings_one_unconsumed_rejected() {
 #[test]
 fn invariant_type_error_is_typecheck_phase_not_parse_phase() {
     let ill_typed_programs = [
-        "if true then 1 else true",    // branch type mismatch
-        "(fn(x: I32) -> x)(true)",     // argument type mismatch
-        "x",                           // unbound variable
-        "let! x = 42 in 0",            // unused linear binding
+        "if true then 1 else true", // branch type mismatch
+        "(fn(x: I32) -> x)(true)",  // argument type mismatch
+        "x",                        // unbound variable
+        "let! x = 42 in 0",         // unused linear binding
     ];
 
     for source in ill_typed_programs {

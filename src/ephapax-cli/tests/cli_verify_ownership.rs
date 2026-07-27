@@ -27,8 +27,7 @@ fn ephapax_bin() -> String {
 #[test]
 fn verify_ownership_clean_module() {
     let src = tempfile::NamedTempFile::with_suffix(".eph").expect("tempfile");
-    std::fs::write(src.path(), "fn add(a: I32, b: I32): I32 = a + b\n")
-        .expect("write source");
+    std::fs::write(src.path(), "fn add(a: I32, b: I32): I32 = a + b\n").expect("write source");
     let out = tempfile::NamedTempFile::new().expect("output tempfile");
 
     let result = Command::new(ephapax_bin())
@@ -69,8 +68,7 @@ fn verify_ownership_linear_program() {
     // satisfying the source-level linear typechecker. The emitted wasm
     // therefore has param_kinds = [Linear] in the ownership section
     // and a body that uses local 0 exactly once.
-    std::fs::write(src.path(), "fn echo(s: String): String = s\n")
-        .expect("write source");
+    std::fs::write(src.path(), "fn echo(s: String): String = s\n").expect("write source");
     let out = tempfile::NamedTempFile::new().expect("output tempfile");
 
     let result = Command::new(ephapax_bin())
@@ -106,8 +104,7 @@ fn compile_without_verify_flag_does_not_run_verifier() {
     // emitted module would hypothetically have issues — the verifier
     // isn't invoked).
     let src = tempfile::NamedTempFile::with_suffix(".eph").expect("tempfile");
-    std::fs::write(src.path(), "fn add(a: I32, b: I32): I32 = a + b\n")
-        .expect("write source");
+    std::fs::write(src.path(), "fn add(a: I32, b: I32): I32 = a + b\n").expect("write source");
     let out = tempfile::NamedTempFile::new().expect("output tempfile");
 
     let result = Command::new(ephapax_bin())

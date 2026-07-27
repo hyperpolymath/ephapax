@@ -279,11 +279,10 @@ fn parse_extern_item(pair: pest::iterators::Pair<Rule>) -> Result<ExternItem, Pa
                                         .next()
                                         .ok_or_else(|| ParseError::missing("extern param name"))?,
                                 );
-                                let pt = parse_type(
-                                    parts
-                                        .next()
-                                        .ok_or_else(|| ParseError::missing("extern param type"))?,
-                                )?;
+                                let pt =
+                                    parse_type(parts.next().ok_or_else(|| {
+                                        ParseError::missing("extern param type")
+                                    })?)?;
                                 params.push((pn, pt));
                             }
                         }
@@ -454,7 +453,11 @@ fn parse_type_decl(pair: pest::iterators::Pair<Rule>) -> Result<Decl, ParseError
         }
     };
 
-    Ok(Decl::Type { name, visibility, ty })
+    Ok(Decl::Type {
+        name,
+        visibility,
+        ty,
+    })
 }
 
 fn parse_sum_type_def(pair: pest::iterators::Pair<Rule>) -> Result<Ty, ParseError> {
@@ -600,7 +603,10 @@ fn parse_type_atom(pair: pest::iterators::Pair<Rule>) -> Result<Ty, ParseError> 
                 (false, first)
             };
             let inner_ty = parse_type_atom(ty_pair)?;
-            Ok(Ty::Borrow { inner: Box::new(inner_ty), mutable })
+            Ok(Ty::Borrow {
+                inner: Box::new(inner_ty),
+                mutable,
+            })
         }
         Rule::list_ty => {
             let elem_ty = parse_type(
@@ -654,7 +660,10 @@ fn parse_type_atom(pair: pest::iterators::Pair<Rule>) -> Result<Ty, ParseError> 
             if parts.next().is_some() {
                 // Has arguments — not supported in core parser
                 return Err(ParseError::Syntax {
-                    message: format!("Parameterized type '{}(...)' requires the surface parser", name_str),
+                    message: format!(
+                        "Parameterized type '{}(...)' requires the surface parser",
+                        name_str
+                    ),
                     span: span_from_pair(&name),
                 });
             }
@@ -755,7 +764,10 @@ fn parse_seq_expr_core(pair: pest::iterators::Pair<Rule>) -> Result<Expr, ParseE
 
     if parsed.len() == 1 {
         // invariant: len() == 1 guarantees next() returns Some
-        return Ok(parsed.into_iter().next().expect("invariant: parsed.len() == 1"));
+        return Ok(parsed
+            .into_iter()
+            .next()
+            .expect("invariant: parsed.len() == 1"));
     }
 
     // invariant: loop above ensures parsed is not empty before we enter this block
@@ -1265,7 +1277,8 @@ fn parse_handle_expr(pair: pest::iterators::Pair<Rule>) -> Result<Expr, ParseErr
                                                                 _ => ResumeMode::Once,
                                                             });
                                                     } else {
-                                                        resume_mode = Some(ResumeMode::Once); // default
+                                                        resume_mode = Some(ResumeMode::Once);
+                                                        // default
                                                     }
                                                 }
                                                 Rule::identifier => {
@@ -1290,8 +1303,7 @@ fn parse_handle_expr(pair: pest::iterators::Pair<Rule>) -> Result<Expr, ParseErr
                     op,
                     params,
                     resume_mode,
-                    body: body_expr
-                        .unwrap_or_else(|| Expr::dummy(ExprKind::Lit(Literal::Unit))),
+                    body: body_expr.unwrap_or_else(|| Expr::dummy(ExprKind::Lit(Literal::Unit))),
                 });
             }
             _ => {}
@@ -1591,10 +1603,7 @@ fn parse_postfix_expr(pair: pest::iterators::Pair<Rule>) -> Result<Expr, ParseEr
                         result = Expr::new(
                             ExprKind::App {
                                 func: Box::new(result),
-                                arg: Box::new(Expr::new(
-                                    ExprKind::Lit(Literal::Unit),
-                                    span,
-                                )),
+                                arg: Box::new(Expr::new(ExprKind::Lit(Literal::Unit), span)),
                             },
                             span,
                         );
@@ -1691,8 +1700,7 @@ fn parse_atom_expr(pair: pest::iterators::Pair<Rule>) -> Result<Expr, ParseError
             );
             let mut args = Vec::new();
             for arg_pair in parts {
-                if arg_pair.as_rule() == Rule::expression || arg_pair.as_rule() == Rule::expr_list
-                {
+                if arg_pair.as_rule() == Rule::expression || arg_pair.as_rule() == Rule::expr_list {
                     for expr_pair in arg_pair.into_inner() {
                         if expr_pair.as_rule() == Rule::expression {
                             args.push(parse_expression(expr_pair)?);
@@ -1776,7 +1784,10 @@ fn parse_atom_expr(pair: pest::iterators::Pair<Rule>) -> Result<Expr, ParseError
             };
             let inner_expr = parse_unary_expr(operand_pair)?;
             Ok(Expr::new(
-                ExprKind::Borrow { inner: Box::new(inner_expr), mutable },
+                ExprKind::Borrow {
+                    inner: Box::new(inner_expr),
+                    mutable,
+                },
                 span,
             ))
         }
@@ -2316,8 +2327,7 @@ mod tests {
     /// and `parse_single_expr_core` reaches the new arm.
     #[test]
     fn test_parse_module_with_core_match() {
-        let source =
-            "fn unwrap_or_zero(x: I32): I32 = match x of | Some(v) => v | None => 0 end";
+        let source = "fn unwrap_or_zero(x: I32): I32 = match x of | Some(v) => v | None => 0 end";
         let module = parse_module(source, "<input>").expect("should parse");
         assert_eq!(module.decls.len(), 1);
         let Decl::Fn { body, .. } = &module.decls[0] else {
@@ -2342,7 +2352,9 @@ mod tests {
             Decl::Extern { abi, items } => {
                 assert_eq!(abi, "gossamer");
                 assert_eq!(items.len(), 3);
-                assert!(matches!(&items[0], ExternItem::Type { name } if name.as_str() == "Window"));
+                assert!(
+                    matches!(&items[0], ExternItem::Type { name } if name.as_str() == "Window")
+                );
                 if let ExternItem::Fn { name, params, .. } = &items[1] {
                     assert_eq!(name.as_str(), "window_open");
                     assert_eq!(params.len(), 2);
@@ -2420,10 +2432,7 @@ mod tests {
                 constructors,
             } => {
                 assert_eq!(name.as_str(), "Result");
-                assert_eq!(
-                    type_params,
-                    &vec![SmolStr::new("a"), SmolStr::new("e")]
-                );
+                assert_eq!(type_params, &vec![SmolStr::new("a"), SmolStr::new("e")]);
                 assert_eq!(constructors.len(), 2);
                 assert_eq!(constructors[0].name.as_str(), "Ok");
                 assert!(matches!(&constructors[0].fields[0], Ty::Var(v) if v == "a"));
@@ -2442,7 +2451,9 @@ mod tests {
         let module = parse_module(source, "test").expect("should parse");
         assert_eq!(module.decls.len(), 1);
         match &module.decls[0] {
-            Decl::Fn { name, visibility, .. } => {
+            Decl::Fn {
+                name, visibility, ..
+            } => {
                 assert_eq!(name.as_str(), "double");
                 assert_eq!(*visibility, Visibility::Public);
             }
@@ -2467,7 +2478,13 @@ mod tests {
         let source = r#"fn identity<T>(x: T): T = x"#;
         let module = parse_module(source, "test").expect("should parse");
         match &module.decls[0] {
-            Decl::Fn { name, type_params, params, ret_ty, .. } => {
+            Decl::Fn {
+                name,
+                type_params,
+                params,
+                ret_ty,
+                ..
+            } => {
                 assert_eq!(name.as_str(), "identity");
                 assert_eq!(type_params.len(), 1);
                 assert_eq!(type_params[0].as_str(), "T");
@@ -2498,7 +2515,11 @@ mod tests {
         let source = r#"pub fn identity<T>(x: T): T = x"#;
         let module = parse_module(source, "test").expect("should parse");
         match &module.decls[0] {
-            Decl::Fn { visibility, type_params, .. } => {
+            Decl::Fn {
+                visibility,
+                type_params,
+                ..
+            } => {
                 assert_eq!(*visibility, Visibility::Public);
                 assert_eq!(type_params.len(), 1);
             }
@@ -2538,7 +2559,9 @@ mod tests {
         let source = r#"pub type Alias = I32"#;
         let module = parse_module(source, "test").expect("should parse");
         match &module.decls[0] {
-            Decl::Type { name, visibility, .. } => {
+            Decl::Type {
+                name, visibility, ..
+            } => {
                 assert_eq!(name.as_str(), "Alias");
                 assert_eq!(*visibility, Visibility::Public);
             }
@@ -2592,7 +2615,11 @@ mod tests {
             | ask(k) => k
         end"#;
         let result = parse(source);
-        assert!(result.is_ok(), "should parse handle with op: {:?}", result.err());
+        assert!(
+            result.is_ok(),
+            "should parse handle with op: {:?}",
+            result.err()
+        );
         match result.unwrap().kind {
             ExprKind::Handle { clauses, .. } => {
                 assert_eq!(clauses.len(), 2);

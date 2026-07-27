@@ -124,11 +124,15 @@ impl QueryDb {
         }
         self.revision.0 += 1;
         let changed_at = self.revision;
-        self.inputs.insert(id.to_string(), Input { text, changed_at });
+        self.inputs
+            .insert(id.to_string(), Input { text, changed_at });
     }
 
     fn input_changed_at(&self, id: &str) -> Revision {
-        self.inputs.get(id).map(|i| i.changed_at).unwrap_or_default()
+        self.inputs
+            .get(id)
+            .map(|i| i.changed_at)
+            .unwrap_or_default()
     }
 
     /// Parse query. Memoises `parse_module`; depends only on the source
@@ -143,7 +147,11 @@ impl QueryDb {
                 return value;
             }
         }
-        let text = self.inputs.get(id).map(|i| i.text.clone()).unwrap_or_default();
+        let text = self
+            .inputs
+            .get(id)
+            .map(|i| i.text.clone())
+            .unwrap_or_default();
         let new = parse_module(&text, id);
         self.recomputes += 1;
         let rev = self.revision;
@@ -153,7 +161,11 @@ impl QueryDb {
         };
         self.parsed.insert(
             id.to_string(),
-            Memo { value: new.clone(), changed_at, verified_at: rev },
+            Memo {
+                value: new.clone(),
+                changed_at,
+                verified_at: rev,
+            },
         );
         new
     }
@@ -161,7 +173,11 @@ impl QueryDb {
     /// Type-check query. Memoises `type_check_module`; depends on `parsed`.
     pub fn typed(&mut self, id: &str) -> TypedResult {
         let parsed = self.parsed(id);
-        let dep = self.parsed.get(id).map(|m| m.changed_at).unwrap_or_default();
+        let dep = self
+            .parsed
+            .get(id)
+            .map(|m| m.changed_at)
+            .unwrap_or_default();
         let rev = self.revision;
         if let Some(m) = self.typed.get_mut(id) {
             if dep <= m.verified_at {
@@ -184,7 +200,11 @@ impl QueryDb {
         };
         self.typed.insert(
             id.to_string(),
-            Memo { value: new.clone(), changed_at, verified_at: rev },
+            Memo {
+                value: new.clone(),
+                changed_at,
+                verified_at: rev,
+            },
         );
         new
     }
@@ -194,7 +214,11 @@ impl QueryDb {
     pub fn wasm(&mut self, id: &str) -> WasmResult {
         let parsed = self.parsed(id);
         let typed = self.typed(id);
-        let dep_parsed = self.parsed.get(id).map(|m| m.changed_at).unwrap_or_default();
+        let dep_parsed = self
+            .parsed
+            .get(id)
+            .map(|m| m.changed_at)
+            .unwrap_or_default();
         let dep_typed = self.typed.get(id).map(|m| m.changed_at).unwrap_or_default();
         let dep = dep_parsed.max(dep_typed);
         let rev = self.revision;
@@ -218,7 +242,11 @@ impl QueryDb {
         };
         self.wasm.insert(
             id.to_string(),
-            Memo { value: new.clone(), changed_at, verified_at: rev },
+            Memo {
+                value: new.clone(),
+                changed_at,
+                verified_at: rev,
+            },
         );
         new
     }
@@ -240,7 +268,11 @@ mod tests {
 
         // Re-demand with no edit: nothing recomputes.
         let _ = db.wasm("m");
-        assert_eq!(db.recompute_count(), n, "re-demand with no edit must skip everything");
+        assert_eq!(
+            db.recompute_count(),
+            n,
+            "re-demand with no edit must skip everything"
+        );
     }
 
     #[test]
@@ -252,7 +284,11 @@ mod tests {
         // Writing the exact same text must not bump the revision.
         db.set_source_text("m", ADD);
         let _ = db.wasm("m");
-        assert_eq!(db.recompute_count(), n, "identical set_source_text must not invalidate");
+        assert_eq!(
+            db.recompute_count(),
+            n,
+            "identical set_source_text must not invalidate"
+        );
     }
 
     #[test]

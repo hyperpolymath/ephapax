@@ -74,12 +74,7 @@ fn compiles(root: &Path, rel: &str, out_dir: &Path) -> bool {
     let out = out_dir.join("gate.wasm");
     Command::new(ephapax_bin())
         .current_dir(root)
-        .args([
-            "compile",
-            rel,
-            "-o",
-            out.to_str().expect("utf8 tmp path"),
-        ])
+        .args(["compile", rel, "-o", out.to_str().expect("utf8 tmp path")])
         .output()
         .map(|o| o.status.success())
         .unwrap_or(false)

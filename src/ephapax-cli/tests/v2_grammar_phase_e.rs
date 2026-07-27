@@ -28,8 +28,7 @@ const LET_PAIR: &str = include_str!(concat!(
 #[test]
 fn annotation_on_fn_decl_parses() {
     let source = "module test\n@tail_recursive\nfn run(): I32 = 0\n";
-    let _ = parse_surface_module(source, "annotation-test")
-        .expect("@annotation prefix must parse");
+    let _ = parse_surface_module(source, "annotation-test").expect("@annotation prefix must parse");
 }
 
 #[test]

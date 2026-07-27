@@ -7,7 +7,9 @@
 //!
 //! Provides a small, stable S-expression encoding for Ephapax AST nodes.
 
-use ephapax_syntax::{BaseTy, BinOp, Decl, Expr, ExprKind, Literal, Module, Ty, UnaryOp, Visibility};
+use ephapax_syntax::{
+    BaseTy, BinOp, Decl, Expr, ExprKind, Literal, Module, Ty, UnaryOp, Visibility,
+};
 use smol_str::SmolStr;
 use std::fmt;
 use thiserror::Error;
@@ -267,7 +269,11 @@ fn decl_to_sexpr(decl: &Decl) -> SExpr {
             ty_to_sexpr(ret_ty),
             expr_to_sexpr(body),
         ]),
-        Decl::Type { name, visibility: _, ty } => SExpr::List(vec![
+        Decl::Type {
+            name,
+            visibility: _,
+            ty,
+        } => SExpr::List(vec![
             SExpr::Atom("type".into()),
             SExpr::Atom(escape_atom(name)),
             ty_to_sexpr(ty),
@@ -275,7 +281,9 @@ fn decl_to_sexpr(decl: &Decl) -> SExpr {
         Decl::Const { name, ty, value } => SExpr::List(vec![
             SExpr::Atom("const".into()),
             SExpr::Atom(escape_atom(name)),
-            ty.as_ref().map(ty_to_sexpr).unwrap_or(SExpr::Atom("_".into())),
+            ty.as_ref()
+                .map(ty_to_sexpr)
+                .unwrap_or(SExpr::Atom("_".into())),
             expr_to_sexpr(value),
         ]),
         // Render `extern "abi" { ... }` as a tagged s-expr so the IR
@@ -563,10 +571,7 @@ pub fn expr_to_sexpr(expr: &Expr) -> SExpr {
             SExpr::List(elems)
         }
         ExprKind::Perform { op, args } => {
-            let mut elems = vec![
-                SExpr::Atom("perform".into()),
-                SExpr::Atom(escape_atom(op)),
-            ];
+            let mut elems = vec![SExpr::Atom("perform".into()), SExpr::Atom(escape_atom(op))];
             elems.extend(args.iter().map(expr_to_sexpr));
             SExpr::List(elems)
         }
@@ -586,13 +591,9 @@ pub fn expr_to_sexpr(expr: &Expr) -> SExpr {
         // ephapax#61 so the structured `match` survives IR round-trip.
         // Guards render as `(arm <pattern> (guard <e>) <body>)`.
         ExprKind::Match { scrutinee, arms } => {
-            let mut elems =
-                vec![SExpr::Atom("match".into()), expr_to_sexpr(scrutinee)];
+            let mut elems = vec![SExpr::Atom("match".into()), expr_to_sexpr(scrutinee)];
             for arm in arms {
-                let mut arm_elems = vec![
-                    SExpr::Atom("arm".into()),
-                    pattern_to_sexpr(&arm.pattern),
-                ];
+                let mut arm_elems = vec![SExpr::Atom("arm".into()), pattern_to_sexpr(&arm.pattern)];
                 if let Some(guard) = &arm.guard {
                     arm_elems.push(SExpr::List(vec![
                         SExpr::Atom("guard".into()),
@@ -612,13 +613,10 @@ fn pattern_to_sexpr(pattern: &ephapax_syntax::Pattern) -> SExpr {
     match pattern {
         Pattern::Wildcard => SExpr::Atom("_".into()),
         Pattern::Unit => SExpr::List(vec![SExpr::Atom("unit".into())]),
-        Pattern::Var(v) => SExpr::List(vec![
-            SExpr::Atom("var".into()),
-            SExpr::Atom(escape_atom(v)),
-        ]),
-        Pattern::Literal(lit) => {
-            SExpr::List(vec![SExpr::Atom("lit".into()), lit_to_sexpr(lit)])
+        Pattern::Var(v) => {
+            SExpr::List(vec![SExpr::Atom("var".into()), SExpr::Atom(escape_atom(v))])
         }
+        Pattern::Literal(lit) => SExpr::List(vec![SExpr::Atom("lit".into()), lit_to_sexpr(lit)]),
         Pattern::Pair(l, r) => SExpr::List(vec![
             SExpr::Atom("pair".into()),
             pattern_to_sexpr(l),
@@ -630,10 +628,7 @@ fn pattern_to_sexpr(pattern: &ephapax_syntax::Pattern) -> SExpr {
             SExpr::List(elems)
         }
         Pattern::Constructor { ctor, args } => {
-            let mut elems = vec![
-                SExpr::Atom("ctor".into()),
-                SExpr::Atom(escape_atom(ctor)),
-            ];
+            let mut elems = vec![SExpr::Atom("ctor".into()), SExpr::Atom(escape_atom(ctor))];
             elems.extend(args.iter().map(pattern_to_sexpr));
             SExpr::List(elems)
         }

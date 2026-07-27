@@ -1,5 +1,6 @@
 # SPDX-License-Identifier: MPL-2.0
 # .editorconfig — RSR standard editor configuration
+# https://editorconfig.org
 
 root = true
 
@@ -11,3 +12,44 @@ end_of_line = lf
 trim_trailing_whitespace = true
 insert_final_newline = true
 
+# Prose formats rely on trailing double-space for hard line breaks.
+[*.md]
+trim_trailing_whitespace = false
+
+[*.adoc]
+trim_trailing_whitespace = false
+
+# Per-language indent widths.
+[*.rs]
+indent_size = 4
+
+[*.zig]
+indent_size = 4
+
+[*.{ada,adb,ads}]
+indent_size = 3
+
+[*.{ex,exs}]
+indent_size = 2
+
+[*.hs]
+indent_size = 2
+
+[*.{res,resi}]
+indent_size = 2
+
+[*.ncl]
+indent_size = 2
+
+[*.rkt]
+indent_size = 2
+
+[*.scm]
+indent_size = 2
+
+[*.nix]
+indent_size = 2
+
+[{Justfile,justfile}]
+indent_style = space
+indent_size = 4

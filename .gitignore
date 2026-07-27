@@ -97,3 +97,36 @@ dist/
 *.cmi
 *.cmo
 *.cmx
+
+# Additional build/tooling artefacts (salvaged from the 2026-07-26 sweep;
+# `.claude/` and `.editorconfig` were dropped from that set — both are TRACKED
+# in this repo and ignoring them would hide real changes from `git status`).
+*.ali
+*.chpl.tmp.*
+*.db
+*.db-journal
+*.db-shm
+*.db-wal
+*.ez
+*.jl.cov
+*.jl.mem
+*.py[cod]
+.venv/
+/.elixir_ls/
+/.stack-work/
+/Manifest.toml
+/_build/
+/bin/
+/build/
+/cover/
+/dist-newstyle/
+/dist/
+/doc/
+/exports/*.json
+/exports/*.lgt
+/obj/
+/out/
+__pycache__/
+composer/*.beam
+composer/build/
+erl_crash.dump

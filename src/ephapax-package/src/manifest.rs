@@ -197,7 +197,12 @@ fn is_valid_package_name(name: &str) -> bool {
 
     // Must start with letter
     // invariant: we already checked !is_empty(), so chars().next() cannot fail
-    if !name.chars().next().expect("invariant: name is not empty").is_ascii_lowercase() {
+    if !name
+        .chars()
+        .next()
+        .expect("invariant: name is not empty")
+        .is_ascii_lowercase()
+    {
         return false;
     }
 

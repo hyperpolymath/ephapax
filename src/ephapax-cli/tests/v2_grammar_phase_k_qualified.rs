@@ -51,10 +51,12 @@ fn qualified_module_member_access_compiles_end_to_end() {
 fn unknown_qualifier_is_a_clean_error() {
     let dir = tempfile::tempdir().expect("temp dir");
     let app = dir.path().join("app.eph");
-    std::fs::write(&app, "module app\nimport lib\nfn t(): I32 = nope.inc(1)\n")
-        .expect("write app");
-    std::fs::write(dir.path().join("lib.eph"), "module lib\npub fn inc(n: I32): I32 = n + 1\n")
-        .expect("write lib");
+    std::fs::write(&app, "module app\nimport lib\nfn t(): I32 = nope.inc(1)\n").expect("write app");
+    std::fs::write(
+        dir.path().join("lib.eph"),
+        "module lib\npub fn inc(n: I32): I32 = n + 1\n",
+    )
+    .expect("write lib");
     let out = tempfile::NamedTempFile::new().expect("temp file");
     let output = Command::new(ephapax_bin())
         .arg("compile-eph")
@@ -63,7 +65,10 @@ fn unknown_qualifier_is_a_clean_error() {
         .arg(out.path())
         .output()
         .expect("ephapax must run");
-    assert!(!output.status.success(), "unknown qualifier must fail to compile");
+    assert!(
+        !output.status.success(),
+        "unknown qualifier must fail to compile"
+    );
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(
         stderr.contains("not an imported module"),

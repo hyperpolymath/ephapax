@@ -414,7 +414,11 @@ fn format_type(ty: &Ty) -> String {
         Ty::Fun { param, ret } => format!("{} -> {}", format_type(param), format_type(ret)),
         Ty::Prod { left, right } => format!("({}, {})", format_type(left), format_type(right)),
         Ty::Sum { left, right } => format!("{} + {}", format_type(left), format_type(right)),
-        Ty::Borrow { inner, mutable } => format!("&{}{}", if *mutable { "mut " } else { "" }, format_type(inner)),
+        Ty::Borrow { inner, mutable } => format!(
+            "&{}{}",
+            if *mutable { "mut " } else { "" },
+            format_type(inner)
+        ),
         Ty::List(elem_ty) => format!("[{}]", format_type(elem_ty)),
         Ty::Tuple(elem_types) => {
             let types_str = elem_types
@@ -435,7 +439,12 @@ fn format_type(ty: &Ty) -> String {
             effects,
         } => {
             let effs = effects.join(" + ");
-            format!("{} -> {} with {}", format_type(param), format_type(ret), effs)
+            format!(
+                "{} -> {} with {}",
+                format_type(param),
+                format_type(ret),
+                effs
+            )
         }
     }
 }

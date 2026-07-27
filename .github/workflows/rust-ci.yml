@@ -2,6 +2,17 @@
 # Rust CI — thin wrapper calling the shared estate reusable in
 # hyperpolymath/standards. Configure once, propagate everywhere.
 # See: docs/CI-REUSABLE-WORKFLOWS.adoc in standards.
+#
+# DO NOT reintroduce a job-level `if: hashFiles('Cargo.toml') != ''` guard here.
+# Job-level `if:` is evaluated server-side before any checkout, so hashFiles()
+# has no workspace to hash. This workflow carried that guard on both local jobs
+# and, as a result, failed 60/60 runs at 0s with zero jobs and no logs — a
+# startup failure, not a test failure. GitHub reported the workflow's name as
+# `.github/workflows/rust-ci.yml` (the path-fallback used when a file has never
+# been parsed) rather than the declared `Rust CI`, which is how it was found.
+# Net effect: this repo's Rust build/test gate never ran between 2026-06-27 and
+# 2026-07-27. If a Cargo.toml presence check is ever needed, follow the estate
+# reusable and gate on a `detect` job output, not on hashFiles() at job level.
 name: Rust CI
 
 on:
@@ -24,7 +35,6 @@ jobs:
     name: Cargo build + test (ephapax-cli, --no-default-features)
     runs-on: ubuntu-latest
     timeout-minutes: 20
-    if: hashFiles('Cargo.toml') != ''
 
     # Proves ephapax can be built and tested with zero git dep on the
     # sibling `hyperpolymath/typed-wasm` repo. Enforces the estate
@@ -64,7 +74,6 @@ jobs:
     name: wasm-tools validate (emitted modules)
     runs-on: ubuntu-latest
     timeout-minutes: 20
-    if: hashFiles('Cargo.toml') != ''
 
     # Structurally validates every module ephapax emits for the fixture
     # corpus (`just validate-wasm`), catching codegen that produces an

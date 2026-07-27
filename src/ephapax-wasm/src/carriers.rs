@@ -177,9 +177,24 @@ mod tests {
     #[test]
     fn access_sites_round_trip() {
         let entries = vec![
-            AccessSite { func_idx: 3, byte_offset: 12, region_id: 0, field_id: 0 },
-            AccessSite { func_idx: 3, byte_offset: 19, region_id: 0, field_id: 1 },
-            AccessSite { func_idx: 300, byte_offset: 70_000, region_id: 0, field_id: 1 },
+            AccessSite {
+                func_idx: 3,
+                byte_offset: 12,
+                region_id: 0,
+                field_id: 0,
+            },
+            AccessSite {
+                func_idx: 3,
+                byte_offset: 19,
+                region_id: 0,
+                field_id: 1,
+            },
+            AccessSite {
+                func_idx: 300,
+                byte_offset: 70_000,
+                region_id: 0,
+                field_id: 1,
+            },
         ];
         let payload = build_access_sites_payload(&entries);
         assert_eq!(parse_access_sites_payload(&payload), Some(entries));
@@ -220,7 +235,7 @@ mod tests {
         assert_eq!(&p[6..10], &14u32.to_le_bytes()); // name len
         assert_eq!(&p[10..24], b"ephapax.string");
         assert_eq!(&p[24..28], &2u32.to_le_bytes()); // two fields
-        // trailing region_byte_size == 8
+                                                     // trailing region_byte_size == 8
         assert_eq!(&p[p.len() - 4..], &8u32.to_le_bytes());
     }
 }

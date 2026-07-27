@@ -474,8 +474,16 @@ fn compile_file(
             if verbose {
                 println!("{} Type check passed", "✓".green());
             }
-            return finish_compile(module, &filename, path, output, opt_level, debug,
-                verify_ownership, verbose);
+            return finish_compile(
+                module,
+                &filename,
+                path,
+                output,
+                opt_level,
+                debug,
+                verify_ownership,
+                verbose,
+            );
         }
         Err(e) => return Err(e.to_string()),
     };
@@ -548,8 +556,16 @@ fn compile_file(
         println!("{} Type check passed", "✓".green());
     }
 
-    finish_compile(module, &filename, path, output, opt_level, debug,
-        verify_ownership, verbose)
+    finish_compile(
+        module,
+        &filename,
+        path,
+        output,
+        opt_level,
+        debug,
+        verify_ownership,
+        verbose,
+    )
 }
 
 /// Codegen + optional ownership verification + output write. Shared by
@@ -564,7 +580,6 @@ fn finish_compile(
     verify_ownership: bool,
     verbose: bool,
 ) -> Result<(), String> {
-
     // Compile to WASM (with or without debug info)
     let wasm_bytes = if debug {
         ephapax_wasm::compile_module(&module).map_err(|e| format!("Codegen error: {}", e))?
@@ -672,16 +687,11 @@ fn report_ownership_verification(wasm_bytes: &[u8], verbose: bool) -> Result<(),
     match verify_from_module(wasm_bytes) {
         Ok(()) => {
             if verbose {
-                println!(
-                    "{} typed-wasm L7+L10 verification: clean",
-                    "✓".green()
-                );
+                println!("{} typed-wasm L7+L10 verification: clean", "✓".green());
             }
             Ok(())
         }
-        Err(VerifyError::Parse(e)) => {
-            Err(format!("verifier could not parse emitted wasm: {}", e))
-        }
+        Err(VerifyError::Parse(e)) => Err(format!("verifier could not parse emitted wasm: {}", e)),
         Err(VerifyError::Ownership(errs)) => {
             eprintln!(
                 "{} typed-wasm verification failed: {} violation(s)",

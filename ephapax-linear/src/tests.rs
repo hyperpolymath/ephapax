@@ -422,19 +422,29 @@ fn p2p_contraction_always_rejected_both_disciplines() {
 
         let mut linear = LinearChecker::new();
         let result = linear.check(&expr);
-        assert!(result.is_err(), "P2P linear[{i}]: double use must be rejected");
+        assert!(
+            result.is_err(),
+            "P2P linear[{i}]: double use must be rejected"
+        );
         let violations = result.unwrap_err();
         assert!(
-            violations.iter().any(|v| matches!(v, DisciplineViolation::Contraction { .. })),
+            violations
+                .iter()
+                .any(|v| matches!(v, DisciplineViolation::Contraction { .. })),
             "P2P linear[{i}]: must report Contraction violation"
         );
 
         let mut affine = AffineChecker::new();
         let result = affine.check(&expr);
-        assert!(result.is_err(), "P2P affine[{i}]: double use must be rejected");
+        assert!(
+            result.is_err(),
+            "P2P affine[{i}]: double use must be rejected"
+        );
         let violations = result.unwrap_err();
         assert!(
-            violations.iter().any(|v| matches!(v, DisciplineViolation::Contraction { .. })),
+            violations
+                .iter()
+                .any(|v| matches!(v, DisciplineViolation::Contraction { .. })),
             "P2P affine[{i}]: must report Contraction violation"
         );
     }
@@ -459,10 +469,15 @@ fn p2p_weakening_linear_forbidden_affine_allowed() {
         // Linear must reject
         let mut linear = LinearChecker::new();
         let result = linear.check(&expr);
-        assert!(result.is_err(), "P2P linear[{i}]: weakening must be rejected");
+        assert!(
+            result.is_err(),
+            "P2P linear[{i}]: weakening must be rejected"
+        );
         let violations = result.unwrap_err();
         assert!(
-            violations.iter().any(|v| matches!(v, DisciplineViolation::WeakeningForbidden { .. })),
+            violations
+                .iter()
+                .any(|v| matches!(v, DisciplineViolation::WeakeningForbidden { .. })),
             "P2P linear[{i}]: must report WeakeningForbidden"
         );
 
@@ -790,7 +805,10 @@ fn aspect_checker_stateless_between_instances() {
     });
 
     let mut checker1 = LinearChecker::new();
-    assert!(checker1.check(&bad_expr).is_err(), "Aspect stateless: bad expr must fail");
+    assert!(
+        checker1.check(&bad_expr).is_err(),
+        "Aspect stateless: bad expr must fail"
+    );
 
     // Second call with a DIFFERENT checker instance on a good expression
     let good_expr = e(ExprKind::LetLin {
@@ -835,10 +853,7 @@ fn aspect_violations_non_empty_on_failure() {
                 body: Box::new(unit()),
             }),
         ),
-        (
-            "drop",
-            e(ExprKind::Drop(Box::new(i32_lit(3)))),
-        ),
+        ("drop", e(ExprKind::Drop(Box::new(i32_lit(3))))),
     ];
 
     for (label, expr) in &bad_cases {
@@ -1037,14 +1052,30 @@ fn aspect_violation_error_warning_mutually_exclusive() {
     use crate::DisciplineViolation;
 
     let all_violations: Vec<DisciplineViolation> = vec![
-        DisciplineViolation::Contraction { name: "x".to_string() },
-        DisciplineViolation::NotInScope { name: "y".to_string() },
-        DisciplineViolation::WeakeningForbidden { name: "z".to_string() },
+        DisciplineViolation::Contraction {
+            name: "x".to_string(),
+        },
+        DisciplineViolation::NotInScope {
+            name: "y".to_string(),
+        },
+        DisciplineViolation::WeakeningForbidden {
+            name: "z".to_string(),
+        },
         DisciplineViolation::DropForbidden,
-        DisciplineViolation::BranchDisagreement { name: "b".to_string() },
-        DisciplineViolation::RegionLeakLinear { region: "r".to_string(), name: "s".to_string() },
-        DisciplineViolation::LetForLinearType { name: "t".to_string() },
-        DisciplineViolation::ImplicitDropWarning { region: "r".to_string(), name: "u".to_string() },
+        DisciplineViolation::BranchDisagreement {
+            name: "b".to_string(),
+        },
+        DisciplineViolation::RegionLeakLinear {
+            region: "r".to_string(),
+            name: "s".to_string(),
+        },
+        DisciplineViolation::LetForLinearType {
+            name: "t".to_string(),
+        },
+        DisciplineViolation::ImplicitDropWarning {
+            region: "r".to_string(),
+            name: "u".to_string(),
+        },
     ];
 
     for violation in &all_violations {

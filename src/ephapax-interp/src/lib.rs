@@ -214,7 +214,10 @@ impl Value {
                 param: Box::new(param_ty.clone()),
                 ret: Box::new(Ty::Base(BaseTy::Unit)), // Unknown without evaluation
             },
-            Value::Borrow(inner) => Ty::Borrow { inner: Box::new(inner.to_type()), mutable: false },
+            Value::Borrow(inner) => Ty::Borrow {
+                inner: Box::new(inner.to_type()),
+                mutable: false,
+            },
         }
     }
 }
@@ -554,16 +557,12 @@ impl Interpreter {
                 }
             }
 
-            ExprKind::Perform { .. } => {
-                Err(RuntimeError::Unimplemented(
-                    "effect perform not yet implemented in interpreter".into(),
-                ))
-            }
-            ExprKind::Handle { .. } => {
-                Err(RuntimeError::Unimplemented(
-                    "effect handle not yet implemented in interpreter".into(),
-                ))
-            }
+            ExprKind::Perform { .. } => Err(RuntimeError::Unimplemented(
+                "effect perform not yet implemented in interpreter".into(),
+            )),
+            ExprKind::Handle { .. } => Err(RuntimeError::Unimplemented(
+                "effect handle not yet implemented in interpreter".into(),
+            )),
             ExprKind::Match { scrutinee, arms } => self.eval_match(scrutinee, arms),
         }
     }
@@ -908,11 +907,7 @@ impl Interpreter {
     /// and restores prior bindings. No arms matching is a runtime
     /// error — the typechecker's exhaustiveness pass should prevent
     /// this when the module is well-typed.
-    fn eval_match(
-        &mut self,
-        scrutinee: &Expr,
-        arms: &[MatchArm],
-    ) -> Result<Value, RuntimeError> {
+    fn eval_match(&mut self, scrutinee: &Expr, arms: &[MatchArm]) -> Result<Value, RuntimeError> {
         let scrut_val = self.eval(scrutinee)?;
         for arm in arms {
             let mut new_bindings: Vec<(Var, Value)> = Vec::new();
@@ -1105,9 +1100,13 @@ impl Interpreter {
                 match prev {
                     Some(v) => {
                         self.env.bindings.insert(left_var.clone(), v);
-                        if let Some(c) = prev_c { self.env.consumed.insert(left_var.clone(), c); }
+                        if let Some(c) = prev_c {
+                            self.env.consumed.insert(left_var.clone(), c);
+                        }
                     }
-                    None => { self.env.remove(left_var); }
+                    None => {
+                        self.env.remove(left_var);
+                    }
                 }
                 Ok(result)
             }
@@ -1119,9 +1118,13 @@ impl Interpreter {
                 match prev {
                     Some(v) => {
                         self.env.bindings.insert(right_var.clone(), v);
-                        if let Some(c) = prev_c { self.env.consumed.insert(right_var.clone(), c); }
+                        if let Some(c) = prev_c {
+                            self.env.consumed.insert(right_var.clone(), c);
+                        }
                     }
-                    None => { self.env.remove(right_var); }
+                    None => {
+                        self.env.remove(right_var);
+                    }
                 }
                 Ok(result)
             }
@@ -1664,24 +1667,31 @@ mod tests {
         });
         let expr = dummy_expr(ExprKind::Match {
             scrutinee: Box::new(scrut),
-            arms: vec![MatchArm {
-                pattern: P::Constructor {
-                    ctor: "Some".into(),
-                    args: vec![P::Var("v".into())],
+            arms: vec![
+                MatchArm {
+                    pattern: P::Constructor {
+                        ctor: "Some".into(),
+                        args: vec![P::Var("v".into())],
+                    },
+                    guard: None,
+                    body: dummy_expr(ExprKind::Var("v".into())),
                 },
-                guard: None,
-                body: dummy_expr(ExprKind::Var("v".into())),
-            }, MatchArm {
-                pattern: P::Wildcard,
-                guard: None,
-                body: lit_i32_expr(0),
-            }],
+                MatchArm {
+                    pattern: P::Wildcard,
+                    guard: None,
+                    body: lit_i32_expr(0),
+                },
+            ],
         });
         let result = interp.eval(&expr).expect("match should evaluate");
         assert!(matches!(result, Value::I32(7)));
 
         let outer = interp.env.get(&Var::from("v")).cloned().unwrap();
-        assert!(matches!(outer, Value::I32(100)), "outer v leaked: {:?}", outer);
+        assert!(
+            matches!(outer, Value::I32(100)),
+            "outer v leaked: {:?}",
+            outer
+        );
     }
 
     /// Multi-field constructor: `Pair(a, b)` of arity 2 lives in a
@@ -1742,7 +1752,11 @@ mod tests {
             }],
         });
         let err = interp.eval(&expr).unwrap_err();
-        assert!(matches!(err, RuntimeError::PatternMatchFailed), "got {:?}", err);
+        assert!(
+            matches!(err, RuntimeError::PatternMatchFailed),
+            "got {:?}",
+            err
+        );
         // suppress unused-import warning for Visibility (held for symmetry
         // with the typing test module pattern).
         let _ = Visibility::Private;
@@ -1820,7 +1834,9 @@ mod tests {
                 },
             ],
         });
-        let result = interp.eval(&expr).expect("guard fall-through should evaluate");
+        let result = interp
+            .eval(&expr)
+            .expect("guard fall-through should evaluate");
         assert!(matches!(result, Value::I32(0)), "got {:?}", result);
     }
 

@@ -151,9 +151,7 @@ fn first_module_declaration(source: &str) -> Option<String> {
             let rest = rest.trim();
             // Take everything up to a whitespace, comma, or comment marker.
             let end = rest
-                .find(|c: char| {
-                    !(c.is_ascii_alphanumeric() || c == '_' || c == '.' || c == '/')
-                })
+                .find(|c: char| !(c.is_ascii_alphanumeric() || c == '_' || c == '.' || c == '/'))
                 .unwrap_or(rest.len());
             let name = &rest[..end];
             if !name.is_empty() {
@@ -208,15 +206,14 @@ fn visit(
         message: e.to_string(),
     })?;
 
-    let surface =
-        parse_surface_module(&source, logical).map_err(|errs| ResolveError::Parse {
-            path: file_path.clone(),
-            message: errs
-                .iter()
-                .map(|e| format!("{}", e))
-                .collect::<Vec<_>>()
-                .join("; "),
-        })?;
+    let surface = parse_surface_module(&source, logical).map_err(|errs| ResolveError::Parse {
+        path: file_path.clone(),
+        message: errs
+            .iter()
+            .map(|e| format!("{}", e))
+            .collect::<Vec<_>>()
+            .join("; "),
+    })?;
 
     // Recurse into imports BEFORE inserting this module so that the
     // post-order visit places dependencies before this module.
@@ -226,7 +223,9 @@ fn visit(
         .map(|i| normalise_path(i.module.as_str()))
         .collect();
     for dep in &deps {
-        visit(dep, None, base_dir, mod_index, loaded, order, visiting, stack)?;
+        visit(
+            dep, None, base_dir, mod_index, loaded, order, visiting, stack,
+        )?;
     }
 
     loaded.insert(
@@ -253,9 +252,9 @@ fn root_module_path_from_source(root_path: &Path) -> Result<String, ResolveError
         let line = line.trim_start();
         if let Some(rest) = line.strip_prefix("module") {
             let rest = rest.trim();
-            if let Some(end) = rest.find(|c: char| {
-                !(c.is_ascii_alphanumeric() || c == '_' || c == '.' || c == '/')
-            }) {
+            if let Some(end) = rest
+                .find(|c: char| !(c.is_ascii_alphanumeric() || c == '_' || c == '.' || c == '/'))
+            {
                 return Ok(normalise_path(&rest[..end]));
             } else if !rest.is_empty() {
                 return Ok(normalise_path(rest));

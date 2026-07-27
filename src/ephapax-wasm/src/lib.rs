@@ -46,8 +46,8 @@
 //!
 //! Mode is set per-module compilation and affects how unused linear values are handled.
 
-mod debug;
 pub mod carriers;
+mod debug;
 pub mod ownership;
 
 pub use debug::{DebugInfo, VariableMetadata};
@@ -186,7 +186,10 @@ fn ty_to_ownership_kind(ty: &Ty) -> ownership::OwnershipKind {
     match ty {
         Ty::Borrow { mutable: true, .. } => ownership::OwnershipKind::ExclBorrow,
         Ty::Borrow { mutable: false, .. } => ownership::OwnershipKind::SharedBorrow,
-        Ty::Ref { linearity: Linearity::Linear, .. } => ownership::OwnershipKind::Linear,
+        Ty::Ref {
+            linearity: Linearity::Linear,
+            ..
+        } => ownership::OwnershipKind::Linear,
         Ty::String(_) => ownership::OwnershipKind::Linear,
         Ty::Region { inner, .. } => ty_to_ownership_kind(inner),
         Ty::ForAll { body, .. } => ty_to_ownership_kind(body),
@@ -778,8 +781,10 @@ impl Codegen {
 
                     let param_names: Vec<String> =
                         params.iter().map(|(n, _)| n.to_string()).collect();
-                    let param_kinds: Vec<ownership::OwnershipKind> =
-                        params.iter().map(|(_, ty)| ty_to_ownership_kind(ty)).collect();
+                    let param_kinds: Vec<ownership::OwnershipKind> = params
+                        .iter()
+                        .map(|(_, ty)| ty_to_ownership_kind(ty))
+                        .collect();
 
                     self.user_fns.insert(
                         name.to_string(),
@@ -941,16 +946,14 @@ impl Codegen {
                             // position among ALL imports: builtin host
                             // imports occupy 0..NUM_BUILTIN_IMPORTS,
                             // then this extern fn takes the next slot.
-                            let import_idx =
-                                NUM_BUILTIN_IMPORTS + self.extern_imports.len() as u32;
+                            let import_idx = NUM_BUILTIN_IMPORTS + self.extern_imports.len() as u32;
 
                             self.extern_imports.push(ExternImport {
                                 abi: abi.clone(),
                                 name: name.to_string(),
                                 wasm_type_idx: type_idx,
                             });
-                            self.extern_fn_indices
-                                .insert(name.to_string(), import_idx);
+                            self.extern_fn_indices.insert(name.to_string(), import_idx);
                         }
                     }
                 }
@@ -1095,7 +1098,11 @@ impl Codegen {
         for decl in &ast.decls {
             match decl {
                 Decl::Fn {
-                    name, params, body, type_params: _, ..
+                    name,
+                    params,
+                    body,
+                    type_params: _,
+                    ..
                 } => {
                     let info = self.user_fns.get(name.as_str()).cloned().ok_or_else(|| {
                         CodegenError(format!("BUG: function `{}` not collected", name))
@@ -1264,7 +1271,12 @@ impl Codegen {
 
         // Export all user functions by name
         for decl in &ast.decls {
-            if let Decl::Fn { name, type_params: _, .. } = decl {
+            if let Decl::Fn {
+                name,
+                type_params: _,
+                ..
+            } = decl
+            {
                 if let Some(info) = self.user_fns.get(name.as_str()) {
                     exports.export(name.as_str(), ExportKind::Func, info.wasm_fn_idx);
                 }
@@ -1275,17 +1287,41 @@ impl Codegen {
     }
 
     fn add_runtime_exports(&self, exports: &mut ExportSection) {
-        exports.export("__ephapax_bump_alloc", ExportKind::Func, self.fn_bump_alloc());
-        exports.export("__ephapax_string_new", ExportKind::Func, self.fn_string_new());
-        exports.export("__ephapax_string_len", ExportKind::Func, self.fn_string_len());
+        exports.export(
+            "__ephapax_bump_alloc",
+            ExportKind::Func,
+            self.fn_bump_alloc(),
+        );
+        exports.export(
+            "__ephapax_string_new",
+            ExportKind::Func,
+            self.fn_string_new(),
+        );
+        exports.export(
+            "__ephapax_string_len",
+            ExportKind::Func,
+            self.fn_string_len(),
+        );
         exports.export(
             "__ephapax_string_concat",
             ExportKind::Func,
             self.fn_string_concat(),
         );
-        exports.export("__ephapax_string_drop", ExportKind::Func, self.fn_string_drop());
-        exports.export("__ephapax_region_enter", ExportKind::Func, self.fn_region_enter());
-        exports.export("__ephapax_region_exit", ExportKind::Func, self.fn_region_exit());
+        exports.export(
+            "__ephapax_string_drop",
+            ExportKind::Func,
+            self.fn_string_drop(),
+        );
+        exports.export(
+            "__ephapax_region_enter",
+            ExportKind::Func,
+            self.fn_region_enter(),
+        );
+        exports.export(
+            "__ephapax_region_exit",
+            ExportKind::Func,
+            self.fn_region_exit(),
+        );
         exports.export("memory", ExportKind::Memory, 0);
     }
 
@@ -2144,9 +2180,8 @@ impl Codegen {
         // 3. Calculate function index for this lambda. Lambdas live
         // after the first user fn block, shifted forward by any
         // dynamic imports (extern / FFI) registered earlier.
-        let lambda_fn_idx = self.first_user_fn()
-            + self.user_fns.len() as u32
-            + self.lambda_fns.len() as u32;
+        let lambda_fn_idx =
+            self.first_user_fn() + self.user_fns.len() as u32 + self.lambda_fns.len() as u32;
 
         // 4. Table index: position in the function table (0-based)
         let table_idx = self.user_fns.len() as u32 + self.lambda_fns.len() as u32;
@@ -3063,10 +3098,7 @@ fn ty_to_valtype(ty: &Ty) -> ValType {
 /// Used by `compile_app` (and `collect_extern_imports`-aware callers)
 /// to recognise direct calls to named functions even when the surface
 /// parser has curried the call into nested `App` nodes.
-fn flatten_app_chain<'a>(
-    fn_expr: &'a Expr,
-    arg: &'a Expr,
-) -> Option<(&'a str, Vec<&'a Expr>)> {
+fn flatten_app_chain<'a>(fn_expr: &'a Expr, arg: &'a Expr) -> Option<(&'a str, Vec<&'a Expr>)> {
     let mut args: Vec<&Expr> = vec![arg];
     let mut current = fn_expr;
     loop {
@@ -4718,8 +4750,7 @@ mod tests {
     fn ownership_payload(wasm: &[u8]) -> Option<Vec<u8>> {
         use wasmparser::{Parser as WP, Payload};
         for payload in WP::new(0).parse_all(wasm) {
-            if let Payload::CustomSection(reader) = payload.expect("wasm parse")
-            {
+            if let Payload::CustomSection(reader) = payload.expect("wasm parse") {
                 if reader.name() == ownership::OWNERSHIP_SECTION_NAME {
                     return Some(reader.data().to_vec());
                 }
@@ -4770,8 +4801,8 @@ mod tests {
 
         let payload = custom_payload(&wasm, carriers::ACCESS_SITES_SECTION_NAME)
             .expect("typedwasm.access-sites section present");
-        let entries = carriers::parse_access_sites_payload(&payload)
-            .expect("access-sites payload parses");
+        let entries =
+            carriers::parse_access_sites_payload(&payload).expect("access-sites payload parses");
         // string_new (2 stores) + string_len (1 load) + string_concat
         // (4 loads + 2 stores) = 9 typed accesses.
         assert_eq!(entries.len(), 9);
@@ -4794,8 +4825,7 @@ mod tests {
         }
         for entry in &entries {
             assert_eq!(entry.region_id, carriers::REGION_STRING);
-            assert!(entry.field_id == carriers::FIELD_PTR
-                || entry.field_id == carriers::FIELD_LEN);
+            assert!(entry.field_id == carriers::FIELD_PTR || entry.field_id == carriers::FIELD_LEN);
             let body_idx = (entry.func_idx - import_count) as usize;
             let (start, end) = bodies[body_idx];
             let opcode_at = start + entry.byte_offset as usize;
@@ -4804,7 +4834,9 @@ mod tests {
             assert!(
                 opcode == 0x28 || opcode == 0x36,
                 "offset {} in func {} points at 0x{:02x}, not i32.load/i32.store",
-                entry.byte_offset, entry.func_idx, opcode
+                entry.byte_offset,
+                entry.func_idx,
+                opcode
             );
         }
     }
@@ -4836,10 +4868,7 @@ mod tests {
             entries[0].param_kinds,
             vec![ownership::OwnershipKind::Linear]
         );
-        assert_eq!(
-            entries[0].ret_kind,
-            ownership::OwnershipKind::Unrestricted
-        );
+        assert_eq!(entries[0].ret_kind, ownership::OwnershipKind::Unrestricted);
     }
 
     #[test]
@@ -5142,8 +5171,7 @@ mod tests {
                 },
             ],
         };
-        let wasm =
-            compile_module(&module).expect("Some(0) | Some(v) | None should compile");
+        let wasm = compile_module(&module).expect("Some(0) | Some(v) | None should compile");
         assert_wasm_header(&wasm);
         validate_wasm(&wasm);
     }
@@ -5213,8 +5241,7 @@ mod tests {
                 },
             ],
         };
-        let wasm =
-            compile_module(&module).expect("Box(Some(v)) | Box(None) should compile");
+        let wasm = compile_module(&module).expect("Box(Some(v)) | Box(None) should compile");
         assert_wasm_header(&wasm);
         validate_wasm(&wasm);
     }
@@ -5280,8 +5307,7 @@ mod tests {
                 },
             ],
         };
-        let wasm =
-            compile_module(&module).expect("guarded match should compile");
+        let wasm = compile_module(&module).expect("guarded match should compile");
         assert_wasm_header(&wasm);
         validate_wasm(&wasm);
     }
@@ -5333,8 +5359,7 @@ mod tests {
                 },
             ],
         };
-        let wasm =
-            compile_module(&module).expect("guard on wildcard should compile");
+        let wasm = compile_module(&module).expect("guard on wildcard should compile");
         assert_wasm_header(&wasm);
         validate_wasm(&wasm);
     }

@@ -73,7 +73,10 @@ impl std::fmt::Display for MetaError {
         match self {
             MetaError::CannotReify(t) => write!(f, "cannot reify a {t} value into syntax"),
             MetaError::LinearSplice(t) => {
-                write!(f, "refused to reify linear {t} value (would duplicate a resource)")
+                write!(
+                    f,
+                    "refused to reify linear {t} value (would duplicate a resource)"
+                )
             }
             MetaError::Decode(e) => write!(f, "decode error: {e}"),
             MetaError::Eval(e) => write!(f, "eval error: {e}"),
@@ -131,7 +134,9 @@ pub struct ReflectiveInterp {
 impl ReflectiveInterp {
     /// A fresh reflective interpreter.
     pub fn new() -> Self {
-        Self { inner: Interpreter::new() }
+        Self {
+            inner: Interpreter::new(),
+        }
     }
 
     /// Quote an expression to data.
@@ -268,7 +273,9 @@ mod tests {
         let stager = WasmStager::new();
         let wasm = stager.compile_stage(&mul(6, 7)).expect("compile stage");
         assert!(wasm.starts_with(b"\0asm"), "valid wasm magic");
-        stager.run_stage(&mul(6, 7)).expect("staged run must not trap");
+        stager
+            .run_stage(&mul(6, 7))
+            .expect("staged run must not trap");
     }
 
     #[test]

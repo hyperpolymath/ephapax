@@ -711,19 +711,14 @@ pub enum ExternItem {
 
 /// Helper for serde skip_serializing_if.
 /// Visibility of a declaration.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum Visibility {
     /// Accessible from other modules.
     Public,
     /// Only accessible within this module (default).
+    #[default]
     Private,
-}
-
-impl Default for Visibility {
-    fn default() -> Self {
-        Visibility::Private
-    }
 }
 
 /// Helper for serde skip_serializing_if.
@@ -797,7 +792,7 @@ mod tests {
             BaseTy::F64,
         ] {
             assert!(
-                !Ty::Base(base.clone()).is_linear(),
+                !Ty::Base(base).is_linear(),
                 "Coq bridge: TBase {base:?} should be NOT linear"
             );
         }

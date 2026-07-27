@@ -173,11 +173,7 @@ impl Backend {
         if let Some(module) = &state.module {
             for d in &module.decls {
                 if let Decl::Fn {
-                    name,
-                    body,
-                    params,
-                    type_params: _,
-                    ..
+                    name, body, params, ..
                 } = d
                 {
                     // Check if word matches a parameter
@@ -572,7 +568,7 @@ fn extract_declarations(module: &Module, _source: &str) -> Vec<DeclInfo> {
                         .unwrap_or_default()
                 ),
                 params: Vec::new(),
-                return_type: ty.as_ref().map(|t| format_ty(t)),
+                return_type: ty.as_ref().map(format_ty),
             }),
             Decl::Extern { abi, items } => {
                 for item in items {

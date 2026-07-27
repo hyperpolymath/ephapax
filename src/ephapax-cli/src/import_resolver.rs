@@ -162,6 +162,7 @@ fn first_module_declaration(source: &str) -> Option<String> {
     None
 }
 
+#[allow(clippy::too_many_arguments)] // recursive resolver: 8 params vs the 7 default threshold
 fn visit(
     logical: &str,
     explicit_file: Option<&Path>,

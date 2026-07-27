@@ -185,7 +185,7 @@ mod tests {
     #[test]
     fn single_linear_param_roundtrip() {
         let e = entry(7, vec![OwnershipKind::Linear], OwnershipKind::Unrestricted);
-        let bytes = build_ownership_section_payload(&[e.clone()]);
+        let bytes = build_ownership_section_payload(std::slice::from_ref(&e));
         assert_eq!(parse_ownership_section_payload(&bytes), vec![e]);
     }
 
@@ -201,7 +201,7 @@ mod tests {
             ],
             OwnershipKind::Linear,
         );
-        let bytes = build_ownership_section_payload(&[e.clone()]);
+        let bytes = build_ownership_section_payload(std::slice::from_ref(&e));
         assert_eq!(parse_ownership_section_payload(&bytes), vec![e]);
     }
 

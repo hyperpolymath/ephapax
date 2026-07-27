@@ -87,10 +87,7 @@ fn module_qualifier_of(base: &SurfaceExpr) -> Option<SmolStr> {
 /// (`lib/math` → `math`, `Foo.Bar` → `Bar`, `Coproc` → `Coproc`). This is
 /// the name a `M.member` qualifier must use.
 fn last_segment(path: &str) -> SmolStr {
-    path.rsplit(|c| c == '/' || c == '.')
-        .next()
-        .unwrap_or(path)
-        .into()
+    path.rsplit(['/', '.']).next().unwrap_or(path).into()
 }
 
 /// Desugaring errors.
@@ -2014,7 +2011,7 @@ mod tests {
                     assert_eq!(params[0].0.as_str(), "title");
                     assert_eq!(*ret_ty, Ty::Base(BaseTy::I32));
                 } else {
-                    panic!("expected ExternItem::Fn, got {:?}", &items[1]);
+                    panic!("expected ExternItem::Fn, got {:?}", items[1]);
                 }
             }
             other => panic!("expected Decl::Extern, got {other:?}"),

@@ -287,10 +287,8 @@ fn parse_extern_item(pair: pest::iterators::Pair<Rule>) -> Result<ExternItem, Pa
                             }
                         }
                     }
-                    Rule::ty => {
-                        if ret_ty.is_none() {
-                            ret_ty = Some(parse_type(sub)?);
-                        }
+                    Rule::ty if ret_ty.is_none() => {
+                        ret_ty = Some(parse_type(sub)?);
                     }
                     _ => {}
                 }
@@ -772,8 +770,7 @@ fn parse_seq_expr_core(pair: pest::iterators::Pair<Rule>) -> Result<Expr, ParseE
 
     // invariant: loop above ensures parsed is not empty before we enter this block
     let last = parsed.pop().expect("invariant: parsed is not empty");
-    parsed.into_iter().rev().fold(Ok(last), |acc, expr| {
-        let acc = acc?;
+    parsed.into_iter().rev().try_fold(last, |acc, expr| {
         let s = expr.span;
         Ok(Expr::new(
             ExprKind::Let {
@@ -1261,34 +1258,29 @@ fn parse_handle_expr(pair: pest::iterators::Pair<Rule>) -> Result<Expr, ParseErr
                     match item.as_rule() {
                         Rule::handler_param_list => {
                             for param_item in item.into_inner() {
-                                match param_item.as_rule() {
-                                    Rule::handler_param => {
-                                        let hp_inner = param_item.into_inner().next();
-                                        if let Some(hp) = hp_inner {
-                                            match hp.as_rule() {
-                                                Rule::resume_param => {
-                                                    // Check for mode
-                                                    if let Some(mode_pair) = hp.into_inner().next()
-                                                    {
-                                                        resume_mode =
-                                                            Some(match mode_pair.as_str() {
-                                                                "once" => ResumeMode::Once,
-                                                                "multi" => ResumeMode::Multi,
-                                                                _ => ResumeMode::Once,
-                                                            });
-                                                    } else {
-                                                        resume_mode = Some(ResumeMode::Once);
-                                                        // default
-                                                    }
+                                if param_item.as_rule() == Rule::handler_param {
+                                    let hp_inner = param_item.into_inner().next();
+                                    if let Some(hp) = hp_inner {
+                                        match hp.as_rule() {
+                                            Rule::resume_param => {
+                                                // Check for mode
+                                                if let Some(mode_pair) = hp.into_inner().next() {
+                                                    resume_mode = Some(match mode_pair.as_str() {
+                                                        "once" => ResumeMode::Once,
+                                                        "multi" => ResumeMode::Multi,
+                                                        _ => ResumeMode::Once,
+                                                    });
+                                                } else {
+                                                    resume_mode = Some(ResumeMode::Once);
+                                                    // default
                                                 }
-                                                Rule::identifier => {
-                                                    params.push(parse_identifier(hp));
-                                                }
-                                                _ => {}
                                             }
+                                            Rule::identifier => {
+                                                params.push(parse_identifier(hp));
+                                            }
+                                            _ => {}
                                         }
                                     }
-                                    _ => {}
                                 }
                             }
                         }
@@ -2359,7 +2351,7 @@ mod tests {
                     assert_eq!(name.as_str(), "window_open");
                     assert_eq!(params.len(), 2);
                 } else {
-                    panic!("expected ExternItem::Fn, got {:?}", &items[1]);
+                    panic!("expected ExternItem::Fn, got {:?}", items[1]);
                 }
             }
             other => panic!("expected Decl::Extern, got {other:?}"),

@@ -225,14 +225,11 @@ pub unsafe extern "C" fn __ephapax_string_list_get(handle: ListHandle, idx: i32)
 
 #[cfg(test)]
 mod tests {
-    use super::*;
 
     #[test]
     fn test_list_new() {
-        unsafe {
-            // This test needs proper WASM memory simulation
-            // Just verify function signature is correct
-        }
+        // This test needs proper WASM memory simulation.
+        // Placeholder: verifies only that the function signature compiles.
     }
 
     #[test]

@@ -419,8 +419,9 @@ fn check_files(files: &[PathBuf], _mode_str: &str, verbose: bool) -> Result<(), 
     }
 }
 
+#[allow(clippy::too_many_arguments)] // CLI entry point: 8 options vs the 7 default threshold
 fn compile_file(
-    path: &PathBuf,
+    path: &Path,
     output: Option<PathBuf>,
     opt_level: u8,
     debug: bool,
@@ -570,10 +571,11 @@ fn compile_file(
 
 /// Codegen + optional ownership verification + output write. Shared by
 /// the multi-module and legacy single-file compile paths.
+#[allow(clippy::too_many_arguments)] // CLI entry point: 8 options vs the 7 default threshold
 fn finish_compile(
     module: ephapax_syntax::Module,
     filename: &str,
-    path: &PathBuf,
+    path: &Path,
     output: Option<PathBuf>,
     opt_level: u8,
     debug: bool,

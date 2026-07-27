@@ -770,7 +770,6 @@ impl Codegen {
                     name,
                     params,
                     ret_ty,
-                    type_params: _,
                     ..
                 } => {
                     // Build WASM type for this function
@@ -1098,11 +1097,7 @@ impl Codegen {
         for decl in &ast.decls {
             match decl {
                 Decl::Fn {
-                    name,
-                    params,
-                    body,
-                    type_params: _,
-                    ..
+                    name, params, body, ..
                 } => {
                     let info = self.user_fns.get(name.as_str()).cloned().ok_or_else(|| {
                         CodegenError(format!("BUG: function `{}` not collected", name))
@@ -1271,12 +1266,7 @@ impl Codegen {
 
         // Export all user functions by name
         for decl in &ast.decls {
-            if let Decl::Fn {
-                name,
-                type_params: _,
-                ..
-            } = decl
-            {
+            if let Decl::Fn { name, .. } = decl {
                 if let Some(info) = self.user_fns.get(name.as_str()) {
                     exports.export(name.as_str(), ExportKind::Func, info.wasm_fn_idx);
                 }

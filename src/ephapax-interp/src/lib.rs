@@ -106,6 +106,13 @@ pub enum RuntimeError {
 }
 
 /// Runtime values
+//
+// clippy::large_enum_variant — `Closure` is ~264 bytes against ~48 for the next
+// largest variant. The fix is to box the closure payload, but that changes every
+// construction and match site in the interpreter, so it is deliberately NOT bundled
+// into the CI-revival change that first surfaced this lint. Tracked separately;
+// remove this allow when the boxing lands.
+#[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone)]
 pub enum Value {
     Unit,

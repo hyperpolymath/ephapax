@@ -201,10 +201,8 @@ fn parse_extern_item(pair: pest::iterators::Pair<Rule>) -> Result<SurfaceExternI
                             }
                         }
                     }
-                    Rule::ty => {
-                        if ret_ty.is_none() {
-                            ret_ty = Some(parse_type(sub)?);
-                        }
+                    Rule::ty if ret_ty.is_none() => {
+                        ret_ty = Some(parse_type(sub)?);
                     }
                     _ => {}
                 }
@@ -507,8 +505,7 @@ fn parse_seq_expr(pair: pest::iterators::Pair<Rule>) -> Result<SurfaceExpr, Pars
     //   let _ = e1 in (let _ = e2 in (... eN))
     // invariant: loop above ensures parsed is not empty before we enter this block
     let last = parsed.pop().expect("invariant: parsed is not empty");
-    parsed.into_iter().rev().fold(Ok(last), |acc, expr| {
-        let acc = acc?;
+    parsed.into_iter().rev().try_fold(last, |acc, expr| {
         let s = expr.span;
         Ok(SurfaceExpr::new(
             SurfaceExprKind::Let {

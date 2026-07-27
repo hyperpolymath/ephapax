@@ -32,9 +32,8 @@ fn assert_checks(source: &str) {
 
 /// Helper: assert that source fails type-checking
 fn assert_rejects(source: &str) {
-    match check(source) {
-        Ok(ty) => panic!("Expected type-check failure for `{source}`, got: {ty:?}"),
-        Err(_) => {}
+    if let Ok(ty) = check(source) {
+        panic!("Expected type-check failure for `{source}`, got: {ty:?}")
     }
 }
 

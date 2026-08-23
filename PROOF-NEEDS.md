@@ -11,7 +11,7 @@
 > in Coq + Idris2.
 >
 > **Ephapax is NOT `hyperpolymath/affinescript`.** AffineScript is a
-> separate, unrelated language (JS/TS/ReScript successor, OCaml + ReScript
+> separate, unrelated language (JS/TS/AffineScript successor, OCaml + AffineScript
 > runtime, no mechanised proofs, no first-class regions). The two share
 > only the compile target (`hyperpolymath/typed-wasm`).
 >

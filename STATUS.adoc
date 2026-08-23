@@ -12,7 +12,7 @@
 ====
 **This is `hyperpolymath/ephapax`.** Ephapax is a *research language for compile-time WebAssembly memory safety*, formally verified in Coq + Idris2, written in Rust + Coq + Idris2.
 
-**Ephapax is *not* `hyperpolymath/affinescript`.** AffineScript is a *separate, unrelated language* that succeeds JavaScript / TypeScript / ReScript — application-developer-facing, OCaml + ReScript runtime, no mechanised proofs, no first-class regions. AffineScript is in a different universe with its own purpose, its own audience, its own codebase, its own roadmap.
+**Ephapax is *not* `hyperpolymath/affinescript`.** AffineScript is a *separate, unrelated language* that succeeds JavaScript / TypeScript / AffineScript — application-developer-facing, OCaml + AffineScript runtime, no mechanised proofs, no first-class regions. AffineScript is in a different universe with its own purpose, its own audience, its own codebase, its own roadmap.
 
 **The only shared surface** between Ephapax and AffineScript is that both *target* `hyperpolymath/typed-wasm`. They are **sibling languages on a common verification substrate** — not an implementation/proof pair, not a parent/dialect pair, not a frontend/backend pair.
 

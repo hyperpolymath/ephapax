@@ -25,7 +25,7 @@ image:https://api.thegreenwebfoundation.org/greencheckimage/ephapax.org[Green Ho
 This is **Ephapax**, a research language for WebAssembly memory safety.
 It is *not* https://github.com/hyperpolymath/affinescript[AffineScript], a
 separate language at `hyperpolymath/affinescript` that succeeds JS / TS /
-ReScript.
+AffineScript.
 
 The two share **exactly one thing**: both target
 https://github.com/hyperpolymath/typed-wasm[typed-wasm]. They have separate

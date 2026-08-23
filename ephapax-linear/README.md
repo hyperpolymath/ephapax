@@ -6,7 +6,7 @@
 > compile-time WebAssembly memory safety, formally verified in Coq + Idris2.
 >
 > **`ephapax-linear` is *not* `hyperpolymath/affinescript`.** AffineScript is
-> a separate, unrelated language (JS/TS/ReScript successor, OCaml + ReScript
+> a separate, unrelated language (JS/TS/AffineScript successor, OCaml + AffineScript
 > runtime). The two share only the compile target (`hyperpolymath/typed-wasm`).
 >
 > **Internal naming trap (important):** This crate implements *both*

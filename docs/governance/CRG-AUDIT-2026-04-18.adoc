@@ -62,7 +62,7 @@ Publication requires B+. Long alpha is discipline, not shame.
 
 | RSR mandatory workflows (17+)
 | *PARTIAL (15)*
-| `.github/workflows/` — `boj-build`, `codeql`, `guix-nix-policy`,
+| `.github/workflows/` — `boj-build`, `codeql`, `guix-guix-policy`,
   `instant-sync`, `mirror`, `npm-bun-blocker`, `rsr-antipattern`, `rust-ci`,
   `scorecard-enforcer`, `scorecard`, `secret-scanner`, `security-policy`,
   `ts-blocker`, `wellknown-enforcement`, `workflow-linter`. Missing:
@@ -91,7 +91,7 @@ Publication requires B+. Long alpha is discipline, not shame.
 | PRESENT (but stale — see §Code and proofs drift).
 | Root.
 
-| `guix.scm` + `flake.nix`
+| `guix.scm` + `flake.guix`
 | PRESENT (primary + fallback)
 | Root.
 
@@ -258,7 +258,7 @@ CI coverage — *this is where the audit breaks C*:
   `secret-scanner.yml`, `workflow-linter.yml`, `instant-sync.yml`,
   `scorecard-enforcer.yml`, `mirror.yml`. `boj-build.yml`,
   `wellknown-enforcement.yml`, `scorecard.yml`, `codeql.yml`,
-  `rsr-antipattern.yml`, `security-policy.yml`, `guix-nix-policy.yml`,
+  `rsr-antipattern.yml`, `security-policy.yml`, `guix-guix-policy.yml`,
   `ts-blocker.yml`, `npm-bun-blocker.yml` are passing.
 - Net CI-green posture: *roughly 9 passing / 6 failing* workflows on the
   last main push. The core Rust test pipeline (`rust-ci.yml`) is in the

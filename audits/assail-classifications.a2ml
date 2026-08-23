@@ -22,11 +22,11 @@
   ;; ─────────────────────────────────────────────────────────────────
 
   (classification
-    (file "flake.nix")
+    (file "flake.guix")
     (category "SupplyChain")
     (classification "legitimate-template-scaffold")
     (audit "ephapax#138 (2026-06-01)")
-    (rationale "ephapax's flake.nix is dormant scaffolding — it still carries the placeholder `description = \"ephapax - {project-description}\"` and `*REMINDER:* Update inputs` comments, and no workflow (`abi-verify.yml`, `boj-build.yml`, `rust-ci.yml`, etc.) invokes `nix develop`/`nix-shell`/`nix build`. There is no `flake.lock` to pin against because nothing consumes the flake. Pinning a flake whose only purpose is template-future use would be premature; activate-then-pin should be one PR. Re-classify to a real-finding if/when the flake is wired into CI."))
+    (rationale "ephapax's flake.guix is dormant scaffolding — it still carries the placeholder `description = \"ephapax - {project-description}\"` and `*REMINDER:* Update inputs` comments, and no workflow (`abi-verify.yml`, `boj-build.yml`, `rust-ci.yml`, etc.) invokes `guix develop`/`guix-shell`/`guix build`. There is no `flake.lock` to pin against because nothing consumes the flake. Pinning a flake whose only purpose is template-future use would be premature; activate-then-pin should be one PR. Re-classify to a real-finding if/when the flake is wired into CI."))
 
   (classification
     (file "src/ephapax-package/src/registry.rs")

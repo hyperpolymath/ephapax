@@ -34,7 +34,7 @@ todo, what's banned), read in this order:
 ====
 This is **`hyperpolymath/ephapax`** — a research language with
 mechanised Coq + Idris2 proofs. It is **not**
-`hyperpolymath/affinescript`, which is a separate JS/TS/ReScript
+`hyperpolymath/affinescript`, which is a separate JS/TS/AffineScript
 successor with no mechanised proofs. The lexical overlap of "affine"
 in both names is a coincidence of substructural-logic terminology.
 Internal naming trap: `ephapax-affine` (the sublanguage *inside*

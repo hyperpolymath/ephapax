@@ -1,0 +1,86 @@
+== ephapax-linear
+
+____
+=== 🛑 First-read disambiguation
+
+This crate is part of *`+hyperpolymath/ephapax+`* — a research language
+for compile-time WebAssembly memory safety, formally verified in Coq +
+Idris2.
+
+*`+ephapax-linear+` is _not_ `+hyperpolymath/affinescript+`.*
+AffineScript is a separate, unrelated language (JS/TS/AffineScript
+successor, OCaml + AffineScript runtime). The two share only the compile
+target (`+hyperpolymath/typed-wasm+`).
+
+*Internal naming trap (important):* This crate implements _both_
+sublanguages of Ephapax — `+ephapax-linear+` (strict core) AND
+`+ephapax-affine+` (versatile prototyping companion). The name of the
+crate is `+ephapax-linear+` for historical reasons, but *the affine
+grammar in this crate is NOT `+AffineScript+`.* The lexical overlap of
+the word `+affine+` is a coincidence of substructural-logic family
+terminology, not a project relationship. Do not apply tactics, lessons,
+or framings from `+hyperpolymath/affinescript+` here, and vice versa.
+
+Canonical disambiguation:
+https://github.com/hyperpolymath/nextgen-languages/blob/main/docs/disambiguation/ephapax-vs-affinescript.md[`+hyperpolymath/nextgen-languages/docs/disambiguation/ephapax-vs-affinescript.md+`].
+____
+
+Standalone linear/affine discipline checker for the Ephapax language.
+
+____
+*Naming note.* This crate is called `+ephapax-linear+` for historical
+reasons; it implements *both* L2 modalities (Linear and Affine). The two
+are not different languages — they are two admissible-derivation regimes
+over the same syntax and semantics. See
+link:../docs/vision/EPHAPAX-VISION.adoc[`+docs/vision/EPHAPAX-VISION.adoc+`]
+for the dyad framing, and
+link:../formal/PRESERVATION-DESIGN.md[`+formal/PRESERVATION-DESIGN.md §5+`]
+for the L2 layer in the four-layer architecture.
+____
+
+=== Two L2 Modalities
+
+This crate implements two *focused substructural grammars* — two views
+of the same ephapax syntax, each enforcing a different structural
+discipline:
+
+[cols=",,",options="header",]
+|===
+|Property |Linear Grammar |Affine Grammar
+|Exchange |Yes |Yes
+|Weakening |*No* (must consume) |*Yes* (implicit drop)
+|Contraction |*No* (single use) |*No* (single use)
+|`+let!+` |Exactly-once |Exactly-once (linear island)
+|`+let+` |Unrestricted types only |Any type
+|`+drop(e)+` |*Forbidden* |Permitted
+|Branch agreement |*Required* |Not required
+|Region exit |Must consume |Implicit drop (warns)
+|===
+
+=== Dyadic Design
+
+Ephapax is *dyadic* — both disciplines coexist per-program. `+let!+`
+always means linear, `+let+` always means affine. There is no global
+mode.
+
+=== Usage
+
+[source,rust]
+----
+use ephapax_linear::{check_expr, Discipline};
+
+// Check under linear discipline
+check_expr(&expr, Discipline::Linear)?;
+
+// Check under affine discipline
+check_expr(&expr, Discipline::Affine)?;
+----
+
+=== Grammar Specifications
+
+* `+grammar/linear.ebnf+` — Linear focused grammar (EBNF)
+* `+grammar/affine.ebnf+` — Affine focused grammar (EBNF)
+
+=== License
+
+SPDX-License-Identifier: CC-BY-SA-4.0

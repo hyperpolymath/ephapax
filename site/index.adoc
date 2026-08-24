@@ -1,0 +1,24 @@
+== Ephapax
+
+The public web home for this project is
+https://ephapax.org[ephapax.org].
+
+A dyadic language - one part affine, the other linear - as a type system
+with safe memory management targeting WebAssembly.
+
+Ephapax uses a compact, statement-delimited block syntax. Newlines act
+as statement separators (equivalent to ;).
+
+=== Project Links
+
+* Website: https://ephapax.org[ephapax.org]
+* Source: https://github.com/hyperpolymath/ephapax
+* README:
+https://github.com/hyperpolymath/ephapax/blob/main/README.adoc[project
+overview]
+* Docs:
+https://github.com/hyperpolymath/ephapax/tree/main/docs[documentation
+directory]
+
+This page is a lightweight landing point for the repository and will
+grow with the project.

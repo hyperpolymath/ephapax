@@ -1,4 +1,5 @@
 # SPDX-License-Identifier: MPL-2.0
+# This workflow is managed by gh actions-lock.
 # Rust CI — thin wrapper calling the shared estate reusable in
 # hyperpolymath/standards. Configure once, propagate everywhere.
 # See: docs/CI-REUSABLE-WORKFLOWS.adoc in standards.
@@ -21,6 +22,7 @@ on:
   pull_request:
 
 permissions:
+  actions: read
   contents: read
 
 concurrency:
@@ -29,7 +31,7 @@ concurrency:
 
 jobs:
   rust-ci:
-    uses: hyperpolymath/standards/.github/workflows/rust-ci-reusable.yml@412a7031577112b31ee287cc6060179d638d6500
+    uses: hyperpolymath/standards/.github/workflows/rust-ci-reusable.yml@84355587cb2a1f86e6882de83514a32db2646e7a
 
   no-default-features:
     name: Cargo build + test (ephapax-cli, --no-default-features)
@@ -43,15 +45,15 @@ jobs:
     # for the in-tree codec that makes this possible.
     steps:
       - name: Checkout repository
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        uses: actions/checkout@v7.0.1
 
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772 # stable
+        uses: dtolnay/rust-toolchain@v1
         with:
           toolchain: stable   # required when SHA-pinned (no rust-toolchain.toml in repo)
 
       - name: Cache cargo registry and build
-        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+        uses: Swatinem/rust-cache@v2.9.2
         with:
           key: no-default-features
 
@@ -83,15 +85,15 @@ jobs:
     # known rustc-incremental ICE on ephapax-parser.
     steps:
       - name: Checkout repository
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        uses: actions/checkout@v7.0.1
 
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772 # stable
+        uses: dtolnay/rust-toolchain@v1
         with:
           toolchain: stable   # required when SHA-pinned (no rust-toolchain.toml in repo)
 
       - name: Cache cargo registry and build
-        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+        uses: Swatinem/rust-cache@v2.9.2
         with:
           key: wasm-validate
 

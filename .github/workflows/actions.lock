@@ -14,26 +14,26 @@ workflows:
         - 'actions/checkout@v7.0.1'
         - 'mlugg/setup-zig@v2.2.1'
     '.github/workflows/governance.yml':
-        - 'hyperpolymath/standards@6b38eb50104901e2fec80f9455a972bc3eced813'
+        - 'hyperpolymath/standards@571cc734cd69fb846032ec77a662aa8ee4fc32cd'
     '.github/workflows/hypatia-scan.yml':
-        - 'hyperpolymath/standards@6b38eb50104901e2fec80f9455a972bc3eced813'
+        - 'hyperpolymath/standards@571cc734cd69fb846032ec77a662aa8ee4fc32cd'
     '.github/workflows/instant-sync.yml':
         - 'peter-evans/repository-dispatch@v4.0.1'
     '.github/workflows/label-triage.yml': []
     '.github/workflows/labels.yml': []
     '.github/workflows/mirror.yml':
-        - 'hyperpolymath/standards@6b38eb50104901e2fec80f9455a972bc3eced813'
+        - 'hyperpolymath/standards@571cc734cd69fb846032ec77a662aa8ee4fc32cd'
     '.github/workflows/push-email-notify.yml':
         - 'dawidd6/action-send-mail@v18'
     '.github/workflows/rust-ci.yml':
         - 'actions/checkout@v7.0.1'
         - 'dtolnay/rust-toolchain@v1'
-        - 'hyperpolymath/standards@6b38eb50104901e2fec80f9455a972bc3eced813'
+        - 'hyperpolymath/standards@571cc734cd69fb846032ec77a662aa8ee4fc32cd'
         - 'swatinem/rust-cache@v2.9.2'
     '.github/workflows/scorecard.yml':
-        - 'hyperpolymath/standards@6b38eb50104901e2fec80f9455a972bc3eced813'
+        - 'hyperpolymath/standards@571cc734cd69fb846032ec77a662aa8ee4fc32cd'
     '.github/workflows/secret-scanner.yml':
-        - 'hyperpolymath/standards@6b38eb50104901e2fec80f9455a972bc3eced813'
+        - 'hyperpolymath/standards@571cc734cd69fb846032ec77a662aa8ee4fc32cd'
     '.github/workflows/status-gate.yml':
         - 'actions/checkout@v7.0.1'
         - 'dtolnay/rust-toolchain@v1'
@@ -59,9 +59,9 @@ dependencies:
         commit: 'sha1-db488ddef3bf6cb639b32c2e9a7c0a7ea8271d28'
         owner_id: 9919
         repo_id: 259445878
-    'hyperpolymath/standards@6b38eb50104901e2fec80f9455a972bc3eced813':
-        ref: '6b38eb50104901e2fec80f9455a972bc3eced813'
-        commit: 'sha1-6b38eb50104901e2fec80f9455a972bc3eced813'
+    'hyperpolymath/standards@571cc734cd69fb846032ec77a662aa8ee4fc32cd':
+        ref: '571cc734cd69fb846032ec77a662aa8ee4fc32cd'
+        commit: 'sha1-571cc734cd69fb846032ec77a662aa8ee4fc32cd'
         owner_id: 6759885
         repo_id: 1116521501
         uses:

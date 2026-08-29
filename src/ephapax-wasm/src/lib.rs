@@ -208,6 +208,8 @@ struct UserFnInfo {
     wasm_fn_idx: u32,
     /// Index of its type in the type section
     wasm_type_idx: u32,
+    /// Concrete WebAssembly result type used for direct-call inference.
+    result_type: ValType,
     /// Parameter names (in order) for local binding
     #[allow(dead_code)]
     param_names: Vec<String>,
@@ -228,6 +230,8 @@ struct UserFnInfo {
 struct LocalTracker {
     /// Map from variable name to its local index
     name_to_idx: HashMap<String, u32>,
+    /// Concrete WebAssembly type for each named local and parameter.
+    name_to_type: HashMap<String, ValType>,
     /// Number of locals allocated so far (parameters first, then compiler temps)
     next_idx: u32,
     /// Which locals are linear (must be consumed before scope exit)
@@ -240,6 +244,7 @@ impl LocalTracker {
     fn new(num_params: u32) -> Self {
         Self {
             name_to_idx: HashMap::new(),
+            name_to_type: HashMap::new(),
             next_idx: num_params,
             linear_locals: HashMap::new(),
             extra_local_types: Vec::new(),
@@ -256,6 +261,7 @@ impl LocalTracker {
         let idx = self.next_idx;
         self.next_idx += 1;
         self.name_to_idx.insert(name.to_string(), idx);
+        self.name_to_type.insert(name.to_string(), ty);
         self.extra_local_types.push(ty);
         if is_linear {
             self.linear_locals.insert(idx, false); // false = not yet consumed
@@ -274,6 +280,11 @@ impl LocalTracker {
     /// Look up a variable by name, returning its local index.
     fn get(&self, name: &str) -> Option<u32> {
         self.name_to_idx.get(name).copied()
+    }
+
+    /// Look up a named local's concrete WebAssembly type.
+    fn get_type(&self, name: &str) -> Option<ValType> {
+        self.name_to_type.get(name).copied()
     }
 
     /// Mark a linear local as consumed.
@@ -364,11 +375,11 @@ pub struct Codegen {
     /// Order = emission order in the import section.
     extern_imports: Vec<ExternImport>,
 
-    /// Lookup: extern fn name -> (wasm function index, returns language Unit).
+    /// Lookup: extern fn name -> (wasm function index, optional wasm result).
     /// `compile_expr` consults this to resolve `Var(name)` references
     /// that come from extern blocks; calls become `Call(idx)` into the
     /// import.
-    extern_fn_indices: HashMap<String, (u32, bool)>,
+    extern_fn_indices: HashMap<String, (u32, Option<ValType>)>,
 
     /// Names of extern types declared in the AST. Used only as a
     /// presence check during typecheck-style queries; the wasm layer
@@ -430,6 +441,8 @@ struct LambdaInfo {
     wasm_type_idx: u32,
     /// Variables captured from the enclosing scope
     captured_vars: Vec<String>,
+    /// Concrete type and byte offset for each captured variable.
+    captured_layout: Vec<(ValType, u64)>,
     /// Lambda parameter name
     param: String,
     /// Lambda parameter type
@@ -636,6 +649,7 @@ impl Codegen {
             UserFnInfo {
                 wasm_fn_idx: self.first_user_fn(),
                 wasm_type_idx: TYPE_VOID_VOID,
+                result_type: ValType::I32,
                 param_names: Vec::new(),
                 param_kinds: Vec::new(),
             },
@@ -810,6 +824,7 @@ impl Codegen {
                         UserFnInfo {
                             wasm_fn_idx: idx,
                             wasm_type_idx: type_idx,
+                            result_type: ty_to_valtype(ret_ty),
                             param_names,
                             param_kinds,
                         },
@@ -954,11 +969,15 @@ impl Codegen {
                         } => {
                             let wasm_params: Vec<ValType> =
                                 params.iter().map(|(_, ty)| ty_to_valtype(ty)).collect();
-                            let returns_unit = matches!(ret_ty, Ty::Base(BaseTy::Unit));
-                            let wasm_results = if returns_unit {
-                                vec![]
+                            let wasm_result = if matches!(ret_ty, Ty::Base(BaseTy::Unit)) {
+                                None
                             } else {
-                                vec![ty_to_valtype(ret_ty)]
+                                Some(ty_to_valtype(ret_ty))
+                            };
+                            let wasm_results = if let Some(result) = wasm_result {
+                                vec![result]
+                            } else {
+                                vec![]
                             };
                             let type_idx = self.register_type(wasm_params, wasm_results);
 
@@ -974,7 +993,7 @@ impl Codegen {
                                 wasm_type_idx: type_idx,
                             });
                             self.extern_fn_indices
-                                .insert(name.to_string(), (import_idx, returns_unit));
+                                .insert(name.to_string(), (import_idx, wasm_result));
                         }
                     }
                 }
@@ -1133,6 +1152,9 @@ impl Codegen {
                     self.locals = LocalTracker::new(num_params);
                     for (i, (pname, pty)) in params.iter().enumerate() {
                         self.locals.name_to_idx.insert(pname.to_string(), i as u32);
+                        self.locals
+                            .name_to_type
+                            .insert(pname.to_string(), ty_to_valtype(pty));
                         if pty.is_linear() {
                             self.locals.linear_locals.insert(i as u32, false);
                         }
@@ -1154,6 +1176,9 @@ impl Codegen {
                     self.locals = LocalTracker::new(num_params);
                     for (i, (pname, pty)) in params.iter().enumerate() {
                         self.locals.name_to_idx.insert(pname.to_string(), i as u32);
+                        self.locals
+                            .name_to_type
+                            .insert(pname.to_string(), ty_to_valtype(pty));
                         if pty.is_linear() {
                             self.locals.linear_locals.insert(i as u32, false);
                         }
@@ -1206,15 +1231,26 @@ impl Codegen {
             self.locals = LocalTracker::new(num_params);
             // param 0 = env_ptr (anonymous, used internally)
             self.locals.name_to_idx.insert("__env_ptr".to_string(), 0);
+            self.locals
+                .name_to_type
+                .insert("__env_ptr".to_string(), ValType::I32);
             // param 1 = lambda parameter
             self.locals.name_to_idx.insert(lambda_info.param.clone(), 1);
+            self.locals.name_to_type.insert(
+                lambda_info.param.clone(),
+                ty_to_valtype(&lambda_info.param_ty),
+            );
             if lambda_info.param_ty.is_linear() {
                 self.locals.linear_locals.insert(1, false);
             }
 
             // Bind captured variables as locals (loaded from env_ptr)
-            for captured_name in &lambda_info.captured_vars {
-                self.locals.bind(captured_name, false);
+            for (captured_name, (captured_type, _)) in lambda_info
+                .captured_vars
+                .iter()
+                .zip(&lambda_info.captured_layout)
+            {
+                self.locals.bind_typed(captured_name, false, *captured_type);
             }
 
             // Save data state so pass 1 string literals don't duplicate
@@ -1223,9 +1259,14 @@ impl Codegen {
             let mut dummy_func = Function::new(vec![(64, ValType::I32)]); // generous
 
             // Emit captured var loads in dry run
-            for (i, _) in lambda_info.captured_vars.iter().enumerate() {
+            for (i, (_, (captured_type, offset))) in lambda_info
+                .captured_vars
+                .iter()
+                .zip(&lambda_info.captured_layout)
+                .enumerate()
+            {
                 dummy_func.instruction(&Instruction::LocalGet(0)); // env_ptr
-                dummy_func.instruction(&Instruction::I32Load(mem_arg((i * 4) as u64)));
+                emit_typed_load(&mut dummy_func, *captured_type, *offset);
                 let local_idx = num_params + i as u32;
                 dummy_func.instruction(&Instruction::LocalSet(local_idx));
             }
@@ -1241,23 +1282,39 @@ impl Codegen {
             // --- Pass 2: compile for real with correct local count --
             self.locals = LocalTracker::new(num_params);
             self.locals.name_to_idx.insert("__env_ptr".to_string(), 0);
+            self.locals
+                .name_to_type
+                .insert("__env_ptr".to_string(), ValType::I32);
             self.locals.name_to_idx.insert(lambda_info.param.clone(), 1);
+            self.locals.name_to_type.insert(
+                lambda_info.param.clone(),
+                ty_to_valtype(&lambda_info.param_ty),
+            );
             if lambda_info.param_ty.is_linear() {
                 self.locals.linear_locals.insert(1, false);
             }
 
             // Re-bind captured variables as locals
-            for captured_name in &lambda_info.captured_vars {
-                self.locals.bind(captured_name, false);
+            for (captured_name, (captured_type, _)) in lambda_info
+                .captured_vars
+                .iter()
+                .zip(&lambda_info.captured_layout)
+            {
+                self.locals.bind_typed(captured_name, false, *captured_type);
             }
 
             debug_assert_eq!(extra as usize, local_declarations.len());
             let mut func = Function::new(local_declarations);
 
             // Load captured variables from env_ptr into local slots
-            for (i, _) in lambda_info.captured_vars.iter().enumerate() {
+            for (i, (_, (captured_type, offset))) in lambda_info
+                .captured_vars
+                .iter()
+                .zip(&lambda_info.captured_layout)
+                .enumerate()
+            {
                 func.instruction(&Instruction::LocalGet(0)); // env_ptr (param 0)
-                func.instruction(&Instruction::I32Load(mem_arg((i * 4) as u64)));
+                emit_typed_load(&mut func, *captured_type, *offset);
                 let local_idx = num_params + i as u32;
                 func.instruction(&Instruction::LocalSet(local_idx));
             }
@@ -1990,6 +2047,55 @@ impl Codegen {
         func.instruction(&Instruction::Call(self.fn_string_len()));
     }
 
+    /// Recover the concrete WebAssembly value type needed by local lowering.
+    /// The typechecker has already accepted the AST, but inferred let types
+    /// are not written back into `ExprKind::Let`, so codegen reconstructs the
+    /// small amount of representation information it needs here.
+    fn infer_expr_valtype(&self, expr: &Expr) -> ValType {
+        match &expr.kind {
+            ExprKind::Lit(Literal::I64(_)) => ValType::I64,
+            ExprKind::Lit(Literal::F32(_)) => ValType::F32,
+            ExprKind::Lit(Literal::F64(_)) => ValType::F64,
+            ExprKind::Lit(_) => ValType::I32,
+            ExprKind::Var(name) => self.locals.get_type(name).unwrap_or(ValType::I32),
+            ExprKind::Let { body, .. } | ExprKind::LetLin { body, .. } => {
+                self.infer_expr_valtype(body)
+            }
+            ExprKind::App { func, arg } => {
+                if let Some((head, _)) = flatten_app_chain(func, arg) {
+                    if let Some(info) = self.user_fns.get(head) {
+                        return info.result_type;
+                    }
+                    if let Some((_, result)) = self.extern_fn_indices.get(head) {
+                        return result.unwrap_or(ValType::I32);
+                    }
+                }
+                ValType::I32
+            }
+            ExprKind::If { then_branch, .. } => self.infer_expr_valtype(then_branch),
+            ExprKind::Region { body, .. } | ExprKind::Copy(body) | ExprKind::Deref(body) => {
+                self.infer_expr_valtype(body)
+            }
+            ExprKind::Block(exprs) => exprs
+                .last()
+                .map(|last| self.infer_expr_valtype(last))
+                .unwrap_or(ValType::I32),
+            ExprKind::UnaryOp {
+                op: UnaryOp::Neg,
+                operand,
+            } => self.infer_expr_valtype(operand),
+            ExprKind::BinOp {
+                op: BinOp::Add | BinOp::Sub | BinOp::Mul | BinOp::Div | BinOp::Mod,
+                left,
+                ..
+            } => self.infer_expr_valtype(left),
+            // The legacy `__ffi` surface is defined as i64-in/i64-out.
+            ExprKind::FFI { .. } => ValType::I64,
+            ExprKind::TupleLit(elements) if elements.len() > 2 => ValType::I64,
+            _ => ValType::I32,
+        }
+    }
+
     fn compile_let(
         &mut self,
         func: &mut Function,
@@ -1999,11 +2105,14 @@ impl Codegen {
         body: &Expr,
         is_linear: bool,
     ) {
+        let local_ty = ty
+            .map(ty_to_valtype)
+            .unwrap_or_else(|| self.infer_expr_valtype(value));
+
         // Compile the value expression
         self.compile_expr(func, value);
 
         // Bind it to a local
-        let local_ty = ty.map(ty_to_valtype).unwrap_or(ValType::I32);
         let local_idx = self.locals.bind_typed(name, is_linear, local_ty);
         func.instruction(&Instruction::LocalSet(local_idx));
 
@@ -2189,6 +2298,18 @@ impl Codegen {
         let mut bound_vars = std::collections::HashSet::new();
         bound_vars.insert(param.to_string());
         let captured_vars = self.find_free_vars(body, &bound_vars);
+        let mut next_capture_offset = 0_u64;
+        let captured_layout: Vec<(ValType, u64)> = captured_vars
+            .iter()
+            .map(|name| {
+                let ty = self.locals.get_type(name).unwrap_or(ValType::I32);
+                let (size, alignment, _) = valtype_storage(ty);
+                next_capture_offset = align_up(next_capture_offset, alignment);
+                let offset = next_capture_offset;
+                next_capture_offset += size;
+                (ty, offset)
+            })
+            .collect();
 
         // 2. Lambda functions take (env_ptr, param) -> result
         let lambda_type_idx = TYPE_CLOSURE_CALL;
@@ -2207,19 +2328,15 @@ impl Codegen {
             wasm_fn_idx: lambda_fn_idx,
             wasm_type_idx: lambda_type_idx,
             captured_vars: captured_vars.clone(),
+            captured_layout: captured_layout.clone(),
             param: param.to_string(),
             param_ty: param_ty.clone(),
             body: body.clone(),
         });
 
         // 6. Allocate environment block for captured variables
-        //    Layout: [captured_0: i32, captured_1: i32, ...]
-        let num_captured = captured_vars.len() as u32;
-        let env_size = if num_captured > 0 {
-            num_captured * 4
-        } else {
-            4
-        }; // min 4 bytes
+        //    Layout preserves each captured value's width and alignment.
+        let env_size = next_capture_offset.max(4);
 
         // Allocate env block via bump allocator
         func.instruction(&Instruction::I32Const(env_size as i32));
@@ -2230,16 +2347,16 @@ impl Codegen {
         func.instruction(&Instruction::LocalSet(env_local));
 
         // Store each captured variable's current value into the env block
-        for (i, var_name) in captured_vars.iter().enumerate() {
+        for (var_name, (captured_type, offset)) in captured_vars.iter().zip(&captured_layout) {
             func.instruction(&Instruction::LocalGet(env_local)); // env_ptr (address)
             if let Some(var_idx) = self.locals.get(var_name) {
                 func.instruction(&Instruction::LocalGet(var_idx)); // captured value
             } else {
                 // Variable not in locals — could be a top-level function reference.
                 // Default to 0 (will be resolved by name during lambda body compilation).
-                func.instruction(&Instruction::I32Const(0));
+                emit_typed_zero(func, *captured_type);
             }
-            func.instruction(&Instruction::I32Store(mem_arg((i * 4) as u64)));
+            emit_typed_store(func, *captured_type, *offset);
         }
 
         // 7. Allocate closure cell: (table_idx: i32, env_ptr: i32)
@@ -2304,7 +2421,7 @@ impl Codegen {
             // Direct call to an extern import (phase 2B-ii of #43).
             // Extern fns are wasm imports — their index lives in
             // `extern_fn_indices` after `collect_extern_imports` runs.
-            if let Some(&(import_idx, returns_unit)) = self.extern_fn_indices.get(head) {
+            if let Some(&(import_idx, wasm_result)) = self.extern_fn_indices.get(head) {
                 // A lone synthetic `()` is the nullary-call placeholder
                 // (`f()` → `App(f, ())`); push no args for it. Otherwise
                 // push every real arg in order.
@@ -2322,7 +2439,7 @@ impl Codegen {
                 // no WebAssembly result. Reconstitute the language value so
                 // the enclosing expression has the stack shape its caller
                 // expects.
-                if returns_unit {
+                if wasm_result.is_none() {
                     func.instruction(&Instruction::I32Const(0));
                 }
                 return;
@@ -3091,6 +3208,58 @@ fn mem_arg(offset: u64) -> wasm_encoder::MemArg {
         align: 2,
         memory_index: 0,
     }
+}
+
+/// Size, byte alignment, and WebAssembly alignment exponent for a captured
+/// scalar value. Ephapax's current runtime representation reaches this helper
+/// only with numeric scalar types and i32 handles.
+fn valtype_storage(ty: ValType) -> (u64, u64, u32) {
+    match ty {
+        ValType::I64 | ValType::F64 => (8, 8, 3),
+        _ => (4, 4, 2),
+    }
+}
+
+fn align_up(offset: u64, alignment: u64) -> u64 {
+    (offset + alignment - 1) & !(alignment - 1)
+}
+
+fn typed_mem_arg(ty: ValType, offset: u64) -> wasm_encoder::MemArg {
+    let (_, _, align) = valtype_storage(ty);
+    wasm_encoder::MemArg {
+        offset,
+        align,
+        memory_index: 0,
+    }
+}
+
+fn emit_typed_zero(func: &mut Function, ty: ValType) {
+    match ty {
+        ValType::I64 => func.instruction(&Instruction::I64Const(0)),
+        ValType::F32 => func.instruction(&Instruction::F32Const(0.0)),
+        ValType::F64 => func.instruction(&Instruction::F64Const(0.0)),
+        _ => func.instruction(&Instruction::I32Const(0)),
+    };
+}
+
+fn emit_typed_store(func: &mut Function, ty: ValType, offset: u64) {
+    let arg = typed_mem_arg(ty, offset);
+    match ty {
+        ValType::I64 => func.instruction(&Instruction::I64Store(arg)),
+        ValType::F32 => func.instruction(&Instruction::F32Store(arg)),
+        ValType::F64 => func.instruction(&Instruction::F64Store(arg)),
+        _ => func.instruction(&Instruction::I32Store(arg)),
+    };
+}
+
+fn emit_typed_load(func: &mut Function, ty: ValType, offset: u64) {
+    let arg = typed_mem_arg(ty, offset);
+    match ty {
+        ValType::I64 => func.instruction(&Instruction::I64Load(arg)),
+        ValType::F32 => func.instruction(&Instruction::F32Load(arg)),
+        ValType::F64 => func.instruction(&Instruction::F64Load(arg)),
+        _ => func.instruction(&Instruction::I32Load(arg)),
+    };
 }
 
 // ---------------------------------------------------------------------------
@@ -4505,7 +4674,7 @@ mod tests {
         codegen.collect_extern_imports(&module);
         assert_eq!(
             codegen.extern_fn_indices.get("do_thing").copied(),
-            Some((NUM_BUILTIN_IMPORTS, false)),
+            Some((NUM_BUILTIN_IMPORTS, Some(ValType::I32))),
             "first extern fn must occupy import slot 2 (right after the 2 builtin imports)"
         );
     }
@@ -4550,7 +4719,75 @@ mod tests {
     /// result is stored and passed to another host import.
     #[test]
     fn annotated_i64_let_uses_i64_wasm_local() {
+        let module = i64_extern_let_module(Some(Ty::Base(BaseTy::I64)));
+        let wasm = compile_module(&module).expect("module must compile");
+        validate_wasm(&wasm);
+    }
+
+    /// Inferred let types are not written back into the AST, so codegen must
+    /// recover an extern call's result representation rather than defaulting
+    /// every unannotated binding to i32.
+    #[test]
+    fn unannotated_i64_extern_result_infers_i64_wasm_local() {
+        let module = i64_extern_let_module(None);
+        let wasm = compile_module(&module).expect("module must compile");
+        validate_wasm(&wasm);
+    }
+
+    /// Closure environments must preserve captured scalar widths. An i64
+    /// captured into an i32-only slot produces invalid loads/local sets in the
+    /// generated lambda body.
+    #[test]
+    fn lambda_capture_preserves_i64_type_and_layout() {
         let module = AstModule {
+            name: "test".into(),
+            imports: vec![],
+            decls: vec![
+                Decl::Extern {
+                    abi: "host".to_string(),
+                    items: vec![ExternItem::Fn {
+                        name: "i64_is_zero".into(),
+                        params: vec![("value".into(), Ty::Base(BaseTy::I64))],
+                        ret_ty: Ty::Base(BaseTy::I32),
+                    }],
+                },
+                Decl::Fn {
+                    name: "entry".into(),
+                    visibility: Visibility::Private,
+                    type_params: vec![],
+                    params: vec![],
+                    ret_ty: Ty::Base(BaseTy::I32),
+                    body: e(ExprKind::Let {
+                        name: "token".into(),
+                        ty: None,
+                        value: Box::new(e(ExprKind::Lit(Literal::I64(5)))),
+                        body: Box::new(e(ExprKind::Let {
+                            name: "check".into(),
+                            ty: None,
+                            value: Box::new(e(ExprKind::Lambda {
+                                param: "unused".into(),
+                                param_ty: Ty::Base(BaseTy::I32),
+                                body: Box::new(e(ExprKind::App {
+                                    func: Box::new(e(ExprKind::Var("i64_is_zero".into()))),
+                                    arg: Box::new(e(ExprKind::Var("token".into()))),
+                                })),
+                            })),
+                            body: Box::new(e(ExprKind::App {
+                                func: Box::new(e(ExprKind::Var("check".into()))),
+                                arg: Box::new(e(ExprKind::Lit(Literal::I32(0)))),
+                            })),
+                        })),
+                    }),
+                },
+            ],
+        };
+
+        let wasm = compile_module(&module).expect("module must compile");
+        validate_wasm(&wasm);
+    }
+
+    fn i64_extern_let_module(annotation: Option<Ty>) -> AstModule {
+        AstModule {
             name: "test".into(),
             imports: vec![],
             decls: vec![
@@ -4577,7 +4814,7 @@ mod tests {
                     ret_ty: Ty::Base(BaseTy::I32),
                     body: e(ExprKind::Let {
                         name: "token".into(),
-                        ty: Some(Ty::Base(BaseTy::I64)),
+                        ty: annotation,
                         value: Box::new(e(ExprKind::App {
                             func: Box::new(e(ExprKind::Var("cap_token".into()))),
                             arg: Box::new(e(ExprKind::Lit(Literal::I32(0)))),
@@ -4589,10 +4826,7 @@ mod tests {
                     }),
                 },
             ],
-        };
-
-        let wasm = compile_module(&module).expect("module must compile");
-        validate_wasm(&wasm);
+        }
     }
 
     // -----------------------------------------------------------------------

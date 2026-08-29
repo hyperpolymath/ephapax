@@ -232,6 +232,8 @@ struct LocalTracker {
     next_idx: u32,
     /// Which locals are linear (must be consumed before scope exit)
     linear_locals: HashMap<u32, bool>,
+    /// WebAssembly types for non-parameter locals, in index order.
+    extra_local_types: Vec<ValType>,
 }
 
 impl LocalTracker {
@@ -240,14 +242,21 @@ impl LocalTracker {
             name_to_idx: HashMap::new(),
             next_idx: num_params,
             linear_locals: HashMap::new(),
+            extra_local_types: Vec::new(),
         }
     }
 
     /// Bind a named variable to the next available local slot.
     fn bind(&mut self, name: &str, is_linear: bool) -> u32 {
+        self.bind_typed(name, is_linear, ValType::I32)
+    }
+
+    /// Bind a named variable with its concrete WebAssembly local type.
+    fn bind_typed(&mut self, name: &str, is_linear: bool, ty: ValType) -> u32 {
         let idx = self.next_idx;
         self.next_idx += 1;
         self.name_to_idx.insert(name.to_string(), idx);
+        self.extra_local_types.push(ty);
         if is_linear {
             self.linear_locals.insert(idx, false); // false = not yet consumed
         }
@@ -258,6 +267,7 @@ impl LocalTracker {
     fn temp(&mut self) -> u32 {
         let idx = self.next_idx;
         self.next_idx += 1;
+        self.extra_local_types.push(ValType::I32);
         idx
     }
 
@@ -285,6 +295,16 @@ impl LocalTracker {
     /// Total number of extra (non-parameter) locals needed.
     fn num_extra_locals(&self, num_params: u32) -> u32 {
         self.next_idx.saturating_sub(num_params)
+    }
+
+    /// Declarations for `wasm_encoder::Function::new`, preserving local
+    /// index order across mixed-width Ephapax bindings.
+    fn wasm_local_declarations(&self) -> Vec<(u32, ValType)> {
+        self.extra_local_types
+            .iter()
+            .copied()
+            .map(|ty| (1, ty))
+            .collect()
     }
 }
 
@@ -344,11 +364,11 @@ pub struct Codegen {
     /// Order = emission order in the import section.
     extern_imports: Vec<ExternImport>,
 
-    /// Lookup: extern fn name -> wasm function index.
+    /// Lookup: extern fn name -> (wasm function index, returns language Unit).
     /// `compile_expr` consults this to resolve `Var(name)` references
     /// that come from extern blocks; calls become `Call(idx)` into the
     /// import.
-    extern_fn_indices: HashMap<String, u32>,
+    extern_fn_indices: HashMap<String, (u32, bool)>,
 
     /// Names of extern types declared in the AST. Used only as a
     /// presence check during typecheck-style queries; the wasm layer
@@ -934,7 +954,8 @@ impl Codegen {
                         } => {
                             let wasm_params: Vec<ValType> =
                                 params.iter().map(|(_, ty)| ty_to_valtype(ty)).collect();
-                            let wasm_results = if matches!(ret_ty, Ty::Base(BaseTy::Unit)) {
+                            let returns_unit = matches!(ret_ty, Ty::Base(BaseTy::Unit));
+                            let wasm_results = if returns_unit {
                                 vec![]
                             } else {
                                 vec![ty_to_valtype(ret_ty)]
@@ -952,7 +973,8 @@ impl Codegen {
                                 name: name.to_string(),
                                 wasm_type_idx: type_idx,
                             });
-                            self.extern_fn_indices.insert(name.to_string(), import_idx);
+                            self.extern_fn_indices
+                                .insert(name.to_string(), (import_idx, returns_unit));
                         }
                     }
                 }
@@ -1122,6 +1144,7 @@ impl Codegen {
                     let mut dummy_func = Function::new(vec![(64, ValType::I32)]); // generous
                     self.compile_expr(&mut dummy_func, body);
                     let extra = self.locals.num_extra_locals(num_params);
+                    let local_declarations = self.locals.wasm_local_declarations();
 
                     // Restore data state
                     self.data_entries.truncate(data_snapshot.0);
@@ -1136,11 +1159,8 @@ impl Codegen {
                         }
                     }
 
-                    let mut func = Function::new(if extra > 0 {
-                        vec![(extra, ValType::I32)]
-                    } else {
-                        vec![]
-                    });
+                    debug_assert_eq!(extra as usize, local_declarations.len());
+                    let mut func = Function::new(local_declarations);
 
                     self.compile_expr(&mut func, body);
                     func.instruction(&Instruction::End);
@@ -1212,6 +1232,7 @@ impl Codegen {
 
             self.compile_expr(&mut dummy_func, &lambda_info.body);
             let extra = self.locals.num_extra_locals(num_params);
+            let local_declarations = self.locals.wasm_local_declarations();
 
             // Restore data state
             self.data_entries.truncate(data_snapshot.0);
@@ -1230,11 +1251,8 @@ impl Codegen {
                 self.locals.bind(captured_name, false);
             }
 
-            let mut func = Function::new(if extra > 0 {
-                vec![(extra, ValType::I32)]
-            } else {
-                vec![]
-            });
+            debug_assert_eq!(extra as usize, local_declarations.len());
+            let mut func = Function::new(local_declarations);
 
             // Load captured variables from env_ptr into local slots
             for (i, _) in lambda_info.captured_vars.iter().enumerate() {
@@ -1821,11 +1839,17 @@ impl Codegen {
             ExprKind::StringConcat { left, right } => self.compile_string_concat(func, left, right),
             ExprKind::StringLen(inner) => self.compile_string_len(func, inner),
             ExprKind::Let {
-                name, value, body, ..
-            } => self.compile_let(func, name, value, body, false),
+                name,
+                ty,
+                value,
+                body,
+            } => self.compile_let(func, name, ty.as_ref(), value, body, false),
             ExprKind::LetLin {
-                name, value, body, ..
-            } => self.compile_let(func, name, value, body, true),
+                name,
+                ty,
+                value,
+                body,
+            } => self.compile_let(func, name, ty.as_ref(), value, body, true),
             ExprKind::Lambda {
                 param,
                 param_ty,
@@ -1970,6 +1994,7 @@ impl Codegen {
         &mut self,
         func: &mut Function,
         name: &str,
+        ty: Option<&Ty>,
         value: &Expr,
         body: &Expr,
         is_linear: bool,
@@ -1978,7 +2003,8 @@ impl Codegen {
         self.compile_expr(func, value);
 
         // Bind it to a local
-        let local_idx = self.locals.bind(name, is_linear);
+        let local_ty = ty.map(ty_to_valtype).unwrap_or(ValType::I32);
+        let local_idx = self.locals.bind_typed(name, is_linear, local_ty);
         func.instruction(&Instruction::LocalSet(local_idx));
 
         // Compile the body
@@ -2278,7 +2304,7 @@ impl Codegen {
             // Direct call to an extern import (phase 2B-ii of #43).
             // Extern fns are wasm imports — their index lives in
             // `extern_fn_indices` after `collect_extern_imports` runs.
-            if let Some(&import_idx) = self.extern_fn_indices.get(head) {
+            if let Some(&(import_idx, returns_unit)) = self.extern_fn_indices.get(head) {
                 // A lone synthetic `()` is the nullary-call placeholder
                 // (`f()` → `App(f, ())`); push no args for it. Otherwise
                 // push every real arg in order.
@@ -2291,6 +2317,14 @@ impl Codegen {
                     self.compile_expr(func, a);
                 }
                 func.instruction(&Instruction::Call(import_idx));
+                // Language-level Unit is represented as i32 zero inside
+                // compiled expressions, but a host Unit-returning import has
+                // no WebAssembly result. Reconstitute the language value so
+                // the enclosing expression has the stack shape its caller
+                // expects.
+                if returns_unit {
+                    func.instruction(&Instruction::I32Const(0));
+                }
                 return;
             }
         }
@@ -4471,9 +4505,94 @@ mod tests {
         codegen.collect_extern_imports(&module);
         assert_eq!(
             codegen.extern_fn_indices.get("do_thing").copied(),
-            Some(NUM_BUILTIN_IMPORTS),
+            Some((NUM_BUILTIN_IMPORTS, false)),
             "first extern fn must occupy import slot 2 (right after the 2 builtin imports)"
         );
+    }
+
+    /// A Unit-returning extern has no WebAssembly result, while Ephapax
+    /// expressions represent Unit as `i32 0`. Direct-call lowering must
+    /// restore that value or the enclosing function is structurally invalid.
+    #[test]
+    fn unit_returning_extern_call_reconstitutes_language_unit() {
+        let module = AstModule {
+            name: "test".into(),
+            imports: vec![],
+            decls: vec![
+                Decl::Extern {
+                    abi: "host".to_string(),
+                    items: vec![ExternItem::Fn {
+                        name: "notify".into(),
+                        params: vec![("value".into(), Ty::Base(BaseTy::I32))],
+                        ret_ty: Ty::Base(BaseTy::Unit),
+                    }],
+                },
+                Decl::Fn {
+                    name: "entry".into(),
+                    visibility: Visibility::Private,
+                    type_params: vec![],
+                    params: vec![],
+                    ret_ty: Ty::Base(BaseTy::Unit),
+                    body: e(ExprKind::App {
+                        func: Box::new(e(ExprKind::Var("notify".into()))),
+                        arg: Box::new(e(ExprKind::Lit(Literal::I32(7)))),
+                    }),
+                },
+            ],
+        };
+
+        let wasm = compile_module(&module).expect("module must compile");
+        validate_wasm(&wasm);
+    }
+
+    /// Declared non-i32 let bindings must retain their WebAssembly local
+    /// type. This models Gossamer's capability-token path, where an i64 host
+    /// result is stored and passed to another host import.
+    #[test]
+    fn annotated_i64_let_uses_i64_wasm_local() {
+        let module = AstModule {
+            name: "test".into(),
+            imports: vec![],
+            decls: vec![
+                Decl::Extern {
+                    abi: "host".to_string(),
+                    items: vec![
+                        ExternItem::Fn {
+                            name: "cap_token".into(),
+                            params: vec![("kind".into(), Ty::Base(BaseTy::I32))],
+                            ret_ty: Ty::Base(BaseTy::I64),
+                        },
+                        ExternItem::Fn {
+                            name: "i64_is_zero".into(),
+                            params: vec![("value".into(), Ty::Base(BaseTy::I64))],
+                            ret_ty: Ty::Base(BaseTy::I32),
+                        },
+                    ],
+                },
+                Decl::Fn {
+                    name: "entry".into(),
+                    visibility: Visibility::Private,
+                    type_params: vec![],
+                    params: vec![],
+                    ret_ty: Ty::Base(BaseTy::I32),
+                    body: e(ExprKind::Let {
+                        name: "token".into(),
+                        ty: Some(Ty::Base(BaseTy::I64)),
+                        value: Box::new(e(ExprKind::App {
+                            func: Box::new(e(ExprKind::Var("cap_token".into()))),
+                            arg: Box::new(e(ExprKind::Lit(Literal::I32(0)))),
+                        })),
+                        body: Box::new(e(ExprKind::App {
+                            func: Box::new(e(ExprKind::Var("i64_is_zero".into()))),
+                            arg: Box::new(e(ExprKind::Var("token".into()))),
+                        })),
+                    }),
+                },
+            ],
+        };
+
+        let wasm = compile_module(&module).expect("module must compile");
+        validate_wasm(&wasm);
     }
 
     // -----------------------------------------------------------------------

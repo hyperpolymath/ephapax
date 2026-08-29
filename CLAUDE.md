@@ -1,7 +1,5 @@
 <!-- SPDX-License-Identifier: CC-BY-SA-4.0 -->
 <!-- Owner: Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk> -->
-<!-- SPDX-License-Identifier: CC-BY-SA-4.0 -->
-<!-- Owner: Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk> -->
 <!-- Copyright (c) 2026 Jonathan D.A. Jewell (hyperpolymath) <j.d.a.jewell@open.ac.uk> -->
 <!-- Author: Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk> -->
 
@@ -11,7 +9,7 @@
 
 **This repo is `hyperpolymath/ephapax`.** It is **NOT** `hyperpolymath/affinescript`.
 
-| | This repo | NOT this repo |
+| Criterion | This repo | NOT this repo |
 |---|---|---|
 | Name | **Ephapax** | AffineScript |
 | Path | `hyperpolymath/ephapax` | `hyperpolymath/affinescript` |

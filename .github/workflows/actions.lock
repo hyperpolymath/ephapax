@@ -3,13 +3,6 @@
 # Docs: https://gh.io/actions-lockfile
 version: 'v0.0.2'
 workflows:
-    '.github/workflows/governance.yml': []
-    '.github/workflows/hypatia-scan.yml': []
-    '.github/workflows/label-triage.yml': []
-    '.github/workflows/labels.yml': []
-    '.github/workflows/mirror.yml': []
-    '.github/workflows/scorecard.yml': []
-    '.github/workflows/secret-scanner.yml': []
     '.github/workflows/abi-verify.yml':
         - 'actions/checkout@v7.0.1'
     '.github/workflows/codeql.yml':
@@ -20,14 +13,21 @@ workflows:
     '.github/workflows/ffi-seams.yml':
         - 'actions/checkout@v7.0.1'
         - 'mlugg/setup-zig@v2.2.1'
+    '.github/workflows/governance.yml': []
+    '.github/workflows/hypatia-scan.yml': []
     '.github/workflows/instant-sync.yml':
         - 'peter-evans/repository-dispatch@v4.0.1'
+    '.github/workflows/label-triage.yml': []
+    '.github/workflows/labels.yml': []
+    '.github/workflows/mirror.yml': []
     '.github/workflows/push-email-notify.yml':
-        - 'dawidd6/action-send-mail@v3.12.0'
+        - 'dawidd6/action-send-mail@v18'
     '.github/workflows/rust-ci.yml':
         - 'actions/checkout@v7.0.1'
         - 'dtolnay/rust-toolchain@v1'
         - 'swatinem/rust-cache@v2.9.2'
+    '.github/workflows/scorecard.yml': []
+    '.github/workflows/secret-scanner.yml': []
     '.github/workflows/status-gate.yml':
         - 'actions/checkout@v7.0.1'
         - 'dtolnay/rust-toolchain@v1'
@@ -38,9 +38,9 @@ dependencies:
         commit: 'sha1-3d3c42e5aac5ba805825da76410c181273ba90b1'
         owner_id: 44036562
         repo_id: 197814629
-    'dawidd6/action-send-mail@v3.12.0':
-        ref: 'v3.12.0'
-        commit: 'sha1-0bbdab096651ee93f37ec02383e088183d41ff0b'
+    'dawidd6/action-send-mail@v18':
+        ref: 'v18'
+        commit: 'sha1-94de994a9f6fffee200243214e17002e2920bb59'
         owner_id: 9713907
         repo_id: 222439721
     'dtolnay/rust-toolchain@v1':

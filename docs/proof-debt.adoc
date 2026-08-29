@@ -1,7 +1,83 @@
 Copyright (c) Jonathan D.A. Jewell j.d.a.jewell@open.ac.uk
 SPDX-FileCopyrightText: 2026 Jonathan D.A. Jewell (hyperpolymath) –>
 
-== Proof Debt — ephapax (SUPERSEDED — archaeology only)
+== Proof Debt — ephapax
+
+=== Current enforced inventory (2026-08-29)
+
+This section is the current inventory consumed by the trusted-base gate. The
+older closure plan below is retained only as labelled archaeology. A path being
+listed here means that its trust boundary is documented; it does *not* mean the
+obligation has been discharged.
+
+==== `+formal/Semantics.v:9258+` — legacy `+preservation+`
+
+* *Status*: one real outer `+Admitted.+`; not proved.
+* *Classification*: durable legacy counterexample boundary. The theorem as
+  originally stated is false, as demonstrated by the five `+Qed+` witnesses in
+  `+formal/Counterexample.v+`. It must not be presented as closable proof debt
+  without first replacing the false statement.
+* *Owner*: @hyperpolymath.
+* *Acceptance*: retain the counterexample regression and publish any replacement
+  theorem with its exact restricted boundary and zero hidden escape hatches.
+
+==== `+formal/Semantics_L1.v:3318+` — `+step_pop_disjoint_from_type_l1+`
+
+* *Status*: one internal `+admit.+` followed by one outer `+Admitted.+`; not
+  proved.
+* *Obligation*: establish region-count coherence when a congruence step exits a
+  region still required by a sibling's type. Ten former sub-cases are closed;
+  this is the one residual case.
+* *Obstacle*: the snapshot region environment and result type do not encode the
+  temporal distinction needed to show that the sibling's occurrence survives
+  the exit. The choreographic experiment in
+  `+formal/L1-ELIMINATOR-FORK.adoc+` showed that the first proposed formulation
+  relocates this obligation rather than discharging it.
+* *Owner*: @hyperpolymath.
+* *Plan and tracking*: continue the staged calculus work in issues #240, #241,
+  and #242; first require a coherent minimal counterexample/positive control,
+  then prove the supporting lemma without circularly assuming preservation.
+* *Acceptance*: `+Qed.+`, a clean `+Print Assumptions
+  step_pop_disjoint_from_type_l1.+`, and a regression showing that an invalid
+  region exit is rejected.
+
+==== `+formal/Semantics_L1.v:3337+` — `+preservation_l1+`
+
+* *Status*: one internal `+admit.+` followed by one outer `+Admitted.+`; not
+  proved.
+* *Dependency*: blocked by `+step_pop_disjoint_from_type_l1+` and the staged L2
+  restrictions tracked in issues #240, #241, and #242.
+* *Owner*: @hyperpolymath.
+* *Acceptance*: the theorem ends in `+Qed.+`, `+Print Assumptions
+  preservation_l1.+` reports no project escape hatch, and the complete Coq
+  build plus counterexample suite passes.
+
+==== `+idris2/src/Main.idr:22+` — global `+%default partial+`
+
+* *Status*: real module-wide Idris2 totality waiver; configured and compiled,
+  but neither totality-audited nor proved.
+* *Scope*: the affine front-end executable, including argument parsing, file
+  I/O orchestration, parser invocation, type checking, and emission.
+* *Owner*: @hyperpolymath.
+* *Plan and tracking*: issue #380. Audit each definition under
+  `+%default total+`; keep any unavoidable partiality narrowly attached to the
+  smallest I/O boundary with a stated precondition and failure result. This is
+  part of the Idris2 ABI trust boundary, so a global waiver is not an acceptable
+  final state.
+* *Acceptance*: a negative control demonstrates that Idris2 rejects a deliberately
+  non-total pure definition; the module builds under total-by-default checking;
+  every remaining local `+partial+` is individually documented and gated.
+
+=== Rust/Creusot verification boundary
+
+Ephapax contains proof-critical Rust but currently has no Creusot integration,
+contracts, reproducible solver setup, or hard verification gate. Issue #378 is
+the canonical closure record. Rust tests, Coq bridge tests, and typed-Wasm checks
+are valuable evidence, but they do not imply that Creusot obligations were
+generated or discharged. Until #378 is completed with its required failing
+positive control, the Rust implementation is *tested, not Creusot-proved*.
+
+=== Archived 2026-05-26 inventory (superseded)
 
 ____
 === 🛑 SUPERSEDED

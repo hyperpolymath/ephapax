@@ -304,18 +304,21 @@ impl LocalTracker {
     }
 
     /// Total number of extra (non-parameter) locals needed.
-    fn num_extra_locals(&self, num_params: u32) -> u32 {
-        self.next_idx.saturating_sub(num_params)
+    fn num_extra_locals(&self) -> u32 {
+        self.extra_local_types.len() as u32
     }
 
     /// Declarations for `wasm_encoder::Function::new`, preserving local
     /// index order across mixed-width Ephapax bindings.
     fn wasm_local_declarations(&self) -> Vec<(u32, ValType)> {
-        self.extra_local_types
-            .iter()
-            .copied()
-            .map(|ty| (1, ty))
-            .collect()
+        let mut declarations: Vec<(u32, ValType)> = Vec::new();
+        for ty in &self.extra_local_types {
+            match declarations.last_mut() {
+                Some((count, previous_ty)) if previous_ty == ty => *count += 1,
+                _ => declarations.push((1, *ty)),
+            }
+        }
+        declarations
     }
 }
 
@@ -1165,7 +1168,7 @@ impl Codegen {
 
                     let mut dummy_func = Function::new(vec![(64, ValType::I32)]); // generous
                     self.compile_expr(&mut dummy_func, body);
-                    let extra = self.locals.num_extra_locals(num_params);
+                    let extra = self.locals.num_extra_locals();
                     let local_declarations = self.locals.wasm_local_declarations();
 
                     // Restore data state
@@ -1184,7 +1187,14 @@ impl Codegen {
                         }
                     }
 
-                    debug_assert_eq!(extra as usize, local_declarations.len());
+                    debug_assert_eq!(
+                        extra,
+                        local_declarations
+                            .iter()
+                            .map(|(count, _)| count)
+                            .copied()
+                            .sum::<u32>()
+                    );
                     let mut func = Function::new(local_declarations);
 
                     self.compile_expr(&mut func, body);
@@ -1272,7 +1282,7 @@ impl Codegen {
             }
 
             self.compile_expr(&mut dummy_func, &lambda_info.body);
-            let extra = self.locals.num_extra_locals(num_params);
+            let extra = self.locals.num_extra_locals();
             let local_declarations = self.locals.wasm_local_declarations();
 
             // Restore data state
@@ -1303,7 +1313,14 @@ impl Codegen {
                 self.locals.bind_typed(captured_name, false, *captured_type);
             }
 
-            debug_assert_eq!(extra as usize, local_declarations.len());
+            debug_assert_eq!(
+                extra,
+                local_declarations
+                    .iter()
+                    .map(|(count, _)| count)
+                    .copied()
+                    .sum::<u32>()
+            );
             let mut func = Function::new(local_declarations);
 
             // Load captured variables from env_ptr into local slots

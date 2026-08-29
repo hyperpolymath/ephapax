@@ -66,11 +66,13 @@ jobs:
       - name: Write summary
         if: always()
         run: |
-          echo "## --no-default-features build" >> "$GITHUB_STEP_SUMMARY"
-          echo "" >> "$GITHUB_STEP_SUMMARY"
-          echo "Proves the typed-wasm-verify feature is genuinely optional:" >> "$GITHUB_STEP_SUMMARY"
-          echo "ephapax-cli builds + tests with zero git dep on the" >> "$GITHUB_STEP_SUMMARY"
-          echo "hyperpolymath/typed-wasm repo." >> "$GITHUB_STEP_SUMMARY"
+          {
+            echo "## --no-default-features build"
+            echo ""
+            echo "Proves the typed-wasm-verify feature is genuinely optional:"
+            echo "ephapax-cli builds + tests with zero git dep on the"
+            echo "hyperpolymath/typed-wasm repo."
+          } >> "$GITHUB_STEP_SUMMARY"
 
   wasm-validate:
     name: wasm-tools validate (emitted modules)
@@ -106,8 +108,10 @@ jobs:
       - name: Write summary
         if: always()
         run: |
-          echo "## wasm-tools validate" >> "$GITHUB_STEP_SUMMARY"
-          echo "" >> "$GITHUB_STEP_SUMMARY"
-          echo "Every module ephapax emits for the fixture corpus passes" >> "$GITHUB_STEP_SUMMARY"
-          echo "wasm-tools validate (structural validity gate), including" >> "$GITHUB_STEP_SUMMARY"
-          echo "the hypatia bridge.eph integration target." >> "$GITHUB_STEP_SUMMARY"
+          {
+            echo "## wasm-tools validate"
+            echo ""
+            echo "Every module ephapax emits for the fixture corpus passes"
+            echo "wasm-tools validate (structural validity gate), including"
+            echo "the hypatia bridge.eph integration target."
+          } >> "$GITHUB_STEP_SUMMARY"

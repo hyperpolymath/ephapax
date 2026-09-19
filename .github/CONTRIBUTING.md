@@ -26,7 +26,7 @@ formal proofs.
 
 For detailed rules on branch naming, commit messages, and the PR
 process, please refer to the machine-readable metadata in
-<a href=".machine_readable/"
+<a href="../.machine_readable/"
 class="machine_readable/">.machine_readable/</a>.
 
 ## Code of Conduct

@@ -45,15 +45,17 @@ jobs:
     # for the in-tree codec that makes this possible.
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v7.0.1
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
 
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@v1
+        uses: dtolnay/rust-toolchain@02cb101ec7c40f2c49e1d9714d64511d8e1b74de  # v1
+        with:
+          toolchain: v1
         with:
           toolchain: stable   # required when SHA-pinned (no rust-toolchain.toml in repo)
 
       - name: Cache cargo registry and build
-        uses: Swatinem/rust-cache@v2.9.2
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6  # v2.9.2
         with:
           key: no-default-features
 
@@ -87,15 +89,15 @@ jobs:
     # known rustc-incremental ICE on ephapax-parser.
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v7.0.1
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
 
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@v1
+        uses: dtolnay/rust-toolchain@02cb101ec7c40f2c49e1d9714d64511d8e1b74de  # v1
         with:
           toolchain: stable   # required when SHA-pinned (no rust-toolchain.toml in repo)
 
       - name: Cache cargo registry and build
-        uses: Swatinem/rust-cache@v2.9.2
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6  # v2.9.2
         with:
           key: wasm-validate
 

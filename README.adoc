@@ -707,7 +707,7 @@ generics, effects, traits, comptime, contracts) lives on
 | link:spec/[spec/]
 | Language specification + grammar EBNF.
 
-| link:CONTRIBUTING.adoc[CONTRIBUTING.adoc]
+| link:.github/CONTRIBUTING.md[.github/CONTRIBUTING.md]
 | Contribution guide.
 
 | link:CODE_OF_CONDUCT.md[CODE_OF_CONDUCT.md]
@@ -764,7 +764,7 @@ comparison against ten of these.
 
 Contributions welcome. Please see:
 
-* link:CONTRIBUTING.adoc[CONTRIBUTING.adoc] — getting started
+* link:.github/CONTRIBUTING.md[.github/CONTRIBUTING.md] — getting started
 * link:CODE_OF_CONDUCT.md[CODE_OF_CONDUCT.md] — community standards
 
 The highest-leverage open work, in priority order:

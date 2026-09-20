@@ -24,11 +24,10 @@ workflows:
     '.github/workflows/mirror.yml':
         - 'hyperpolymath/standards@571cc734cd69fb846032ec77a662aa8ee4fc32cd'
     '.github/workflows/push-email-notify.yml':
-        - 'dawidd6/action-send-mail@v21'
+        - 'dawidd6/action-send-mail@v3.12.0'
     '.github/workflows/rust-ci.yml':
         - 'actions/checkout@v7.0.1'
         - 'dtolnay/rust-toolchain@v1'
-        - 'hyperpolymath/standards@571cc734cd69fb846032ec77a662aa8ee4fc32cd'
         - 'swatinem/rust-cache@v2.9.2'
     '.github/workflows/scorecard.yml':
         - 'hyperpolymath/standards@571cc734cd69fb846032ec77a662aa8ee4fc32cd'
@@ -59,9 +58,9 @@ dependencies:
         commit: 'sha1-043fb46d1a93c77aae656e7c1c64a875d1fc6a0a'
         owner_id: 44036562
         repo_id: 192625955
-    'dawidd6/action-send-mail@v21':
-        ref: 'v21'
-        commit: 'sha1-03a02a49409134de07636216fb379a026c52991e'
+    'dawidd6/action-send-mail@v3.12.0':
+        ref: 'v3.12.0'
+        commit: 'sha1-67ce3558d613188179559c61d3565140cf389968'
         owner_id: 9713907
         repo_id: 222439721
     'denoland/setup-deno@22d081ff2d3a40755e97629de92e3bcbfa7cf2ed':
@@ -76,7 +75,7 @@ dependencies:
         repo_id: 260749683
     'dtolnay/rust-toolchain@v1':
         ref: 'v1'
-        commit: 'sha1-6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772'
+        commit: 'sha1-02cb101ec7c40f2c49e1d9714d64511d8e1b74de'
         owner_id: 1940490
         repo_id: 260749683
     'editorconfig-checker/action-editorconfig-checker@840e866d93b8e032123c23bac69dece044d4d84c':

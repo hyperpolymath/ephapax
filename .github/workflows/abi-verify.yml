@@ -1,3 +1,4 @@
+# This workflow is managed by gh actions-lock.
 # SPDX-License-Identifier: MPL-2.0
 # This workflow is managed by gh actions-lock.
 # Copyright (c) 2026 Jonathan D.A. Jewell (hyperpolymath) <j.d.a.jewell@open.ac.uk>
@@ -48,7 +49,7 @@ jobs:
       image: snazzybucket/idris2:latest  # estate-standard Idris2 image
     steps:
       - name: Checkout repository
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        uses: actions/checkout@v7.0.1
 
       - name: Build (typecheck) the ABI seam
         working-directory: src/abi
@@ -70,7 +71,7 @@ jobs:
       image: snazzybucket/idris2:latest  # estate-standard Idris2 image
     steps:
       - name: Checkout repository
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        uses: actions/checkout@v7.0.1
 
       - name: Build (typecheck) the formal package
         working-directory: src/formal
@@ -86,7 +87,7 @@ jobs:
       image: snazzybucket/idris2:latest  # estate-standard Idris2 image
     steps:
       - name: Checkout repository
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        uses: actions/checkout@v7.0.1
 
       - name: Build the parse front-end + test executable
         working-directory: idris2

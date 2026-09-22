@@ -7,7 +7,7 @@ workflows:
         - 'actions/checkout@v7.0.1'
     '.github/workflows/codeql.yml':
         - 'actions/checkout@v7.0.1'
-        - 'github/codeql-action@b96794f015dfd88f77b49b1c93e0fa7110f94c63'
+        - 'github/codeql-action@1c5b675653bb5c22dbe9b12b556ec555138e09fd'
     '.github/workflows/coq-build.yml':
         - 'actions/checkout@v7.0.1'
     '.github/workflows/ffi-seams.yml':
@@ -24,11 +24,12 @@ workflows:
     '.github/workflows/mirror.yml':
         - 'hyperpolymath/standards@571cc734cd69fb846032ec77a662aa8ee4fc32cd'
     '.github/workflows/push-email-notify.yml':
-        - 'dawidd6/action-send-mail@v3.12.0'
+        - 'dawidd6/action-send-mail@67ce3558d613188179559c61d3565140cf389968'
     '.github/workflows/rust-ci.yml':
         - 'actions/checkout@v7.0.1'
         - 'dtolnay/rust-toolchain@v1'
-        - 'swatinem/rust-cache@v2.9.2'
+        - 'hyperpolymath/standards@571cc734cd69fb846032ec77a662aa8ee4fc32cd'
+        - 'Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6'
     '.github/workflows/scorecard.yml':
         - 'hyperpolymath/standards@571cc734cd69fb846032ec77a662aa8ee4fc32cd'
     '.github/workflows/secret-scanner.yml':
@@ -36,8 +37,13 @@ workflows:
     '.github/workflows/status-gate.yml':
         - 'actions/checkout@v7.0.1'
         - 'dtolnay/rust-toolchain@v1'
-        - 'swatinem/rust-cache@v2.9.2'
+        - 'Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6'
 dependencies:
+    'Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6':
+        ref: '6323deb102c322ba6fcbdcafc7e3dddab59af2b6'
+        commit: 'sha1-6323deb102c322ba6fcbdcafc7e3dddab59af2b6'
+        owner_id: 580492
+        repo_id: 298565987
     'actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9':
         ref: '55cc8345863c7cc4c66a329aec7e433d2d1c52a9'
         commit: 'sha1-55cc8345863c7cc4c66a329aec7e433d2d1c52a9'
@@ -58,9 +64,9 @@ dependencies:
         commit: 'sha1-043fb46d1a93c77aae656e7c1c64a875d1fc6a0a'
         owner_id: 44036562
         repo_id: 192625955
-    'dawidd6/action-send-mail@v3.12.0':
-        ref: 'v3.12.0'
-        commit: 'sha1-2cea9617b09d79a095af21254fbcb7ae95903dde'
+    'dawidd6/action-send-mail@67ce3558d613188179559c61d3565140cf389968':
+        ref: 'v22'
+        commit: 'sha1-67ce3558d613188179559c61d3565140cf389968'
         owner_id: 9713907
         repo_id: 222439721
     'denoland/setup-deno@22d081ff2d3a40755e97629de92e3bcbfa7cf2ed':
@@ -88,14 +94,14 @@ dependencies:
         commit: 'sha1-54075bcc5e249e4758d363f27d099f55d843f124'
         owner_id: 47606891
         repo_id: 331103973
+    'github/codeql-action@1c5b675653bb5c22dbe9b12b556ec555138e09fd':
+        ref: 'v4.38.1'
+        commit: 'sha1-1c5b675653bb5c22dbe9b12b556ec555138e09fd'
+        owner_id: 9919
+        repo_id: 259445878
     'github/codeql-action@db488ddef3bf6cb639b32c2e9a7c0a7ea8271d28':
         ref: 'v4.37.8'
         commit: 'sha1-db488ddef3bf6cb639b32c2e9a7c0a7ea8271d28'
-        owner_id: 9919
-        repo_id: 259445878
-    'github/codeql-action@b96794f015dfd88f77b49b1c93e0fa7110f94c63':
-        ref: 'b96794f015dfd88f77b49b1c93e0fa7110f94c63'
-        commit: 'sha1-b96794f015dfd88f77b49b1c93e0fa7110f94c63'
         owner_id: 9919
         repo_id: 259445878
     'goto-bus-stop/setup-zig@abea47f85e598557f500fa1fd2ab7464fcb39406':

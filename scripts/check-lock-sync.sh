@@ -330,7 +330,7 @@ END {
     exit 1
   }
   printf "actions.lock is in sync and transitively closed:\n"
-  printf "  * every uses: is locked under its own workflow path (job-level reusable refs included)\n"
+  printf "  * every step-level uses: is locked under its own workflow path (job-level reusable refs optional)\n"
   printf "  * every lockfile entry is still referenced\n"
   printf "  * every ref named in the lockfile resolves to a dependencies: record (0 dangling edges)\n"
   printf "  * every workflow file has a lockfile key (zero-uses: workflows included)\n"

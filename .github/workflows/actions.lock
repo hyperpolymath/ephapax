@@ -7,7 +7,7 @@ workflows:
         - 'actions/checkout@v7.0.1'
     '.github/workflows/codeql.yml':
         - 'actions/checkout@v7.0.1'
-        - 'github/codeql-action@b96794f015dfd88f77b49b1c93e0fa7110f94c63'
+        - 'github/codeql-action@1c5b675653bb5c22dbe9b12b556ec555138e09fd'
     '.github/workflows/coq-build.yml':
         - 'actions/checkout@v7.0.1'
     '.github/workflows/ffi-seams.yml':

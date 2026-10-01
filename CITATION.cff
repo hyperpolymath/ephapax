@@ -1,7 +1,7 @@
 cff-version: 1.2.0
 message: "If you use this software, please cite it as below."
 type: software
-title: "ephapax"
+title: "Ephapax"
 abstract: "Dyadic linear+affine type system for compile-time WASM memory safety — no use-after-free, no leaks, region-based allocation. Mechanically proved in Coq and Idris2."
 authors:
   - family-names: "Jewell"

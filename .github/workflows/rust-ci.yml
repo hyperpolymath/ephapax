@@ -51,8 +51,6 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@v1
         with:
-          toolchain: v1
-        with:
           toolchain: stable   # required when SHA-pinned (no rust-toolchain.toml in repo)
 
       - name: Cache cargo registry and build

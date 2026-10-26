@@ -7,7 +7,7 @@ workflows:
         - 'actions/checkout@v7.0.1'
     '.github/workflows/codeql.yml':
         - 'actions/checkout@v7.0.1'
-        - 'github/codeql-action@6f2ac81f5cd81fe351a197ba0b00d91d03cd2aee'
+        - 'github/codeql-action@9b3254085494b55a0f7c4c2b3d2d52cc712ce370'
     '.github/workflows/coq-build.yml':
         - 'actions/checkout@v7.0.1'
     '.github/workflows/ffi-seams.yml':
@@ -25,7 +25,7 @@ workflows:
     '.github/workflows/mirror.yml':
         - 'hyperpolymath/standards@571cc734cd69fb846032ec77a662aa8ee4fc32cd'
     '.github/workflows/push-email-notify.yml':
-        - 'dawidd6/action-send-mail@67ce3558d613188179559c61d3565140cf389968'
+        - 'dawidd6/action-send-mail@47af4a10b540781705f283a2cf1a9650713ac795'
     '.github/workflows/rust-ci.yml':
         - 'actions/checkout@v7.0.1'
         - 'dtolnay/rust-toolchain@v1'
@@ -59,9 +59,9 @@ dependencies:
         commit: 'sha1-043fb46d1a93c77aae656e7c1c64a875d1fc6a0a'
         owner_id: 44036562
         repo_id: 192625955
-    'dawidd6/action-send-mail@67ce3558d613188179559c61d3565140cf389968':
-        ref: 'v22'
-        commit: 'sha1-67ce3558d613188179559c61d3565140cf389968'
+    'dawidd6/action-send-mail@47af4a10b540781705f283a2cf1a9650713ac795':
+        ref: 'v23'
+        commit: 'sha1-47af4a10b540781705f283a2cf1a9650713ac795'
         owner_id: 9713907
         repo_id: 222439721
     'denoland/setup-deno@22d081ff2d3a40755e97629de92e3bcbfa7cf2ed':
@@ -89,9 +89,9 @@ dependencies:
         commit: 'sha1-54075bcc5e249e4758d363f27d099f55d843f124'
         owner_id: 47606891
         repo_id: 331103973
-    'github/codeql-action@6f2ac81f5cd81fe351a197ba0b00d91d03cd2aee':
-        ref: 'v4.39.0'
-        commit: 'sha1-6f2ac81f5cd81fe351a197ba0b00d91d03cd2aee'
+    'github/codeql-action@9b3254085494b55a0f7c4c2b3d2d52cc712ce370':
+        ref: 'v4.39.1'
+        commit: 'sha1-9b3254085494b55a0f7c4c2b3d2d52cc712ce370'
         owner_id: 9919
         repo_id: 259445878
     'github/codeql-action@db488ddef3bf6cb639b32c2e9a7c0a7ea8271d28':

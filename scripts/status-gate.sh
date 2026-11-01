@@ -37,6 +37,9 @@ extract_claim() {
   echo "$line" | grep -Eo '[0-9]+' | head -n 1
 }
 
+# Compare the first proof count marker with lines starting with `Admitted.`
+# (after optional whitespace) in Coq files under formal/. Exit if the marker
+# is missing or the counts differ.
 check_proofs() {
   # Single-source claim: PROOF-NEEDS.adoc §4 carries the canonical
   # `Coq admitted proofs remaining: <n>` marker (a source-marker count,
@@ -53,6 +56,9 @@ check_proofs() {
   echo "status-gate[proofs]: OK — admitted proofs: ${actual}"
 }
 
+# Compare the first test count marker with Cargo's listed lines ending in
+# `: test`. Exit if the marker is missing, the counts differ, or the listing
+# pipeline fails, including when no test lines match.
 check_tests() {
   local claim actual
   claim="$(extract_claim "TEST-NEEDS.adoc" "Documented all-target tests")"

@@ -513,7 +513,11 @@ the owner*:
 
 Coq `+Admitted.+` marker count: *3* (current source inventory): one
 legacy marker plus two in `+Semantics_L1.v+`. This is a marker count, not
-a count of sound obligations still awaiting routine proof:
+a count of sound obligations still awaiting routine proof.
+
+CI count marker only (source markers, not routine proof debt):
+Coq admitted proofs remaining: 3
+
 
 * `+formal/Semantics.v+` `+preservation+`: false as stated; durable
   legacy archaeology, pinned by `+Counterexample.v+`.

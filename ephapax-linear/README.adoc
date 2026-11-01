@@ -4,8 +4,9 @@ ____
 === 🛑 First-read disambiguation
 
 This crate is part of *`+hyperpolymath/ephapax+`* — a research language
-for compile-time WebAssembly memory safety, formally verified in Coq +
-Idris2.
+for compile-time WebAssembly memory safety with formal artifacts in Coq
+and Idris2. Those artifacts do not establish general language soundness
+or implementation refinement; see `+PROOF-NEEDS.adoc+`.
 
 *`+ephapax-linear+` is _not_ `+hyperpolymath/affinescript+`.*
 AffineScript is a separate, unrelated language (JS/TS/AffineScript
@@ -34,7 +35,7 @@ are not different languages — they are two admissible-derivation regimes
 over the same syntax and semantics. See
 link:../docs/vision/EPHAPAX-VISION.adoc[`+docs/vision/EPHAPAX-VISION.adoc+`]
 for the dyad framing, and
-link:../formal/PRESERVATION-DESIGN.md[`+formal/PRESERVATION-DESIGN.md §5+`]
+link:../formal/PRESERVATION-DESIGN.adoc[`+formal/PRESERVATION-DESIGN.adoc §5+`]
 for the L2 layer in the four-layer architecture.
 ____
 

@@ -18,8 +18,8 @@ This wiki is the *signpost* — canonical docs live in the repo. Edit [`docs/wik
 |---|---|
 | Understand what Ephapax is | [README.adoc](https://github.com/hyperpolymath/ephapax/blob/main/README.adoc) |
 | See the current proof status | [STATUS.adoc](https://github.com/hyperpolymath/ephapax/blob/main/STATUS.adoc) |
-| Understand the four-layer redesign | [formal/PRESERVATION-DESIGN.md](https://github.com/hyperpolymath/ephapax/blob/main/formal/PRESERVATION-DESIGN.md) |
-| See the per-sublanguage proof debt | [PROOF-NEEDS.md](https://github.com/hyperpolymath/ephapax/blob/main/PROOF-NEEDS.md) |
+| Understand the four-layer redesign | [formal/PRESERVATION-DESIGN.adoc](https://github.com/hyperpolymath/ephapax/blob/main/formal/PRESERVATION-DESIGN.adoc) |
+| See the per-sublanguage proof debt | [PROOF-NEEDS.adoc](https://github.com/hyperpolymath/ephapax/blob/main/PROOF-NEEDS.adoc) |
 | See the counterexample that invalidated the old design | [formal/Counterexample.v](https://github.com/hyperpolymath/ephapax/blob/main/formal/Counterexample.v) |
 | See architecture decisions | [docs/specs/DESIGN-DECISIONS.adoc](https://github.com/hyperpolymath/ephapax/blob/main/docs/specs/DESIGN-DECISIONS.adoc) |
 | See machine-readable state | [.machine_readable/6a2/STATE.a2ml](https://github.com/hyperpolymath/ephapax/blob/main/.machine_readable/6a2/STATE.a2ml) |
@@ -51,7 +51,7 @@ The four layers and their current state:
 
 | Layer | Description | Status |
 |---|---|---|
-| **L1** — Region capabilities | `R_in`, `R_out`, `In r R` threading | Substantially complete; `preservation_l1` proved conditional on L2 effect-typing |
+| **L1** — Region capabilities | `R_in`, `R_out`, `In r R` threading | Judgment/helpers mechanised; unrestricted `preservation_l1` refuted by pinned counterexample; replacement redesign open |
 | **L2** — Structural modality | `m : Modality` in `has_type_l1`; `linear_to_affine` | Core landed (PRs #176+#177); `linear_to_affine` Qed, zero axioms; 6 supporting lemmas regressed to Admitted pending Phase D Stages 2–4 |
 | **L3** — Echo residue | What was lost at an irreversible step | `preservation_l3` + two companions Qed (conditional); wired into L1 |
 | **L4** — Dyadic mode | Project-level mode declaration | Phase A scaffold landed (`formal/L4.v`): `PModeLinear`/`PModeAffine`/`PModeBoundaryMix` + round-trip; definitions only by design |
@@ -81,5 +81,5 @@ The four layers and their current state:
 - **Licence**: MPL-2.0
 - **Machine-readable state**: [`.machine_readable/6a2/`](https://github.com/hyperpolymath/ephapax/tree/main/.machine_readable/6a2/)
 - **Contractiles**: 6-verb governance in [`.machine_readable/contractiles/`](https://github.com/hyperpolymath/ephapax/tree/main/.machine_readable/contractiles/)
-- **Security policy**: [SECURITY.md](https://github.com/hyperpolymath/ephapax/blob/main/SECURITY.md)
+- **Security policy**: [SECURITY.adoc](https://github.com/hyperpolymath/ephapax/blob/main/SECURITY.adoc)
 - **Open issues**: [github.com/hyperpolymath/ephapax/issues](https://github.com/hyperpolymath/ephapax/issues)

@@ -9,24 +9,20 @@ Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk>
 [IMPORTANT]
 .Post-counterexample reorientation 2026-05-27
 ====
-This vision document is **the design rationale**. The architecture
-described here was reframed on 2026-05-26 when a verified Coq
-counterexample showed the original single-layer typing judgment was
-*provably false*. The current architecture is a *four orthogonal
-layers* design (region capabilities / structural modality / echo
-residue / dyadic mode) where preservation is re-derived per layer
-from explicit invariants.
+This vision document is **design rationale, not proof evidence**. The
+four-layer architecture (region capabilities / structural modality /
+echo residue / dyadic mode) is a design program; preservation has not
+been re-derived successfully for every layer. Later pinned Coq
+counterexamples refute the legacy and unrestricted L1 statements, and no
+unconditional L2 theorem is established. The intent below — dyadic
+discipline, region-based memory, no tracing GC, and a WASM target — is
+aspirational where it describes end-to-end safety.
 
-The *intent* below — dyadic discipline, region-based memory, no
-tracing GC, WASM target — survives the redesign intact. The
-*mechanisation* is layered.
-
-For implementation status (per-layer counts, what's done, what's
-todo, what's banned), read in this order:
+For current implementation and proof status, read in this order:
 
 . link:../../STATUS.adoc[`STATUS.adoc`] — past/present/future map.
-. link:../../formal/PRESERVATION-DESIGN.md[`formal/PRESERVATION-DESIGN.md`] — the four-layer architecture doctrine.
-. link:../../PROOF-NEEDS.md[`PROOF-NEEDS.md`] — per-sublanguage proof debt.
+. link:../../formal/PRESERVATION-DESIGN.adoc[`formal/PRESERVATION-DESIGN.adoc`] — architecture history.
+. link:../../PROOF-NEEDS.adoc[`PROOF-NEEDS.adoc`] and `EXPLAINME.adoc` — current proof boundaries and ledger.
 ====
 
 [NOTE]
@@ -107,11 +103,10 @@ partners in the dyad: each is enforced independently, but each takes its
 | Layer | What the dyad says about it
 
 | L1 — Region capabilities
-| Identical in both modes. Every live region is tracked in an
-  input/output capability environment threaded through every
-  compound expression. A sibling cannot reference a region a
-  previous sibling has exited. The mother and the child obey the
-  same L1 invariant; the soundness story is the same.
+| Identical in both modes. The judgment threads an input/output region
+  environment through compound expressions, but later Coq counterexamples
+  refute unrestricted L1 preservation. The intended sibling-safety
+  invariant is not established by threading alone; see `PROOF-NEEDS.adoc`.
 
 | L2 — Structural modality
 | *This is the dyad itself.* The mother is `Linear`; the child is
@@ -164,23 +159,20 @@ forks:                    linear enforcer | affine enforcer
 
 == The Workflow
 
-This is the practical power of the dyad:
+This is the intended workflow of the dyad, subject to the implementation
+and proof boundaries above:
 
-. *Plan and build in Affine* — write real, properly typed Ephapax code without
-  being blocked by linear obligations you are not ready to address. The affine
-  type checker is doing real work. You have genuine guarantees. You can think,
-  build, get a working thing, without solving problems that are not the
-  current problem.
+. *Plan and build in Affine* — the checker can accept programs under the
+  Affine rules. This is an implementation-level type-checking result, not
+  a proved language-soundness or memory-safety guarantee.
 
-. *Tighten to Linear when ready* — run the linear enforcer. It does not say
-  "rewrite this." It says precisely what does not satisfy linear discipline.
-  Because the syntax is identical and the code was always truly typed, the
-  path from affine to linear is a targeted, type-guided process — not a
-  rewrite.
+. *Tighten to Linear when ready* — the linear checker reports violations
+  of its discipline. Shared syntax and checker behavior do not by themselves
+  prove a refinement relation or a complete proof of correctness.
 
-You always have truly typed code. The affine stage is not a sketch or a
-prototype you will throw away. It is a typed foundation that the linear
-enforcer can read directly.
+The affine stage is intended to support experimentation before enforcing
+stricter obligations. Whether accepted programs enjoy end-to-end safety
+requires separate local proofs and implementation correspondence.
 
 *The daughter grows up, but her freedom and adaptiveness must not be lost in
 that growing.*

@@ -19,29 +19,29 @@ the 12 → 0 reduction story. - Extending the legacy `+Semantics.v+` with
 new lemmas to support any of the above (`+step_preserves_type_at_pre+`,
 `+step_output_context_eq_at_pre+`, etc. are all in this class).
 
-The canonical design for the fix is the *four-layer redesign* in
-`+formal/PRESERVATION-DESIGN.md+`. Preservation is re-derived per-layer
-(`+preservation_l1+` in `+Semantics_L1.v+`, etc.), not closed against
-the legacy judgment. The owner directive (2026-05-27) is in
-`+CLAUDE.md+` at the repo root.
+The four-layer architecture in `+formal/PRESERVATION-DESIGN.adoc+` is
+design history, not an established fix. Later pinned counterexamples
+refute unrestricted L1 preservation, and no unconditional L2 theorem is
+established. Do not describe preservation as re-derived per layer. The
+current boundary and policies are in `+PROOF-NEEDS.adoc+`,
+`+EXPLAINME.adoc+`, and `+CLAUDE.md+`.
 
 This file is retained so the per-case diagnostic data (which congruence
 patterns hit which obstacle, etc.) remains available to inform the
 layered design — but reading it as a closure plan is the trap.
 ____
 
-Diagnostic + remediation log. The proof is still `+Admitted.+`, but as
-of *2026-05-21* it’s *down from 910 open goals to 12* via four landed
-PRs. This file tells whoever picks it up next exactly what’s open and
-what the canonical closure path is.
+Diagnostic + remediation log, frozen as historical closure-attempt
+material. Its 2026-05-21 count (910 open goals to 12) is not current
+proof status. The four-layer document records design rationale, not a
+canonical closure path; later L1 counterexamples also refute unrestricted
+redesign statements. Use `+PROOF-NEEDS.adoc+` and `+EXPLAINME.adoc+` for
+current boundaries. This file remains useful only as per-case archaeology.
 
 ____
-*The canonical closure plan is now in `+formal/PRESERVATION-DESIGN.md+`*
-(four-layer redesign; L1 region capability threading). The prior
-"`Preservation closure plan`" in `+ROADMAP.adoc+` is superseded; this
-file remains as the per-case diagnostic record. Read the design doc
-first; come back here for case detail and the historical closure-attempt
-log.
+*Do not follow the closure plans in this file or infer a proof route from
+the design history.* The legacy theorem is false as stated, and the
+unrestricted L1 theorem is separately refuted.
 ____
 
 === State at a glance

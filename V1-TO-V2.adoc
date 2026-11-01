@@ -51,9 +51,12 @@ additional L1/L2 soundness gaps that require redesign:
   track regions, structural discipline, echo residue and dyadic mode all
   at once. That conflation was *unsound*, and — unusually — we **proved
   it unsound with a machine-checked counterexample** rather than shipping
-  the bug. v2 splits those four concerns into four orthogonal layers
-  (L1–L4) and **re-derives preservation per layer** from explicit
-  invariants. Three of the four layers already carry `Qed` theorems.
+  the bug. v2 separates those four concerns into four orthogonal layers
+  (L1–L4) as a **redesign target** for future, precisely stated
+  preservation results. The current unrestricted L1 preservation claim is
+  refuted, no unconditional L2 preservation theorem is established, and
+  L3 results are scoped to matching echo-rule pairs. Existing `Qed`
+  lemmas do not establish general preservation per layer.
 
 Discovering your own unsoundness *before* anyone depends on it, with a
 proof, and then redesigning around the lesson, is not failure. It is the

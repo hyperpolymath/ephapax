@@ -339,7 +339,7 @@ helper is not proof debt.
 actual call sites. This restricted result does not restore unrestricted
 region shrinking or general preservation.
 
-|L1 no-exit liveness and strengthened substitution helpers |proven (conditional)
+|L1 no-exit liveness and strengthened substitution helpers |proven
 |Coq 8.18.0; project build recipe above
 |`+formal/Semantics_L1.v+`: `+region_liveness_no_exit_l1_gen+`, `+subst_preserves_typing_l1+`
 |No-exit premise is explicit; these lemmas support restricted substitution
@@ -351,7 +351,7 @@ and do not prove preservation for arbitrary operational steps.
 |Shows the local modality weakening relation only. It does not prove
 L1/L2 preservation for either mode.
 
-|L2 β-case helper family |proven (conditional)
+|L2 β-case helper family |proven
 |Coq 8.18.0; project build recipe above
 |`+formal/TypingL2.v+`: `+preservation_l2_app_eff_beta_linear_l1+`, `+_linear+`, `+_ground_nonlinear_l1+`, `+_ground_nonlinear+`, `+_tfuneff_l1+`, `+_tfuneff+`
 |Requires the exact value/type/effect premises in each lemma. The
@@ -359,11 +359,12 @@ L1/L2 preservation for either mode.
 subset condition, and closure below zero. These are restricted β-case
 lemmas, not unconditional L2 preservation.
 
-|L3 matching echo-rule preservation results |proven (scoped)
+|L3 matching echo-rule preservation results |proven
 |Coq 8.18.0; project build recipe above
 |`+formal/Semantics_L1.v+`: `+preservation_l3_region_active_echo+`, `+preservation_l3_drop_echo+`, `+preservation_l3+`
-|Only matching echo-emitting typing/step-rule pairs; does not establish
-general L1/L2 preservation or implementation refinement.
+|Only matching echo-emitting typing/step-rule pairs. The region-echo case
+additionally requires `+expr_strictly_free_of_region r v+`; it does not
+establish general L1/L2 preservation or implementation refinement.
 
 |Fresh-region L2 β witness (input types, steps, result is untypable at L1) |proven
 |Coq 8.18.0; project build recipe above
@@ -389,7 +390,7 @@ all L1 regressions remain mandatory controls.
 |Current β-case helpers are conditional; `+preservation_l2_via_l1+`
 transparently depends on the refuted L1 statement.
 
-|Mathesis Grade 3 receipt for Ephapax language soundness |open (target)
+|Mathesis Grade 3 receipt for Ephapax language soundness |open
 |Agda receipt required by the Mathesis architecture
 |No Agda Grade 3 proof currently recorded
 |The existing witnesses are Coq, not Grade 3. Standards classifies local
@@ -500,7 +501,7 @@ so this is not a reproducibly pinned toolchain receipt.
 |`+src/formal/Ephapax/Formal/RegionLinear.idr:164+`
 |Transports a `+CannotEscape+` witness across a qualifier change in the local datatype. It is not a language preservation theorem.
 
-|Region safety extraction `+regionSafetyExtract+` and GC extraction `+noGCExtract+` |proven (vacuous wrappers)
+|Region safety extraction `+regionSafetyExtract+` and GC extraction `+noGCExtract+` |proven
 |Idris2 0.8.0; `%default total`; package build above (historically reported, not rerun here)
 |`+src/formal/Ephapax/Formal/RegionLinear.idr:139,151+`
 |Return supplied input witnesses unchanged. They prove no standalone runtime region-safety or GC-freedom property.
@@ -520,10 +521,10 @@ so this is not a reproducibly pinned toolchain receipt.
 |`+src/abi/Ephapax/ABI/Foreign.idr:108+`
 |Case analysis for the local enum/int mapping only; not evidence that Rust/WASM compilation succeeds or preserves source typing.
 
-|ABI seam E1/E2-control-flow/E3-runtime/E4/E5/E6 obligations |open / erased postulates
+|ABI seam E1/E2-control-flow/E3-runtime/E4/E5/E6 obligations |open
 |Idris2 package build checks declarations, not discharged proofs
 |`+src/abi/Ephapax/ABI/Invariants.idr+`; register in `+PROOF-NEEDS.adoc+` §5.3
-|Declarations state owed obligations (type preservation, control-flow consumption, runtime no-escape, no-GC, WASM typing, IR semantics). They are not proof receipts; E2 position-form and E3 static form are separately discharged as above.
+|These obligations remain open; some are represented by erased declarations/postulates, not proof terms. E2 position-form and E3 static form are separately discharged as above. The ledger row does not treat declarations as evidence that the operational or compiler-correctness obligations hold.
 |===
 
 Idris2 evidence follows the Standards route for repository-specific

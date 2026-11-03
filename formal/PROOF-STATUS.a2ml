@@ -4,18 +4,29 @@
 #
 # PROOF-STATUS.a2ml — machine-readable Coq proof state
 #
-# Snapshot of formal/*.v as of 2026-05-27 (post-L1.A through L1.F).
-# Consumed by automated proof-debt trackers, status dashboards, and
-# CI gates that need to know "what counts as proven here".
+# Historical schema snapshot from 2026-05-27 (post-L1.A through L1.F).
+# Its legacy counts and classifications below are superseded by the
+# current boundary block and PROOF-NEEDS.adoc. Do not consume historical
+# L1 debt rows as open obligations without checking pinned counterexamples.
 #
-# Human-readable companion: formal/PRESERVATION-DESIGN.md §4.7 and §4.8.
+# Human-readable source of truth: PROOF-NEEDS.adoc and EXPLAINME.adoc.
 
 [metadata]
 version = "1.0.0"
 snapshot-date = "2026-05-27"
 design-branch = "proof/l1-region-threading-design"
-spec-doc = "formal/PRESERVATION-DESIGN.md"
+spec-doc = "formal/PRESERVATION-DESIGN.adoc"
 counterexample = "formal/Counterexample.v"
+
+[current-proof-boundary]
+status-date = "2026-11-01"
+source-of-truth = "PROOF-NEEDS.adoc"
+legacy-preservation = "refuted-as-stated; durable Admitted retained; five-Qed regression pinned"
+step-pop-disjoint-from-type-l1 = "refuted-as-stated; Counterexample_StepPop.v"
+preservation-l1 = "refuted-as-stated in Linear instance; Counterexample_PreservationL1.v"
+preservation-l2 = "no unconditional theorem declared; see Counterexample_L2.v and Counterexample_L2_nested.v"
+mathesis-grade = "not-claimed; current witnesses are Coq, not Grade 3 Agda receipts"
+proof-policy = "hyperpolymath/mathesis/estate-mathematical-architecture; hyperpolymath/standards/3-practice/PROOF-POLICY.adoc"
 
 # ============================================================================
 # FILES — what's in formal/ and its proof-status posture
@@ -56,17 +67,18 @@ key-lemmas = [
 [[files]]
 path = "formal/Semantics.v"
 purpose = "operational step + legacy preservation"
-status = "frozen-with-1-residual"
+status = "frozen-refuted"
 admit-count = 1
-note = "Legacy preservation has 1 residual admit (S_Region_Step + T_Region_Active region weakening). Out of scope for L1 redesign."
+note = "The legacy preservation statement is false as stated; its durable Admitted is pinned by the five-Qed formal/Counterexample.v regression. Do not treat as ordinary debt."
 
 [[files]]
 path = "formal/Semantics_L1.v"
-purpose = "L1 preservation theorem + helpers"
-status = "active"
-admit-count = 4
-axiom-count = 1
+purpose = "L1 helper lemmas, false unrestricted theorem statements, and scoped regressions"
+status = "active-with-refuted-preservation-statements"
+admit-count = 2
+axiom-count = 0
 admitted-lemma-count = 2
+note = "Current two outer Admitted lemmas are refuted as stated by Counterexample_StepPop.v and Counterexample_PreservationL1.v; replacements require redesign, not proof completion."
 landed-in = ["PR-157", "PR-158", "PR-159", "PR-160", "PR-161", "PR-162", "PR-163"]
 
 # ============================================================================
@@ -90,8 +102,8 @@ name = "region_shrink_preserves_typing_l1"
 file = "Semantics_L1.v"
 landed-in = "PR-159"
 swarm-stream = "L1.B"
-purpose = "shrink region env for value typings (wraps _gen)"
-depends-on-admitted = ["region_shrink_preserves_typing_l1_gen"]
+purpose = "value-restricted region shrinking via region_shrink_msperm"
+note = "The unrestricted general statement was refuted in Counterexample_RegionShrink.v; this Qed value corollary is the restricted replacement."
 
 [[qed-lemmas]]
 name = "subst_preserves_typing_l1"
@@ -131,11 +143,11 @@ purpose = "corollary: In r R' implies In r R"
 file = "Semantics_L1.v"
 landed-in = "PR-161"
 swarm-stream = "L1.D"
-status = "Admitted"
+status = "Admitted; refuted-as-stated"
 cases-total = 33
 cases-qed = 29
 cases-admit = 4
-note = "All Qed cases use the four Qed helpers above. The 4 admits all surface a single structural class (see [proof-debt] below)."
+note = "The theorem statement is refuted by Counterexample_PreservationL1.v (Linear instance). Case counts are historical; do not treat residual admits as unfinished routine proof debt."
 
 # ============================================================================
 # OUTSTANDING PROOF DEBT
@@ -144,57 +156,57 @@ note = "All Qed cases use the four Qed helpers above. The 4 admits all surface a
 [[proof-debt]]
 id = "L1.B-residual-1"
 file = "Semantics_L1.v"
-line-anchor = "region_shrink_preserves_typing_l1_gen T_Region_Active_L1 shadowed"
-class = "list-vs-multiset"
-tractable = true
-diagnosis = "set-equality bridges don't preserve remove_first_L1 output because the operation is positional, not set-theoretic"
-closes-when = "redesign remove_first_L1 as a multiset operation, OR prove a position-aware bridge"
+line-anchor = "historical region_shrink_preserves_typing_l1_gen T_Region_Active_L1 shadowed"
+class = "counterexample-refuted-statement"
+tractable = false
+diagnosis = "The unrestricted helper is refuted by Counterexample_RegionShrink.v; duplicate ambient region entries make single-entry removal unsound even under strict syntactic freeness."
+closes-when = "Do not prove the old statement. Restricted region_shrink_msperm and value/neutral corollaries replace it for current call sites."
 
 [[proof-debt]]
 id = "L1.D-StringConcat"
 file = "Semantics_L1.v"
-line-anchor = "preservation_l1 S_StringConcat_Step2"
-class = "operationally-sound-needs-supporting-lemma"
-tractable = true
-diagnosis = "value v1 left, e2 steps right. Need step_pop_disjoint_from_type_l1 lemma (operational claim: a step's R-pop doesn't pop a region appearing in any sibling's free regions)"
-closes-when = "prove step_pop_disjoint_from_type_l1"
+line-anchor = "historical preservation_l1 S_StringConcat_Step2 support claim"
+class = "counterexample-refuted-statement"
+tractable = false
+diagnosis = "The unrestricted helper step_pop_disjoint_from_type_l1 is refuted by Counterexample_StepPop.v; Counterexample_PreservationL1.v also refutes the proposed value-anchored restriction along this path."
+closes-when = "Do not prove the old conclusion. Define and prove a separately stated sound replacement after redesign."
 
 [[proof-debt]]
 id = "L1.D-App"
 file = "Semantics_L1.v"
 line-anchor = "preservation_l1 S_App_Step2"
-class = "calculus-soundness-gap"
+class = "counterexample-refuted-statement"
 tractable = false
-diagnosis = "T_Lam_L1 rigidly fixes the lambda body's R at lambda-creation; T_Var_*_L1 permit typing TString r at empty R. Combined, the L1 typing is too permissive for preservation under R-shifting steps."
-closes-when = "one of (1) effect-typed lambdas (L2/L3), (2) restrict T_Lam_L1 to region-pure bodies, (3) restrict T_Var_*_L1 to require In r R for variables of type containing r"
-follow-up = "see PRESERVATION-DESIGN.md §4.8"
+diagnosis = "Historical S_App_Step2 conjecture; the unrestricted preservation_l1 theorem is refuted by Counterexample_PreservationL1.v."
+closes-when = "Not by proving this statement. State a sound replacement after judgment/step redesign."
+follow-up = "see PROOF-NEEDS.adoc current L1 boundary"
 
 [[proof-debt]]
 id = "L1.D-Pair"
 file = "Semantics_L1.v"
 line-anchor = "preservation_l1 S_Pair_Step2"
-class = "calculus-soundness-gap"
+class = "counterexample-refuted-statement"
 tractable = false
-diagnosis = "same as L1.D-App"
-closes-when = "see L1.D-App"
-follow-up = "see PRESERVATION-DESIGN.md §4.8"
+diagnosis = "Historical S_Pair_Step2 conjecture; the unrestricted preservation_l1 theorem is refuted by Counterexample_PreservationL1.v."
+closes-when = "Not by proving this statement. State a sound replacement after judgment/step redesign."
+follow-up = "see PROOF-NEEDS.adoc current L1 boundary"
 
 [[proof-debt]]
 id = "L1.C-region-liveness"
 file = "Semantics_L1.v"
-line-anchor = "region_liveness_at_split_l1 (Axiom)"
-class = "carry-invariant-through-induction"
-tractable = true
-diagnosis = "subst_typing_gen_l1 needs to know that In rv R_inner at each compound-rule split point. The outer call provides In rv R; the inductive descent doesn't propagate it because T_Var_Lin_L1 doesn't enforce In rv R."
-closes-when = "one of (1) strengthen T_Var_Lin_L1 to require In rv R, (2) add a side condition to subst_typing_gen_l1 stating In rv R at every R_inner reached, (3) prove a region-liveness corollary of L1.B's count monotonicity"
+line-anchor = "historical region_liveness_at_split_l1 (removed 2026-06-26)"
+class = "refuted-statement-replaced"
+tractable = false
+diagnosis = "The unconditional region-liveness claim was false in the active-region exit case and has been removed. The current true lemma carries an explicit no-exit premise."
+closes-when = "No closure of the old statement. Preserve region_liveness_no_exit_l1_gen and val_region_no_exit as the restricted boundary."
 
 # ============================================================================
 # DOCUMENTATION POINTERS
 # ============================================================================
 
 [docs]
-design = "formal/PRESERVATION-DESIGN.md"
-handoff = "formal/PRESERVATION-HANDOFF.md"
+design = "formal/PRESERVATION-DESIGN.adoc"
+handoff = "formal/PRESERVATION-HANDOFF.adoc"
 roadmap = "ROADMAP.adoc"
 counterexample = "formal/Counterexample.v"
 disambiguation = "nextgen-languages/docs/disambiguation/ephapax-vs-affinescript.md"
@@ -215,7 +227,8 @@ preservation-design-§12-16-roadmap = "v2 echo-as-foundation forward look"
 coq-version = "8.18.0"
 project-file = "formal/_CoqProject"
 invocation = "coq_makefile -f _CoqProject -o Makefile && make"
-last-clean-build = "2026-05-27"
+last-clean-build = "2026-05-27 (historical; no fresh build in 2026-11 audit)"
+current-audit = "coqc unavailable; GitHub run 40435929887 (2026-10-27) succeeded overall but skipped Coq build job; not a proof-build receipt"
 modules = [
   "Syntax",
   "Typing",

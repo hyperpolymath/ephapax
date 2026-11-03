@@ -14,8 +14,8 @@
   ***  `has_type_l1` (L2-hybrid landing, PRs #176 + #177).            ***
   ***  `linear_to_affine` is Qed with zero axioms.                   ***
   ***                                                                ***
-  ***  See `STATUS.adoc`, `PROOF-NEEDS.md`,                          ***
-  ***  `formal/PRESERVATION-DESIGN.md`.                              ***
+  ***  See `STATUS.adoc`, `PROOF-NEEDS.adoc`,                          ***
+  ***  `formal/PRESERVATION-DESIGN.adoc`.                              ***
   *********************************************************************
 
 *)
@@ -23,11 +23,12 @@
 (** * Ephapax Typing Rules — L1 redesign (region capability threading)
 
     This file contains the **new** typing judgment as specified in
-    [formal/PRESERVATION-DESIGN.md §4]. It coexists with the legacy
+    [formal/PRESERVATION-DESIGN.adoc §4]. It coexists with the legacy
     [Typing.v] (`has_type`) so that the migration is incremental: old
     lemmas in [Semantics.v] continue to compile against the legacy
-    judgment, and [Counterexample.v] gains a new lemma proving the
-    L1 fix blocks the bad input.
+    judgment, and [Counterexample.v] proves that this particular
+    legacy bad input is rejected. This regression is not a general
+    preservation or language-soundness theorem.
 
     The judgment shape is:
 
@@ -47,7 +48,7 @@
       beyond L1's scope. This is the same simplification echo-types
       makes by parameterising over a thin order rather than a fibration.
 
-    See [formal/PRESERVATION-DESIGN.md §4] for the full design
+    See [formal/PRESERVATION-DESIGN.adoc §4] for the full design
     rationale and [Counterexample.v]'s new [bad_input_untypable_l1]
     lemma for the regression. *)
 
@@ -357,7 +358,7 @@ Inductive has_type_l1
       T_Case_L1_Affine's per-branch disagreement.
 
       L3 echo residue: output [TBase TUnit] is a residue placeholder;
-      full residue mechanisation is L3 (PRESERVATION-DESIGN.md §6). *)
+      full residue mechanisation is L3 (PRESERVATION-DESIGN.adoc §6). *)
 
   | T_Drop_L1 : forall m R R' G G' e T,
       is_linear_ty T = true ->
@@ -422,7 +423,7 @@ Inductive has_type_l1
       irreversible step*, not recovery of the erased witness. The
       witness is, by construction, irrecoverable — see
       [Echo.no_section_collapse_to_residue] (Qed) and
-      [PRESERVATION-DESIGN.md §6.0.2.3]. *)
+      [PRESERVATION-DESIGN.adoc §6.0.2.3]. *)
 
   | T_Observe_L1 : forall m R R' G G' e T,
       R ; G |=L1[m] e : TEcho T -| R' ; G' ->
@@ -471,7 +472,7 @@ Qed.
 
     Every derivation in [has_type_l1 Linear ...] is also a derivation
     in [has_type_l1 Affine ...]. This is the modality weakening
-    promised by PRESERVATION-DESIGN.md §5 — the "thin-poset
+    promised by PRESERVATION-DESIGN.adoc §5 — the "thin-poset
     decoration" lemma, mirror of [echo-types/proofs/agda/EchoLinear.agda:38-58]
     [weaken : LEcho linear → LEcho affine].
 

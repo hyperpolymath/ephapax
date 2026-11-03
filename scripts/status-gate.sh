@@ -8,10 +8,10 @@
 # required gate and the expensive one as a separate, cancellable job:
 #
 #   --proofs   Proof-count only: greps formal/*.v for `Admitted.` and
-#              compares to PROOF-NEEDS.md. No toolchain, runs in ~1s.
+#              compares to PROOF-NEEDS.adoc. No toolchain, runs in ~1s.
 #              This is the CORE gate — keep it required.
 #   --tests    Test-count only: `cargo test --all-targets -- --list` and
-#              compares to TEST-NEEDS.md. Needs a full Rust build (minutes).
+#              compares to TEST-NEEDS.adoc. Needs a full Rust build (minutes).
 #              SAFE TO SKIP / CANCEL if you are in a rush — it never gates
 #              soundness, only doc-count hygiene for the test inventory.
 #   (no arg)   Both (the local `just status-gate` default).
@@ -37,31 +37,37 @@ extract_claim() {
   echo "$line" | grep -Eo '[0-9]+' | head -n 1
 }
 
+# Compare the first proof count marker with lines starting with `Admitted.`
+# (after optional whitespace) in Coq files under formal/. Exit if the marker
+# is missing or the counts differ.
 check_proofs() {
-  # Single-source claim: PROOF-NEEDS.md §4 carries the canonical
-  # `Coq admitted proofs remaining: <n>` marker. ROADMAP.adoc no longer
-  # duplicates this; see the per-file table + seam audit in PROOF-NEEDS.md.
+  # Single-source claim: PROOF-NEEDS.adoc §4 carries the canonical
+  # `Coq admitted proofs remaining: <n>` marker (a source-marker count,
+  # not an assertion that each marker is routine proof debt).
   local claim actual
-  claim="$(extract_claim "PROOF-NEEDS.md" "Coq admitted proofs remaining")"
+  claim="$(extract_claim "PROOF-NEEDS.adoc" "Coq admitted proofs remaining")"
   actual="$(
     (grep -R --include='*.v' -n '^[[:space:]]*Admitted\.' formal || true) \
       | wc -l | tr -d ' '
   )"
   if [ "$claim" != "$actual" ]; then
-    fail "PROOF-NEEDS.md claims ${claim} admitted proofs, actual is ${actual}"
+    fail "PROOF-NEEDS.adoc claims ${claim} admitted markers, actual is ${actual}"
   fi
   echo "status-gate[proofs]: OK — admitted proofs: ${actual}"
 }
 
+# Compare the first test count marker with Cargo's listed lines ending in
+# `: test`. Exit if the marker is missing, the counts differ, or the listing
+# pipeline fails, including when no test lines match.
 check_tests() {
   local claim actual
-  claim="$(extract_claim "TEST-NEEDS.md" "Documented all-target tests")"
+  claim="$(extract_claim "TEST-NEEDS.adoc" "Documented all-target tests")"
   actual="$(
     cargo test --all-targets -- --list \
       | grep ': test$' | wc -l | tr -d ' '
   )"
   if [ "$claim" != "$actual" ]; then
-    fail "TEST-NEEDS.md claims ${claim} tests, actual is ${actual}"
+    fail "TEST-NEEDS.adoc claims ${claim} tests, actual is ${actual}"
   fi
   echo "status-gate[tests]: OK — all-target tests: ${actual}"
 }

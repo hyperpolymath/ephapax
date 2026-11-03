@@ -1,17 +1,23 @@
 == Preservation: principled redesign
 
-Companion to `+PRESERVATION-HANDOFF.md+`. The handoff document is a
+Companion to `+PRESERVATION-HANDOFF.adoc+`. The handoff document is a
 diagnostic record of attempted proof-engineering. This document is the
-*design* rationale for the typing-layer change that the verified
-counterexample (`+Counterexample.v+`, all three lemmas `+Qed.+`) now
-makes unavoidable.
+*design* rationale for the typing-layer change made necessary by the
+legacy counterexample (`+Counterexample.v+`; its three core legacy-witness
+lemmas are `+Qed+`, and the file now pins five Qed lemmas total including
+the separate L1 regression).
 
 The handoff’s Option 3 ("`type-system change`") is here re-cast not as a
 patch but as the deliberate separation of four concerns that the current
 calculus conflates: *structural discipline*, *region capability
 tracking*, *dyadic interaction semantics*, and *echo / residue
-semantics*. Preservation is derived from explicit invariants in the new
-architecture; it is not forced through the old.
+semantics*. This document records design rationale and historical proof
+plans, not an established soundness result. Later pinned regressions
+(`+Counterexample_StepPop.v+`, `+Counterexample_PreservationL1.v+`,
+`+Counterexample_L2.v+`, and `+Counterexample_L2_nested.v+`) refute the
+unrestricted L1 statement and expose L2 β-preservation gaps. See
+`+PROOF-NEEDS.adoc+` for current status; upstream theories and conceptual
+vocabulary do not discharge Ephapax-local soundness obligations.
 
 '''''
 
@@ -203,7 +209,11 @@ Under the new rules:
 `+R_out = remove_first r1 [r0; r1] = [r0]+`.
 * Now `+EPair+`’s second sibling `+ELoc l1 r1+` must type at
 `+R = [r0]+`. `+T_Loc+` requires `+region_active [r0] r1+`, false.
-* *The `+EPair+` rule has no derivation.* Counterexample disappears.
+* *The `+EPair+` rule has no derivation.* This is a proved regression
+for this exact legacy input only. It does not establish general L1
+preservation: `+Counterexample_PreservationL1.v+` later exhibits a distinct
+well-typed L1 input that steps to an untypable state. See
+`+PROOF-NEEDS.adoc+` for the current theorem boundary.
 
 ==== 4.5 Preservation under the new judgment
 
@@ -229,7 +239,15 @@ admit was asking "`how do I re-type the unchanged sibling under the
 shrunken R’?`". Under the new threading the sibling is typed at `+R'+`
 from the outset — there is nothing to re-type.
 
-==== 4.6 Cost: which existing lemmas need re-proof
+==== 4.6 Cost: historical projection of proof changes
+
+[NOTE]
+====
+The counts and proof routes in this subsection are design-era estimates,
+not a report of completed proofs. In particular, the proposed preservation
+proof was not established; the current unrestricted L1 statement is refuted
+by later pinned counterexamples. See `+PROOF-NEEDS.adoc+`.
+====
 
 The judgment shape changes, so every lemma that pattern-matches the old
 shape (`+R; G |- e : T -| G'+`) must be updated. The lemma count in the
@@ -261,14 +279,23 @@ subsumed by the new judgment
 `+R'_final+`; `+step_preserves_type+` proves the new preservation
 statement directly
 
-|`+preservation+` |1 |proved by structural induction on the new judgment
+|`+preservation+` |1 |would require a new proof; no result established. The current unrestricted L1 theorem was later refuted.
 |===
 
 The at-pre helper pattern survives because it is orthogonal to the
 threading change: the pre-step env is the new `+R_in+` of the diagonal
 typing rule.
 
-==== 4.7 L1 closure status (2026-05-27)
+==== 4.7 L1 closure status (historical snapshot, 2026-05-27)
+
+[NOTE]
+====
+This subsection records the intermediate L1 state at 2026-05-27. Its admit
+counts, debt classifications, and proposed closure routes are superseded by
+later work and pinned counterexamples. They must not be read as current
+proof debt or as evidence that the unrestricted theorem can be proved;
+see `+PROOF-NEEDS.adoc+` and `+EXPLAINME.adoc+`.
+====
 
 Six follow-up PRs against `+proof/l1-region-threading-design+` (the
 design branch) landed the L1 implementation incrementally:
@@ -327,10 +354,18 @@ induction.
 (`+region_shrink_preserves_typing_l1_gen+` and `+preservation_l1+`) —
 each closes the moment its internal admits close.
 
-==== 4.8 Soundness finding: T_Lam_L1 + T_Var_*_L1 are too permissive
+==== 4.8 Historical soundness diagnosis (incomplete): L1 rules and region presence
 
-L1.E surfaced a genuine soundness issue, separate from the proof-
-engineering gaps:
+[NOTE]
+====
+This 2026-05 diagnosis predates `+Counterexample_StepPop.v+` and
+`+Counterexample_PreservationL1.v+`. It is not a complete account of the
+refuted theorem, and the resolution paths below are design ideas, not
+proved repairs. Preserve the later regressions as authoritative controls.
+====
+
+L1.E surfaced a soundness issue, originally described as separate from the
+proof-engineering gaps:
 
 *The finding.* `+T_Lam_L1+` rigidly fixes the lambda body’s region
 environment `+R+` at lambda-creation time, with no mechanism to retype
@@ -435,8 +470,9 @@ linear bindings |optional; produces an Affine-echo residue (see §6)
 [width="100%",cols="34%,33%,33%",options="header",]
 |===
 |Property |Ephapax-Linear |Ephapax-Affine
-|Preservation |✓ (L1 fix) |✓ (same fix; Affine derivations are L1-safe
-by weakening)
+|Preservation |✗ current modality-polymorphic L1 statement is refuted
+by the Linear instance in `+Counterexample_PreservationL1.v+` |No separate
+Affine-only preservation theorem is established or claimed by this witness
 
 |Progress |✓ |✓
 
@@ -582,13 +618,15 @@ change.
 
 === 8. Proof-need separation: Linear vs Affine
 
+The following table is a list of target properties, not established
+proofs. Current preservation status is recorded in `+PROOF-NEEDS.adoc+`.
 Where the layers’ proof needs differ:
 
 [width="100%",cols="34%,33%,33%",options="header",]
 |===
 |Property |Ephapax-Linear |Ephapax-Affine
-|*Preservation* (L1) |identical statement; proof via L1 threading
-|identical statement; follows from Linear via modality-weakening
+|*Preservation* (L1) |Current unrestricted statement is refuted; redesign/replacement theorem is open
+|No separate Affine-only preservation theorem is established; the L1 counterexample is Linear and does not alone refute an Affine-only claim
 
 |*Progress* |values + closed contexts step |values + closed contexts
 step; affine "`ambient drop`" rule may fire
@@ -622,10 +660,11 @@ genuinely split.
 
 === 9. Counterexample examination, revisited
 
-The verified counterexample (`+Counterexample.v+`) was a _single_
-witness. The L1 architectural fix subsumes a family of related
-configurations, all sharing the same shape. Cataloguing them sharpens
-the design:
+The legacy counterexample (`+Counterexample.v+`) is one pinned
+witness, and `+bad_input_untypable_l1+` rejects that particular input.
+This does not show that L1 subsumes the related configurations below:
+later counterexamples refute unrestricted L1 preservation. The family
+table is historical design analysis, not evidence of a general fix.
 
 [width="100%",cols="34%,33%,33%",options="header",]
 |===
@@ -671,18 +710,20 @@ require `+r ∈ R_in+`, but `+r ∉ R_in+` by `+T_Region+`’s premise — so
 this is well-typedness, not preservation, and the existing rules already
 reject it.
 
-This confirms the diagnosis: *the asymmetry is region _exit_, not region
-introduction*. L1’s left-to-right threading is the exactly- sufficient
-mechanism.
+This was the original diagnosis, not a proof that L1 threading enforces
+sibling safety. The pinned L1 counterexamples show that the unrestricted
+judgment still permits preservation failures; a sound replacement needs
+additional, explicitly checked invariants.
 
 '''''
 
 === 10. Implementation order
 
 [arabic]
-. *L1 — region threading* (this design). Closes preservation. Days, not
-weeks. The hard part is re-stating ~80 lemmas; the substance of each is
-unchanged.
+. *L1 — region threading* (this design). This was expected to support
+preservation, but the unrestricted L1 theorem was later refuted by pinned
+counterexamples. A sound judgment/step redesign and replacement proof are
+still required; the old schedule estimate is not current.
 . *L2 — modality parameter* (already present _in_ the types via
 `+is_linear_ty+`; needs to be _promoted_ to a judgment parameter plus
 the Linear ⇒ Affine weakening). Orthogonal to L1; can be done before or
@@ -693,10 +734,10 @@ preservation, progress, or the dyadic story). Bring in echo-types’
 via decoration-commuting.
 . *L4 — module-level mode declaration* (UX, not proof).
 
-Each step’s correctness is independent of the next. The decoration-
-commuting recipe from echo-types (`+composition.md+` §Q5) guarantees
-that adding L3 to a system that already has L1+L2 does not invalidate
-any L1/L2 proof.
+The design hoped for independent layer proofs. The decoration-commuting
+recipe from echo-types (`+composition.md+` §Q5) is a conceptual
+construction, not a proof that adding L3 preserves Ephapax's L1/L2
+properties; those local obligations must be proved against Ephapax rules.
 
 '''''
 
@@ -704,7 +745,7 @@ any L1/L2 proof.
 
 * The verified counterexample: `+formal/Counterexample.v+` (this repo).
 * The diagnostic record of attempted patches:
-`+formal/PRESERVATION-HANDOFF.md+`.
+`+formal/PRESERVATION-HANDOFF.adoc+`.
 * Echo definition:
 `+~/developer/repos/echo-types/proofs/agda/Echo.agda+` (line 14).
 * Echo residue + non-recovery:
@@ -733,37 +774,38 @@ interesting story is the layering itself. This section catalogues the
 documents that frame "`what ephapax is`" and specifies the substantive
 edits required, with draft text where the framing matters.
 
-The rollout deliberately leaves implementation untouched. Documentation
-that promises the new architecture without it being built would be
-dishonest; documentation that describes the *direction* alongside the
-current state is a roadmap. The text below is the roadmap form.
+The rollout deliberately leaves implementation untouched. This section
+is an archival 2026-05 documentation plan: its draft quotations and
+checklists are not current claims and must not be copied as evidence. Some
+were superseded by later counterexamples and policy updates. Current proof
+status is in `+PROOF-NEEDS.adoc+` and the ledger in `+EXPLAINME.adoc+`.
 
 ==== 12.1 Tagline and one-line description (used by many surfaces)
 
 The current GitHub repo description is:
 
 ____
-Dyadic linear+affine type system for compile-time WASM memory safety —
-no use-after-free, no leaks, region-based allocation. Mechanically
-proved in Coq and Idris2.
+Research language exploring dyadic linear/affine typing and region-based
+allocation for WebAssembly. Coq and Idris2 artifacts do not establish
+whole-language memory safety or implementation refinement.
 ____
 
 Proposed replacement (matches the four-layer story without overclaiming
 unbuilt layers):
 
 ____
-A dyadic programming language for WebAssembly, where four orthogonal
-disciplines — structural (linear ↔ affine), region capabilities,
-irreversibility residue, and dyadic interaction mode — compose to
-guarantee compile-time memory safety without a garbage collector.
-Mechanically formalised in Coq and Idris2.
+A research language for WebAssembly exploring four design concerns —
+structural modality, region capabilities, irreversibility residue, and
+dyadic interaction. Formal artifacts exist in Coq and Idris2, but the
+current preservation counterexamples mean no whole-language memory-safety
+guarantee is established.
 ____
 
 Short form (≤ 130 chars, for cards and `+site:+` listings):
 
 ____
-Ephapax: four-layer dyadic type system for WASM memory safety —
-linearity, regions, echo residue, dyadic mode. Coq + Idris2 proofs.
+Ephapax: research language exploring linear/affine typing, regions,
+echo residue, and dyadic mode; Coq and Idris2 proof artifacts.
 ____
 
 Lift this string verbatim into:
@@ -802,7 +844,9 @@ the recipe).
 | **L1 — Region capabilities**
 | Every live region is tracked in an input/output environment
   threaded through every expression. A region cannot be referenced
-  after a sibling has exited it. Soundness proof in `formal/`.
+  after a sibling has exited it. This is the design goal; a general
+  soundness proof is not established, and current L1 counterexamples
+  refute the unrestricted preservation claim.
 
 | **L2 — Structural discipline (linear ↔ affine)**
 | The *modality* of the surrounding program decides whether linear
@@ -835,11 +879,11 @@ ____
 . *Replace "`Region-based memory`" row* with the L1 framing:
 +
 ____
-*Region-based memory (L1)* | Allocations live in named regions
-(`+region r: ...+`). The type system threads a region-capability
-environment through every expression so a sibling cannot read from a
-region another sibling has just exited. When a region’s scope ends, the
-runtime bulk-frees every resource in it.
+*Region-based memory (L1)* | Allocations are designed around named regions
+(`+region r: ...+`). The judgment threads a region-capability environment,
+but unrestricted L1 preservation is refuted by pinned counterexamples;
+sibling safety remains a design target, not an established guarantee.
+The Rust runtime's region behavior is not proved to refine the calculus.
 ____
 . *Add a footnote-style block* linking to this design document for
 readers who want the soundness story:
@@ -851,9 +895,10 @@ readers who want the soundness story:
 The four-layer separation is **not** decorative — it exists
 because the original "linear+affine + regions" framing admitted a
 verified counterexample to preservation (see
-`formal/Counterexample.v` and `formal/PRESERVATION-DESIGN.md`).
-The four-layer redesign restores soundness by making each
-discipline's invariants explicit and orthogonal.
+`formal/Counterexample.v` and `formal/PRESERVATION-DESIGN.adoc`).
+The four-layer redesign makes proposed disciplines explicit, but it does
+not by itself restore soundness. Current L1 preservation is refuted and
+unconditional L2 preservation is not established.
 ****
 ----
 . *Do not* change the disambiguation block (lines 19–41). It is correct
@@ -868,11 +913,11 @@ two new claims and weaken one:
 
 * *New (L1)*: "`The region capability environment is threaded through
 every compound expression.`" Evidence pointer: cite
-`+formal/PRESERVATION-DESIGN.md §4+` and `+formal/Counterexample.v+`
+`+formal/PRESERVATION-DESIGN.adoc §4+` and `+formal/Counterexample.v+`
 (until the Coq side is implemented, the evidence is the *design doc +
 counterexample*, not a passing proof — say so honestly).
 * *New (L3, planned)*: "`Irreversible operations produce residue
-witnesses.`" Evidence pointer: `+formal/PRESERVATION-DESIGN.md §6+` and
+witnesses.`" Evidence pointer: `+formal/PRESERVATION-DESIGN.adoc §6+` and
 the upstream echo-types proofs at
 `+~/developer/repos/echo-types/proofs/agda/EchoLinear.agda+`. Mark as
 *planned* until ephapax has its own `+formal/Echo.v+`.
@@ -887,12 +932,14 @@ Add a new top-level section after "`Claim: Region-Based Memory`":
 == Claim: Sibling-safe region capabilities (L1)
 
 *Evidence*: Region capabilities are threaded as input/output
-environments through every compound typing rule. A sibling cannot
-reference a region a previous sibling has exited.
+environments through compound typing rules. This is not sufficient for
+general preservation: the pinned L1 counterexamples refute the unrestricted
+claim. The legacy regression rejects one specific input only.
 
-* Counterexample at `formal/Counterexample.v` (all three lemmas
-  `Qed`) demonstrates the soundness gap the threading fixes.
-* Design rationale at `formal/PRESERVATION-DESIGN.md §3-§4`.
+* The three core legacy-witness lemmas in `formal/Counterexample.v`
+  are `Qed`; the file pins five Qed lemmas total. They refute the legacy
+  statement and do not establish general L1 preservation.
+* Design rationale at `formal/PRESERVATION-DESIGN.adoc §3-§4`.
 * Reference implementation: forthcoming — see `ROADMAP.adoc` for
   the order in which L1 lands in `formal/` and in
   `src/ephapax-typing/`.
@@ -908,7 +955,7 @@ Affine mode permits silent lowering.
 * Upstream theory at
   `~/developer/repos/echo-types/proofs/agda/EchoLinear.agda` (lines
   30–101), already mechanised.
-* Forward-looking design at `formal/PRESERVATION-DESIGN.md §6`.
+* Forward-looking design at `formal/PRESERVATION-DESIGN.adoc §6`.
 * Status: **planned** — no ephapax rule yet introduces `TEcho`. The
   L3 extension follows L1.
 ----
@@ -956,12 +1003,11 @@ each takes its **defaults** from which side of the dyad you are on.
   program has one.
 |===
 
-The four layers compose without coherence obligations because each
-is a *thin poset* — propositional ordering kills the categorical
-overhead that would otherwise demand pentagon laws and the like. The
-construction is taken verbatim from
-https://github.com/hyperpolymath/echo-types[echo-types]'
-decoration-commuting recipe.
+The design intends the four concerns to compose through a *thin-poset*
+structure, reducing categorical coherence overhead. This architectural
+argument is not an Ephapax soundness theorem. The construction is inspired
+by the `+echo-types+` decoration-commuting development; upstream results do
+not discharge Ephapax-local obligations.
 
 The dyad remains primary. The layers are how the dyad's promises
 are *enforced*.
@@ -1010,7 +1056,7 @@ orthogonal layers; each is implemented in sequence.
   - No proof obligations.
 
 The previous "Preservation closure plan" section is **archived** —
-see `formal/PRESERVATION-HANDOFF.md` for the historical record.
+see `formal/PRESERVATION-HANDOFF.adoc` for the historical record.
 ----
 
 ==== 12.6 spec/SPEC.md and spec/ephapax-spec.md — the canonical spec
@@ -1045,7 +1091,7 @@ grammars. Add a banner at the top:
 > (Linear and Affine). The two are not different languages — they
 > are two admissible-derivation regimes over the same syntax and
 > semantics. See `docs/vision/EPHAPAX-VISION.adoc` for the dyad,
-> and `formal/PRESERVATION-DESIGN.md §5` for the L2 layer.
+> and `formal/PRESERVATION-DESIGN.adoc §5` for the L2 layer.
 ----
 
 Update the comparison table title from "`Dual Substructural Grammars`"
@@ -1071,7 +1117,7 @@ which layer a question touches is the first step in answering it:
 | L4 — Dyadic mode | "Is this a project-level mode declaration question?" |
 
 Most questions touch exactly one layer. The design rationale is in
-`formal/PRESERVATION-DESIGN.md`. The verified counterexample that
+`formal/PRESERVATION-DESIGN.adoc`. The verified counterexample that
 forced the redesign is in `formal/Counterexample.v`.
 
 Standing rule: if a proposed change appears to require a side
@@ -1088,7 +1134,7 @@ that side condition *derivable*, not stated.
 
 ### Architecture
 
-- **Four-layer typing redesign** (`formal/PRESERVATION-DESIGN.md`).
+- **Four-layer typing redesign** (`formal/PRESERVATION-DESIGN.adoc`).
   The original "linear+affine + regions" framing admitted a verified
   counterexample to preservation (`formal/Counterexample.v`). The
   redesign separates four orthogonal disciplines: region capabilities
@@ -1098,13 +1144,14 @@ that side condition *derivable*, not stated.
 
 ### Proof / theory
 
-- Verified counterexample to preservation in the current rules
-  (`formal/Counterexample.v` — three lemmas `Qed`). The
-  counterexample is the canonical regression test for the L1 fix.
+- Verified legacy preservation counterexample
+  (`formal/Counterexample.v`; see file for the pinned five-Qed inventory).
+  `bad_input_untypable_l1` rejects that particular input only; later L1
+  regressions refute the unrestricted L1 preservation statement too.
 
 ### Docs
 
-- New design document: `formal/PRESERVATION-DESIGN.md`.
+- New design document: `formal/PRESERVATION-DESIGN.adoc`.
 - README, EXPLAINME, EPHAPAX-VISION, ROADMAP, CLAUDE updated to
   reflect the four-layer story.
 - Repo description and tagline updated.
@@ -1121,18 +1168,23 @@ hero block:
 ----
 # Ephapax
 
-> Four-layer dyadic type system for WebAssembly memory safety.
+> Research language exploring dyadic linear/affine typing and region-based
+> memory management for WebAssembly.
 
-Four orthogonal disciplines compose to guarantee compile-time
-memory safety without a garbage collector:
+The four layers are design concerns, not a soundness proof. Current
+Coq counterexamples refute legacy and unrestricted L1 preservation; no
+unconditional L2 preservation theorem is established. Selected L3 results
+are scoped to matching echo-emitting rule pairs, and L4 is a scaffold.
 
-- **Regions** (L1) — capabilities threaded through every expression.
-- **Linear ↔ Affine** (L2) — the dyad, mother and child.
-- **Echo** (L3, planned) — irreversibility leaves typed residue.
-- **Dyadic mode** (L4) — declare which side you speak from.
+- **Regions** (L1) — input/output capability threading; general preservation
+  remains an open redesign obligation.
+- **Linear ↔ Affine** (L2) — modality and weakening artifacts; no unconditional
+  L2 preservation theorem.
+- **Echo** (L3) — typed residue with scoped matching-rule results.
+- **Dyadic mode** (L4) — declarations/design scaffold.
 
 Mechanically formalised in Coq and Idris2. See
-[design](formal/PRESERVATION-DESIGN.md) ·
+[design](formal/PRESERVATION-DESIGN.adoc) ·
 [vision](docs/vision/EPHAPAX-VISION.adoc) ·
 [spec](spec/SPEC.md) ·
 [roadmap](ROADMAP.adoc).
@@ -1222,7 +1274,7 @@ upstream. Mark as "`planned`" prominently.
 fits.
 
 |`+Soundness+` |Index of what is proved, where, and at what status.
-Cross-references `+formal/PRESERVATION-DESIGN.md+` and
+Cross-references `+formal/PRESERVATION-DESIGN.adoc+` and
 `+Counterexample.v+`.
 
 |`+FAQ+` |Includes the disambiguation against AffineScript, the
@@ -1236,30 +1288,27 @@ mode, thin-poset decoration.
 Wiki updates should happen *after* the repo-side docs land, so the wiki
 can link to merged sources rather than to in-flight files.
 
-==== 12.14 Cross-cutting: language for new framing (drop-ins)
+==== 12.14 Cross-cutting: qualified project framing (not a guarantee template)
 
-These passages are written once and dropped wherever needed:
+The following replaces the historical marketing-style framing. Use it
+only with the explicit proof boundary below:
 
-*One-sentence what-this-is*: > Ephapax is a dyadic programming language
-whose type system composes > four orthogonal disciplines — region
-capabilities, structural > modality, irreversibility residue, and dyadic
-mode — to guarantee > compile-time WebAssembly memory safety without a
-garbage collector.
+*One-sentence*: Ephapax is a research language exploring region
+capabilities, linear/affine modalities, irreversibility evidence, and
+dyadic interaction for compile-time WebAssembly memory safety.
 
-*One-paragraph what-this-is*: > Ephapax is a programming language for
-WebAssembly with a > mechanically verified type system. Four orthogonal
-disciplines > compose to give the safety guarantees: *region
-capabilities* (L1) > thread an explicit live-region set through every
-expression so a > sibling cannot reference a region another sibling has
-exited; > *structural modality* (L2) chooses between Linear (every
-linear > binding must be consumed) and Affine (linear bindings may be >
-dropped); *irreversibility residue* (L3, planned) makes the >
-information lost by region exit and drop into a first-class, >
-proof-relevant value; and *dyadic mode* (L4) declares, at the > project
-level, which side of the linear/affine dyad the program > speaks from.
-The four layers compose without coherence obligations > because each is
-a thin-poset decoration, a construction borrowed > verbatim from the
-`+echo-types+` mechanisation.
+*One-paragraph*: Ephapax is a research language for WebAssembly whose
+type-system design explores four concerns: region capabilities (L1),
+structural modality (L2), irreversibility residue (L3), and dyadic mode
+(L4). The L1 judgment threads region environments, but later Coq
+counterexamples refute unrestricted L1 preservation; no unconditional
+L2 preservation theorem is established. The L2 β-case lemmas are
+conditional, L3 preservation results are Qed only for matching
+echo-emitting rule pairs, and L4 remains a definitions-only scaffold.
+The architecture is design rationale, not a soundness proof. The Coq
+artifacts do not prove the Rust implementation refines the calculus.
+Do not infer Ephapax-specific guarantees from `+echo-types+` or other
+upstream developments.
 
 *Why four layers (FAQ-shaped)*: > Q: Why four layers, not three or five?
 > > A: The four are what the soundness story demands. L1 is forced by >
@@ -1291,93 +1340,103 @@ or by an agent. The architecture above describes the *target*; this
 subsection describes the *current state*, which is much narrower than
 the target.
 
-===== 12.15.1 What is mechanised today
+===== 12.15.1 Current proof inventory (summary)
+
+This table is an orientation only; exact propositions, checker
+information, and trust boundaries are in the EXPLAINME proof ledger.
 
 [width="100%",cols="34%,33%,33%",options="header",]
 |===
-|Mechanisation |Scope |Status
-|`+formal/Semantics.v+`, `+formal/Typing.v+`, `+formal/Syntax.v+` (Coq)
-|A *single* typing judgment `+R; G ⊢ e : T -| G'+` and its small-step
-operational semantics |Builds with `+coqc 8.18.0+`
+|Artifact |Scope |Current status
+|`+formal/Counterexample.v+` (Coq)
+|Legacy preservation witness and separate L1 regression
+|Five Qed lemmas total. The three core legacy-witness lemmas refute the
+legacy theorem; `+bad_input_untypable_l1+` rejects only that input.
 
-|`+formal/Counterexample.v+` |A verified counterexample to preservation
-*as currently stated* |All three lemmas `+Qed+`
+|`+formal/Semantics.v+` (Coq)
+|Legacy `+preservation+`
+|False as stated; durable `+Admitted.+` retained. Not ordinary debt.
 
-|`+preservation+` theorem in `+Semantics.v+` |Soundness under the
-current single judgment |*`+Admitted.+`* — 11 cascading goals open (see
-`+PRESERVATION-HANDOFF.md+`)
+|`+formal/TypingL1.v+`, `+Semantics_L1.v+` (Coq)
+|Modality-indexed L1 judgment, structural helpers, L1 preservation claims
+|The unrestricted `+step_pop_disjoint_from_type_l1+` and
+`+preservation_l1+` statements are refuted; two outer `+Admitted.+`
+markers are retained. Restricted helper results are not general
+preservation.
 
-|`+src/abi/Ephapax/…/*.idr+` (Idris2) |Selected structural-safety claims
-|Per file; see `+idris2 --check+`
+|`+formal/TypingL2.v+`, `+Counterexample_L2*.v+` (Coq)
+|L2 β-case helpers and two distinct witnesses
+|Conditional helpers only; no unconditional `+preservation_l2+` theorem
+is declared.
+
+|`+formal/Echo.v+`, scoped L3 lemmas (Coq)
+|Echo/residue calculus and matching rule-pair cases
+|Selected Qed results only; no general L1/L2 preservation.
+
+|Mathesis Grade 3 status
+|Agda local proof, no independent translation
+|No Grade 3 receipt recorded. Existing Coq Qed results are not Grade 3.
 |===
 
-===== 12.15.2 What the single judgment *is not*
+No fresh Coq build was run in this editing environment (`+coqc+` is
+unavailable); the current CI run did not execute the Coq job. The proof
+ledger records that limitation explicitly.
 
-The current `+has_type+` judgment *does not distinguish* Linear from
-Affine ephapax. It is a single typing relation, parameterised over a
-linearity context `+G+` whose entries carry a `+(ty, bool)+` consumption
-flag. `+is_linear_ty+` returns a per-type tag. There is *no judgment
-parameter* for L2 modality; there is *no proof* that Linear derivations
-form a subset of Affine derivations; there is *no mechanised
-ephapax-affine type system* at all.
+===== 12.15.2 What current artifacts do not establish
 
-Concretely: the Rust crate `+ephapax-linear/+` contains a
-`+LinearChecker+` and an `+AffineChecker+`, with EBNF grammars and
-behavioural tests proving they diverge on identical programs. That is
-the implementation side of the dyad. The *proofs side* has not caught
-up: the Coq + Idris2 formalisation models _one_ judgment, which
-behaviourally resembles the linear discipline (it requires linear-typed
-bindings to be consumed) but is not labelled as such and has no proven
-dual.
+The `+has_type_l1+` judgment is modality-indexed, and
+`+linear_to_affine+` is Qed with zero axioms. These results do not imply
+L1 or L2 preservation. In particular, the unrestricted L1 statements
+are refuted, no unconditional L2 preservation theorem is declared, and
+no separate Affine-only preservation theorem is established (the Linear
+counterexample does not alone refute such a theorem).
 
-===== 12.15.3 What this redesign *will* establish
+The Rust crate contains `+LinearChecker+` and `+AffineChecker+`, but no
+proof shows that either checker or the compiler refines the Coq/Idris2
+calculus. Coq evidence is not an Agda Grade 3 receipt. For the
+Mathesis/Standards grading boundary and exact checker status, see
+`+PROOF-NEEDS.adoc+` and the EXPLAINME proof ledger.
 
-If executed as designed, the redesign closes:
+===== 12.15.3 Intended outcomes versus current evidence
 
-* *L1 — region capabilities*: a new threading discipline + a reproof of
-preservation under the new rules. This is the central deliverable. The
-verified counterexample becomes a passing regression.
-* *L2 promotion*: the judgment gains an `+ℓ ∈ {Linear, Affine}+`
-parameter, and a `+weaken_modality : Linear ⇒ Affine+` lemma. This is
-what _introduces_ a mechanised ephapax-affine into the formal
-development for the first time.
+This subsection describes the earlier redesign target, not achieved
+results. The current evidence is narrower:
 
-===== 12.15.4 What this redesign *will not* establish
+* *L1 — region capabilities*: the judgment and helpers exist, but
+  unrestricted `+step_pop_disjoint_from_type_l1+` and
+  `+preservation_l1+` are refuted as stated. A sound replacement theorem
+  remains open; the legacy-input regression is only a specific control.
+* *L2 promotion*: modality indexing and `+linear_to_affine+` are
+  mechanised, but no unconditional `+preservation_l2+` theorem is
+  declared. β-case lemmas are conditional, and the two L2 witnesses
+  document distinct gaps.
 
-Equally explicitly — so future sessions, agents, and PR reviewers do not
-assume otherwise:
+===== 12.15.4 Other proof boundaries
 
-* *The ephapax-affine type proofs are not done today, and the L1
-redesign on its own does not finish them.* L1 closes preservation under
-the _single_ judgment that already exists. L2’s modality-weakening
-lemma, once proved, will lift L1’s preservation to the affine side — but
-that lift is a _separate_ lemma that has not been written and is not
-part of the L1 patch. Until L2 lands _and_ the weakening lemma is
-`+Qed+`, *no ephapax-affine soundness property is mechanised*.
-* *No L3 (Echo / residue) proof obligation is closed.* L3 is
-forward-looking. Until `+formal/Echo.v+` exists and references it from
-the operational semantics, the Linear-echo "`mandatory observation`"
-property and the Affine-echo "`non-duplicable residue`" property are
-_aspirations_, not theorems.
-* *No proof that the Rust `+AffineChecker+` agrees with any mechanised
-affine judgment.* The implementation-side dual exists; the
-mechanisation-side dual does not. Cross-checking the two is a third,
-independent body of work.
-* *No proof of the L4 mode declaration’s consistency* (e.g., that a
-program declared Linear cannot accidentally invoke an Affine- typed
-library through a hole in mode-elaboration). L4 is a UX layer in this
-design; making it sound requires further work that is not scoped here.
+* *Affine soundness*: the L1 counterexample refutes the modality-
+  polymorphic theorem through its Linear instance; it does not alone
+  refute an Affine-only theorem. No Affine-only preservation theorem or
+  implementation refinement is established.
+* *L3 (Echo / residue)*: selected Qed results cover matching
+  echo-emitting typing/step rule pairs only. They do not establish
+  general L1/L2 preservation or end-to-end language soundness.
+* *Rust implementation*: the Coq/Idris2 artifacts do not prove that the
+  Rust `+AffineChecker+` or compiler refines the formal calculus.
+* *L4 mode declaration*: `+formal/L4.v+` is a definitions-only
+  scaffold; there is no mode-consistency preservation theorem.
 
 ===== 12.15.5 The honest one-line summary
 
 ____
-*Ephapax’s mechanised soundness story today is: one judgment, resembling
-linear discipline, with preservation `+Admitted+`. The verified
-counterexample shows preservation false as stated. The L1 redesign in
-this document closes that counterexample. Ephapax- affine proofs as a
-distinct mechanised body of theorems are not done, will not be done by
-L1 alone, and will require L2 plus a follow-up weakening lemma before
-any "`ephapax-affine is sound`" claim is honest.*
+*Ephapax’s mechanised soundness story is bounded: the legacy preservation
+statement is refuted and remains `+Admitted+`; the current unrestricted L1
+preservation statement is also refuted (`+Counterexample_PreservationL1.v+`),
+and no unconditional L2 preservation theorem is established. The L1
+judgment rejects the specific legacy witness, but that regression is not a
+soundness theorem. The Qed L2 β-case helpers have explicit preconditions;
+the L2 counterexamples document gaps outside those restricted cases.
+Ephapax-affine soundness is not established by the L1/L2 vocabulary or by
+proofs in another repository.*
 ____
 
 Cite this subsection by section number (`+§12.15+`) whenever the
@@ -1419,9 +1478,10 @@ itself a research question.
 *Why this is staged separately from B:*
 
 [arabic]
-. *B closes preservation in weeks; A is months.* Preservation is
-currently `+Admitted+` with a verified counterexample. Closing it is
-more urgent than v2 architectural exploration.
+. *B was initially estimated as weeks; that estimate is obsolete.*
+The legacy theorem is false, and later L1 counterexamples showed the
+redesign also needs further work. The replacement proof boundary remains
+open; v2 architectural exploration is a separate research track.
 . *B and A are not mutually exclusive.* Once B lands, A can be developed
 as a parallel branch using B’s primitives. The L3 echo layer in B is a
 _prerequisite_ for A’s foundation rewrite — nothing wasted.
@@ -1471,7 +1531,7 @@ Add to `+ROADMAP.adoc+` under "`Future research tracks`":
 ----
 === Echo as operational foundation (v2)
 
-The four-layer redesign (`formal/PRESERVATION-DESIGN.md`) treats Echo
+The four-layer redesign (`formal/PRESERVATION-DESIGN.adoc`) treats Echo
 as a residue layer (L3) over regions. A coherent v2 research direction
 makes Echo the *foundation* itself: `ERelease` as a primitive
 operation, regions desugared to sequenced releases, Linear-mode
@@ -1479,7 +1539,7 @@ discharge as a termination invariant.
 
 **Not scheduled.** This is a months-long research effort, staged
 after the L1+L2+L3 layer-redesign lands. See
-`formal/PRESERVATION-DESIGN.md §12.16` for the seed; an
+`formal/PRESERVATION-DESIGN.adoc §12.16` for the seed; an
 `ECHO-AS-FOUNDATION.md` design doc will be opened when the work
 begins.
 ----
@@ -1490,7 +1550,7 @@ The user has not asked for these edits to be made yet. Execution order,
 when they are:
 
 [arabic]
-. Land `+formal/PRESERVATION-DESIGN.md+` (this document).
+. Land `+formal/PRESERVATION-DESIGN.adoc+` (this document).
 . Update README + EXPLAINME + EPHAPAX-VISION in one PR ("`docs:
 introduce four-layer framing`").
 . Update ROADMAP + CHANGELOG in one PR ("`docs: roadmap reflects

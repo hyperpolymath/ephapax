@@ -29,16 +29,18 @@ table (P28); OwnershipKind from_byte/to_byte round-trip (P59, typed-wasm
 ADR-0002 carrier handshake); 4 stdlib DB-theory additions — Transactions
 (D04), Allen's interval algebra (D11), MessageHandle (D17), monoidal
 aggregates (D18). Stages 2-4 of the Phase 3b plan (#240/#241/#242) remain
-un-touched. See `CHANGELOG.md` for full enumeration and per-PR detail.
+un-touched. See `CHANGELOG.adoc` for full enumeration and per-PR detail.
 
 == Four-layer redesign (2026-05-26 → )
 
 The verified preservation counterexample
 (`formal/Counterexample.v`, five `Qed` lemmas) closed the original
 preservation closure plan as unreachable in the legacy single-layer
-typing judgment. The new plan separates four orthogonal layers; each
-is implemented in sequence and preservation is *re-derived per
-layer* from explicit invariants.
+typing judgment. The architecture separates four concerns, but its existence does not
+establish language soundness. The current unrestricted L1 preservation
+statement is refuted, L2 has no unconditional preservation theorem, and
+L3 results are scoped to matching echo rule pairs. Replacement theorem
+statements and proofs remain the live soundness milestone.
 
 . *L1 — Region capability threading*
 +
@@ -46,8 +48,10 @@ layer* from explicit invariants.
   region-capability environment) through every compound rule.
 - Land in `formal/TypingL1.v` + `formal/Semantics_L1.v` against
   `Counterexample.v` as a regression oracle.
-- Status: judgment landed, `m`-indexed post-L2-hybrid; 9 L1
-  supporting-lemma admits remain as L2-integration debt.
+- Status: judgment landed and `m`-indexed. Two outer L1 `Admitted.`
+  markers remain, but both unrestricted statements are refuted by pinned
+  counterexamples; they are not routine integration debt. Several helpers
+  are conditional and do not establish general preservation.
 
 . *L2 — Modality parameter*
 +
@@ -60,30 +64,29 @@ layer* from explicit invariants.
 
 . *L3 — Echo residue*
 +
-- `formal/Echo.v` mirrors `echo-types/proofs/agda/Echo.agda`. The
-  L3 calculus (modes, `LEcho`, `weaken`, `degrade_mode`) is
-  mechanised locally.
-- Next: introduce `TEcho ⟨op⟩` + the `T_Observe` rule into the
-  typing judgment; modify `S_Region_Exit` and `S_Drop` to produce
-  residue values.
-- Status: K-free scaffold landed via #166/#167/#173; typing-rule
-  integration is the next-block work.
+- `formal/Echo.v` contains the L3 calculus; typing and step-rule
+  integration has also landed.
+- `preservation_l3_region_active_echo`, `preservation_l3_drop_echo`,
+  and `preservation_l3` are Qed only for matching echo-emitting rule
+  pairs. This does not establish general L1/L2 preservation.
+- Status: keep the scoped rule-pair boundary; additional coverage is
+  separate work.
 
 . *L4 — Mode declaration*
 +
 - Project-level metadata (`Cargo.toml` or `ephapax.toml`). Type
   checker reads the declaration and selects the L2 modality.
-- No proof obligations of its own — see `formal/L4-DYADIC.md`.
+- No proof obligations of its own — see `formal/L4-DYADIC.adoc`.
 - Status: mechanical scaffold landed in `formal/L4.v`
   (`ProgramMode` + `program_mode_to_modality`); surface syntax
   not yet wired into the parser.
 
 The previous *Preservation closure plan* section is **archived** —
-see `formal/PRESERVATION-HANDOFF.md` for the historical record. PRs
+see `formal/PRESERVATION-HANDOFF.adoc` for the historical record. PRs
 #92 / #102 / #104 / #106 / #114 / #116 / #117 / #121 / #146 are
 pre-discovery; treat them as archaeology, not instructions.
 
-Canonical design source: `formal/PRESERVATION-DESIGN.md`.
+Canonical design source: `formal/PRESERVATION-DESIGN.adoc`.
 
 == Formal-proof status
 
@@ -122,7 +125,7 @@ substitution semantics:
 
 | **`preservation`** (legacy)
 | 🔴 Admitted — **provably false**, do not attempt to close
-| `formal/Counterexample.v` exhibits five `Qed.` lemmas showing the theorem is genuinely false (`bad_typable`, `bad_step`, `bad_post_untypable`, `t_loc_l1_R_preserving`, `bad_input_untypable_l1`). The 11-goals story (PRs #92/#102/#104/#106/#114/#116/#117/#121/#146) is pre-discovery archaeology. The work is the **four-layer redesign** in `formal/PRESERVATION-DESIGN.md`, with preservation re-derived per-layer (`preservation_l1` in `Semantics_L1.v`, etc.). See `CLAUDE.md` at repo root for the owner directive (2026-05-27).
+| `formal/Counterexample.v` pins five `Qed` lemmas, including the three core legacy witness lemmas (`bad_typable`, `bad_step`, `bad_post_untypable`) and the separate L1 regression. The 11-goals story (PRs #92/#102/#104/#106/#114/#116/#117/#121/#146) is pre-discovery archaeology. The four-layer architecture in `formal/PRESERVATION-DESIGN.adoc` is a design program, not a proof result: later pinned regressions refute unrestricted L1 preservation, and no unconditional L2 theorem is established. Do not describe preservation as re-derived per layer. See `CLAUDE.md` and `PROOF-NEEDS.adoc` for current boundaries.
 |===
 
 **Historical note**: an earlier in-file comment claimed `preservation`
@@ -217,31 +220,20 @@ All four headline theorems complete with **zero `believe_me` /
 * [ ] Type checker completion (`ephapax-typing`)
 * [ ] WASM code generation: lambda/app compilation (closure conversion)
 * [x] Coq: `subst_preserves_typing` (Qed)
-* [ ] **Coq: re-derive preservation in the four-layer architecture**
-      — `Theorem preservation` in `formal/Semantics.v` is **provably
-      false** (verified by `formal/Counterexample.v`, five `Qed`
-      lemmas). The work is **not** to close that theorem; it is to
-      derive `preservation_l1` / `preservation_l2` / `preservation_l3`
-      per-layer in the redesigned architecture documented in
-      `formal/PRESERVATION-DESIGN.md`. Status (2026-06-01):
-      - L1 (`Semantics_L1.v` `preservation_l1`): Admitted with 1 inner
-        `admit.` covering S_StringConcat/S_App/S_Pair Step2 cases
-        (lambda-rigidity gap closing via Phase 3b Stage 2+3+4);
-      - L2 (in-place modality, PRs #176 + #177): `linear_to_affine`
-        Qed zero axioms; `preservation_l2_via_l1` Qed (conditional on
-        `preservation_l1`); 3 β-case lemmas Qed for ground non-linear,
-        Stage 1b TFunEff (conditional on side conditions), and Linear;
-        unconditional `preservation_l2` blocked on Phase 3b Stages 2/3/4
-        (#240/#241/#242);
-      - L3 (`Echo.v` + slice 4 wiring): `preservation_l3_region_active_echo`,
-        `preservation_l3_drop_echo`, and umbrella `preservation_l3` all
-        Qed (conditional on the `region_shrink_preserves_typing_l1_gen_m`
-        structural admit that itself closes at Phase D);
-      - L4 (`L4.v`): Phase A scaffold landed 2026-05-28 (Definitions
-        only — `PModeLinear` / `PModeAffine` / `PModeBoundaryMix` +
-        `program_mode_to_modality` round-trip).
-      See also `CLAUDE.md` at repo root and `PROOF-NEEDS.md` for the
-      complete picture.
+* [ ] **Coq: specify and prove sound replacement preservation theorems.**
+      The legacy `Theorem preservation` is refuted by `Counterexample.v`
+      and must remain `Admitted.` The current unrestricted L1
+      `preservation_l1` is refuted by `Counterexample_PreservationL1.v`,
+      with its supporting `step_pop_disjoint_from_type_l1` separately
+      refuted by `Counterexample_StepPop.v`; do not treat either as
+      unfinished routine proof debt. L2 has no unconditional
+      `preservation_l2` theorem: `Counterexample_L2.v` and
+      `Counterexample_L2_nested.v` record distinct β-preservation gaps,
+      while current β-case lemmas are conditional. L3 Qed results cover
+      matching echo rule pairs only. The open milestone is an explicit
+      L1/L2 judgment/step redesign and exact replacement theorem
+      boundaries, with all counterexample regressions retained. See
+      `PROOF-NEEDS.adoc` and `CLAUDE.md`.
 
 [#preservation-closure-plan]
 == Preservation: superseded by four-layer redesign
@@ -254,15 +246,15 @@ No sequence of lemmas closes it because no proof exists.
 
 Canonical path now:
 
-- **Design source**: `formal/PRESERVATION-DESIGN.md` (four orthogonal
-  layers: L1 region capabilities / L2 modality / L3 echo / L4 dyadic
-  mode).
-- **Layered Coq files**: `TypingL1.v` (now `m`-indexed post-#176),
-  `Semantics_L1.v`, `Modality.v`, `Echo.v` — preservation re-derived
-  per layer from explicit invariants.
+- **Design history**: `formal/PRESERVATION-DESIGN.adoc` records the four-layer
+  architecture; it is not a proof result.
+- **Current Coq boundary**: `TypingL1.v`, `Semantics_L1.v`, `Modality.v`,
+  and `Echo.v` contain local judgments and lemmas. Unrestricted L1
+  preservation is refuted; L2 has no unconditional theorem; L3 results
+  cover matching echo rule pairs only.
 - **Agent guidance**: `CLAUDE.md` at the repo root.
 - **Historical record**: the per-case reduction story (910 → 11
-  goals) lives in `formal/PRESERVATION-HANDOFF.md` as archaeology.
+  goals) lives in `formal/PRESERVATION-HANDOFF.adoc` as archaeology.
   PRs #92 / #102 / #104 / #106 / #114 / #116 / #117 / #121 / #146
   are pre-discovery; treat them as history, not instructions.
 
@@ -301,16 +293,18 @@ audio buffer management:
 
 == v1.0.0 — Production ready
 
-* [ ] **Per-layer preservation theorems closed**: `preservation_l1`,
-      `preservation_l2` (unconditional, post-Phase-3b Stage 4), and
-      `preservation_l3` (umbrella) all `Qed.` in `formal/Semantics_L1.v`
-      with clean `Print Assumptions`. See `formal/PRESERVATION-DESIGN.md
-      §12` and Phase 3b Stages 2/3/4 (#240/#241/#242).
-+
+* [ ] **Sound language-level preservation boundary established**:
+      redesign/refine L1 and L2 judgments and prove replacement theorems
+      only after they state their exact hypotheses and cover the retained
+      counterexamples. The current `preservation_l1` and
+      `step_pop_disjoint_from_type_l1` statements are refuted; no
+      unconditional `preservation_l2` theorem exists. Existing L3 Qed
+      results are scoped to matching echo rule pairs.
+
 NOTE: The legacy `Theorem preservation` in `formal/Semantics.v` is
-provably false (`formal/Counterexample.v`) and stays `Admitted.` by
-owner directive 2026-05-27. Closing it is NOT a v1.0 blocker — the
-four-layer redesign supersedes it.
+provably false (`formal/Counterexample.v`) and its `Admitted.` is durable.
+It is archaeological, not ordinary proof debt, and any replacement must
+be a separately stated theorem.
 * [ ] Idris2 `Parse/Parser.idr` upgraded from `%default covering` to
       `%default total` (LL(k) fuel-refactor; deferred separate campaign)
 * [ ] Stable surface syntax (already locked, but confirm no changes needed)
@@ -330,12 +324,12 @@ four-layer redesign supersedes it.
 
 * link:README.adoc[README] — project overview + quickstart
 * link:EXPLAINME.adoc[EXPLAINME] — "show me the receipts" for the README's claims
-* link:PROOF-NEEDS.md[PROOF-NEEDS] — outstanding proof obligations + leverage
+* link:PROOF-NEEDS.adoc[PROOF-NEEDS] — outstanding proof obligations + leverage
 * link:RUST-SPARK-STANCE.adoc[RUST-SPARK-STANCE] — comparison + interop notes
-* link:formal/PRESERVATION-HANDOFF.md[PRESERVATION-HANDOFF] — *archaeology only*:
+* link:formal/PRESERVATION-HANDOFF.adoc[PRESERVATION-HANDOFF] — *archaeology only*:
   per-case Coq preservation checklist from the pre-discovery legacy-judgment
   closure plan. Retained for historical context. Not actionable; see
-  `formal/PRESERVATION-DESIGN.md` for the four-layer redesign.
+  `formal/PRESERVATION-DESIGN.adoc` for the four-layer redesign.
 * link:docs/vision/EPHAPAX-VISION.adoc[Vision document] — design rationale
 * link:docs/specs/DESIGN-DECISIONS.adoc[Design decisions] — 17 ADRs
 * link:docs/specs/LANGUAGE-COMPARISON.adoc[Language comparison] — vs 10 other languages

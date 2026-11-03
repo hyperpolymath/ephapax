@@ -11,11 +11,11 @@ README.adoc is tied to a specific file, test, or proof obligation.
 
 [quote, README]
 ____
-A dyadic linear+affine type system for compile-time WebAssembly
-memory safety. Resources are tracked through the type system so the
-compiler can guarantee — without a garbage collector — that no value
-is used after being freed, no resource is leaked, and region-scoped
-allocations are deallocated in bulk at scope exit.
+A research language for principled handling of irreversible boundaries
+in WebAssembly. Ephapax aims to track resource use and typed evidence at
+region exits and drops. Its local preservation obligations remain under
+proof: the legacy theorem and current unrestricted L1 theorem are refuted,
+and no unconditional L2 preservation theorem is established.
 ____
 
 == Claim: Dyadic Type System (L2)
@@ -33,8 +33,10 @@ L1 / L3 / L4 evidence follows below.
 * `BindingForm::Param` -- follows type linearity
 
 Tests `test_let_allows_unconsumed_linear` and `test_let_bang_rejects_unconsumed`
-verify the distinction. `test_let_bang_rejects_unconsumed_unrestricted` proves
-that `let!` enforces exactly-once even for unrestricted types like `I32`.
+exercise the distinction. `test_let_bang_rejects_unconsumed_unrestricted` checks
+that this implementation rejects `let!` without consumption for unrestricted
+types like `I32`. These are behavioral tests, not a proof of language soundness
+or compiler refinement.
 
 The Coq-side L2 evidence is `linear_to_affine : Linear ≤ Affine` (Qed,
 zero axioms) in `formal/Modality.v`.
@@ -47,11 +49,14 @@ zero axioms) in `formal/Modality.v`.
 * `src/ephapax-syntax/` -- Core AST with binary sums, `case`/`inl`/`inr`
 * `src/ephapax-desugar/` -- Transforms surface to core
 
-The Coq formal proofs (`formal/`) reason about the core AST only. New surface
-features (pattern matching, named constructors) never invalidate the proofs.
+The Coq formal artifacts (`formal/`) reason about the core AST only. Surface
+features such as pattern matching and named constructors are not part of those
+proofs. The desugar/type-check test below exercises the implementation, but no
+formal preservation theorem currently connects the surface pipeline to the
+Coq calculus.
 
-Test `integration_desugar_typecheck_no_parser` in `ephapax-desugar` verifies the
-full pipeline: surface AST -> desugar -> core AST -> type check.
+Test `integration_desugar_typecheck_no_parser` in `ephapax-desugar` exercises the
+pipeline: surface AST -> desugar -> core AST -> type check.
 
 == Claim: Pattern Matching Desugars to Binary Sums
 
@@ -78,54 +83,50 @@ demonstrate where they diverge on identical programs (e.g.
 
 == Claim: Region-Based Memory
 
-*Evidence*: `check_region` in `src/ephapax-typing/src/lib.rs` enforces:
+*Implementation evidence*: `check_region` in `src/ephapax-typing/src/lib.rs`
+checks that the return type does not reference the region and that bindings
+marked `demands_consumption()` are consumed at region exit. The tests
+`test_region_non_escaping` and `test_region_string_allocation` exercise this
+checker behavior. These tests do not establish a theorem connecting the Rust
+checker or runtime to the Coq calculus.
 
-1. *NoRegionInType* -- return type must not reference the region (no escape)
-2. *Consumption at region exit* -- only bindings that `demands_consumption()` must
-   be consumed; affine bindings are implicitly dropped
+== Claim: Region capability threading (L1; soundness boundary open)
 
-Test `test_region_non_escaping` verifies escape detection.
-Test `test_region_string_allocation` verifies in-region allocation.
+*Evidence*: `has_type_l1` threads region environments through compound
+rules in `formal/TypingL1.v`. This is the redesign's intended capability
+accounting, but the current judgment does **not** establish that a region
+used by a surviving sibling remains live across another sibling's step.
 
-== Claim: Sibling-safe region capabilities (L1)
-
-*Evidence*: Region capabilities are threaded as input/output
-environments through every compound typing rule. A sibling cannot
-reference a region a previous sibling has exited — this is the
-soundness invariant the legacy judgment was missing.
-
-* Counterexample at `formal/Counterexample.v` (all five lemmas
-  `Qed`) demonstrates the soundness gap the threading fixes.
-* The new `has_type_l1` judgment lives in `formal/TypingL1.v` and
-  carries the R-threading directly. Step relation at
-  `formal/Semantics_L1.v`.
-* Design rationale at `formal/PRESERVATION-DESIGN.md §3-§4`.
-* Status: judgment landed; `Semantics_L1.v` carries 3 outer
-  `Admitted.` markers covering 5 inner `admit.` cases — pre-existing
-  L1 structural debt + parallel mirrors (file:line breakdown in
-  `PROOF-NEEDS.md §4`).
+* `formal/Counterexample.v` contains five Qed lemmas. Three prove the
+  legacy witness types, steps, and becomes untypable; the L1 regression
+  proves only that this particular input is rejected in both modes.
+* `formal/Counterexample_StepPop.v` refutes the unrestricted
+  `step_pop_disjoint_from_type_l1` statement.
+* `formal/Counterexample_PreservationL1.v` refutes the
+  modality-polymorphic `preservation_l1` statement through its Linear
+  instance. It does not establish that a separate Affine-only statement
+  is false.
+* The local proof artifacts are Coq evidence only. The exact open
+  replacement boundary and Grade 3 policy are in `PROOF-NEEDS.adoc`.
 
 == Claim: Irreversibility residue is first-class (L3, wired)
 
-*Evidence*: Operations that erase information (region exit, drop)
-produce typed residue witnesses, following the
-https://github.com/hyperpolymath/echo-types[echo-types]
-formulation. Linear mode requires the residue to be observed;
-Affine mode permits silent lowering.
+*Design*: The L3 calculus models typed residues for selected irreversible
+operations, drawing on the `echo-types` formulation. This does not establish
+that all runtime region exits/drops emit or discharge residue; the local Qed
+preservation results are scoped to the matching rules listed below.
 
 * Upstream theory at
   `~/developer/repos/echo-types/proofs/agda/EchoLinear.agda` (lines
   30–101), already mechanised.
 * Local mirror at `formal/Echo.v` — the L3 calculus is mechanised
   here (modes, `LEcho`, `weaken`, `degrade_mode`, all `Qed`).
-* Forward-looking design at `formal/PRESERVATION-DESIGN.md §6`.
+* Forward-looking design at `formal/PRESERVATION-DESIGN.adoc §6`.
 * Status: **wiring landed** (slice 4, 2026-05-27).
   `preservation_l3_region_active_echo`, `preservation_l3_drop_echo`,
-  and the `preservation_l3` umbrella in `Semantics_L1.v` are all
-  Qed, each conditional on the
-  `region_shrink_preserves_typing_l1_gen_m` L1 structural admit.
-  Remaining L3 work is unconditional `preservation_l3` (Phase 3b
-  Stage 2).
+  and the `preservation_l3` umbrella in `Semantics_L1.v` are Qed for
+  their matching echo-emitting rule pairs. These scoped results do not
+  establish general L1/L2 preservation.
 
 == Claim: Dyadic mode is project-level only (L4)
 
@@ -134,8 +135,8 @@ Affine mode permits silent lowering.
 `program_mode_to_modality` (total mapping to L2's modality). No
 theorems, no admits, no axioms — by design.
 
-* Companion design note: `formal/L4-DYADIC.md`.
-* Canonical design source: `formal/PRESERVATION-DESIGN.md §7`.
+* Companion design note: `formal/L4-DYADIC.adoc`.
+* Canonical design source: `formal/PRESERVATION-DESIGN.adoc §7`.
 * Surface syntax for the L4 declaration
   (`#![ephapax_linear]` / `#![ephapax_affine]` /
   `#![module_boundary_mix(...)]`) is not yet wired into the parser
@@ -152,7 +153,7 @@ theorems, no admits, no axioms — by design.
 | *Rust* | Compiler implementation language
 | *Pest (PEG)* | Parser generator -- surface + core grammars
 | *WASM* | Compilation target -- portable, sandboxed, near-native
-| *Coq* | Formal proofs of core calculus soundness
+| *Coq* | Core-calculus proof artifacts and counterexample regressions; general preservation remains unproved/refuted as documented
 | *Idris 2* | ABI definitions with dependent type proofs
 | *Zig* | FFI implementation (C-compatible, cross-compilation)
 |===
@@ -167,9 +168,9 @@ theorems, no admits, no axioms — by design.
 | Core language design — affine (`let`) and linear (`let!`) bindings enforced by the type checker in `src/ephapax-typing/src/lib.rs`
 | gossamer (`src/core/Bridge.eph` uses `let!` for window handles and IPC channels); all Ephapax-backed applications in the account
 
-| *Coq formal proofs*
-| `formal/` — progress and preservation theorems for the core calculus; two-layer AST keeps proofs stable as surface language grows
-| ephapax-pipewire proving ground (PipeWire filter-node linearity); proven repo (`formal/coq/` — 48 Qed / 1 Admitted estate-wide)
+| *Coq formal artifacts*
+| `formal/` — local typing/semantics lemmas and pinned counterexamples. The legacy and unrestricted L1 preservation claims are refuted; no unconditional L2 preservation theorem is established.
+| ephapax-pipewire proving ground (PipeWire filter-node linearity); local evidence remains Coq-specific and does not establish Ephapax implementation refinement
 
 | *Idris2 ABI + Zig FFI standard*
 | `idris2/` ABI definitions; Zig FFI layer per the hyperpolymath ABI/FFI universal standard
@@ -211,9 +212,11 @@ theorems, no admits, no axioms — by design.
 | `conformance/` | Conformance test suite (valid/invalid programs)
 |===
 
-== Claim: Mechanically Proved Soundness
+== Claim: Formal Proof Artifacts and Soundness Boundary
 
-*Evidence*: Two complementary formalisations, both run on every push.
+*Evidence*: Coq and Idris2 formal artifacts are present. CI build success
+checks compilation, not the truth of every intended language-level theorem;
+the exact preservation boundary is recorded below.
 
 === Coq (`formal/`)
 
@@ -226,16 +229,19 @@ configuration that types under the legacy judgment, steps via the
 operational semantics, and lands at an untypable post-state. The
 `Admitted.` on `Theorem preservation` is correct — no proof closes it.
 
-The post-discovery work is the **four-layer principled redesign**
-documented in `formal/PRESERVATION-DESIGN.md`, where preservation is
-*re-derived per layer* from explicit invariants. Any earlier-in-this-
-README counts of "910 → 22 → 12 open goals" are archaeology, not
-instructions. See `STATUS.adoc` for the past/present/future map.
+The post-discovery architecture is a design program, not yet a sound
+replacement. The unrestricted L1 preservation statement is refuted by
+`Counterexample_PreservationL1.v`; L2 has no unconditional preservation
+theorem, and its counterexamples constrain the β-case helpers. L3's Qed
+results are scoped to matching echo rules. Any earlier-in-this-README
+counts of "910 → 22 → 12 open goals" are archaeology, not instructions.
+See `STATUS.adoc` and `PROOF-NEEDS.adoc` for current boundaries.
 ====
 
-The Coq formalisation is now layered. Each layer has its own
-judgment, its own invariants, and its own per-layer preservation
-theorem.
+The Coq formalisation has layered judgments and infrastructure, but
+not a soundness theorem for every layer. L1's unrestricted preservation
+claim is refuted, L2 has no unconditional preservation theorem, and L3's
+Qed results are scoped to matching echo rule pairs.
 
 [cols="3,1,3"]
 |===
@@ -250,8 +256,8 @@ theorem.
 | `formal/TypingL1.v` — modality-indexed, R-threaded
 
 | L1 semantics
-| 🟡 37 Qed, 3 Admitted (5 inner admits — pre-existing L1 structural debt + parallel mirrors)
-| `formal/Semantics_L1.v` — 3 outer `Admitted.` markers cover 5 internal `admit.` cases. Per `PROOF-NEEDS.md §4`: pre-existing L1 structural debt (multiset/list-perm bridge + L2 effect-typed `TFun` per PRESERVATION-DESIGN.md §5.1 + lambda-rigidity at `preservation_l1` body) and two parallel mirrors that close mechanically when their originals close.
+| 🛑 Current unrestricted preservation statements refuted
+| `formal/Semantics_L1.v` has two outer `Admitted.` markers: `step_pop_disjoint_from_type_l1` and `preservation_l1`. Both unrestricted statements have pinned Coq counterexamples; they are not routine open proof debt. See `PROOF-NEEDS.adoc`.
 
 | L2 modality (`Modality.v`)
 | ✅ Core landed (1 Qed, 0 axioms)
@@ -259,11 +265,11 @@ theorem.
 
 | L3 echo / residue calculus
 | ✅ Calculus 12 Qed + wiring landed (slice 4, 2026-05-27)
-| `formal/Echo.v` — one type former (fiber `Echo f y := Σ x. f x ≡ y`) + degrade map + no-section-collapse-to-residue proof. Wiring lemmas (`preservation_l3_region_active_echo`, `preservation_l3_drop_echo`, `preservation_l3` umbrella) in `Semantics_L1.v` — all Qed, conditional on `region_shrink_preserves_typing_l1_gen_m`.
+| `formal/Echo.v` — one type former (fiber `Echo f y := Σ x. f x ≡ y`) + degrade map + no-section-collapse-to-residue proof. The Qed wiring lemmas cover matching echo-emitting rule pairs only; they do not prove general L1/L2 preservation.
 
 | L4 dyadic interaction
 | ✅ Phase A scaffold landed (`formal/L4.v`, 2026-05-28); definitions only
-| `PModeLinear` / `PModeAffine` / `PModeBoundaryMix` enum + `program_mode_to_modality` round-trip. No theorems by design. Design in `formal/PRESERVATION-DESIGN.md §7`.
+| `PModeLinear` / `PModeAffine` / `PModeBoundaryMix` enum + `program_mode_to_modality` round-trip. No theorems by design. Design in `formal/PRESERVATION-DESIGN.adoc §7`.
 
 | Legacy `Theorem preservation` (`formal/Semantics.v`)
 | 🛑 Provably false (Admitted)
@@ -271,19 +277,135 @@ theorem.
 |===
 
 What's done = `Modality.linear_to_affine` (Linear ⇒ Affine weakening,
-zero axioms), the L1 judgment, L3 fiber + degrade calculus, L3
-wiring into the L1 step rules (slice 4 — `preservation_l3` umbrella
-Qed conditional on the L1 structural admit), L4 Phase A scaffold
-(definitions only), and the counterexample regression witness.
-What's todo = close the 3 Semantics_L1 outer Admitteds (pre-existing
-L1 structural debt: multiset/list-perm bridge + L2-effect-typed
-`TFun` + lambda-rigidity at `preservation_l1`), then state
-unconditional `preservation_l3` (Phase 3b Stage 2). What's banned =
-closing the legacy theorem, adding new `Axiom` declarations to
-discharge L1/L2 gaps, conflating `ephapax-affine` (this repo's
-sublanguage) with `AffineScript` (a separate language at
-`hyperpolymath/affinescript`). Full per-sublanguage breakdown in
-`PROOF-NEEDS.md`.
+zero axioms), the L1 judgment and helper lemmas, the L3 calculus and
+scoped matching-rule preservation results, the L4 Phase A scaffold
+(definitions only), and pinned counterexample regressions. What's open =
+redesign the L1 judgment/step interface and state sound replacement
+theorems; L2 has no unconditional preservation theorem and its β-case
+helpers remain conditional. What's banned = trying to prove the false
+legacy or current unrestricted L1 statements, masking counterexamples,
+adding new `Axiom` declarations, or conflating `ephapax-affine` (this
+repo's sublanguage) with `AffineScript` (a separate language at
+`hyperpolymath/affinescript`). Full boundary in `PROOF-NEEDS.adoc`.
+
+== Proof Ledger
+
+This ledger follows the estate proof-ledger vocabulary. “Proven” rows record
+existing local Coq propositions with Qed proof terms; they do not imply that
+the language implementation refines the calculus. The source baseline for
+this audit is `800030f3c92536cce57acb5e82da6cf27b942826`; proof-status files
+name the relevant scripts. The Coq 8.18.0 build recipe is
+`cd formal && coq_makefile -f _CoqProject -o build.mk && make -f build.mk`.
+`coqc` is unavailable in this editing environment. The 2026-10-27 CI run
+`40435929887` succeeded overall but its Coq build job was skipped, so it is
+not a proof-build receipt. No fresh build is claimed here; the source proof
+scripts and theorem statements were not changed in this audit, only their
+documentation comments were clarified.
+
+[cols="2,1,2,2,3",options="header"]
+|===
+|Obligation / result |Status |Checker (version, flags) |Where |Trust boundary
+
+|The legacy `+preservation+` statement is false as stated |proven
+|Coq 8.18.0; project build recipe above
+|`+formal/Counterexample.v+`: `+bad_typable+`, `+bad_step+`, `+bad_post_untypable+`
+|Concrete witness refutes the legacy universal statement only. It proves
+no redesign or implementation refinement; retain the separate legacy
+`+Admitted.+` unchanged.
+
+|`+step_pop_disjoint_from_type_l1+` is false as stated |proven
+|Coq 8.18.0; project build recipe above
+|`+formal/Counterexample_StepPop.v+`: `+step_pop_disjoint_from_type_l1_FALSE+`
+|One typed step removes a region free in the result type. This refutes the
+unrestricted helper; it does not prove a replacement with added premises.
+
+|The modality-polymorphic `+preservation_l1+` statement is false |proven
+|Coq 8.18.0; project build recipe above
+|`+formal/Counterexample_PreservationL1.v+`: `+preservation_l1_FALSE+`
+|The refuting instance is Linear; the pre-state also types in Affine. This
+witness alone does not refute a separate Affine-only theorem.
+
+|Unrestricted L1 region shrinking is false |proven
+|Coq 8.18.0; project build recipe above
+|`+formal/Counterexample_RegionShrink.v+`: `+region_shrink_is_FALSE+` (six Qed witnesses/lemmas)
+|Two nested active regions consume duplicate ambient entries; removing one
+entry breaks typing despite strict syntactic freeness. The old universal
+helper is not proof debt.
+
+|Restricted L1 region-shrink replacement |proven
+|Coq 8.18.0; project build recipe above
+|`+formal/Semantics_L1.v+`: `+region_shrink_msperm+`, `+region_shrink_neutral+`, `+region_shrink_value+`
+|Requires output multiset-permutation; value/neutral corollaries cover the
+actual call sites. This restricted result does not restore unrestricted
+region shrinking or general preservation.
+
+|L1 no-exit liveness and strengthened substitution helpers |proven
+|Coq 8.18.0; project build recipe above
+|`+formal/Semantics_L1.v+`: `+region_liveness_no_exit_l1_gen+`, `+subst_preserves_typing_l1+`
+|No-exit premise is explicit; these lemmas support restricted substitution
+and do not prove preservation for arbitrary operational steps.
+
+|Linear-to-Affine weakening `+linear_to_affine+` |proven
+|Coq 8.18.0; project build recipe above; zero axioms as recorded
+|`+formal/TypingL1.v+` (`+Modality+` definitions in `+formal/Modality.v+`)
+|Shows the local modality weakening relation only. It does not prove
+L1/L2 preservation for either mode.
+
+|L2 β-case helper family |proven
+|Coq 8.18.0; project build recipe above
+|`+formal/TypingL2.v+`: `+preservation_l2_app_eff_beta_linear_l1+`, `+_linear+`, `+_ground_nonlinear_l1+`, `+_ground_nonlinear+`, `+_tfuneff_l1+`, `+_tfuneff+`
+|Requires the exact value/type/effect premises in each lemma. The
+`+TFunEff+` case also requires `+tfuneff_lambda_free+`, the region-introduction
+subset condition, and closure below zero. These are restricted β-case
+lemmas, not unconditional L2 preservation.
+
+|L3 matching echo-rule preservation results |proven
+|Coq 8.18.0; project build recipe above
+|`+formal/Semantics_L1.v+`: `+preservation_l3_region_active_echo+`, `+preservation_l3_drop_echo+`, `+preservation_l3+`
+|Only matching echo-emitting typing/step-rule pairs. The region-echo case
+additionally requires `+expr_strictly_free_of_region r v+`; it does not
+establish general L1/L2 preservation or implementation refinement.
+
+|Fresh-region L2 β witness (input types, steps, result is untypable at L1) |proven
+|Coq 8.18.0; project build recipe above
+|`+formal/Counterexample_L2.v+`: `+e_before_typed+`, `+e_step+`, `+e_after_untypable+`
+|Exact `+TFunEff+`/fresh-region witness only. It motivates restricted β
+lemmas; it is not a full L2 preservation theorem.
+
+|Nested-`+TFunEff+` L2 β witness (input types, steps, result is untypable at L1) |proven
+|Coq 8.18.0; project build recipe above
+|`+formal/Counterexample_L2_nested.v+`: corresponding three witness lemmas
+|Exact nested-lambda witness only. Its conditions distinguish this gap
+from the fresh-region case; it is not full L2 preservation.
+
+|Sound replacement for unrestricted L1 preservation |open
+|—
+|`+PROOF-NEEDS.adoc+`; no replacement theorem is yet stated
+|Requires a sound judgment/step boundary and explicit temporal invariant;
+all L1 regressions remain mandatory controls.
+
+|Unconditional `+preservation_l2+` |open
+|—
+|No such theorem is declared in the current tree; see `+formal/TypingL2.v+`
+|Current β-case helpers are conditional; `+preservation_l2_via_l1+`
+transparently depends on the refuted L1 statement.
+
+|Mathesis Grade 3 receipt for Ephapax language soundness |open
+|Agda receipt required by the Mathesis architecture
+|No Agda Grade 3 proof currently recorded
+|The existing witnesses are Coq, not Grade 3. Standards classifies local
+Ephapax-specific typing/step claims as engineering (Idris2) unless a genuine
+implementation-independent theory statement is defined. Resolve this
+mapping before assigning a Grade 3 label; see `+PROOF-NEEDS.adoc+`.
+|===
+
+Grade labels are not interchangeable with this ledger's statuses. Per
+`+hyperpolymath/mathesis/estate-mathematical-architecture+`, Grade 3 means
+locally checked in Agda without independent translation. Per
+`+hyperpolymath/standards/3-practice/PROOF-POLICY.adoc+`, engineering and
+theory obligations follow different verifier routes. Therefore no Coq
+`+Qed+` row above is labelled Grade 3, and no upstream or cross-repo
+conceptual result discharges an Ephapax-specific obligation.
 
 === Idris2 (`idris2/src/Ephapax/` + `src/formal/`)
 
@@ -349,12 +471,72 @@ properties of the region-linear calculus:
 |===
 
 All five with zero `believe_me`, zero postulates, under `%default
-total`.
+total`. Scope caveat: `regionSafetyExtract` and `noGCExtract` return
+proof witnesses supplied as inputs; their proof terms are valid but their
+stated results are vacuous wrappers, not standalone region-safety or
+GC-freedom theorems.
+
+=== Idris2 Proof Ledger
+
+These rows record existing Idris2 source proofs and their exact scope; they
+do not establish that the Rust implementation refines the formal model.
+The source baseline is `800030f3c92536cce57acb5e82da6cf27b942826`.
+`idris2` is unavailable in this editing environment, so there is no fresh
+build receipt. The repository documents Idris2 0.8.0 and builds the formal
+package with `cd src/formal && idris2 --build ephapax-formal.ipkg`; the CI
+workflow currently uses a mutable `snazzybucket/idris2:latest` image tag,
+so this is not a reproducibly pinned toolchain receipt.
+
+[cols="2,1,2,2,3",options="header"]
+|===
+|Obligation / result |Status |Checker (version, flags) |Where |Trust boundary
+
+|Static no-escape proposition `+noEscapeTheorem+` |proven
+|Idris2 0.8.0; `%default total`; package build above (historically reported, not rerun here)
+|`+src/formal/Ephapax/Formal/RegionLinear.idr:129+`
+|Proves the indexed type-level contradiction `+NoRegionInType r (Scoped r a) -> Void+`. It does not establish runtime escape-freedom or connect to Coq/Rust semantics.
+
+|Qualifier orthogonality `+orthogonalityLemma+` |proven
+|Idris2 0.8.0; `%default total`; package build above (historically reported, not rerun here)
+|`+src/formal/Ephapax/Formal/RegionLinear.idr:164+`
+|Transports a `+CannotEscape+` witness across a qualifier change in the local datatype. It is not a language preservation theorem.
+
+|Region safety extraction `+regionSafetyExtract+` and GC extraction `+noGCExtract+` |proven
+|Idris2 0.8.0; `%default total`; package build above (historically reported, not rerun here)
+|`+src/formal/Ephapax/Formal/RegionLinear.idr:139,151+`
+|Return supplied input witnesses unchanged. They prove no standalone runtime region-safety or GC-freedom property.
+
+|Linear split coverage `+splitLinearCoverage+` |proven
+|Idris2 0.8.0; `%default total`; package build above (historically reported, not rerun here)
+|`+src/formal/Ephapax/Formal/Qualifier.idr+`
+|For an indexed `+Split+`, each linear binding at any context position occurs in at least one branch. It does not prove exclusivity or consumption consistency across arbitrary language control flow.
+
+|Region outlives transitivity `+outlivesTransitive+` |proven
+|Idris2 0.8.0; `%default total`; package build above (historically reported, not rerun here)
+|`+src/formal/Ephapax/Formal/Region.idr:72+`
+|Pure transitivity of the abstract outlives relation; no operational safety or compiler-refinement result.
+
+|FFI result-code round trip `+compileResultRoundTrip+` |proven
+|Idris2 0.8.0; `%default total`; `+idris2 --build ephapax-abi.ipkg+` (historically reported, not rerun here)
+|`+src/abi/Ephapax/ABI/Foreign.idr:108+`
+|Case analysis for the local enum/int mapping only; not evidence that Rust/WASM compilation succeeds or preserves source typing.
+
+|ABI seam E1/E2-control-flow/E3-runtime/E4/E5/E6 obligations |open
+|Idris2 package build checks declarations, not discharged proofs
+|`+src/abi/Ephapax/ABI/Invariants.idr+`; register in `+PROOF-NEEDS.adoc+` §5.3
+|These obligations remain open; some are represented by erased declarations/postulates, not proof terms. E2 position-form and E3 static form are separately discharged as above. The ledger row does not treat declarations as evidence that the operational or compiler-correctness obligations hold.
+|===
+
+Idris2 evidence follows the Standards route for repository-specific
+engineering claims, but it is not thereby Mathesis Grade 3: Grade 3
+requires a locally checked Agda proof. The current Coq and Idris2 rows
+must retain their checker labels and cannot be upgraded by cross-repo
+vocabulary or by the proof-policy mapping alone.
 
 == Test Evidence
 
 357 tests across 17 active workspace crates + `tests/fuzz`, 0
-failures (per `cargo test --all-targets`; see `TEST-NEEDS.md` for
+failures (per `cargo test --all-targets`; see `TEST-NEEDS.adoc` for
 the per-crate breakdown). Key test categories:
 
 * *Type checker dyadic tests*: `let` vs `let!` semantics, branch
@@ -378,12 +560,13 @@ the per-crate breakdown). Key test categories:
 * `docs/specs/LANGUAGE-COMPARISON.adoc` — comparison against 10 languages
 * `docs/vision/EPHAPAX-VISION.adoc` — design rationale, why dyadic +
   regions + WASM
-* `formal/PRESERVATION-HANDOFF.md` — *archaeology only*: per-case
+* `formal/PRESERVATION-HANDOFF.adoc` — *archaeology only*: per-case
   checklist from the pre-2026-05-26 legacy-judgment closure plan,
   retained for historical context. The legacy `preservation` is
-  provably false; the path forward is the per-layer theorems documented
-  in `formal/PRESERVATION-DESIGN.md`.
-* `PROOF-NEEDS.md` — outstanding proof obligations + leverage
+  provably false; the design document records an architecture, not an
+  established soundness result. Current proof boundaries and replacement
+  obligations are in `PROOF-NEEDS.adoc`.
+* `PROOF-NEEDS.adoc` — outstanding proof obligations + leverage
 
 == Questions?
 

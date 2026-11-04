@@ -1,0 +1,1545 @@
+// SPDX-License-Identifier: CC-BY-SA-4.0
+// Owner: Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk>
+// SPDX-FileCopyrightText: 2026 Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk>
+= Ephapax v2 — system architecture and ultracode completion plan
+:toc: left
+:toclevels: 2
+:sectnums:
+
+[abstract]
+This plan synthesises three candidate routes (proof-first, dogfood-first and seam-contract) and the adversarial critiques of each. The evidence base is a read-only survey of `/home/user/ephapax` and its sibling repositories carried out between 2026-10-27 and 2026-11-04.
+
+The survey ran the following toolchains:
+
+* coqc 8.18.0 on a scratch copy of `formal/`;
+* `cargo test` across the ephapax and typed-wasm workspaces;
+* Agda 2.6.3 against agda-stdlib v2.3 for the Agda siblings.
+
+Idris2, Lean, Isabelle, zig, julia, z3 and the wasmtime CLI are not installed. Every claim that depends on them is marked *UNVERIFIED*.
+
+Nothing in this document proposes closing or extending `formal/Semantics.v` or `formal/Typing.v`. The legacy `Theorem preservation` is false (`formal/Counterexample.v`), and its `Admitted.` is correct.
+
+Throughout, *ephapax-affine* means the internal sublanguage. It is not AffineScript. The two projects share only the compile target, typed-wasm.
+
+[IMPORTANT]
+.Evidence preserved with this document (re-checked 2026-11-04)
+====
+The survey ran in an ephemeral container, so its scratch files do not survive. The load-bearing witnesses were re-checked by hand and committed beside this plan:
+
+* `evidence/SurveyCounterexamples.v` (Coq 8.18, not part of `formal/_CoqProject`). It proves `False` from each of the two `Admitted.` v2 lemmas (F1). It also proves the closed-context preservation failure (ClosedCex, F2), the echo cross-path failure (EchoCex part 1, F3), the stuck `EObserve` (EchoCex part 2, F4), PairDup (F5) and EchoCopy (F6). Apart from F1, every lemma prints "Closed under the global context".
+* `evidence/probes/*.eph.txt`, with verdicts tabulated in `evidence/README.adoc`. These are the Rust-checker probes: `ephapax check` accepts dup2, dup4, pairdup and lamcap, and rec1 aborts with a stack overflow (exit 134).
+
+*Not re-checked:* the EscapeCex, L2Comp and LetCheck families were produced by a survey agent whose scratch files were lost to a container restart. Their statements in this plan are as that agent reported them. Rung P2 must re-create and land them before they are relied on.
+====
+
+[NOTE]
+.Size scale and oracle shorthands used below
+====
+*Size scale:* S is at most 1 session; M is 2–3 sessions; L is 4–8 sessions; XL is more than 8 sessions or open research.
+
+*ORACLE-COQ* means `cd formal && coq_makefile -f _CoqProject -o Makefile.coq && make -f Makefile.coq -j4`, then `bash scripts/assumptions-gate.sh`. The gate script does not exist yet; it is created at rung P1.
+
+*CLOSED* means `Print Assumptions <name>` reports "Closed under the global context".
+====
+
+== Executive answer
+
+=== Fastest proof route
+
+. *Restore consistency (P0/P1, size S).* Today the build can derive `False`.
+** `preservation_l1` (`formal/Semantics_L1.v:3324`, `Admitted.` at :3337) and `step_pop_disjoint_from_type_l1` (:3281, `Admitted.` at :3318) are both refuted by Qed files built in the same `_CoqProject`: `Counterexample_PreservationL1.v:151` and `Counterexample_StepPop.v:142`.
+** A scratch `Lemma env_inconsistent : False` compiles.
+** The owner ratifies retiring both lemmas to `Definition …_stmt : Prop`.
+** `preservation_l2_via_l1` and `preservation_l2_lift_case` (`formal/TypingL2.v:334-357`) are made conditional.
+** CI must *assert* `Print Assumptions` against the allowlist `{Semantics.preservation}`. Today it only prints the output.
+. *Land the falsifiers in the repo before any design work (P2, size S).* The scratch counterexamples become in-repo Qed regression files against the *current* judgment:
+** ClosedCex, EchoCex, EscapeCex, L2Comp, LetCheck;
+** PairDup (`has_type_l1` lets a `TProd` variable duplicate a linear `TString` in Linear mode, CLOSED);
+** EchoCopy (`TEcho` can be `ECopy`'d in Linear mode).
+. *One owner decision packet (P3).* It covers:
+** a v2-owned fork of the syntax, typing *and* step relation under `formal/v2/`;
+** runtime frames;
+** locally nameless region binders;
+** latent region effects with prenex region polymorphism;
+** per-binder usage grades with the modality as the preorder;
+** syntactically distinct echo forms plus `S_Observe`;
+** a global function environment for top-level recursion.
+. *Build `formal/v2` and test it before proving (P4–P6).*
+** Write the skeleton and `Regress.v`, re-encoding every counterexample.
+** Write an executable `step_v2_fn` and a naive `check_v2`.
+** Write a *typed-by-construction* term generator with a measured acceptance floor, and only then run the property falsifier.
+. *Prove L1 with L2 folded in (P7–P10).*
+** Prove the opening, renaming and substitution lemmas and the canonical forms.
+** Then prove `progress_v2` and `preservation_v2`.
+. *Then L3, L4, the meta plane and the certified checker (P11–P15).*
+
+=== Fastest engineering route
+
+. *Close the Rust holes and fail loudly (E0/E1, size S–M).* No owner decision is needed except a conservative *reject* for compound linearity.
+** Make `let!` contraction honour `demands_consumption` (`src/ephapax-typing/src/lib.rs:191-201`).
+** Reject closures that consume a captured linear value (`lib.rs:1109`).
+** Reject pairs that contain a linear value.
+** Turn the recursive-`data` stack overflow into an error.
+** Make perform/handle a `CodegenError` (`src/ephapax-wasm/src/lib.rs:1991-2000`).
+** Make `@total`, `@pure` and `@comptime` errors until they are enforced.
+. *One front end and a wasm runner (E3/E4).* `ephapax-driver::load_program` serves every tool, and `ephapax run` executes the compiled wasm through the wasmtime 36 crate.
+. *A typed side table from the *existing* checker feeds codegen (E5).* This fixes I64/F32/F64 binops, `String.len` and n-tuples. It is *not* gated on the certified checker.
+. *An aLib conformer today (E6).* `stdlib/ALib.eph` plus a wasmtime-based Rust test over pinned vectors. The measured baseline is 89 pass / 1 fail / 13 skip / 51 unimplemented.
+. *Then the upstream fix to the typed-wasm access-site convention*, after which the full gate is on by default (E8).
+. *Then grammar reconciliation*, generics, `M.Ctor(x)`, recursive types and closures behind `--unstable-core`, the stdlib port, and the LSP.
+
+=== Where the two routes meet
+
+* *The core interchange.* The `ephapax-ir` S-expression codec, plus a new Rust-core→Coq-`SyntaxV2` translator, is the single exchange format for differential testing.
+* *The soundness-direction gate.* "Rust accepts ⇒ oracle accepts" is asserted at zero tolerance from the moment `check_v2` exists. The completeness direction is report-only until the Rust checker is rewritten as an image of `CheckV2.v`.
+* *One ADR for compound linearity and grades.* The hole exists in *both* Coq (PairDup) and Rust (`pairdup`), so the decision is made once for both.
+* *Translation validation at the target.* Every emitted module must pass `typed_wasm_gate::gate_module`. This is how E5a (carrier soundness) is discharged, rather than proving full compiler correctness.
+
+== Ground truth as of this survey
+
+Sources: the scratch builds and probes recorded in the dossier, plus spot checks in this session. `_CoqProject` lists 18 `.v` files, and `Counterexample.v` appears once. There are 8 `canonical_*` lemmas in `Semantics_L1.v`. No region-renaming function exists in `formal/`. `scripts/status-gate.sh:41-45` still reads `PROOF-NEEDS.md`. `Counterexample.v:182` imports `TypingL1`. `ocaml`, `ocamlfind` and `coqtop` are installed.
+
+[cols="2,3,3,3",options="header"]
+|===
+|Area |Claimed |Verified |Mismatch
+
+|Coq build
+|green
+|18 files, exit 0, about 1m42s
+|none
+
+|Outer `Admitted.` count (comments stripped)
+|PROOF-NEEDS: 3; PROOF-STATUS.a2ml: 4 admits + 1 axiom; Semantics_L1.v banner: 3; CLAUDE.md: "6 regressed"
+|3: Semantics.v 1, Semantics_L1.v 2 (+2 `admit.`); 0 `Axiom`. A raw grep finds 21 matches in Semantics_L1.v, all in comments.
+|PROOF-STATUS.a2ml, the banner and CLAUDE.md are stale
+
+|Consistency of the global environment
+|implicitly consistent
+|*Inconsistent*: `False` is derivable from `preservation_l1` + `preservation_l1_FALSE`, and likewise for step_pop
+|critical; not recorded in any doc
+
+|`preservation_l1` partial progress
+|"29–30 of 33 cases Qed" (header :3194-3233, PROOF-STATUS)
+|body is `intros …; admit.` (:3330-3337); the theorem is Qed-false
+|header overclaims
+
+|L1 counterexample families
+|2 in repo
+|in repo: Counterexample_PreservationL1 and _StepPop. In scratch, Qed and CLOSED: ClosedCex (G=[]), EchoCex (echo crosspath and stuck `EObserve`), EscapeCex (region escape through a TFun closure), L2Comp, LetCheck (a completeness gap, not a soundness one), PairDup, EchoCopy
+|the scratch files are *not* in the repo yet
+
+|Compound linearity in Coq
+|not discussed
+|`is_linear_ty TProd = false` (Syntax.v:468-474), and `T_Var_Unr_L1` with `T_Fst_L1` duplicates a linear `TString` (PairDup.v, CLOSED)
+|a hole in the v2 judgment itself
+
+|`preservation_l3`
+|"conditional on an L1 admit" (CLAUDE.md, V1-TO-V2, STATUS.adoc:147-182)
+|CLOSED, but it is only a conjunction of two case lemmas (:3451-3467) with a weak/strict freedom mismatch
+|docs are stale and the scope is overstated
+
+|L2
+|`linear_to_affine` Qed; L2 landed
+|`linear_to_affine` and `weaken_modality` CLOSED; the beta lemmas are CLOSED with P1/P2 side conditions; `has_type_l2` does not compose (L2Comp)
+|`preservation_l2_via_l1` rests on a false axiom
+
+|L4
+|"Phase A scaffold landed"
+|`L4.v`: 2 `eq_refl` definitions, no theorem, imported by nothing
+|scaffold only
+
+|Qed counts per file
+|PROOF-NEEDS §4: Semantics_L1 54, Echo 12, TypingL2 10, Modality 1
+|52 / 19 / 14 / 2; RegionEnvL1 18 is omitted from that table
+|stale
+
+|Canonical forms
+|"7"
+|8 (`canonical_string_l1` plus 7 `*_l1_m`)
+|minor
+
+|CI Print Assumptions
+|"build truth is the Print Assumptions CI gate" (Semantics_L1.v:4)
+|`coq-build.yml` only pipes the output to `tail`
+|gate not enforced
+
+|`status-gate.sh --proofs`
+|working
+|exit 1: it reads `PROOF-NEEDS.md`, but the file was renamed to `.adoc`
+|broken
+
+|Rust workspace tests
+|488 (TEST-NEEDS.adoc:24)
+|507 pass, 0 fail, 0 ignored; v2 phase tests 17 + stdlib import 3
+|count stale
+
+|v2 grammar coverage
+|"ACTIVE, phases pass"
+|traits, impl, effect/handler decls, comptime, contracts, capabilities, where-clauses, `with` effect types, annotation args and `import … from` are all parse errors; EBNF and pest disagree on `<a>` vs `[a]` and on the import syntax
+|large spec/implementation gap
+
+|Rust checker soundness
+|"memory-safe"
+|accepts: `let!` reuse (dup2 returns 10), pair duplication, re-calling a capturing closure; all three pass `--verify-ownership` clean
+|soundness holes
+
+|Recursive `data`
+|supported in specs
+|compiler stack overflow (rec1)
+|crash
+
+|Codegen typing
+|typed
+|all binops lower to i32 (`lib.rs:3019-3039`); I64/F64, `String.len` and 3-tuples produce invalid wasm; function-typed parameters produce "unknown table 0"
+|untyped codegen
+
+|Front end
+|one language
+|run/repl/lsp/query use the v1 `parse_module`; `check` has no import resolver
+|split language
+
+|Corpus
+|—
+|120 `.eph` files; 14 compile, 12 check, 104 parse failures; the 5 `conformance/invalid` files all fail at *parse*, not for their intended reason
+|negative corpus is vacuous
+
+|stdlib
+|"partial implementation"
+|compile: 1/9 (Argv). Check: 2/9 (Argv, Coproc). `src/ephapax-stdlib` crate: no consumer
+|overclaim
+
+|typed-wasm seam
+|seam tests green
+|seam tests 6/6 and 3/3 pass; `gate_module` accepts *0/17* ephapax modules; after a byte-offset→operator-index translation, 17/17 are clean
+|a typed-wasm-internal contradiction with ADR-0003
+
+|typed-wasm L10
+|linearity enforced on bytes
+|a `local.set` copy bypasses it (aliasprobe); a payload with count 0xFFFFFFFF aborts with a 137 GB allocation
+|soundness hole and DoS
+
+|typed-wasm tests
+|—
+|197 default / 209 with `--all-features`
+|none
+
+|`--mode affine` vs `--mode linear`
+|distinct sublanguages
+|byte-identical output
+|ephapax-affine is invisible on the wire
+
+|aLib (aggregate-library 48b7694)
+|"29 / 22 / 20 ops" across its docs; `just validate` works
+|29 specs, 154 vectors; `just validate` / `just test` fail (`.md` globs); `not.adoc` has contradictory vectors
+|several
+
+|aLib against ephapax (scratch)
+|no conformer
+|89 pass / 1 fail (spec defect) / 13 out of the I32 domain (10 decimal + 3 string-valued `if_then_else`) / 51 unimplemented
+|n/a
+
+|Idris2 (ephapax `src/abi`, `idris2/`; typed-wasm `src/abi` incl. VerifierSpec, Layout.*; januskey A-/C-rows; anytype)
+|"Qed", "22/22 modules"
+|*UNVERIFIED* (no idris2). Read-only finding: the typed-wasm VerifierSpec agreement is true by construction, and Idris E1 is stated in the legacy shape and cites the false Semantics.v
+|cannot check here
+
+|Lean / Isabelle (tropical-types, occupancy stackcert)
+|various
+|*UNVERIFIED*
+|—
+
+|zig / julia / z3 / wasmtime CLI / Creusot
+|various
+|*UNVERIFIED*
+|—
+
+|Agda siblings
+|green on the pinned 2.6.4.3
+|green on *2.6.3*: echo-types All/Smoke, secret, epistemic, occupancy (with resource-algebra 0b338c9), choreographic (with resource-algebra b2c9f1f and the working-tree epistemic, not pin 495db9c), residual, absolute-zero (4 modules), januskey (with resource-algebra cf9235c)
+|version mismatch recorded
+
+|absolute-zero
+|CNO terminates and is thermodynamically reversible; Coq/Lean/Isabelle "VERIFIED"
+|both Agda fields are vacuous by definition (CNO.agda:165-170, 201-206); the Coq/Lean/Isabelle trees are archived
+|overclaim
+
+|jtv-halting-islands-ct
+|"grammar membership = termination", 45 tests
+|Rust binary ignores its input, has 0 tests, and does not reject `violation.jtv`
+|not citable
+
+|januskey
+|135 tests
+|135 pass
+|none
+
+|typell-ephapax
+|ephapax bridge
+|9 pass; models pre-v2 ephapax (`mut` affinity, no regions, no echo)
+|lags v2
+|===
+
+=== Corrections applied to the input routes
+
+* `_CoqProject` does *not* list `Counterexample.v` twice. There is no de-duplication task.
+* There are 6 in-repo `Counterexample*.v` files, not 18. The other families exist only in scratch and must be landed first (P2).
+* LetCheck is a *completeness* gap: v2 must make `let_unit` typable. It is not a term to prove untypable.
+* PairDup settles the open X4 question: compound linearity is a hole in the *Coq judgment*, not only in Rust. It therefore moves into the first judgment revision, under the doctrine "holes before anything".
+* Editing `TypingL1.v` in place ripples into the fenced `Counterexample.v` (`:182` imports it, and `:186-240` inverts over its constructors). The v2 typing must therefore be forked as well, not only the step relation.
+* A configuration-level frame stack alone cannot tell an entered `ERegion` from an unentered one (`Syntax.v:122`). A runtime-only frame form in `SyntaxV2.v` is the main path, not a fallback.
+* The EFrame-at-Enter design needs region renaming or opening, and there is none in `formal/`. Latent effects need region polymorphism. Both are added as rungs.
+* A falsifier over random terms is vacuous. The typed generator moves into the same wave, with an acceptance floor.
+* aLib "≥102 after decimals" is unreachable. With an F64 binding the ceiling is 99 unless string-valued `if_then_else` is also implemented.
+* OCaml *is* installed, so extraction is not blocked by the toolchain. Whether OCaml is acceptable is a policy question (D9).
+* The Rust↔Coq differential needs a translator that does not exist yet. The Coq core has no recursion and no top-level declarations, so the v2 core gets a global function environment.
+* W0 exit gates must not depend on another repository's owner. The typed-wasm gate criteria move to the wave after the upstream fix lands.
+
+== Target architecture
+
+=== System diagram
+
+----
+ .eph v2 source  (spec/ephapax-v2-grammar.ebnf == ephapax.pest : ONE normative grammar)
+     |  S1 parse      [O1: grammar-conformance fixtures; each EBNF production parses or is marked UNIMPLEMENTED
+     |                     and is rejected loudly]
+     v
+ ephapax-parser (pest) --> ephapax-surface AST (type params, mode decls, echo/observe/drop!, @comptime island)
+     |  S2 desugar    [O2: golden + metamorphic desugar tests; formal/v2/Desugar.v match_desugar_correct
+     |                     (data/match -> right-nested sums); surface sugar (traits, contracts) = pure desugar]
+     v
+ ephapax-desugar --> CORE v2 AST (src/ephapax-syntax mirrors formal/v2/SyntaxV2.v constructor-for-constructor)
+     |        \______ ephapax-ir S-expr codec --> core->SyntaxV2 translator --> tools/ephapax-oracle
+     |                                                                 (extracted check_v2 + step_v2_fn)
+ ephapax-driver::load_program (import resolver + package tier + surface + desugar)
+     used by check | compile | run | repl | lsp | query | fmt     [O-D: driver_agreement.rs, check == compile]
+     |  S3 check      [O3: check_v2_sound Qed+CLOSED; CI: Rust-accept => oracle-accept, zero tolerance;
+     |                     verdict + Ty + R' + G' agreement report]
+     v
+ ephapax-check-v2 (Rust I/O-context algorithm: grades {0,1,w}, mode = preorder, R -> R', latent effects,
+                   EFrame never surface-writable)  ==> TYPED CORE (expr-id -> Ty, grades, regions)
+     |  S4 semantics  [O4: progress_v2, preservation_v2 (L1+L2), linear_echo_discharged (L3),
+     |                     mode_coherence / handoff_sound (L4), over StepV2 + ConfigWF]
+     v
+ meta plane (comptime halting island; ephapax-meta evaluator restricted to it)
+     |  S4' meta      [O4': comptime_normalises, comptime_ignores_runtime; spliced output re-checked by S3]
+     v
+ ephapax-wasm (typed dispatch; funcref table + closure ABI per typed-wasm ADR-005; boxed iso-recursive ADTs)
+   carriers: typedwasm.ownership (per-param kind from grade + mode, ret_kind, module mode record),
+             typedwasm.regions + typedwasm.access-sites (ADR-0003 BYTE offsets),
+             later: L9 lifetime-intervals for L1 region scopes (typed-wasm proposal 0006)
+     |  S5 target     [O5: E5a translation validation: typed_wasm_gate::gate_module == Ok on every emitted
+     |                     module, default-on; formal/v2/CarrierSpec.v ownership_kind_sound; negative mutants
+     |                     rejected; Idris E5a restatement UNVERIFIED]
+     v
+ typed-wasm verify + gate (locals taint for L7/L10, bounded counts) --> wasmtime host (`ephapax run`)
+     |  S6 library    [O6: alib_conformance.rs ratchet over pinned vectors; eph_corpus_gate ratchet]
+     v
+ stdlib/*.eph: ALib, Prelude, Aggregate, Region, IO, Stream, Transactions, Reversible (RMR), Erasure (RMO)
+
+ S7 cross-kernel  [O7: formal/v2/CORRESPONDENCE.adoc: one row per mirrored theorem with Agda module@pin,
+                       Coq lemma, both checker invocations + exit codes + checker versions]
+ S8 status        [O8: generated PROOF-STATUS from coqc; Print-Assumptions allowlist; Admitted-vs-*_FALSE tripwire]
+----
+
+=== Formal stack (`formal/v2/`, Coq 8.18; oracle = ORACLE-COQ)
+
+----
+ L4  L4Boundary.v   module judgment has_type_mod with a declared mode; adjoint shifts EUp (Linear->Affine)
+                    / EDown (Affine->Linear, only for obligation-free values); mode_coherence, handoff_sound,
+                    program_safety_mod
+ L3  (folded)       distinct echo forms (EDropE / ERegionE); EObserve + S_Observe; residue shape
+                    {full, commitment, trivial} kept separate from obligation grade; TEcho has grade 1 in
+                    Linear mode. Echo.v is bridged by mode_iso : Echo.Mode ~= the modality preorder.
+ L2  (folded)       per-binder usage grades {0,1,w}; the modality m picks the preorder (Affine adds 1 <= 0);
+                    compound types take the join of component grades; effect-typed application is a
+                    rule of the one judgment (fixes L2Comp)
+ L1  TypingV2.v     has_type_v2 m Sigma R G e T R' G'; locally nameless region binders; runtime-only EFrame typed
+                    only by T_Frame; arrows TArr Rin Rout T1 T2 with prenex region abstraction for top-level fns
+     StepV2.v       deterministic step_v2; Enter opens the binder with a fresh name; Exit removes the frame
+     ConfigWF.v     R =_multiset frames(e) /\ store_typed mu /\ every ELoc tagged r occurs only while r is
+                    framed /\ closed e
+     ProgressV2.v / PreservationV2.v / SafetyV2.v
+ meta MetaPlane.v   first-order comptime calculus; structural Fixpoint as the termination certificate
+ tool CheckV2.v     check_v2 + check_v2_sound (+ complete on the annotated fragment) + Extraction
+     Exec.v         step_v2_fn + step_v2_fn_correct; typed term generator spec
+     Regress.v      every counterexample family re-stated (untypable / not WF / preserved; LetCheck now typable)
+ LEGACY (frozen): Syntax.v, Typing.v, Semantics.v (preservation Admitted, false), TypingL1.v, Semantics_L1.v
+                  (P0 retirement edits only), TypingL2.v (P0 only), Counterexample*.v (regression)
+----
+
+=== Components
+
+*Surface and grammar.* There is one normative grammar. The plan's default is to regenerate the EBNF from `ephapax.pest` and back it with a conformance fixture test. Productions that are not implemented must fail with a named error.
+
+*Desugar.* It stays the only place where sugar lives: `data`/`match` become right-nested sums, records become products, traits become dictionary passing, and contracts become asserts. Each lowering either has a `Desugar.v` lemma or is a pure syntactic macro that has a test.
+
+*Core.* `ephapax-syntax` is a Rust mirror of `SyntaxV2.v`. The additions over today's core are:
+
+* a global function table Σ, giving top-level recursion;
+* iso-recursive `TMu` (after D7);
+* `TArr` with Rin/Rout;
+* region abstraction;
+* grades on binders;
+* distinct echo forms;
+* `EObserve`.
+
+`EFrame` is runtime-only: the parser cannot produce it, and only `Enter` creates it.
+
+*Checker (L1–L4).* `ephapax-check-v2` is an input/output-context algorithm in the Hodas–Miller style. It has one function per `has_type_v2` constructor, named after that constructor. It returns `(Ty, R', G')` and emits the typed core.
+
+`ephapax-typing` remains as a façade until switch-over. `ephapax-linear` either becomes a thin linter over the grades or is deprecated, according to the D5 ADR.
+
+*Meta plane.* `@comptime` is a halting island:
+
+* no free recursive `comptime_call`;
+* built-in bounded folds over finite type descriptors, with a cut-off at recursive types;
+* no comptime inside `@emit_decl`;
+* spliced output is re-checked by S3.
+
+`ephapax-meta`'s reflective `quote`/`eval` is fenced to that island. This needs a decision against ADR-016.
+
+*IR.* The typed core is the IR. `ephapax-ir` is the exchange format between the driver and the oracle; it is not a new optimisation layer.
+
+*typed-wasm backend.* Linear memory with a bump allocator and region stack, which is today's design. On top of that:
+
+* typed instruction selection;
+* a funcref table using the ADR-005 closure ABI `[fnId@0, envPtr@4]`;
+* carriers as listed in the diagram;
+* `ret_kind` populated;
+* an Affine ownership kind and a module mode record, once typed-wasm ratifies them.
+
+The *interop representation* question (linear-memory layout profile vs WasmGC) is D10.
+
+*Runtime.* There is one embedded runtime, generated by `ephapax-wasm`. `ephapax-runtime` and `ephapax-analysis` are either wired in or explicitly retired. Scrub-on-exit (`memory.fill` over the freed bump range) applies to regions marked sensitive.
+
+*stdlib via aLib.* `stdlib/ALib.eph` is scored against vendored, pinned aLib vectors. `Aggregate.eph` follows the echo-types `EchoAggregation` monoid-homomorphism shape. `Transactions.eph` and `Reversible.eph` are RMR; `Erasure.eph` is RMO.
+
+*Tooling.* LSP, REPL, query, fmt/lint and the package manager all run on the driver. The package manager's lockfile tier feeds the import resolver.
+
+=== How sibling repositories plug in
+
+All cross-kernel use is *port plus ledger*; nothing is imported across kernels. Per D-2026-10-12, Agda is the family proof kernel and Idris2 is used for ABI/runtime only.
+
+[cols="2,2,3,3",options="header"]
+|===
+|Sibling |Plugs into |How |Obligation at the seam
+
+|echo-types (Agda)
+|L3, `Echo.v`, residue taxonomy, RMR
+|Coq ports of `weaken`, `degradeMode-comp`, no-section, DecorationStructure laws, `reversibility-via-totality`, EchoResidueCell once-only. The variance verdict (graded monad of accumulation, *not* a comonad) constrains residue composition.
+|CORRESPONDENCE rows (coqc exit 0 + agda exit 0, versions recorded); no comonadic "recover from residue" rule
+
+|resource-algebra / tropical-types
+|L1 region-count carrier (`RegionEnvL1.v`); optional cost/HWM effect layer
+|The count-map carrier is already adopted. The Agda `ResourceAlgebra` requires idempotent ⊕, so it *cannot* host {0,1,ω} usage grades; keep separate sorts.
+|instance laws Qed in Coq plus ledger rows; Lean UNVERIFIED
+
+|occupancy-types
+|optional HWM peak analysis over linear memory
+|separate graded-effect layer (P20), orthogonal to L2
+|`peak_sound`: dynamic live bytes ≤ static HWM; stackcert (Lean) and occ (Idris) UNVERIFIED
+
+|secret-types
+|optional IFC layer
+|three-law Lattice census; TINI holds only for a two-variable while-language
+|new relational proof over the v2 core (XL); never folded into L2
+
+|choreographic-types
+|research route for D2 option (iii) and for L4 handoff
+|K-CUT proven only for a finite, binary-choice, plain-merge fragment
+|no claim outside that fragment
+
+|epistemic-types
+|contracts and audit receipts (warrant ≠ proof)
+|conceptual only
+|none until contracts land
+
+|residual-evidence-types
+|diagnostics
+|candidate-world explanations in `ephapax-analysis`
+|none (non-semantic)
+
+|anytype (Idris2)
+|design reference only
+|"pick the algebra, get the discipline"; no branching (no join), no soundness proof, UNVERIFIED
+|must not become a dependency (kernel ruling)
+
+|absolute-zero
+|shape of the RMO statement
+|`is-OND` observation model; OND-5 non-composition
+|cite only after the vacuous CNO fields (`terminates`, `energy-dissipated`) are documented as definitional
+
+|januskey + MAA draft
+|RMR/RMO reference semantics; `Transactions.eph`
+|`TransactionAtomicity.rollback-restores`; Loss grade {fin 0, ∞} ⊇ Linear≤Affine quotient
+|MAA draft expired (2026-04-13) and attributes enforcement to Oblíbený; do not assimilate across the boundary; Idris rows UNVERIFIED
+
+|jtv-halting-islands-ct
+|meta-plane totality by grammar
+|the *principle* only; the current jtv artefact has no parser and 0 tests
+|`MetaPlane.v` stands on its own Coq certificate, not on jtv
+
+|typell
+|downstream consumer
+|update typell-ephapax after D5
+|bridge tests green against v2 fixtures
+
+|typed-wasm
+|compile target, VerifierSpec of record
+|upstream fixes first (offsets, taint, bounds), then Affine kind and mode record
+|S5 obligations above
+
+|aggregate-library
+|stdlib semantics
+|pinned vendored vectors
+|ratchet; upstream fixes for spec defects
+|===
+
+== What needs creating
+
+Items marked "*(external)*" in the Home column live outside `hyperpolymath/ephapax`.
+
+[cols="3,2,4,1",options="header"]
+|===
+|Component |Home |Why |Size
+
+|`formal/AssumptionsAudit.v` + `scripts/assumptions-gate.sh` + `formal/ASSUMPTIONS-ALLOWLIST` + Admitted-vs-`*_FALSE` tripwire
+|ephapax
+|CI prints but never asserts, which let an inconsistent environment stay green
+|S
+
+|`formal/regress/` (ClosedCex, EchoCex, EscapeCex, L2Comp, LetCheck, PairDup, EchoCopy), as Qed against the *current* judgment
+|ephapax
+|makes every later judgment revision falsifiable by machine
+|S
+
+|`formal/v2/{SyntaxV2,TypingV2,StepV2,ConfigWF}.v`
+|ephapax
+|the v2-owned core; forking syntax *and* typing keeps `Counterexample.v` (which imports TypingL1) untouched
+|L
+
+|`formal/v2/Regions.v` (locally nameless region binders, open/close, renaming equivariance)
+|ephapax
+|needed for fresh names at Enter; no renaming exists in `formal/`
+|M–L
+
+|`formal/v2/Regress.v`
+|ephapax
+|each counterexample family re-stated against v2
+|M
+
+|`formal/v2/Exec.v` + extraction prototype + `tests/differential/gen` (typed-by-construction generator, mutation operator, acceptance and coverage metrics)
+|ephapax
+|cheap falsifier before XL proofs; prevents vacuous property tests
+|M
+
+|`formal/v2/{ProgressV2,PreservationV2,SafetyV2}.v`
+|ephapax
+|L1+L2 soundness
+|L–XL
+
+|`formal/v2/L4Boundary.v`
+|ephapax
+|L4 has no theorem today
+|L
+
+|`formal/v2/MetaPlane.v`
+|ephapax
+|backs "total and pure" (currently false)
+|M
+
+|`formal/v2/CheckV2.v` + `tools/ephapax-oracle` + hand-written S-expr reader (trusted, labelled)
+|ephapax
+|certified reference for the Rust checker
+|M–L
+
+|core→SyntaxV2 translator (named vars → locally nameless, multi-arg → curried, Σ for top-level fns, ADTs → sums)
+|ephapax
+|the differential cannot run without it; measures fragment coverage
+|M
+
+|`formal/v2/Desugar.v`
+|ephapax
+|S2 contract for match/data
+|M
+
+|`formal/v2/CarrierSpec.v`
+|ephapax
+|E5a checkable in Coq (the Idris side is UNVERIFIED)
+|M
+
+|`formal/v2/CORRESPONDENCE.adoc` + `EchoBridge.v`
+|ephapax (mirror in echo-types)
+|`Echo.v` claims to mirror upstream but has no checked correspondence
+|S–M
+
+|`scripts/gen-proof-status.sh` (generated PROOF-STATUS)
+|ephapax
+|every status doc disagrees with coqc
+|S
+
+|`src/ephapax-driver`
+|ephapax
+|one language for every tool
+|M
+
+|typed side table → `TypedModule` from the current checker (stopgap), later emitted by `ephapax-check-v2`
+|ephapax
+|untyped codegen produces invalid wasm
+|M–L
+
+|`ephapax run` on wasm (wasmtime crate, host bindings)
+|ephapax
+|no runner exists; the interpreter fails on 2-parameter functions
+|S
+
+|`src/ephapax-check-v2`
+|ephapax
+|the current checker is v1-shaped (cites Typing.v) and has 3 holes
+|L
+
+|v2 conformance corpus with `// expect-error: <Kind>` headers
+|ephapax
+|the negative corpus fails at parse today
+|S
+
+|`conformance/alib/{vectors.json,binding.ephapax.json,PINNED-COMMIT}` + `stdlib/ALib.eph` + `tests/alib_conformance.rs`
+|ephapax
+|stdlib semantic seam; no JS toolchain needed
+|S
+
+|`examples/proving-ground/eph-agg` + `tests/proving_ground.rs`
+|ephapax
+|real program covering I64/F64, ADTs, closures, regions, `let!`, imports, package, runner, LSP
+|M
+
+|`stdlib/{Erasure,Reversible}.eph` + scrub-on-exit codegen
+|ephapax
+|RMO/RMR primitives; physical scrub absent today
+|M
+
+|ADRs: dyadic split / grades; compound linearity; region binders and polymorphism; echo determinism; recursive types; interop representation; comptime vs ADR-016
+|ephapax (`docs/decisions`, `PRESERVATION-DESIGN.adoc` decision record)
+|owner-gated design calls
+|S each
+
+|Access typing honours ADR-0003 byte offsets (verify.rs:1235, codegen lib.rs:578); bounded wire counts; locals-taint L10/L7
+|typed-wasm *(external)*
+|0/17 gate acceptance; `local.set` bypass; DoS abort
+|M
+
+|Proposal: Affine OwnershipKind + module mode record; borrow axis kept separate from usage grade
+|typed-wasm *(external)*
+|ephapax-affine is invisible on the wire
+|M
+
+|Linear-memory stdlib layout profile + aLib wasm-ABI binding profile + shared aLib runner crate
+|typed-wasm *(external)*
+|Layout.* is WasmGC-only and has no emitter
+|M
+
+|`vectors/*.json` export, fn-string mini-grammar, `not.adoc` fix, Justfile `.adoc` globs, substring semantics
+|aggregate-library *(external)*
+|fix at source
+|S
+
+|Ledger rows + RMR/RMO/OND correspondence note
+|echo-types *(external)*
+|cross-kernel honesty
+|S
+
+|Grade-interface reconciliation note + TYPE-CONNECTIONS rows for ephapax and anytype; fix stale secret-types text
+|nextgen-typing *(external)*
+|five incompatible grade interfaces
+|M
+
+|Restored parser + diode-negative tests
+|jtv-halting-islands-ct *(external)*
+|makes the principle citable again
+|M
+
+|Linear-token undo API
+|januskey *(external)*
+|`undo(&str)` allows double-undo
+|S–M
+
+|Document vacuous CNO fields; fix the archived-prover PROOF-STATUS rows
+|absolute-zero *(external)*
+|citation hygiene
+|S
+
+|typell-ephapax v2 bridge
+|typell *(external)*
+|consumer lag
+|S
+|===
+
+== Proof, theory and solver ladder
+
+=== On-trajectory rungs
+
+[cols="1,4,3,2,1",options="header"]
+|===
+|Rung |Deliverable |Oracle |Depends |Size
+
+|P0 Consistency restore
+|Owner-ratified retirement: `preservation_l1` and `step_pop_disjoint_from_type_l1` become `Definition …_stmt : Prop`. `preservation_l2_via_l1` and `lift_case` take `preservation_l1_stmt` as a hypothesis, or are deleted. The `*_FALSE` files still compile. The PR is framed as *retirement*, not closure (CLAUDE.md DO NOT #3 adjacency). The same PR corrects CLAUDE.md, V1-TO-V2.adoc, STATUS.adoc and PROOF-NEEDS, which currently send agents to "close the residual L1 admits". Docs are applied by the owner, GPG-signed.
+|ORACLE-COQ; scratch `env_inconsistent : False` fails to compile (expected-failure target); allowlist = `{Semantics.preservation}`
+|owner ratification
+|S
+
+|P1 Gate integrity
+|`assumptions-gate.sh` covers every headline and is required in `coq-build.yml`. The tripwire fails when an Admitted `X` coexists with a Qed `X_FALSE`. `status-gate.sh`/`.yml` read `PROOF-NEEDS.adoc`. `gen-proof-status.sh` generates PROOF-STATUS.
+|CI red when a dummy `Admitted.` is injected; `bash scripts/status-gate.sh --proofs` exits 0; generated file diff-clean
+|P0 (or a temporary allowlist entry)
+|S
+
+|P2 Land falsifiers
+|Scratch ClosedCex, EchoCex, EscapeCex, L2Comp, LetCheck, PairDup and EchoCopy become `formal/regress/*.v`, Qed against the *current* judgment, with `Print Assumptions` CLOSED.
+|ORACLE-COQ
+|P0
+|S
+
+|P3 Decision record
+|`PRESERVATION-DESIGN.adoc` "Experiment 3 decision record" covering D1–D8 (section 9), each with the default labelled and the X3 prototype table attached.
+|merged and signed off by the owner
+|X3, X4, X9
+|S (plus owner time)
+
+|P4 v2 core skeleton
+|`SyntaxV2` / `Regions` / `TypingV2` / `StepV2` / `ConfigWF` with:
+
+* locally nameless region binders;
+* runtime-only `EFrame`;
+* `TArr Rin Rout` with prenex region abstraction;
+* grades {0,1,ω} with modality = preorder;
+* compound join;
+* `TEcho` grade 1 in Linear mode;
+* distinct echo forms;
+* `S_Observe`;
+* a global Σ for recursion;
+* store coherence in `config_wf`.
+
+Includes `step_v2_deterministic`.
+|ORACLE-COQ; `step_v2_deterministic` CLOSED
+|P3
+|L
+
+|P5 Regress.v
+|Each family re-stated against v2: PreservationL1, StepPop, ClosedCex, EscapeCex, EchoCex, L2Comp, PairDup and EchoCopy each become untypable, not-WF or preserved. LetCheck becomes `let_unit_typable_v2`. `Counterexample.v` `bad_input_untypable_l1` is untouched and still Qed.
+|ORACLE-COQ; all CLOSED
+|P4
+|M
+
+|P6 Executable falsifier
+|`Exec.v` with `step_v2_fn_correct`; a naive `check_v2`; extraction; a typed generator; a proptest for preservation, progress and determinism.
+|`cargo test -p ephapax-differential --test preservation_property`: 0 counterexamples over 100k *well-typed* terms; acceptance rate ≥ 20%; every `has_type_v2` constructor hit ≥ 100 times
+|P4
+|M
+
+|P7 Structural lemmas
+|Open/close/rename for region binders and typing equivariance; substitution (port `subst_typing_gen_l1_m`); `value_R_G_preserving_v2`; weakening and strengthening; `frames_unique`, `frames_fresh_at_enter`, store coherence preserved. Includes a porting report on how many of the 52 Semantics_L1 Qed lemmas carry over. Step-shaped lemmas must be re-proved against `step_v2`.
+|ORACLE-COQ CLOSED; `formal/v2/PORT-REPORT.adoc` with measured numbers
+|P4, X4
+|L
+
+|P8 Canonical forms
+|For every type former: unit, bool, i32, string, arr, sum, prod, ref, borrow, region, echo, mu.
+|CLOSED
+|P4
+|S–M
+
+|P9 `progress_v2`
+|For closed well-formed configurations. EscapeCex and the stuck `EObserve` are already ruled out at P5.
+|CLOSED
+|P7, P8
+|M
+
+|P10 `preservation_v2` (L1 + L2 folded)
+|All step cases, including an unconditional effect-typed beta. This discharges what #240–#242 were working toward. Corollary `type_safety_v2`. Sub-agents work by case family: region, drop, app/beta, let/case/pair, ref/borrow, echo/observe.
+|CLOSED; allowlist unchanged
+|P7, P8, P9
+|L–XL
+
+|P11 L2 metatheory
+|`linear_to_affine_v2` as transport along the preorder inclusion; `weaken_modality_v2`; join plus 3 laws in the `Modality` pattern (`Echo.v:543-573`).
+|CLOSED
+|P10 (the join laws can start in W1)
+|S–M
+
+|P12 L3 obligation
+|`linear_echo_discharged` (no unobserved echo at a Linear value); a single freedom predicate replaces the weak/strict pair; `mode_iso`; residue-shape parameter. EchoCopy is untypable.
+|CLOSED
+|P10
+|M
+
+|P13 L4 boundary
+|`has_type_mod`, `EUp`/`EDown`, `mode_coherence`, `handoff_sound`, `program_safety_mod`.
+|CLOSED; a boundary-leak counterexample is Qed-untypable
+|P11, P12
+|L
+
+|P14 Meta plane
+|`MetaPlane.v`: `comptime_normalises` (structural Fixpoint) and `comptime_ignores_runtime`.
+|CLOSED
+|E15 grammar (parallel)
+|M
+
+|P15 Certified checker
+|`check_v2_sound`; `check_v2_complete` on the annotated fragment; `check_mod`; extraction (target per D9).
+|CLOSED; extracted oracle builds in CI and checks the corpus
+|P10, P13
+|M–L
+
+|P16 Desugar seam
+|`match_desugar_correct`.
+|CLOSED
+|P4
+|M
+
+|P17 Recursive types
+|Iso-recursive `TMu` with fold/unfold (D7), matching typed-wasm `listHeapType` WHT_Rec. P9 and P10 re-run.
+|`progress_v2` / `preservation_v2` still CLOSED
+|P10, D7
+|M
+
+|P18 Carrier seam E5a
+|`CarrierSpec.v` `ownership_kind_sound` (grade + mode → kind). Restate Idris E1/E5a against `has_type_v2` (*UNVERIFIED*).
+|CLOSED; gate acceptance from E8
+|P15, typed-wasm fixes
+|M
+
+|P19 Ledger + RMR
+|`EchoBridge.v`, CORRESPONDENCE rows, `rmr_restores`, `residue_once_only`.
+|CLOSED; each row records coqc and agda exit 0 with versions
+|P12
+|M–L
+|===
+
+=== Detours and optional rungs
+
+These are kept off the critical path.
+
+* *P20 graded-effect layer* (cost = MaxPlus, occupancy = HWM): a Coq port of resource-algebra Core. It is orthogonal to L2. Size L.
+* *P21 `erase_noninterference`* (RMO): a binary logical relation with an `is-OND` observation model. Physical scrub is a *tagged METAL-BOUNDARY axiom*. That needs explicit owner sign-off, must be allowlisted by name, and must never appear in the `Print Assumptions` of any L1/L2 theorem. Size XL.
+* *IFC layer* over secret-types TINI. Size XL; deferred.
+* *Generalising L2 into an anytype-style single algebra.* This is a detour. No existing interface hosts usage grades, cost, HWM and labels together (idempotent ⊕ vs 1+1=ω), and doing so would break four-layer orthogonality.
+* *Full E5b* semantic compiler correctness. XL; deferred behind translation validation.
+* *Explicitly out of scope:* anything touching `Semantics.v`, `Typing.v`, `Syntax.v` or the legacy `Theorem preservation`.
+
+=== Theory hooks that could give a more final solution
+
+* *Semantic soundness* via a unary step-indexed or Iris-style logical relation with region liveness as a world or resource. It gives safety without syntactic preservation. The *same* relation, made binary, delivers `erase_noninterference` (P21) and an IFC result. This is the fallback if K1 fires (section 10), and arguably the more final architecture once L1 is stable.
+* *Proof-producing checker.* `ephapax-check-v2` emits a typing derivation, and Coq checks it, or an extracted certificate checker does. This removes Rust from the trusted base per program, without extracting the whole checker (D9 option D).
+* *RichWasm* (Coq-mechanised typed Wasm with linear/unrestricted qualifiers and regions) as a target-IR model. It turns E5 into a typed translation.
+* *QTT grades with a mode preorder.* Linear vs Affine is exactly whether `1 ≤ 0` holds. This unifies L2 placement (D5), the Rust `let`/`let!` split and the wire ownership kinds.
+* *Adjoint/LNL shifts* for L4 (Pruiksma–Pfenning mode preorders).
+* *Calcagno–Helsen–Thiemann* syntactic region soundness (runtime frames). *Tofte–Talpin* latent effects and region polymorphism. *Aydemir et al.* cofinite quantification for region binders.
+* *2LTT / staged calculi* for the meta plane: a total meta level generating a partial object level.
+* *Abstract interpretation over Wasm locals* (must/may use-count lattice) for the typed-wasm L10 fix.
+
+== Engineering ladder
+
+[cols="1,4,3,2,1",options="header"]
+|===
+|Rung |Deliverable |Gate |Depends |Size
+
+|E0 Holes first
+|`mark_used` routes through `demands_consumption` (lib.rs:191). `check_lambda` rejects consuming a captured linear value. `Ty::is_linear` takes the join over Prod/Sum/Tuple/List (conservative *reject*, aligned with the D5 ADR). Recursive `data` gives a `DesugarError`, not an overflow.
+|`tests/linearity_holes.rs`: dup2, dup4, pairdup, lamcap rejected with named `TypeError` kinds; rec1 exits ≠ 134; `cargo test --workspace` green (≥ 507)
+|none (escalation note for pairdup)
+|S–M
+
+|E1 Fail loudly
+|Perform/Handle give a `CodegenError`. `@total`, `@pure` and `@comptime` give an "annotation not enforced" error. G5 FFI gets a clean error or contiguous indices (lib.rs:478, 579). `-O`, `--debug` and `check --mode` take effect or are rejected.
+|`tests/fail_loud.rs`: perform, g5 and the `@total` loop are rejected; no `unreachable` in any emitted module
+|none
+|S
+
+|E2 Real negative corpus
+|`conformance/{valid,invalid}` rewritten in v2 syntax with `expect-error` headers; `examples/v2/hello.eph` fixed.
+|`eph_corpus_gate` asserts the error kind; reverting E0 turns it red (CI mutation job)
+|E0
+|S
+
+|E3 Driver
+|`src/ephapax-driver` used by every tool; `src/ephapax-tools` either joins the workspace or is excluded.
+|`driver_agreement.rs`: check == compile on all corpus files; `qualified-import/app.eph` and `bridge.eph` check
+|none
+|M
+
+|E4 Runner
+|`ephapax run` executes wasm; the interpreter becomes `run --interp` and is fixed or marked.
+|`ephapax run p1.eph` prints 162; interpreter and wasm agree on the compiling corpus
+|E3
+|S–M
+
+|E5 Typed codegen (stopgap)
+|Expr-id → Ty side table from the current checker; typed binop/literal/string/tuple; F64 rem lowering; I64 literals (G4).
+|`wasm_e2e`: i64, f64, s1, s6, t3 return correct values; corpus compile count > 14
+|E3
+|M–L
+
+|E6 aLib conformer
+|`ALib.eph` (20 scalar ops), vectors, binding with reasoned skips, `alib_conformance.rs` ratchet.
+|pass ≥ 89, 0 unexpected FAIL, every skip has a reason; after E5 with an F64 binding: pass ≥ 99
+|none (widens after E5)
+|S
+
+|E7 Grammar + generics
+|One normative grammar plus a conformance fixture test. `SurfaceDecl::Fn` type params (desugar lib.rs:323). `M.Ctor(x)` lowers to `Construct`. Import and extern syntax reconciled.
+|`gen_angle.eph` and `qa/app2.eph` compile and run; 0 EBNF productions unaccounted for
+|E3, syntax ADR
+|M
+
+|E8 Gate on by default
+|Pin bump to a typed-wasm rev with the fixes; add the `typed-wasm-gate` dependency; `compile` runs `gate_module` by default (`--no-verify` escape; also on the sexpr path); `ret_kind`; fix the seam-test comment overclaim; negative mutants.
+|`typed_wasm_full_gate.rs`: accepted == compiled corpus count, 0 rejected; `local.set` alias and count-0xFFFFFFFF mutants rejected with `Err`
+|typed-wasm T1–T3 upstream
+|S–M
+
+|E9 Recursive types + closures
+|Iso-recursive `TMu` with boxed codegen; funcref table with the ADR-005 ABI; behind `--unstable-core` until P17 is CLOSED.
+|IntList sum and `apply(f: I32 -> I32, x)` run and pass the gate
+|E5, D7
+|L
+
+|E10 stdlib port
+|Prelude, IO, Region, Aggregate, Stream, Allen and Transactions in v2; `src/ephapax-stdlib` retired (default); package import tier.
+|`ephapax check stdlib/*.eph` 9/9; corpus ≥ 22; aLib collection group attempted
+|E7, E9
+|L
+
+|E11 LSP
+|On the driver plus query: diagnostics, hover from the typed table, go-to-definition, format.
+|`lsp_e2e.rs`: 0 diagnostics on `bridge.eph`/`p1.eph`; hover on `fact` = `I32 -> I32`
+|E3, E5
+|M
+
+|E12 Differential harness
+|core→SyntaxV2 translator, oracle runner, generator, mutation, corpus mode; report of fragment coverage.
+|soundness direction (Rust-accept ⇒ oracle-accept) at 0 tolerance from the first oracle; completeness reported
+|P6 (naive oracle), P15
+|M–L
+
+|E13 Rust v2 checker
+|`ephapax-check-v2` as an image of `CheckV2.v`; emits the typed core; `ephapax-typing` delegates to it.
+|0 disagreements (both directions) over corpus + 100k generated + 10k mutated terms, in CI on every PR
+|P15, D5
+|L
+
+|E14 Proving ground
+|`eph-agg` region-scoped CLI.
+|`ephapax run eph-agg -- 3 4 5` prints `sum=12 count=3 max=5`; gate Ok; LSP 0 diagnostics; within the X12 budget
+|E4, E8, E9, E10
+|M
+
+|E15 Comptime island
+|Restricted grammar, `@comptime` parses, wired to `ephapax-meta`.
+|a self-recursive `comptime_fn` fails to parse; a fold over `@fields_of` compiles and is re-checked
+|E3, D12
+|L
+
+|E16 L3/L4 surface + RMR/RMO
+|echo/observe/`drop!`/`region!`, mode declarations, `Erasure.eph`, `Reversible.eph`, scrub-on-exit; docs: full-fiber Linear echo = RMR (retention), never "erasure".
+|unobserved Linear echo rejected; affine and linear outputs differ in ownership; freed sensitive cells read 0 (interpreter; wasmtime-level UNVERIFIED until a runner test exists)
+|P12, P13, Affine proposal
+|L
+
+|E17 Effects / traits / contracts / capabilities
+|Annotation args and capabilities → contracts as asserts → traits by dictionary passing → one-shot handlers via evidence passing.
+|one phase test per feature that *runs* wasm through gate and runner; differential still 0
+|E13
+|XL
+
+|E18 Ecosystem
+|typell-ephapax v2; shared aLib runner in typed-wasm; linear-memory layout profile.
+|typell tests green on v2 fixtures; shared runner reproduces ephapax's pass count
+|E6, D10
+|M
+|===
+
+== Experiments and benches before bigger commitments
+
+[cols="1,4,3",options="header"]
+|===
+|# |Experiment |Decides
+
+|X1
+|Check in `scripts/probe-battery.sh`, emitting a TSV of verdicts for dup2, dup4, pairdup, lamcap, rec1, i64, s1, s6, t3, perform, g5, gen_angle, qa/app2, the `@total` loop and the five `conformance/invalid` files.
+|the E0–E2 baseline; every wave diffs against it
+
+|X2
+|P0 dry run in scratch: apply the retirement edits, confirm `env_inconsistent` fails, confirm the `*_FALSE` files still compile, run the gate script.
+|the evidence package for owner ratification
+
+|X3
+|Frames prototype (time-boxed to 3 days): a scratch `SyntaxV2`/`StepV2`/`ConfigWF` with option (i); re-check all 8 families.
+|whether D2(i) kills every known class (input to K1)
+
+|X4
+|Porting rate: retarget the 52 Semantics_L1 Qed lemmas, and count verbatim / small edit / dead, with step-shaped lemmas counted separately.
+|real sizes for P7 and P10
+
+|X5
+|Typed generator acceptance and constructor coverage on the naive `check_v2`.
+|whether the P6 falsifier counts (K2)
+
+|X6
+|Translator fragment coverage: what fraction of the 14 compiling corpus files and of 1k proptest terms reaches SyntaxV2.
+|whether the differential gate is meaningful; sizes E12
+
+|X7
+|typed-wasm replay: port the scratch `xlate` mapping into `probe_op_at`; typed-wasm tests stay at 209; aliasprobe variants (`local.set`, `local.tee`, store) against a taint prototype; the count-0xFFFFFFFF payload; one-byte ownership flip mutation over the corpus.
+|the upstream PR content; the E8 baseline (0/17 → 17/17 expected)
+
+|X8
+|Reproduce aLib in Rust/wasmtime at exactly 89/1/13/51.
+|runner validity before it becomes a gate
+
+|X9
+|A-prime / grade impact: classify corpus files by bare-TFun region capture, compound-linear use and non-linear `let!`.
+|how many programs D4/D5 reject (K8)
+
+|X10
+|Extraction feasibility: toy `check_v2` extracted to OCaml reading `ephapax-ir` S-expressions, timed on the corpus; plus a 100-line derivation-certificate prototype (D9 option D).
+|the D9 choice
+
+|X11
+|Halting-island grammar on a scratch pest copy: fraction of intended EBNF comptime uses that survive.
+|D12 (K9)
+
+|X12
+|Bench: corpus compile time cold and warm; `p1.wasm` size (959 B baseline); wasmtime time for a 1e6-iteration fold with and without scrub; LSP incremental latency on `bridge.eph` (target < 100 ms).
+|budgets before E14 and E16
+
+|X13
+|Recursive-type probe: monomorphic IntList, iso-recursive vs nominal, termination of desugar, diagnostic quality.
+|D7
+
+|X14
+|Agda re-pin to 2.6.4.3 if obtainable; otherwise ledger rows record 2.6.3.
+|ledger honesty
+|===
+
+== Ultracode session plan
+
+=== Global fences (all waves)
+
+* Never edit `formal/Semantics.v`, `formal/Typing.v`, `formal/Syntax.v` or the in-repo `formal/Counterexample*.v`.
+* `formal/TypingL1.v` is frozen once the fork exists. `formal/Semantics_L1.v` and `formal/TypingL2.v` receive only the P0 retirement edits.
+* Never propose closing `Theorem preservation`. Never add an `Axiom` or `Admitted` outside the allowlist.
+* Any cross-layer side condition triggers escalation under the CLAUDE.md anti-pattern detector.
+* No Idris2, Lean, Isabelle, zig or wasmtime-CLI result is ever reported as passing.
+* ephapax-affine ≠ AffineScript. typed-wasm "region" (a memory schema) ≠ ephapax L1 region. L1 maps to typed-wasm L9, not L2.
+* typed-wasm, aggregate-library and other external changes go only through upstream PRs. Never work around them in ephapax; in particular, never emit operator indices.
+* No admin-merge before CI is green ("squabble, don't bypass"). Commits are GPG-signed with key `4A03639C…2867091E`. No licence edits.
+
+=== Waves
+
+[cols="1,4,1,3,3",options="header"]
+|===
+|Wave |Parallel tracks |Agents |Exit gate |Must not touch
+
+|*W0 Honesty and holes* (1 week; ephapax only)
+a|* T0a P0 dry run, then the ratification request (X2)
+* T0b P1 gate, tripwire, `status-gate` fix, `gen-proof-status`
+* T0c P2 land the 7 scratch falsifiers
+* T0d E0 + E1 Rust holes and fail-loud
+* T0e X1 probe battery + X8 aLib harness + E6 conformer
+* T0f doc-correction PR draft (owner applies)
+|6
+|`assumptions-gate.sh` exits 0 with allowlist `{Semantics.preservation}` (on the P0 branch; temporarily also the two retired names on main). Dummy `Admitted` turns CI red. `status-gate.sh --proofs` exits 0. `formal/regress/*` CLOSED. `linearity_holes.rs` and `fail_loud.rs` green. `alib_conformance` at 89/0 unexpected. *No cross-repo criterion.*
+|typed-wasm; any judgment design; `formal/v2`
+
+|*W1 Decisions and infrastructure* (1–2 weeks)
+a|* T1a decision packet D1–D8 with X3 + X4 + X9 attached
+* T1b X7 typed-wasm upstream PRs (offsets, bounds, taint)
+* T1c E3 driver + E4 runner
+* T1d E2 corpus + E7 grammar reconciliation draft
+* T1e `Modality` join laws (P11 part 1)
+* T1f X10 extraction / certificate prototype
+|6
+|Decision record merged and signed off. Driver agreement passes; `ephapax run p1.eph` prints 162. Corpus gate asserts error kinds. typed-wasm PRs open with green tests (≥ 209). Join laws CLOSED.
+|`formal/v2` beyond prototypes; Rust checker rewrite
+
+|*W2 v2 core and falsifier* (2–3 weeks)
+a|* T2a P4 skeleton
+* T2b P5 Regress
+* T2c P6 `Exec.v` + typed generator (X5)
+* T2d E12 translator + harness, report-only (X6)
+* T2e E5 typed side-table codegen
+* T2f E8 if typed-wasm has merged; otherwise wait
+|6
+|ORACLE-COQ green on `formal/v2`. All Regress CLOSED; `let_unit_typable_v2` CLOSED. Falsifier: 0 counterexamples over 100k well-typed terms at ≥ 20% acceptance with full constructor coverage. `wasm_e2e` i64/f64/s1/s6/t3 green. `PORT-REPORT.adoc` committed.
+|`PreservationV2` main proof (no proving before the falsifier is green)
+
+|*W3 L1 metatheory* (3–5 weeks)
+a|* T3a P7 structural lemmas (2 agents: regions/renaming, substitution/weakening)
+* T3b P8 canonical forms
+* T3c P9 progress
+* T3d P10 preservation, split by case family (4 agents)
+* T3e E9 recursive types and closures behind a flag
+* T3f E11 LSP
+|10
+|`progress_v2`, `preservation_v2` and `type_safety_v2` CLOSED; allowlist unchanged. Translator coverage reported. LSP e2e green.
+|L3/L4 surface; Rust checker rewrite
+
+|*W4 L2/L3/L4 and meta* (3–4 weeks)
+a|* T4a P11 rest
+* T4b P12 L3 obligation
+* T4c P13 L4 boundary
+* T4d P14 + E15 comptime island
+* T4e P17 TMu re-check
+* T4f P19 ledger + `EchoBridge` (both checkers)
+* T4g typed-wasm Affine kind + mode-record proposal
+|7
+|All CLOSED; EchoCopy untypable; `preservation_v2` CLOSED with TMu; every ledger row records both exit codes and versions; self-recursive `comptime_fn` fails to parse.
+|stdlib bulk port; effects
+
+|*W5 Certified checker and Rust as its image* (3–4 weeks)
+a|* T5a P15 `CheckV2` + extraction
+* T5b E13 `ephapax-check-v2`
+* T5c E12 soundness direction asserted
+* T5d P16 `Desugar.v`
+* T5e P18 `CarrierSpec` + Affine emission
+* T5f E10 stdlib port
+|6
+|`check_v2_sound` CLOSED. Differential: 0 disagreements in both directions over corpus + 100k generated + 10k mutated, on every PR. `ephapax-typing` delegates. Gate accepts 100% of compiled modules. Affine and linear outputs differ. stdlib 9/9.
+|L3/L4 surface beyond phase tests; effects
+
+|*W6 Growth* (open-ended)
+a|* T6a E14 proving ground + X12 budgets
+* T6b E16 L3/L4 surface, RMR/RMO stdlib, scrub
+* T6c E17 effects / traits / contracts
+* T6d E18 ecosystem
+* T6e optional P20 / P21 research
+|5–6
+|Each feature lands with (a) a CLOSED rule or desugar lemma, (b) a phase test that runs wasm through gate and runner, (c) differential still 0. The allowlist grows only by named, owner-signed METAL-BOUNDARY entries.
+|any core change without its formal rule
+|===
+
+*Order.* Run W0, then W1, then W2, then W3, then W4, then W5, then W6.
+
+Engineering tracks inside each wave run in parallel with the proof tracks. The only hard cross-dependencies are:
+
+* E8 waits on the typed-wasm upstream fix;
+* E13 waits on P15;
+* E9's promotion out of `--unstable-core` waits on P17;
+* E16 waits on P12 and P13.
+
+== Options requiring owner decision
+
+Ratings run from 1 to 5. Column (a) is elegance and correctness; column (b) is dependability and security/privacy. The *recommended* option in each table is labelled. Where it is not the most elegant option, the departure is stated, per doctrine 15.
+
+=== D0 — Form of the P0 retirement
+
+[cols="3,1,1,4",options="header"]
+|===
+|Option |(a) |(b) |Comment
+
+|*Recommended (elegant default):* `Definition …_stmt : Prop`; refutations kept; L2 corollaries take the statement as a hypothesis
+|5 |5
+|Maintainability: keeps the history readable. Security: removes `False` from the environment. Precedent: the 2026-06-26 removal of `region_liveness`.
+
+|Delete both lemmas outright
+|4 |5
+|Loses the statement that the `*_FALSE` files reference; those must be restated.
+
+|Move them to an unbuilt `formal/attic/`
+|3 |4
+|Not checked by coqc, so they can rot silently.
+
+|Unconventional: keep them Admitted but sealed in a `Module Type` (never instantiated)
+|3 |3
+|Consistent, but confusing for agents; the tripwire still fires.
+|===
+
+=== D1 — Where the v2 core lives
+
+[cols="3,1,1,4",options="header"]
+|===
+|Option |(a) |(b) |Comment
+
+|*Recommended (elegant default):* fork `formal/v2/` (syntax + typing + step); legacy frozen
+|5 |5
+|The only option that leaves the fenced files untouched (`Counterexample.v:182` imports TypingL1). Cost: duplicated step machinery, sized by X4.
+
+|Edit `TypingL1.v` / `Syntax.v` in place
+|2 |2
+|Breaks `Counterexample.v` inversions and touches fenced artefacts. *Rejected.*
+
+|Configuration-level frame stack, no new constructors
+|2 |3
+|Cannot distinguish an entered from an unentered `ERegion` (`Syntax.v:122`).
+
+|Unconventional: semantic soundness (logical relations / Iris-style) over the current syntax, with no syntactic preservation
+|4 |4
+|Most robust against hidden invariants and doubles as the P21 machinery. Heavier infrastructure; kept as the K1 fallback.
+|===
+
+=== D2 — Region-frame invariant
+
+[cols="3,1,1,4",options="header"]
+|===
+|Option |(a) |(b) |Comment
+
+|*Recommended (elegant default):* (i) runtime `EFrame` + binder freshness + `config_wf` (Calcagno–Helsen–Thiemann)
+|5 |5
+|Targets the root cause; standard; validated cheaply by X3 / Regress.
+
+|(ii) capability well-formedness of Γ and the result type
+|4 |4
+|Principled (Walker–Morrisett), but heavier typing rules.
+
+|(iii) choreographic trace coherence as a judgment input
+|3 |3
+|Research; proven only for a finite fragment.
+
+|Unconventional: region liveness as an Iris resource
+|4 |4
+|See D1, last option.
+|===
+
+=== D3 — Region naming
+
+[cols="3,1,1,4",options="header"]
+|===
+|Option |(a) |(b) |Comment
+
+|*Recommended (elegant default):* locally nameless with cofinite quantification
+|5 |5
+|Freshness and shadowing are solved by construction; region weakening becomes provable.
+
+|Concrete names + fresh renaming at Enter + equivariance lemma
+|3 |4
+|Closest to today's code; the equivariance lemma is an L-sized tax.
+
+|de Bruijn region indices
+|3 |4
+|Shifting lemmas everywhere; hard to read when mirrored in Rust.
+|===
+
+=== D4 — Closure region visibility (A-prime)
+
+[cols="3,1,1,4",options="header"]
+|===
+|Option |(a) |(b) |Comment
+
+|*Recommended (elegant default):* latent effects on every arrow (`TArr Rin Rout`) plus prenex region polymorphism on top-level functions
+|5 |5
+|Kills EscapeCex; region polymorphism keeps stdlib functions reusable; decidable. Performance: none at runtime.
+
+|Effect-typed lambdas only (retire bare TFun)
+|3 |4
+|Simpler, but rejects more programs (X9) and has no answer for reuse across regions.
+
+|Unconventional: capture checking (CC<:□-style capture sets)
+|4 |4
+|Elegant and expressive, but new theory to mechanise; inference cost is higher.
+|===
+
+=== D5 — Placement of the dyadic split and compound linearity
+
+[cols="3,1,1,4",options="header"]
+|===
+|Option |(a) |(b) |Comment
+
+|Judgment-level `m` only (current formal design)
+|3 |3
+|Does not match the Rust `let`/`let!` or the v2 grammar; does not fix PairDup by itself.
+
+|Per-binder grades only (Rust today)
+|3 |3
+|Loses the program-level L4 mode.
+
+|*Recommended (elegant default):* per-binder grades {0,1,ω}, with the modality as the *preorder* (Affine adds `1 ≤ 0`); compound types take the join; `TEcho` has grade 1 in Linear mode; borrows on a separate axis
+|5 |5
+|Unifies Coq, Rust and the wire ownership kinds. `linear_to_affine` becomes order inclusion. Fixes PairDup and EchoCopy. Interop: maps to typed-wasm Linear / Affine / Unrestricted, with ExclBorrow and SharedBorrow kept separate.
+
+|Unconventional: LNL / adjoint two-sorted contexts with up/down shifts in the core
+|4 |4
+|Very principled for L4; heavier surface; adopted only at L4 boundaries (P13).
+|===
+
+=== D6 — Echo determinism
+
+[cols="3,1,1,4",options="header"]
+|===
+|Option |(a) |(b) |Comment
+
+|*Recommended (elegant default):* syntactically distinct echo forms (`EDropE`, `ERegionE`), chosen by the elaborator from the declared obligation
+|5 |5
+|Deterministic step; obligation visible in source.
+
+|Modality-indexed step relation
+|3 |4
+|Couples the operational semantics to typing.
+
+|Unconventional: an echo as an algebraic effect discharged by a residue handler
+|4 |3
+|Elegant and unifies with effects (E17), but delays L3 until effects exist.
+|===
+
+=== D7 — Recursive types
+
+[cols="3,1,1,4",options="header"]
+|===
+|Option |(a) |(b) |Comment
+
+|*Recommended (elegant default):* iso-recursive `TMu` with fold/unfold inserted by desugar
+|5 |5
+|Aligns with typed-wasm WHT_Rec; small core.
+
+|Nominal named types
+|4 |4
+|Better diagnostics (X13); a larger core.
+
+|Unconventional: no core recursion; Church / bounded encodings only
+|2 |4
+|Total, but unusable for the stdlib.
+|===
+
+=== D8 — Comptime / reflection vs ADR-016 (meta plane)
+
+[cols="3,1,1,4",options="header"]
+|===
+|Option |(a) |(b) |Comment
+
+|*Recommended (elegant default):* halting-island grammar plus `MetaPlane.v`; `ephapax-meta` reflection fenced to the island
+|5 |5
+|Total by construction; Harvard separation provable. Security: no runtime data reaches comptime.
+
+|Fuel-bounded evaluator
+|3 |4
+|Termination by fuel, not by construction; nondeterministic failures.
+
+|Drop comptime from v2.0
+|3 |5
+|Most dependable; loses `@derive`.
+
+|Unconventional: full 2LTT staging (typed quotes)
+|4 |4
+|The most final theory; XL effort.
+|===
+
+=== D9 — Checker oracle form
+
+[cols="3,1,1,4",options="header"]
+|===
+|Option |(a) |(b) |Comment
+
+|Coq extraction to OCaml (installed; estate policy lists OCaml for the AffineScript compiler only)
+|4 |4
+|Mature extractor. The trusted base is the extractor, the OCaml runtime and a hand-written S-expression reader. Needs policy sign-off.
+
+|Extraction to Scheme (Guile, estate-allowed)
+|3 |4
+|Policy-clean; less mature extraction.
+
+|Hand-port to Rust
+|2 |2
+|Loses the soundness link; only a stopgap.
+
+|*Recommended:* derivation certificates. Rust emits a typing derivation; `check_v2_cert` (proved sound, then extracted, or run under Coq) checks it per program. OCaml extraction is used for the bulk differential.
+|5 |5
+|Per-program verified acceptance without trusting the Rust checker. Performance: a certificate-size overhead, measured by X10. This option is both the most elegant and the recommendation.
+|===
+
+=== D10 — Interop representation
+
+[cols="3,1,1,4",options="header"]
+|===
+|Option |(a) |(b) |Comment
+
+|*Recommended (elegant default):* typed-wasm adds a linear-memory layout profile (String `(ptr,len)`, Bool i32, closure per ADR-005) beside WasmGC Layout.*
+|4 |5
+|Matches what both ephapax and typed-wasm-codegen emit today; size M.
+
+|A WasmGC backend for ephapax
+|4 |3
+|Interop with Layout.* contracts that have no emitter and whose proofs are UNVERIFIED; size XL.
+
+|Unconventional: dual codegen behind one typed core
+|3 |3
+|Maximal interop; double maintenance.
+|===
+
+=== D11 — Access-site convention (typed-wasm owner)
+
+[cols="3,1,1,4",options="header"]
+|===
+|Option |(a) |(b) |Comment
+
+|*Recommended (elegant default):* honour ADR-0003 byte offsets in the verifier and codegen
+|5 |5
+|Fix at source; ephapax is already correct (17/17 after translation).
+
+|Amend to operator indices + `ACCESS_SITES_VERSION` bump
+|3 |3
+|Breaks other producers; re-pins all fixtures.
+|===
+
+=== D12 — Certified erasure (RMO) statement
+
+[cols="3,1,1,4",options="header"]
+|===
+|Option |(a) |(b) |Comment
+
+|*Recommended (elegant default):* OND-shaped non-interference over a declared observation model, plus a tagged METAL-BOUNDARY scrub assumption, plus scrub-on-exit codegen
+|5 |4
+|The only honest type-level statement. Privacy: physical remanence is stated as an assumption.
+
+|Crypto-shredding receipts (erase one key)
+|4 |4
+|Reduces the assumption to one key; adds key management.
+
+|Claim nothing; label the README rows as designed-not-mechanised
+|3 |5
+|Mandatory *now* regardless of which option is chosen later. The full-fiber Linear drop echo is RMR (retention), never erasure.
+|===
+
+== Risks and kill criteria
+
+[cols="3,3,3",options="header"]
+|===
+|Risk |Mitigation |Kill criterion
+
+|Owner bottleneck on P0, D1–D12 and typed-wasm
+|Pre-packaged prototypes with labelled defaults; engineering waves continue on sugar-only work
+|If a decision is open for more than 2 weeks, the dependent track pauses; no workaround patches
+
+|Option (i) misses a counterexample class
+|X3 and Regress before P10
+|*K1:* if any family remains typable-and-failing after 2 design iterations, stop the syntactic route and switch to D1's semantic-soundness option
+
+|Vacuous falsifier
+|Typed generator, acceptance floor, coverage
+|*K2:* below 20% well-typed acceptance or any constructor unhit, the falsifier result does not count toward the W2 exit
+
+|Fork cost underestimated
+|X4 porting report
+|*K3:* if fewer than 30% of lemmas port verbatim, re-size P7/P10 to XL and re-run the D1 comparison
+
+|Preservation grind (CLAUDE.md anti-pattern)
+|Case-family split; escalate on any new side condition
+|*K4:* if P10 is open after 8 sessions with no new case closed in 2, escalate; never add a side condition or Axiom
+
+|Inconsistency or axiom regression
+|P1 gate and tripwire
+|*K5:* any non-allowlisted axiom reverts the PR automatically
+
+|Rust/Coq drift; trusted oracle
+|Soundness direction at 0 tolerance; derivation certificates; report as "tested agreement", never "verified Rust checker"
+|*K6:* an unresolved soundness-direction disagreement for one wave blocks making `ephapax-check-v2` the default
+
+|typed-wasm upstream delay
+|Gate remains report-only and is labelled as such
+|*K7:* never switch ephapax to operator indices; never report the gate as passing
+
+|Language shrinkage from D4/D5
+|X9; region and grade inference; LetCheck completeness fix in the same revision
+|*K8:* if corpus acceptance drops more than 40%, revisit inference before shipping
+
+|Comptime restriction too tight
+|X11
+|*K9:* if more than 50% of intended uses are blocked, defer comptime (D8 option 3); do not re-allow recursion
+
+|Overclaims (erasure, totality, Idris, jtv, CNO)
+|W0 doc PR; generated status
+|Any doc claim without a matching oracle run is removed or labelled
+
+|Prover fragmentation (Coq / Agda / Idris / Lean)
+|Port plus ledger with versions
+|A ledger row without both exit codes is marked ASSUMED
+
+|Name collisions ("aggregate library" ×5, Linear/Affine ×4, "region" ×2)
+|Qualified names at every seam
+|—
+
+|Toolchain gaps (Idris2, Lean, Agda 2.6.4.3, wasmtime CLI)
+|Every dependent claim marked UNVERIFIED
+|No wave exit may depend on them
+|===
+
+== Cross-repo action list
+
+*hyperpolymath/typed-wasm*
+
+* Make `verify_access_typing_from_module` read ADR-0003 byte offsets (`crates/typed-wasm-verify/src/verify.rs:1235`). Emit byte offsets in `typed-wasm-codegen` (`lib.rs:578`). Update fixtures.
+* Bound wire counts in `section.rs:47` and the `with_capacity` sites (`:441`, `:762`, `:768`).
+* Add a locals-taint L10/L7 analysis (`local.set`, `local.tee`, stores).
+* Proposal: Affine OwnershipKind, module mode record, and a separate borrow axis. Extend VerifierSpec `OwnershipIntent` accordingly. The Idris parts are UNVERIFIED.
+* Write the linear-memory stdlib layout profile, the aLib wasm-ABI binding profile, and a shared aLib runner crate.
+* Docs:
+** `LEVEL-STATUS.adoc:576-577` says ownership is emitted "on every compile"; it is emitted only when some parameter is non-Unrestricted.
+** ephapax#251 is listed as pending; ephapax already emits access sites.
+** `verify_regions_from_module` is cited but does not exist.
+** "Ephapax compiles to WasmGC" is wrong; ephapax emits linear memory.
+** String is documented as `(array i8)` but modelled as `(array i32)`.
+** Missing `stdlib/` and `generated/` directories.
+** VerifierSpec agreement is described as proven; it is tautological.
+
+*hyperpolymath/aggregate-library*
+
+* Fix `specs/logical/not.adoc` vector 3, the substring start/end semantics and the AffineScript conformer drift (`src/affinescript/ALib.affine:106-108`).
+* Fix the Justfile `.md` → `.adoc` globs.
+* Export `vectors/*.json` and a grammar for the fn/condition mini-language.
+* Reconcile the operation counts (29 / 22 / 20).
+* The owner decides Deno vs Bun for aLib's own runner. Both CLAUDE.md files conflict, and `mise.toml` violates both.
+
+*hyperpolymath/echo-types*
+
+* Add CORRESPONDENCE rows: `weaken`, `degradeMode-comp`, no-section, DecorationStructure laws, `reversibility-via-totality`, EchoResidueCell.
+* Add an RMR/RMO/OND correspondence note in `docs/bridges/cross-repo-bridge-status.md`.
+
+*hyperpolymath/nextgen-typing*
+
+* Grade-interface reconciliation note declaring distinct sorts.
+* TYPE-CONNECTIONS rows for ephapax and anytype.
+* Fix the self-contradictory secret-types "specification-stage" text.
+
+*hyperpolymath/jtv-halting-islands-ct*
+
+* Restore the parser and the diode-negative tests.
+* The binary must read its input file.
+* Update README/GRAMMAR, which still describe the deleted Python, and the DATA semantics (now i64, documented as rationals).
+* Replace the `ensures(true)` "verification" claim.
+
+*hyperpolymath/januskey*
+
+* Linear-token undo API (T-8).
+* Keep X-1 and E-1 labelled ASSUMED/OPEN.
+* The MAA draft has expired (2026-04-13). Restate RMR two-sided and state-equality-relative, and drop the Oblíbený and Isabelle attributions before ephapax cites it.
+
+*hyperpolymath/absolute-zero*
+
+* Document that `terminates` and `energy-dissipated` are definitional or vacuous.
+* Fix the PROOF-STATUS rows that point to the archived `proofs/coq` and `verify-all-provers.sh`.
+* Make the Agda stdlib registration reproducible.
+
+*hyperpolymath/typell*
+
+* typell-ephapax v2 bridge (regions, TEcho, grades) after the D5 ADR.
+
+*hyperpolymath/resource-algebra, tropical-types, occupancy-types*
+
+* No change is required for v2.0.
+* Before the optional P20 layer: Lean checks for tropical and stackcert in an environment that has Lean (UNVERIFIED here), and an Agda re-run on 2.6.4.3.
+
+*hyperpolymath/anytype*
+
+* Record that ephapax uses anytype as a *design reference only*: no dependency, per the kernel ruling, and no soundness proof exists.
+
+*hyperpolymath/secret-types, choreographic-types, epistemic-types, residual-evidence-types*
+
+* No action until W6.
+* choreographic-types should re-check against its pinned epistemic-types 495db9c. Here it was checked against the working tree.
+
+*hyperpolymath/ephapax* (tracked here for completeness; all owner-applied):
+
+* The W0 doc-truth PR: CLAUDE.md, V1-TO-V2.adoc, STATUS.adoc, PROOF-STATUS.a2ml, PROOF-NEEDS §4, the `Echo.v` and `Semantics_L1.v` banners, and README.adoc:275-283 (erasure).
+* Stale typed-wasm pin comment in `Cargo.toml:60-64`.
+* Rust "Coq bridge" test equating `Ty::Effectful` with `TFunEff` (`src/ephapax-syntax/src/lib.rs:880-888`).
+
+*Evidence for this survey:* see `evidence/README.adoc` beside this document. Scratch paths quoted by the survey agents no longer exist.

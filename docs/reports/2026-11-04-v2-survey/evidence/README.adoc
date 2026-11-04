@@ -1,0 +1,50 @@
+// SPDX-License-Identifier: CC-BY-SA-4.0
+// SPDX-FileCopyrightText: 2026 Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk>
+= Evidence for the 2026-11-04 v2 survey
+
+These files back the findings in `../EPHAPAX-V2-ARCHITECTURE-AND-PLAN.adoc`. They are deliberately *outside* `formal/_CoqProject` and the Cargo workspace, so they change no build.
+
+== Coq witnesses
+
+`SurveyCounterexamples.v` is checked against the current `formal/` build:
+
+[source,sh]
+----
+cd formal
+coq_makefile -f _CoqProject -o Makefile.coq && make -f Makefile.coq -j4
+coqc -R . Ephapax ../docs/reports/2026-11-04-v2-survey/evidence/SurveyCounterexamples.v
+----
+
+Expected `Print Assumptions` output, as of commit `800030f` with coqc 8.18.0:
+
+[cols="2,3",options="header"]
+|===
+|Lemma |Assumptions
+|`env_inconsistent_preservation_l1` |axiom `preservation_l1` (the `Admitted.` lemma)
+|`env_inconsistent_step_pop` |axiom `step_pop_disjoint_from_type_l1` (the `Admitted.` lemma)
+|`preservation_l1_FALSE_closed` |Closed under the global context
+|`preservation_l1_FALSE_echo_crosspath` |Closed under the global context
+|`observe_stuck` |Closed under the global context
+|`pair_dup_linear_string` |Closed under the global context
+|`echo_copyable_linear_mode` |Closed under the global context
+|===
+
+The first two rows mean the global environment can derive `False`. That needs the P0 retirement in the plan, which requires the owner's decision. The `Admitted.` must not be closed, and no side-condition may be added.
+
+== Rust checker probes
+
+`probes/*.eph.txt` (stored with a `.txt` suffix so the repo-wide `eph_corpus_gate` ignores them; copy to `.eph` to re-run) were run with `target/debug/ephapax check` from a `cargo build --workspace` of the same commit. The table below records each exit code and the last output line. For dup2, dup4, pairdup and lamcap, exit 0 is a *soundness hole*, because each one reuses a linear value. For rec1, exit 134 is a crash.
+
+[cols="1,1,4",options="header"]
+|===
+|Probe |`check` exit |Last output line
+|`dup2` |0 |✓ 1 file(s) checked successfully
+|`dup4` |0 |✓ 1 file(s) checked successfully
+|`pairdup` |0 |✓ 1 file(s) checked successfully
+|`lamcap` |0 |✓ 1 file(s) checked successfully
+|`rec1` |134 |fatal runtime error: stack overflow, aborting
+|`i64` |0 |✓ 1 file(s) checked successfully
+|`perform` |0 |✓ 1 file(s) checked successfully
+|`g5` |0 |✓ 1 file(s) checked successfully
+|`gen_angle` |1 |Error: 1 file(s) checked, 1 error(s)
+|===

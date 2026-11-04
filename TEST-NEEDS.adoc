@@ -51,7 +51,7 @@ pass/fail enforced by `+rust-ci.yml+`
 `+formal/Semantics_L1.v+` — `+step_pop_disjoint_from_type_l1+` /
 `+preservation_l1+` — covering 2 internal `+admit.+` cases at lines
 3315/3336; rebuilt `+coqc 8.18.0+` ground truth 2026-06-27). Single-
-source breakdown lives in `+PROOF-NEEDS.md §4+`;
+source breakdown lives in `+PROOF-NEEDS.adoc §4+`;
 `+scripts/status-gate.sh+` reads from there.
 
 ===== Crates with ZERO tests:
@@ -70,7 +70,7 @@ source breakdown lives in `+PROOF-NEEDS.md §4+`;
 * 3 Admitted markers in Coq (1 in `+Semantics.v+` — provably-false
 legacy preservation, sacrosanct; 2 in `+Semantics_L1.v+` —
 `+step_pop_disjoint_from_type_l1+` + `+preservation_l1+`, the
-eliminator-fork invariant + its gated capstone, per PROOF-NEEDS.md §4)
+eliminator-fork invariant + its gated capstone, per PROOF-NEEDS.adoc §4)
 * 5 remaining tasks (#15-#19) from type checker audit
 * interp env-leak fix was made 2026-03-28
 
@@ -108,9 +108,11 @@ vendored).
 
 * [ ] panic-attack assail on own repo
 * [ ] Compile all .eph stdlib files as test suite
-* [ ] Resolve remaining Admitted Coq markers (`+preservation+` in
-`+Semantics.v+` is sacrosanct — provably false; 3 in `+Semantics_L1.v+`
-track pre-existing L1 structural debt — see PROOF-NEEDS.md §4)
+* [ ] Establish sound replacement preservation theorems after L1/L2
+redesign. Keep the legacy `+preservation+` marker and the two L1
+`+Admitted.+` markers: their unrestricted statements are refuted and
+must not be converted into fake proofs or ordinary debt entries. See
+`+PROOF-NEEDS.adoc+`.
 
 === Priority
 

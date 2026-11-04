@@ -2,7 +2,7 @@ cff-version: 1.2.0
 message: "If you use this software, please cite it as below."
 type: software
 title: "Ephapax"
-abstract: "Dyadic linear+affine type system for compile-time WASM memory safety — no use-after-free, no leaks, region-based allocation. Mechanically proved in Coq and Idris2."
+abstract: "Research language exploring dyadic linear/affine typing, region-based allocation, and WebAssembly. Includes Coq and Idris2 proof artifacts; current counterexamples refute unrestricted legacy and L1 preservation, no unconditional L2 preservation theorem is established, and implementation refinement remains unproved."
 authors:
   - family-names: "Jewell"
     given-names: "Jonathan D.A."

@@ -4,8 +4,10 @@ ____
 === 🛑 First-read disambiguation (human + machine readers)
 
 *This document is for `+hyperpolymath/ephapax+`.* Ephapax is a research
-language for compile-time WebAssembly memory safety, formally verified
-in Coq + Idris2.
+language for compile-time WebAssembly memory safety with formal artifacts
+in Coq and Idris2. Current Coq counterexamples refute legacy and
+unrestricted L1 preservation; no unconditional L2 theorem or
+implementation-refinement proof is established.
 
 *Ephapax is NOT `+hyperpolymath/affinescript+`.* AffineScript is a
 separate, unrelated language (JS/TS/AffineScript successor, OCaml +
@@ -27,10 +29,79 @@ ____
 
 === Reading guide
 
-This file is the _proof-debt audit_ for Ephapax post-counterexample
-(2026-05-26). It supersedes earlier versions of `+PROOF-NEEDS.md+` that
-still referenced the legacy preservation closure plan as if it were
-viable.
+This file is the proof-status audit for Ephapax. It supersedes earlier
+versions that treated the legacy preservation closure plan as viable.
+Keep these categories distinct:
+
+* *Legacy archaeology*: the original `+preservation+` statement is false;
+  its durable `+Admitted.+` and pinned five-`+Qed+` regression in
+  `+formal/Counterexample.v+` are intentional and must remain together.
+* *Redesigned judgments*: L1/L2 change typing interfaces; conceptual
+  vocabulary or results from another repo do not discharge Ephapax's
+  language-soundness obligations.
+* *Proved regressions*: counterexamples and positive controls are
+  machine-checked evidence about exact statements, not general preservation
+  theorems.
+* *Genuinely open obligations*: only unrefuted statements belong here. A
+  refuted theorem requires an explicit redesign or restricted replacement,
+  not an attempt to prove the old claim.
+
+The current preservation boundary is:
+
+[cols="18%,26%,56%",options="header"]
+|===
+|Layer |Status |Evidence / boundary
+|Legacy |*False as stated; pinned archaeology* |`+Counterexample.v+` has
+5 `+Qed+` lemmas. Keep the one durable `+Admitted.+` in
+`+Semantics.v+`; do not relabel it ordinary debt or replace it with a fake
+proof.
+|L1 |*Current universal statement false as stated* |`+Counterexample_StepPop.v+`
+refutes `+step_pop_disjoint_from_type_l1+`; `+Counterexample_PreservationL1.v+`
+refutes the modality-polymorphic `+preservation_l1+` via its Linear
+instance (the pre-state witness types in both modes). It does not by itself
+refute a separate Affine-only theorem. The existing
+`+bad_input_untypable_l1+` only rejects the original legacy witness; it does
+not establish L1 preservation.
+|L2 |*No unconditional theorem established* |`+preservation_l2+` is not
+declared as a theorem in the current tree. `+Counterexample_L2.v+` and
+`+Counterexample_L2_nested.v+` witness distinct β-preservation gaps. The
+Qed β-case lemmas in `+TypingL2.v+` are conditional and do not assert the
+refuted unrestricted claim.
+|Replacement work |*Open design obligation* |Specify sound judgments /
+side conditions and state exact replacement preservation theorems. These
+are new obligations; the refuted legacy and L1 statements remain pinned.
+|===
+
+==== Estate proofing policy and Grade 3 target
+
+Follow the estate's canonical references for proof method and grade:
+
+* link:https://github.com/hyperpolymath/mathesis/blob/main/estate-mathematical-architecture[`hyperpolymath/mathesis/estate-mathematical-architecture`]
+  defines Grade 3 as an Agda proof that type-checks locally and has not been
+  independently translated. Grade 2/1 claims require their separate
+  translation/API evidence.
+* link:https://github.com/hyperpolymath/standards/blob/main/3-practice/PROOF-POLICY.adoc[`hyperpolymath/standards/3-practice/PROOF-POLICY.adoc`]
+  assigns implementation-specific engineering obligations to Idris2 and
+  implementation-independent theory to Agda, rechecked in Rocq and Lean.
+  Its deciding test is whether a claim names a repository-specific type,
+  function, or wire format. The
+  link:https://github.com/hyperpolymath/standards/blob/main/docs/README-EXPLAINME-STANDARD.adoc[proof-ledger standard]
+  also requires every claimed proof (including open/refuted claims) to
+  appear in `+EXPLAINME.adoc+` with status, checker, location, and trust
+  boundary.
+
+*Grade 3 is the requested target, not a status to apply retroactively.* The
+current regression witnesses are Coq scripts (`+Qed+`), so they are not
+Mathesis Grade 3 receipts. The Ephapax-specific `+has_type_l1+`/`+step+`
+claims also appear engineering-specific under the current standards mapping;
+that mapping does not automatically make them Agda theory. Until an
+owner-approved formulation resolves this boundary, record current Coq
+results as Coq evidence, retain `+COUNTEREXAMPLE+` for refuted statements,
+and do not label them Grade 3. A future Agda Grade 3 receipt must include
+the exact proposition, assumptions, source commit, pinned Agda/toolchain,
+canonical invocation, and evidence that it is the same Ephapax statement;
+it must not be inferred from shared vocabulary or another repository's
+proof. No Grade 2/1 claim is made here.
 
 The audit is split by sublanguage:
 
@@ -41,7 +112,7 @@ The audit is split by sublanguage:
 
 For the architectural background see link:STATUS.adoc[`+STATUS.adoc+`]
 and
-link:formal/PRESERVATION-DESIGN.md[`+formal/PRESERVATION-DESIGN.md+`].
+link:formal/PRESERVATION-DESIGN.adoc[`+formal/PRESERVATION-DESIGN.adoc+`].
 
 '''''
 
@@ -81,8 +152,10 @@ TFunEff). Slice 4 L3 wiring delivered
 `+weaken_modality+` family (5), `+preservation_l2_via_l1+` (conditional
 on `+preservation_l1+`), `+linear_value_retype_l1_m+`, and 3
 `+preservation_l2_app_eff_beta_*+` variants (Linear / ground_nonlinear /
-tfuneff conditional on Stage 1b side conditions P1+P2+P3). Stage 2/3/4
-(#240/#241/#242) drop the conditions.
+TFunEff conditional on their listed side conditions). The separate L2
+counterexamples below show why these restrictions matter; planned Stages
+2/3/4 are not evidence that the unrestricted theorem has been proved, and
+no unconditional `+preservation_l2+` is present in this tree.
 
 |L4 labelling scaffold (Phase A, 2026-05-28) |`+formal/L4.v+`
 |`+ProgramMode+` enum (`+PModeLinear+` / `+PModeAffine+` /
@@ -94,8 +167,11 @@ Definitions only — no theorems, zero axioms.
 |5 + 5 Qed pinning the Phase 4c (fresh-region scope crossing) and Phase
 3b (nested TFunEff) soundness-gap classes
 
-|Counterexample regression witness |`+formal/Counterexample.v+` |5 Qed
-(`+bad_input_untypable_l1+` proved under both modes)
+|Pinned legacy counterexample + L1 positive regression
+|`+formal/Counterexample.v+` |5 Qed in total: three lemmas establish the
+legacy counterexample; `+t_loc_l1_R_preserving+` supports the L1 argument;
+`+bad_input_untypable_l1+` rejects this one input in both modes. This is
+not a proof of L1 preservation.
 
 |Operational checker (Rust, ephapax-linear sublanguage)
 |`+ephapax-linear/src/linear.rs+` |working — discharges resource-exact
@@ -121,14 +197,13 @@ graceful abandonment
 |Affine-mode echo discipline (LEcho Affine = lowered triple)
 |`+formal/Echo.v+` (calculus) |calculus done; rule wiring pending
 
-|Affine forward progress lemmas |`+formal/Semantics_L1.v+`
-|bullet-structure rewrites + `+subst_typing_gen_l1_m+` +
-`+region_shrink_preserves_typing_l1_gen_m+` m-polymorphic
-generalisations landed 2026-05-27; Phase 3b Stage 1a + 1b landed
-2026-05-30/31 via #252 + #253. Remaining admits are pre-existing L1
-structural debt + one provably-false-as-stated sub-case
-(`+Semantics_L1.v:1994+` / mirror `+:2014+` — closure requires Phase D
-reformulation, not direct proof). See §4 seam audit.
+|L1/L2 conditional helper infrastructure |`+formal/Semantics_L1.v+` and `+formal/TypingL2.v+`
+|Stage 3b and β-case helpers landed with explicit premises; they are not
+unconditional preservation theorems. The unrestricted region-shrink helper
+and former region-liveness lemma were refuted and removed; the restricted
+`+region_shrink_msperm+`/value/neutral results are Qed. Two outer L1
+`+Admitted+` markers remain, and both unrestricted statements are now
+refuted by pinned counterexamples (see §1 boundary and §4 seam audit).
 |===
 
 ==== Counterexample regression
@@ -144,13 +219,15 @@ in both Linear and Affine modes
 configuration
 |===
 
-→ The counterexample establishes the gap. The new L1 judgment closes it.
+→ The L1 judgment rejects the *specific legacy input*. The later
+`+Counterexample_PreservationL1.v+` shows that this local regression does
+not make the current L1 preservation theorem sound.
 
 '''''
 
 === §2. What’s todo
 
-==== Near-term (L1 ⇒ L2 integration debt — mechanical)
+==== L1/L2 preservation boundary (historical lemmas vs. open redesign)
 
 [width="100%",cols="34%,33%,33%",options="header",]
 |===
@@ -172,25 +249,25 @@ m-polymorphic helper (residual list-vs-multiset structural admit
 isolated to T_Region_Active_L1 shadowed case inside _gen_m)
 |`+formal/Semantics_L1.v+` |done 2026-05-27 (L2-β follow-up #3)
 
-|Close T_Region_Active_L1 [rr = r] shadowed sub-case of
-region_shrink_preserves_typing_l1_gen_m (list-vs-multiset bridge —
-option (a) L1 perm lemma, (b) multiset reformulation, or (c)
-T_Region_*_L1 redesign per the case’s own note)
-|`+formal/Semantics_L1.v+` |structural; non-trivial — investigation
-owed; lambda-body’s shadowing internal ERegion is the obstacle
+|✅ Replace the unrestricted region-shrink helper |`+formal/Semantics_L1.v+`,
+`+Counterexample_RegionShrink.v+` |the unrestricted statement is refuted;
+`+region_shrink_msperm+` and the value/neutral corollaries are Qed. Do not
+attempt to prove the old unrestricted helper.
 
-|State and prove `+preservation_l1+` for both modes
-|`+formal/Semantics_L1.v+` |depends on region_shrink + region_liveness
-narrow admit
+|Redesign the L1 judgment / step interface and state a sound replacement
+for `+preservation_l1+` |`+formal/Semantics_L1.v+`,
+`+Counterexample_PreservationL1.v+` |open design obligation; the current
+unrestricted statement is refuted and must not be treated as closable debt
 |===
 
-==== Near-term (L3 wiring — design + mechanisation)
+==== L3 wiring (scoped result; not general preservation)
 
-L3 calculus is done in `+formal/Echo.v+` (12 Qed, no admits). What’s
-missing is the _integration_ into the typing judgment and the step
-rules. The shape is laid out in `+formal/PRESERVATION-DESIGN.md §6.3+`
-"`Where echo enters the typing rules`" and (for the diagram) in §6 (to
-be added).
+The L3 calculus and its specific typing/step-rule integration are present.
+`+preservation_l3_region_active_echo+`, `+preservation_l3_drop_echo+`, and
+`+preservation_l3+` are Qed for their matching echo-emitting cases. These
+results are scoped to those rule pairs; they do not repair or imply general
+L1/L2 preservation. See `+formal/Semantics_L1.v+` and
+`+formal/PRESERVATION-DESIGN.adoc+` for the exact theorem statements.
 
 [width="100%",cols="34%,33%,33%",options="header",]
 |===
@@ -247,9 +324,9 @@ plus an umbrella `+preservation_l3+` (their conjunction, Qed). Zero new
 admits or axioms. Per-case alignment forced by `+T_Echo_L1+`’s
 witness-type premise; non-deterministic crossover cases are
 non-preserving by design (typing derivation pins the path).
-Conditionally Qed under the pre-existing
-`+region_shrink_preserves_typing_l1_gen_m+` L1 structural admit per
-PRESERVATION-DESIGN.md §5.1.
+Qed for the stated matching echo paths; this is not a general L1/L2
+preservation theorem and has no dependency on the refuted unrestricted
+region-shrink statement.
 
 |⏸ Register `+TEcho+` as linear via `+is_linear_ty+` (Phase B Slice 1) —
 DEFERRED 2026-05-28 |Realises the design intent annotated at
@@ -292,14 +369,14 @@ effect-typed TFun) introduces the natural setting: lambda bodies’ R-flow
 becomes effect-typed, which gives the structural invariant that lets
 body-input-shrinkage discharge. The 2 admits at lines 553/621 remain as
 documented L1 debt, and the outer `+Admitted.+` at line 653 + the
-`+preservation_l3+` dependency annotation in PRESERVATION-DESIGN.md §5.1
+`+preservation_l3+` dependency annotation in PRESERVATION-DESIGN.adoc §5.1
 continue to attribute them correctly.
 |===
 
 ==== Mid-term (L4 — scaffold landed 2026-05-28)
 
 L4 covers dyadic interaction semantics (mother–child distinction). Per
-`+formal/PRESERVATION-DESIGN.md §7+`, L4 is "`not a separate proof
+`+formal/PRESERVATION-DESIGN.adoc §7+`, L4 is "`not a separate proof
 layer. It is a labelling discipline at the program / module level… No
 proofs change.`"
 
@@ -434,34 +511,31 @@ the owner*:
 
 === §4. Counts + file-by-file map
 
+Coq `+Admitted.+` marker count: *3* (current source inventory): one
+legacy marker plus two in `+Semantics_L1.v+`. This is a marker count, not
+a count of sound obligations still awaiting routine proof.
+
+CI count marker only (source markers, not routine proof debt):
 Coq admitted proofs remaining: 3
 
-(1 outer `+Admitted.+` in `+formal/Semantics.v+` — sacrosanct legacy
-preservation, provably false per `+Counterexample.v+` + *2* outer
-`+Admitted.+` markers in `+formal/Semantics_L1.v+` — the two open L1
-lemmas `+step_pop+` / `+preservation_l1+`. *Updated 2026-06-26 (this
-branch) against rebuilt `+coqc 8.18.0+` +
-`+scripts/status-gate.sh --proofs+` ground truth. Two closures dropped
-the count 5 → 3:* *(a) `+region_shrink_preserves_typing_l1_gen_m+` was
-_dissolved_ (the 2026-06-16 multiset-perm closure) — its general form is
-proven false and pinned in `+formal/Counterexample_RegionShrink.v+`, the
-surviving value corollary `+region_shrink_value+` is `+Qed+`/axiom-free,
-and `+preservation_l3+` is consequently UNCONDITIONALLY axiom-free.*
-*(b) `+region_liveness_at_split_l1_gen+` — the provably-false
-`+In rv R -> In rv R'+` lemma — was _removed_. Its 13 consumers in
-`+subst_typing_gen_l1_m+` now route through the TRUE, `+Qed+`
-`+region_liveness_no_exit_l1_gen+`, supplied with the honest
-`+val_region_no_exit+` premise threaded through
-`+subst_typing_gen_l1_m+` / `+subst_typing_gen_l1+` /
-`+subst_preserves_typing_l1+` and the L2 β-case lemmas
-(`+preservation_l2_app_eff_beta_linear+` / `+_l1+`) — all of which
-`+Print Assumptions+` now reports as "`Closed under the global context`"
-(axiom-free) instead of depending on a false axiom.* The two remaining
-outer markers are `+step_pop_disjoint_from_type_l1+` and
-`+preservation_l1+` (capstone, gated on `+step_pop+`); §5’s line numbers
-are earlier-branch snapshots, superseded here.)
 
-==== Per-file Qed / Admitted summary (as of 2026-06-01)
+* `+formal/Semantics.v+` `+preservation+`: false as stated; durable
+  legacy archaeology, pinned by `+Counterexample.v+`.
+* `+formal/Semantics_L1.v+` `+step_pop_disjoint_from_type_l1+` and
+  `+preservation_l1+`: both unrestricted statements are refuted by
+  `+Counterexample_StepPop.v+` and
+  `+Counterexample_PreservationL1.v+`; neither is ordinary proof debt.
+* The false unrestricted region-shrink helper was replaced by
+  `+region_shrink_msperm+` and proved value/neutral corollaries. The
+  false unconditional region-liveness helper was removed and replaced at
+  call sites by the no-exit formulation. These are separate refuted
+  helper statements and do not create additional live `+Admitted.+`
+  markers.
+
+Open work is redesigning L1/L2 judgments and stating sound replacement
+theorems with exact hypotheses. See the current boundary at the start of
+this document; the dated detail below is historical.
+==== Archived per-file Qed / Admitted summary (2026-06-01; superseded)
 
 [width="100%",cols="23%,>28%,>28%,21%",options="header",]
 |===
@@ -489,9 +563,10 @@ soundness-gap witness — nested TFunEff (analogue structure to
 modality-indexed
 
 |`+formal/Semantics_L1.v+` |*54* |*2* |✅ active — Phase 3b Stage 1a +
-1b landed via PRs #252 + #253. *2* outer `+Admitted.+` markers — the two
-open L1 lemmas (`+step_pop_disjoint_from_type_l1+` /
-`+preservation_l1+`). *Updated 2026-06-26: `+region_shrink…gen_m+`
+1b landed via PRs #252 + #253. *2* outer `+Admitted.+` markers —
+`+step_pop_disjoint_from_type_l1+` and `+preservation_l1+`; both
+unrestricted statements are refuted by later pinned regressions, not
+ordinary open obligations. *Updated 2026-06-26: `+region_shrink…gen_m+`
 dissolved (2026-06-16) and `+region_liveness_at_split_l1_gen+` removed
 (this branch) via the honest `+val_region_no_exit+` reformulation — see
 the §4 marker note. `+preservation_l3+` and the L2 β-case lemmas are now
@@ -524,7 +599,7 @@ linearity, narrow no-escape proof; no `+believe_me+` / `+sorry+` /
 `+assert_total+`
 |===
 
-==== Seam audit (current 2026-06-01): every admit/axiom classified
+==== Archived seam audit (2026-06-01; superseded by current classifications)
 
 The current `+admit.+` / `+Admitted.+` set in `+formal/*.v+`. The
 remaining admits are exactly the *pre-existing L1 structural debt* (with
@@ -552,7 +627,7 @@ internal `+:576+` + `+:646+` |When both internal admits close
 sub-case; *GENUINELY FALSE as stated* (single-case counterexample
 documented at site lines 1923-1926); current `+Admitted.+` is a
 transparency mark, not "`almost done`" |L2 effect-typed `+TFun+` per
-`+PRESERVATION-DESIGN.md §5.1+`; closure requires reformulation, not
+`+PRESERVATION-DESIGN.adoc §5.1+`; closure requires reformulation, not
 direct proof
 
 |`+Semantics_L1.v:2014+` (`+admit.+`) |*Parallel mirror* of `+:1994+` —
@@ -566,7 +641,7 @@ never directly — only via reformulation)
 |`+Semantics_L1.v:3132+` (`+admit.+`) |*Pre-existing* —
 `+preservation_l1+` body, covering S_StringConcat_Step2 + S_App_Step2 +
 S_Pair_Step2 cases; lambda-rigidity gap per
-`+PRESERVATION-DESIGN.md §4.8+` |Phase 3b Stages 2/3/4 (#240/#241/#242)
+`+PRESERVATION-DESIGN.adoc §4.8+` |Phase 3b Stages 2/3/4 (#240/#241/#242)
 — L2 effect-typed lambdas with `+R_in/R_out+` syntactic annotations
 
 |`+Semantics_L1.v:3133+` (`+Admitted.+`) |*Outer marker* — depends on
@@ -625,15 +700,16 @@ build`" jobs.
 
 '''''
 
-=== §5. Closure plan + current-branch state + foundation audit (2026-06-16)
+=== §5. Archived closure-plan snapshots + foundation audit (2026-06-16 onward)
 
 ____
-This section is a dated *status + plan* snapshot. It does *not*
-supersede §1–§4 (which track `+main+`); it records (a) the authoritative
-ground-truthed admit set on the current proof branch, (b) the committed
-closure route, and (c) the independent trust audit of the foundation
-repos the route builds on. Sourced from a ground-truth sweep
-(`+coqc+`/`+grep+`-verified, not doc-trusted), not from prose.
+This section preserves dated historical snapshots for traceability; it is
+not current status and is superseded by §1–§4 and the current preservation
+boundary at the start of this document. In particular, later Coq
+counterexamples refuted `+step_pop_disjoint_from_type_l1+` and
+`+preservation_l1+`; old “open closure route” language below must not be
+read as a plan to prove those unrestricted statements. The foundation-repo
+audit is separate and cannot discharge Ephapax's local soundness obligations.
 
 *Companion design docs* `+L1-REGION-REFOUNDATION-PLAN.md+` and
 `+L1-ELIMINATOR-FORK.md+` (referenced below) live in *PR #299* (branch
@@ -642,7 +718,7 @@ tropical applicability case study is `+tropical-resource-typing+` PR #21
 (`+docs/applications/ephapax-l1-regions.adoc+`).
 ____
 
-==== 5.1 Current proof branch
+==== 5.1 Archived proof-branch snapshot (superseded)
 
 Branch `+proofs/l1-effect-typing-Aprime+` (A′ effect-typed-only
 lambdas). *A′ closes 0 of 4 L1 admits* — the open obligations are
@@ -665,7 +741,7 @@ companion `+fix/proof-gates+` PR repairs the script (`+//+`→`+#+`) and
 wires it into CI so future drift is flagged. (A′ shifts the line numbers
 but not the count.)
 
-==== 5.2 The four L1 admits — authoritative classification (this branch)
+==== 5.2 Archived L1-admit table (not authoritative; later counterexamples supersede)
 
 [width="99%",cols="20%,16%,16%,16%,16%,16%",options="header",]
 |===
@@ -696,37 +772,35 @@ lambda) but region-count coherence at a region exit. *⚠️ 2026-07-07
 under `+S_Pair_Step1+`), and lands at `+R'=[]+` with
 `+rv ∈ free_regions(T)+`. Same class as admit #2’s history: the
 `+Admitted.+` hides a falsehood, not a gap. |*the eliminator fork* — now
-with a Qed forcing argument that typing ⇏ trace coherence
-|*Reformulation, owner-gated* — restate with a liveness/coherence
-premise or restrict to value-anchored consumers (the sole caller retypes
-an `+ELoc+` value whose `+T_Loc_L1+` typing carried `+In r R+`; the
-refuting sibling is a variable, which no `+S_*_Step2+` case retypes at
-`+R'+`). The choreographic route’s task is now provably "`make coherence
-a judgment-level input`", not "`derive it`".
+with a Qed forcing argument that typing ⇏ trace coherence. The initial
+value-anchored restriction proposal is superseded: the later witness in
+`+Counterexample_PreservationL1.v+` refutes the `+S_StringConcat_Step2+`
+case with an `+ELoc+` anchor. The current unrestricted lemma must not be
+proved; a replacement requires an explicitly different judgment or
+premise, owner-approved and independently proved.
 `+Counterexample_StepPop.v+` header + `+L1-ELIMINATOR-FORK.md+` §3–§8
 
 |4 |`+preservation_l1+` (capstone) |`+Semantics_L1.v:3367+` |`+:3379+`
 |*⚠️ provably FALSE AS STATED (2026-07-07, experiment 3b)* —
 `+formal/Counterexample_PreservationL1.v+` (Qed, zero axioms):
 `+EStringConcat (ELoc 0 rv) (ESnd (EPair (ERegion rv (EI32 0)) (EVar 0)))+`
-at `+R=[rv]+` types in both modalities, steps (the sibling’s region-exit
-pops the only `+rv+`), and the post-state is untypable — the `+ELoc+`
-anchor’s `+T_Loc_L1+` demands `+In rv []+`. The value-anchored escape
+at `+R=[rv]+` types in both modalities and steps (the sibling’s region-exit
+pops the only `+rv+`). In the Linear instance the post-state is untypable —
+the `+ELoc+` anchor’s `+T_Loc_L1+` demands `+In rv []+`. The value-anchored escape
 hatch suggested by `+Counterexample_StepPop.v+` is closed: the dangling
 dependence here IS a value. |*NOT closable by lemmas* — the judgment
-must carry the temporal invariant (region-liveness-through-reduction):
-either coherence as a judgment input (choreographic-foundational route,
-now Qed-mandatory) or leaf-rule strengthening that rejects the witness
-at typing (A′/path-3 family, to be re-examined against this witness).
-Owner decision; record in `+PRESERVATION-DESIGN.md+`.
+needs a temporal invariant such as region-liveness-through-reduction,
+encoded in the judgment or enforced by strengthened leaf rules that reject
+the witness. These are redesign directions, not established proofs; owner
+decision required and to be recorded in `+PRESERVATION-DESIGN.adoc+`.
 |===
 
-`+preservation_l3+` (`+Semantics_L1.v+`, *Qed*) is real and depends on
-*only* admit #1 (`+region_shrink+`); it flips *unconditional* the moment
-#1 closes. `+L4.v+` is *scaffold-unbuilt* (`+ProgramMode+` + round-trip
-mapping; definitions only, no theorems — not debt, just not yet built).
-No hidden 5th admit, no `+Axiom+`/`+Parameter+`/`+Hypothesis+` smuggled
-assumption, no fake-`+Qed+` was found anywhere in `+formal/*.v+`.
+`+preservation_l3+` (`+Semantics_L1.v+`, *Qed*) is scoped to the
+matching echo-emitting rule pairs; it does not depend on the removed
+unrestricted region-shrink helper and does not establish general L1/L2
+preservation. `+L4.v+` is a scaffold (`+ProgramMode+` + round-trip
+mapping; definitions only, no theorems). The marker inventory above is
+not evidence that a refuted theorem should be closed.
 
 ==== 5.3 Idris2 ABI proof needs (a separate axis from the Coq L1 admits)
 
@@ -737,9 +811,9 @@ forward to a discharging proof:
 [width="100%",cols="34%,33%,33%",options="header",]
 |===
 |ID |Invariant |Status
-|E1 |Type preservation (operational) |*owed* — forwards to Coq
-`+preservation+` (legacy is false; real obligation is
-`+preservation_l1+`)
+|E1 |Type preservation (operational) |*owed* — legacy `+preservation+`
+is false and current unrestricted `+preservation_l1+` is refuted. This
+requires a separately stated, sound replacement theorem in Coq.
 
 |E2 |Linear consumption across control flow |E2a position-form
 *DISCHARGED* (`+splitLinearCoverage+`, Qed, `+Formal/Qualifier.idr+`);
@@ -872,7 +946,7 @@ foundation it builds on is independently verified.
 
 * link:STATUS.adoc[`+STATUS.adoc+`] — past / present / future temporal
 map.
-* link:formal/PRESERVATION-DESIGN.md[`+formal/PRESERVATION-DESIGN.md+`]
+* link:formal/PRESERVATION-DESIGN.adoc[`+formal/PRESERVATION-DESIGN.adoc+`]
 — canonical four-layer design doctrine.
 * link:CLAUDE.md[`+CLAUDE.md+`] — agent guidance; owner directive
 2026-05-27.

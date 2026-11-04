@@ -21,36 +21,43 @@ obligation has been discharged.
 * *Acceptance*: retain the counterexample regression and publish any replacement
   theorem with its exact restricted boundary and zero hidden escape hatches.
 
-==== `+formal/Semantics_L1.v:3318+` — `+step_pop_disjoint_from_type_l1+`
+==== Redesigned L1 preservation boundary — `+formal/Semantics_L1.v+`
 
-* *Status*: one internal `+admit.+` followed by one outer `+Admitted.+`; not
-  proved.
-* *Obligation*: establish region-count coherence when a congruence step exits a
-  region still required by a sibling's type. Ten former sub-cases are closed;
-  this is the one residual case.
-* *Obstacle*: the snapshot region environment and result type do not encode the
-  temporal distinction needed to show that the sibling's occurrence survives
-  the exit. The choreographic experiment in
-  `+formal/L1-ELIMINATOR-FORK.adoc+` showed that the first proposed formulation
-  relocates this obligation rather than discharging it.
-* *Owner*: @hyperpolymath.
-* *Plan and tracking*: continue the staged calculus work in issues #240, #241,
-  and #242; first require a coherent minimal counterexample/positive control,
-  then prove the supporting lemma without circularly assuming preservation.
-* *Acceptance*: `+Qed.+`, a clean `+Print Assumptions
-  step_pop_disjoint_from_type_l1.+`, and a regression showing that an invalid
-  region exit is rejected.
+The source still contains two `+Admitted.+` declarations, but neither is a
+routine open proof obligation. Their exact unrestricted statements are
+refuted by pinned counterexamples:
 
-==== `+formal/Semantics_L1.v:3337+` — `+preservation_l1+`
+* `+step_pop_disjoint_from_type_l1+` (source near line 3318) is *false as
+  stated*: `+formal/Counterexample_StepPop.v+` proves that a typed step can
+  remove a region still free in the result type. Its `+Admitted.+` is not a
+  promise that this theorem should be finished.
+* `+preservation_l1+` (source near line 3337) is *false as stated*:
+  `+formal/Counterexample_PreservationL1.v+` gives an input typed in both
+  modalities and a step whose post-state is untypable in the Linear
+  instance, refuting the theorem's modality-polymorphic quantification.
+  This closes the suggested value-anchored escape route as well; it does
+  not by itself refute a separate Affine-only theorem.
 
-* *Status*: one internal `+admit.+` followed by one outer `+Admitted.+`; not
-  proved.
-* *Dependency*: blocked by `+step_pop_disjoint_from_type_l1+` and the staged L2
-  restrictions tracked in issues #240, #241, and #242.
-* *Owner*: @hyperpolymath.
-* *Acceptance*: the theorem ends in `+Qed.+`, `+Print Assumptions
-  preservation_l1.+` reports no project escape hatch, and the complete Coq
-  build plus counterexample suite passes.
+The counterexamples are proof regressions, not proofs of an alternative
+soundness theorem. The open work is to redesign or strengthen the judgment /
+operational interface with an explicit temporal liveness/coherence invariant,
+then state and prove a replacement theorem with its exact boundary. Do not
+close either current statement by ad-hoc lemma work or change these `+Admitted.+`
+markers into claimed proofs. Track that replacement separately from the
+legacy archaeology below.
+
+==== L2 preservation boundary — `+formal/TypingL2.v+`
+
+There is no unconditional theorem named `+preservation_l2+` in the current
+tree. `+preservation_l2_via_l1+` transparently depends on the refuted L1
+statement, while the β-case lemmas are proved only under their stated
+preconditions. `+formal/Counterexample_L2.v+` (fresh-region scope crossing)
+and `+formal/Counterexample_L2_nested.v+` (nested `+TFunEff+` lambda) record
+distinct counterexample classes for broader L2 β-preservation. They do not
+invalidate the conditional helper lemmas whose hypotheses exclude those
+classes; nor do they establish full L2 preservation. Any future L2 theorem
+must name and prove its restricted boundary without inheriting the L1
+counterexample by assumption.
 
 ==== `+idris2/src/Main.idr:22+` — global `+%default partial+`
 
@@ -90,8 +97,8 @@ closure plan and lists `+step_preserves_type+` /
 `+formal/Semantics.v+` is _provably false_ (`+formal/Counterexample.v+`,
 five `+Qed+` lemmas) and its `+Admitted.+` is correct + durable.
 
-*Canonical proof-debt sources*: - `+PROOF-NEEDS.md+` (root) -
-`+formal/PRESERVATION-DESIGN.md §12+` - `+formal/PHASE-D-REDESIGN.md+`
+*Canonical proof-debt sources*: - `+PROOF-NEEDS.adoc+` (root) -
+`+formal/PRESERVATION-DESIGN.adoc §12+` - `+formal/PHASE-D-REDESIGN.md+`
 
 Retained for traceability against the
 https://github.com/hyperpolymath/standards/blob/main/docs/TRUSTED-BASE-REDUCTION-POLICY.adoc[trusted-base-reduction

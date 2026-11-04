@@ -14,11 +14,11 @@
   ***  load-bearing for the regression theorem; do not "fix" the     ***
   ***  legacy judgment to make these lemmas fail.                    ***
   ***                                                                ***
-  ***  bad_input_untypable_l1 is also Qed under BOTH modalities,     ***
-  ***  showing that the new L1 judgment closes the gap regardless of ***
-  ***  Linear vs Affine.                                             ***
+  ***  bad_input_untypable_l1 is also Qed under BOTH modalities.     ***
+  ***  It rejects this legacy witness only; later L1 preservation     ***
+  ***  counterexamples are pinned separately.                        ***
   ***                                                                ***
-  ***  See `STATUS.adoc`, `formal/PRESERVATION-DESIGN.md §1`.        ***
+  ***  See `STATUS.adoc`, `formal/PRESERVATION-DESIGN.adoc §1`.        ***
   *********************************************************************
 
 *)
@@ -42,7 +42,7 @@
 
     Diagnoses the obstacle for preservation's 10 touches_region RIGHT
     branches: closing them requires a type-system change (Option 3 in
-    PRESERVATION-HANDOFF.md), not a proof technique. *)
+    PRESERVATION-HANDOFF.adoc), not a proof technique. *)
 
 From Ephapax Require Import Syntax Typing Semantics.
 Require Import Coq.Strings.String.
@@ -153,18 +153,22 @@ Section Counterexample.
       a single-step reduction exists; [bad_post_untypable] shows the
       result of that reduction is untypable at the same outer type.
 
-      The 11 remaining preservation admits on the [touches_region]
-      RIGHT branches share this structure. A type-system change
-      (Option 3 in PRESERVATION-HANDOFF.md) is required. *)
+      Historical closure attempts recorded 11 remaining admits on the
+      [touches_region] RIGHT branches; that count is archival, not a
+      current proof obligation. This witness refutes the universal theorem.
+      Its [Admitted] remains durable; a different sound theorem requires
+      an approved redesign, not closure of this statement. See
+      [PRESERVATION-HANDOFF.adoc] for archaeology. *)
 
 End Counterexample.
 
-(** * L1 regression: the redesigned typing blocks the bad input
+(** * L1 regression: the redesigned typing blocks this legacy input
 
-    With the [has_type_l1] judgement from [TypingL1.v], the bad input
-    [e_bad] no longer has a derivation — the L1 fix replaces the
-    post-step untypability of the original counterexample with **input
-    untypability**.
+    With the [has_type_l1] judgement from [TypingL1.v], this particular
+    bad input [e_bad] has no derivation — for this witness, the L1 rules
+    replace post-step untypability with **input untypability**. This
+    regression is not a general L1 soundness or preservation theorem;
+    [Counterexample_PreservationL1.v] records a different L1 failure.
 
     Proof structure:
     - Invert [T_Pair_L1] on the assumed derivation: forces the

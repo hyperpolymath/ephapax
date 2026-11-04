@@ -13,10 +13,13 @@
       has_type_l1 m R G e T R_final G' ->
       has_type_l1 m R' G e' T R_final G'.
 
-    This file exhibits a configuration that types (in BOTH modalities),
-    steps, and whose post-state is UNTYPABLE at the same indices — [Qed],
-    zero axioms. Together with [Counterexample_StepPop.v]: BOTH remaining
-    L1 Admitted markers were hiding falsehoods, not unfinished proofs.
+    This file exhibits a configuration whose pre-state types in BOTH
+    modalities and which steps to a post-state that is untypable in the
+    Linear instance at the same indices — [Qed], zero axioms. This
+    refutes the modality-polymorphic [preservation_l1] theorem (which
+    quantifies over Linear). It does not by itself refute an Affine-only
+    theorem. Together with [Counterexample_StepPop.v], it shows that BOTH
+    remaining unrestricted L1 statements are false as stated.
 
     ** The witness (value-anchored — closes the StepPop file's open door)
 

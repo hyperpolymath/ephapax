@@ -19,7 +19,7 @@
 | Proofs | `formal/Semantics.v` (Coq), `src/abi/Ephapax/…` (Idris2) | None mechanized; `lib/borrow.ml` only |
 
 **Internal naming trap.** Ephapax itself is dyadic. Inside this repo:
-- **ephapax-linear** = strict, formally-verified core.
+- **ephapax-linear** = strict core with formal artifacts; no full language-soundness or implementation-refinement proof is claimed.
 - **ephapax-affine** = versatile prototyping companion to ephapax-linear.
 
 Both are *internal sublanguages*. They share one AST, one Rust crate (`ephapax-linear/`), one grammar directory. **The `ephapax-affine` sublanguage is NOT AffineScript.** The word `affine` is shared because both happen to be substructural-logic-family type systems — that's a logic-family fact, not a project relationship.
@@ -59,50 +59,54 @@ When working in this repo, the typing system has four layers. Knowing which laye
 | **L3 — Echo residue** | "Is this about *what was lost* when an irreversible step fired?" |
 | **L4 — Dyadic mode** | "Is this a project-level mode declaration question?" |
 
-Most questions touch exactly one layer. The design rationale is in `formal/PRESERVATION-DESIGN.md`. The verified counterexample that forced the redesign is in `formal/Counterexample.v` (3 lemmas under the legacy judgment + `bad_input_untypable_l1` under the new `has_type_l1`).
+Proof and design history is in `formal/PRESERVATION-DESIGN.adoc`; current status is in `PROOF-NEEDS.adoc`. The legacy counterexample and the separate L1 regressions are in `formal/Counterexample.v`, `Counterexample_StepPop.v`, and `Counterexample_PreservationL1.v`. These prove exact counterexamples, not a sound replacement.
 
-**Standing rule**: if a proposed change appears to require a side condition on a compound typing rule (e.g. "the sibling doesn't reference this region"), pause — the four-layer threading should make that side condition *derivable*, not stated.
+**Standing rule**: if a proposed change appears to require a side condition on a compound typing rule (e.g. "the sibling doesn't reference this region"), do not assume it is derivable. The pinned L1 witnesses show that the current judgment does not encode the temporal dependency. Pause and propose an explicit judgment/step redesign; do not patch the false preservation theorem by strengthening a helper lemma.
 
 **Disambiguation reminder**: the names L1/L2/L3/L4 (layer names), `ephapax-linear`/`ephapax-affine` (L2 modes / the Rust crate), and `Linear`/`Affine` as used in echo-types (L3 modes) deliberately overlap because the underlying thin-poset construction is shared. Agents must disambiguate by context.
 
 ## Standing reminders
 
-- Formal-proof work touches `formal/Semantics.v` + `formal/TypingL1.v` (Coq) and `src/abi/Ephapax/…/*.idr` (Idris2). Both build oracles are authoritative; `coqc` and `idris2 --check` are the only "is this proved?" answers.
-- The legacy preservation closure plan is superseded by `formal/PRESERVATION-DESIGN.md` (four-layer redesign). `formal/PRESERVATION-HANDOFF.md` carries the historical diagnostic record only.
-- Ephapax-affine type proofs are **NOT** done — `formal/` mechanises a single legacy judgment + L1's `has_type_l1`; there is no separate mechanised ephapax-affine until L2 + the Linear ⇒ Affine weakening lemma land. See `PRESERVATION-DESIGN.md §12.15`.
+- Formal-proof work spans Coq, Idris2, and the applicable estate policy. Checker output is evidence only for the exact proposition and assumptions run; a green build does not establish general language soundness.
+- The legacy preservation closure plan is obsolete. `formal/PRESERVATION-DESIGN.adoc` is design/history, not a proof result; `formal/PRESERVATION-HANDOFF.adoc` is historical diagnosis only.
+- Modality and `linear_to_affine` artifacts are mechanised, but no unconditional L1/L2 preservation theorem is established. The modality-polymorphic L1 statement is refuted as stated; see `PROOF-NEEDS.adoc` and the EXPLAINME ledger.
 - All commits GPG-signed (key `4A03639C1EB1F86C7F0C97A91835A14A2867091E`), email `6759885+hyperpolymath@users.noreply.github.com`. Auto-merge ON for every PR.
 
 ---
 
 ## Orientation: this language is gestating — engage with v2
 
-**Read `V1-TO-V2.adoc` first.** Ephapax is *not* dead, broken, or
-abandoned — it is part-way through a deliberate second draft on two
-tracks (grammar and soundness proof), both landing. Do not read the
-prohibitions below as "there is nothing to do here." They fence off
-exactly **two** v1 artefacts; everything in v2 is open and wants work.
+**Read `V1-TO-V2.adoc` first.** Ephapax is part-way through a deliberate
+second draft on grammar and proof design. The legacy preservation theorem
+is false, and later counterexamples also refute the current unrestricted
+L1 preservation claim; L2 has no unconditional preservation theorem.
+Do not read this as "there is nothing to do here": the active work is to
+redesign and state sound replacement theorems, not to prove refuted ones.
 
 **Where the tractable work is (engage with this):**
 
-- **Proof, L1** — close the residual L1 structural admits in
-  `formal/Semantics_L1.v` (list/multiset bridge;
-  `region_shrink_preserves_typing_l1_gen_m`; `TFun` effect typing).
-  These are *v2 design follow-ups*, not legacy patching. See
-  `PROOF-NEEDS.md §4`.
-- **Proof, L3** — state + prove the **unconditional** `preservation_l3`
-  (currently conditional on an L1 admit).
+- **Proof, L1** — do not attempt to close the unrestricted
+  `step_pop_disjoint_from_type_l1` or `preservation_l1` statements:
+  both are refuted by pinned Coq counterexamples. The open work is an
+  owner-approved judgment/step redesign with an explicit temporal
+  invariant, followed by a new theorem with a stated boundary.
+- **Proof, L2** — no unconditional `preservation_l2` theorem exists.
+  Keep the fresh-region and nested-`TFunEff` counterexamples visible;
+  the existing β-case lemmas are conditional.
+- **Proof, L3** — the Qed preservation result is scoped to matching
+  echo-emitting typing/step rules; it is not general L1/L2 preservation.
 - **Grammar, v2** — continue the phase work in
   `spec/ephapax-v2-grammar.ebnf` + the `v2_grammar_phase_*` CLI tests.
 - **Proof, L4** — Phase A scaffold landed; mother–child dyadic
-  semantics (`PRESERVATION-DESIGN.md §7`) is the next design step.
+  semantics (`PRESERVATION-DESIGN.adoc §7`) is the next design step.
 
-## 🛑 Owner directive 2026-05-27 — the two fences (narrow, load-bearing)
+## 🛑 Owner directive snapshot (2026-05-27) — legacy fence plus later L1 regressions
 
-> The guardrails below are narrow by design. They stop one specific
-> wasted path (several sessions burned hours trying to close a theorem
-> that is *proven* unclosable). They do **not** mean "skip this repo."
-> Engage with the v2 work listed above; just keep off the two fenced
-> v1 artefacts.
+> The guardrails below protect pinned counterexamples and the false
+> statements they refute. They do **not** mean "skip this repo." The
+> active work is redesigning sound judgments and theorem boundaries;
+> do not try to prove legacy or L1 statements that have already been
+> refuted.
 
 ### TL;DR
 
@@ -110,14 +114,16 @@ Ephapax preservation as originally stated in `formal/Semantics.v` is
 **provably false** — and that is a *result*, not a defeat:
 `formal/Counterexample.v` exhibits a concrete configuration that types,
 steps, and lands at an untypable post-state (5 lemmas `Qed`), which
-named the exact invariant the redesign needed. So the work is **not** to
-close `Theorem preservation` in `Semantics.v` (no closure exists; the
-`Admitted` is deliberate). The work is the **four-layer principled
-redesign** (L1 region capabilities / L2 modality, now `m`-indexed into
-`has_type_l1` / L3 echo / L4 dyadic mode) in
-`formal/PRESERVATION-DESIGN.md`, where preservation is **re-derived
-per layer** from explicit invariants. Three of the four layers already
-carry `Qed` theorems — this is a healthy build, not a stalled one.
+named an invariant missing from the legacy judgment. So the work is **not**
+to close `Theorem preservation` in `Semantics.v` (no closure exists; the
+`Admitted` is deliberate). Nor should the current unrestricted L1
+preservation be treated as routine debt: `Counterexample_StepPop.v` and
+`Counterexample_PreservationL1.v` refute its supporting claim and capstone.
+There is no unconditional L2 preservation theorem; the L2 β-case helpers
+are conditional and later counterexamples document distinct gaps. The
+four-layer architecture in `formal/PRESERVATION-DESIGN.adoc` is a design
+program, not proof that the language is sound. Preserve each local
+counterexample and state any replacement theorem with its exact boundary.
 
 ### DO NOT
 
@@ -138,15 +144,13 @@ them if asked; if asked anyway, push back and link this section.
    invariant the counterexample demands; no lemma collection bolted
    onto it will help.
 
-3. **DO NOT close any residual axiom in `formal/Semantics_L1.v`
-   (e.g. `region_liveness_at_split_l1` if it returns) by adding
-   proof tricks, side-conditions discharged ad-hoc, or strengthened
-   lemma signatures within the current judgment shape.** This is
-   *the same kind of patching that produced the legacy admits*, one
-   layer up. The post-L2-hybrid main carries the `Modality`
-   parameter directly in `has_type_l1`; closures that previously
-   looked like "an L1 fix" are now cross-layer and must be
-   reasoned-about at the layered level.
+3. **DO NOT try to complete the current unrestricted
+   `step_pop_disjoint_from_type_l1` or `preservation_l1` statements in
+   `formal/Semantics_L1.v`.** Both are refuted by pinned witnesses; their
+   `Admitted.` markers are transparent boundaries, not ordinary debt.
+   Do not route around the counterexamples with ad-hoc side conditions or
+   helper-signature changes. A separately stated sound theorem after an
+   owner-approved judgment/step redesign is allowed and expected.
 
 4. **DO NOT follow the "Preservation closure plan" steps in
    historical PRs / branches / comments.** Anything dated before
@@ -162,28 +166,36 @@ them if asked; if asked anyway, push back and link this section.
 
 ### DO
 
-1. **DO read `formal/PRESERVATION-DESIGN.md` first.** It is the
-   canonical design source. The four-layer architecture, the
-   missing-invariant statement, and the per-layer plan are all
-   there.
+1. **DO read `PROOF-NEEDS.adoc` and `EXPLAINME.adoc` for current status.**
+   `formal/PRESERVATION-DESIGN.adoc` records the architecture and history;
+   it is not evidence that a layer's preservation theorem is established.
 
-2. **DO continue the layered build:**
-   - L1 (`TypingL1.v` + `Semantics_L1.v`): R-threading + modality
-     parameter (post-L2-hybrid). Residual admits are L1 design
-     follow-ups, not legacy patching.
-   - L2: modality landed in-place via PRs #176 + #177
-     (`has_type_l1` now carries `m : Modality`;
-     `linear_to_affine` Qed with zero axioms). 6 L1 supporting
-     lemmas in `Semantics_L1.v` regressed to Admitted post-L2 —
-     bullet-structure rewrite needed for the 3 new Affine-only
-     constructors.
-   - L3 (`Echo.v`): K-free, forward-looking. Not wired into L1/L2
-     judgments yet — that's L1 ⇒ L3 follow-up.
-   - L4: not started; design in §7 of the design doc.
+2. **DO continue the layered build without overclaiming:**
+   - L1 (`TypingL1.v` + `Semantics_L1.v`): the judgment and helper
+     lemmas exist, but the unrestricted preservation claim is refuted.
+     Replacement design is open; its theorem boundary must be explicit.
+   - L2: modality is mechanised and `linear_to_affine` is Qed, but
+     no unconditional `preservation_l2` theorem exists. Treat the
+     β-case lemmas as conditional and retain both L2 counterexamples.
+   - L3 (`Echo.v`): calculus and selected matching-rule preservation
+     results are Qed; do not generalise them to L1/L2.
+   - L4: scaffold/design only; no preservation theorem.
 
-3. **DO derive preservation per-layer.** `preservation_l1` is
-   proved in the L1 vocabulary, against the L1 judgment, using L1
-   invariants. The same shape for L2 / L3 / L4 as each lands.
+3. **DO state and prove only sound replacement theorems.** A theorem
+   name or layer label does not make a statement true. First write the
+   exact judgment, transition relation, hypotheses, and boundary; then
+   prove it locally and report its assumptions and regressions.
+
+4. **DO follow estate proofing and grading policy.** Consult
+   `hyperpolymath/mathesis/estate-mathematical-architecture` for grades
+   and `hyperpolymath/standards/3-practice/PROOF-POLICY.adoc` for prover
+   mapping. Mathesis Grade 3 specifically requires a local Agda proof;
+   Coq `Qed` is Coq evidence, not Grade 3. Standards maps
+   Ephapax-specific engineering claims to Idris2 unless an
+   implementation-independent theory statement is explicitly defined.
+   Do not assign a Grade 3 label until that classification and exact
+   statement correspondence are recorded in `EXPLAINME.adoc` and
+   `PROOF-NEEDS.adoc`.
 
 4. **DO escalate before patching.** If a proof attempt requires
    adding a side-condition to fix a sibling-region-disjointness
@@ -214,7 +226,7 @@ Two questions to ask before touching `formal/`:
    in a new layer, not to admit it.
 
 2. **Am I about to close an L1/L2/L3 admit by reasoning that
-   crosses layers?** If yes — check `PRESERVATION-DESIGN.md` for
+   crosses layers?** If yes — check `PRESERVATION-DESIGN.adoc` for
    the cross-layer dependency annotations. The layered design
    intentionally splits some closures across layers; trying to
    close them within one layer alone is the trap.

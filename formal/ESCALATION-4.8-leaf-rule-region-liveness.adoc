@@ -1,7 +1,9 @@
 == Escalation: the §4.8 leaf-rule region-liveness decision (owner call)
 
-*Status:* OPEN — needs an owner design decision before any further L1
-preservation proof work. Raised 2026-06-16.
+*Status:* HISTORICAL / SUPERSEDED — raised 2026-06-16, before the later
+pinned L1 counterexamples. Its candidate closure paths are not current
+proof tasks and do not justify proving the refuted unrestricted statements.
+Use `+PROOF-NEEDS.adoc+` and `+EXPLAINME.adoc+` for current boundaries.
 
 ____
 === ⚠️ UPDATE 2026-06-16 — path (3) *proven insufficient*; the real fork is effect typing
@@ -129,8 +131,10 @@ structural induction (the missing inner-typing premise is now present at
 the variable/loc leaves).
 . `+region_shrink_preserves_typing_l1_gen_m+`’s shadowed case closes via
 the commutation already proved for the descend case.
-. `+preservation_l1+` is re-derived as the capstone (shape drafted in
-PRESERVATION-DESIGN.md §4.5).
+. The historical plan proposed re-deriving `+preservation_l1+` as a
+capstone (shape drafted in `+PRESERVATION-DESIGN.adoc+` §4.5); later
+counterexamples refuted the unrestricted theorem, so this is not a current
+proof route.
 
 Path (1) — effect-typed `+TFunEff+` lambdas — is *already in the
 codebase* and additionally closes the `+S_App_Step2+` case; (3) is the

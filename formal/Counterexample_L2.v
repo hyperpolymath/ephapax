@@ -2,22 +2,23 @@
 (* Owner: Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk> *)
 (* SPDX-FileCopyrightText: 2026 Jonathan D.A. Jewell *)
 
-(** * Soundness gap (L2): preservation_l2 fails for TFunEff substituends
+(** * L2 β-preservation counterexample: TFunEff substituends
       inside fresh-region scopes
 
-    The Phase D slice 4 Phase 4c β-case of preservation_l2 fails for
-    programs that substitute a TFunEff value into a body containing
-    [ERegion] (fresh-region) introduction.
+    This exact β-case witness shows that the proposed unrestricted
+    preservation claim fails for programs substituting a TFunEff value
+    into a body containing [ERegion] (fresh-region) introduction. No
+    unconditional [preservation_l2] theorem is declared in the current tree.
 
     This file mechanises the counterexample. It mirrors the structure
     of [Counterexample.v] (which exhibits the legacy preservation's
     soundness gap) but at the L1/L2 layer with the post-redesign
-    [has_type_l1] / [has_type_l2] judgments. The artifact justifies
-    the **conditional** preservation_l2 closure recommended in
-    [SUBST-LEMMA-GENERALIZATION-DESIGN.md] §"Phase 4c": preservation
-    holds only for programs satisfying
-    [regions_introduced_by(ebody) ⊆ R_in_v]; programs outside this
-    class form a documented soundness-gap subclass.
+    [has_type_l1] / [has_type_l2] judgments. The artifact motivates
+    the **conditional** β-case restriction proposed in
+    [SUBST-LEMMA-GENERALIZATION-DESIGN.md] §"Phase 4c": exclude programs
+    whose [regions_introduced_by(ebody)] are not contained in [R_in_v].
+    This witness does not prove the restricted β-case theorem or general
+    L2 preservation; see [PROOF-NEEDS.adoc].
 
     ===== Configuration =====
 

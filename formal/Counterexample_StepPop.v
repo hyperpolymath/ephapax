@@ -64,8 +64,11 @@
         S_StringConcat_Step2, retypes an [ELoc _ r] VALUE whose
         [T_Loc_L1] typing already carried [In r R]; note the witness's
         dangling sibling is a VARIABLE, which no [S_*_Step2] case ever
-        needs to retype at R', suggesting the value-anchored restriction
-        may be provable);
+        needs to retype at R'. This only suggested a restriction; it did
+        not prove one. The later value-anchored witness in
+        [Counterexample_PreservationL1.v] also refutes the restricted
+        [step_pop_disjoint_from_type_l1] conclusion for the
+        [S_StringConcat_Step2] path; that proposed escape is closed.
       - the choreographic route's job description changes from "derive
         coherence from typing" (impossible — this file) to "make
         coherence a judgment-level input" — the foundational thesis,

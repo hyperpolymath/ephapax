@@ -4,9 +4,9 @@
 (* hypatia: allow code_safety/admitted -- FALSE POSITIVE: this file has no Coq admit/Admitted/Axiom; all proofs are Qed-closed. The scanner substring-matched prose in the doc comment that NEGATES their presence ("No new [Axiom] or [Admitted] markers"). *)
 (* hypatia: allow coq_admit_tactic -- same false positive: substring match on documentation prose, not a Coq tactic. *)
 
-(** * Soundness gap (L2): preservation_l2 fails for nested-TFunEff
-      substituends — the gap Phase 3b Stage 1's [tfuneff_lambda_free]
-      precondition correctly EXCLUDES.
+(** * L2 β-preservation counterexample: nested-TFunEff substituends
+      — excluded by the Phase 3b Stage 1 [tfuneff_lambda_free] precondition.
+      No unconditional [preservation_l2] theorem is declared.
 
     Sibling artifact to [Counterexample_L2.v]. That earlier file
     witnessed the soundness gap for TFunEff substituends crossing
@@ -23,10 +23,10 @@
       (P2)  [regions_introduced_by ebody ⊆ R_in_v]
             — rules out [Counterexample_L2.v]'s class (fresh region)
 
-    Stage 2 (#240) lifts (P1) by carrying [R_in / R_out] on [ELam].
-    Stage 3 (#241) replaces (P1) with a CPS-style proof that closes
-    the inner-lambda case via a relaxed [declared_lambda_r_ins ⊆ R_in_v]
-    obligation. Stage 4 (#242) reaches an unconditional preservation_l2.
+    The Stage 2–4 sequence below is historical planning, not a verified
+    theorem route. In particular, Stage 4's proposed unconditional
+    [preservation_l2] is not established or declared in the current tree;
+    retain the counterexamples as controls for any redesign.
 
     ===== Configuration =====
 

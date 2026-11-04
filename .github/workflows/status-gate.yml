@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: MPL-2.0
 # This workflow is managed by gh actions-lock.
 # Owner: Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk>
-# Status Gate — fail when the PROOF-NEEDS.md / TEST-NEEDS.md count markers
+# Status Gate — fail when the PROOF-NEEDS.adoc / TEST-NEEDS.adoc count markers
 # drift from coqc/cargo ground truth.
 #
 # Split into two independent jobs so the slow one is cancellable without
@@ -18,8 +18,8 @@ on:
   pull_request:
     paths:
       - 'formal/**'
-      - 'PROOF-NEEDS.md'
-      - 'TEST-NEEDS.md'
+      - 'PROOF-NEEDS.adoc'
+      - 'TEST-NEEDS.adoc'
       - 'scripts/status-gate.sh'
       - 'Cargo.toml'
       - 'Cargo.lock'
@@ -36,7 +36,7 @@ concurrency:
 
 jobs:
   # CORE — fast, no toolchain. Keep this one required: a new Admitted that
-  # isn't reflected in PROOF-NEEDS.md fails here in ~1 second.
+  # isn't reflected in PROOF-NEEDS.adoc fails here in ~1 second.
   status-gate-core:
     name: status-gate-core
     runs-on: ubuntu-latest
@@ -56,7 +56,7 @@ jobs:
     steps:
       - name: Notice — this is the slow, skippable job
         run: |
-          echo "::notice title=Slow check — safe to cancel::status-gate-tests runs a full cargo build just to verify the TEST-NEEDS.md test count. The core proof-count gate (status-gate-core) is a separate, independent job and is already enforced. If you're in a rush you can cancel THIS job without letting any core gating go."
+          echo "::notice title=Slow check — safe to cancel::status-gate-tests runs a full cargo build just to verify the TEST-NEEDS.adoc test count. The core proof-count gate (status-gate-core) is a separate, independent job and is already enforced. If you're in a rush you can cancel THIS job without letting any core gating go."
       - name: Checkout repository
         uses: actions/checkout@v7.0.1
       - name: Install Rust toolchain

@@ -156,18 +156,16 @@ Proof.
   rewrite Hneutral in Hsuf. exact Hsuf.
 Qed.
 
-(** ** (B) The decisive lemma — a sibling [Use] keeps the region live.
+(** ** (B) A trace-model lemma — a sibling [Use] keeps the region live.
 
-    THIS is the obligation [step_pop_disjoint_from_type_l1] relocates to,
-    proved here as a pure structural fact. If the surviving sibling uses
-    [rv] AFTER the stepping sibling's sub-trace [t1] (the whole
-    [t1 ++ Use :: t2] is coherent), then the balance after [t1] is forced
-    [>= 1]: the stepping sibling CANNOT have closed [rv] out of scope. In
-    [step_pop] terms, [rv] free in the result type (the surviving
-    sibling's [Use]) + [rv] live before the step ([k >= 1]) gives [rv]
-    live AFTER the step — exactly [In rv R'] — with NO appeal to
-    preservation. The snapshot cannot prove this because it does not carry
-    the order placing the [Use] after [t1]. *)
+    This proves a pure structural fact in the experiment's trace model:
+    if the surviving sibling uses [rv] AFTER the stepping sibling's
+    sub-trace [t1], then the model's balance after [t1] is [>= 1]. It is
+    not a proof of [step_pop_disjoint_from_type_l1]: no verified
+    translation from the Coq operational step and typing derivation into
+    this trace model is established here. Later pinned L1 counterexamples
+    refute the unrestricted Coq statement, so this experiment is a
+    research artifact, not a closure route or soundness receipt. *)
 Theorem sibling_use_keeps_region_live : forall t1 t2 k,
   valid k (t1 ++ Use :: t2) ->
   final_balance k t1 >= 1.

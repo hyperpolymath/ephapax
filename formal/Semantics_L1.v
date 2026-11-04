@@ -1,7 +1,7 @@
 (* SPDX-License-Identifier: MPL-2.0 *)
 (* SPDX-FileCopyrightText: 2026 Jonathan D.A. Jewell *)
 
-(* hypatia: allow code_safety/admitted -- TRACKED v2 proof-debt, not an honest-completion gap. The 2 remaining Admitted lemmas (step_pop_disjoint_from_type_l1, preservation_l1) and their internal `admit.` tactics are documented in PROOF-NEEDS.md and owner-fenced by CLAUDE.md (directive 2026-05-27): closing or extending them via ad-hoc patching is a banned anti-pattern. step_pop is open eliminator-fork research; preservation_l1 is the capstone gated on it. The former third admit, region_liveness_at_split_l1_gen, was provably FALSE as stated and has been REMOVED (2026-06-26) via the honest val_region_no_exit reformulation (routes through the TRUE region_liveness_no_exit_l1_gen, Qed). Build truth is the `Print Assumptions` CI gate, not this comment. *)
+(* hypatia: allow code_safety/admitted -- tracked proof boundary; not an honest-completion claim. The two remaining outer Admitted markers (step_pop_disjoint_from_type_l1, preservation_l1) are each refuted as currently stated: see Counterexample_StepPop.v and Counterexample_PreservationL1.v. Do not try to close either unrestricted claim by ad-hoc patching or relabel them routine debt. Replacement work must reformulate the judgment/step interface with an explicit invariant and state a new theorem. The former region_liveness_at_split_l1_gen false statement was removed (2026-06-26) via val_region_no_exit / region_liveness_no_exit_l1_gen. See PROOF-NEEDS.adoc for current classification. Build truth is the `Print Assumptions` CI gate, not this comment. *)
 (* hypatia: allow coq_admit_tactic -- see preceding directive; same tracked admits. *)
 
 (**
@@ -11,8 +11,9 @@
   ***                                                                ***
   ***  This is the post-counterexample L1 redesign. Extend HERE.     ***
   ***                                                                ***
-  ***  3 `Admitted` lemmas remain (down from 7 mid-chain, 9 pre-     ***
-  ***  bullet-restoration). L2-β + L1 closures so far:               ***
+  ***  2 outer `Admitted` lemmas remain; both unrestricted claims    ***
+  ***  are refuted by pinned regressions (see below). L1/L2 Qed      ***
+  ***  infrastructure is not a universal preservation theorem.       ***
   ***    - typing_preserves_bindings_l1 (now m-polymorphic)          ***
   ***    - unrestricted_flag_unchanged_l1                            ***
   ***    - shift_typing_gen_l1 (via shift_typing_gen_l1_m + wrapper) ***
@@ -26,14 +27,11 @@
   ***    - typing_preserves_length_l1, output_shape_at_l1,           ***
   ***      loc_retype_at_R_l1 all generalised to m-polymorphic       ***
   ***                                                                ***
-  ***  Residual admits (L2-β follow-up):                             ***
-  ***    1. region_liveness_at_split_l1_gen — 1 narrow admit in the  ***
-  ***       T_Region_Active_L1 [r = rv] sub-case (genuinely false    ***
-  ***       per documented counterexample ERegion rv (EI32 5))       ***
-  ***    2. step_pop_disjoint_from_type_l1 — congruence cases        ***
-  ***       (S_Let_Step etc.) blocked on §4.8 lambda-rigidity        ***
-  ***    3. preservation_l1 — capstone; depends on closing (1)+(2)   ***
-  ***       under L2 dispatch + lambda-rigidity gap resolution       ***
+  ***  Refuted statements still marked Admitted:                      ***
+  ***    - step_pop_disjoint_from_type_l1 — Counterexample_StepPop.v ***
+  ***    - preservation_l1 — Counterexample_PreservationL1.v         ***
+  ***  Their Admitted markers are transparency, not a proof plan.     ***
+  ***  Replacement theorems require an owner-approved redesign.       ***
   ***                                                                ***
   ***  DO NOT close them by:                                         ***
   ***    - introducing new `Axiom` declarations                      ***
@@ -41,10 +39,10 @@
   ***    - strengthened lemma signatures dodging the L2 dispatch     ***
   ***                                                                ***
   ***  Cross-layer dependencies (L1's lambda-rigidity gap closes at  ***
-  ***  L2) are documented in `formal/PRESERVATION-DESIGN.md §5.1`.   ***
+  ***  L2) are documented in `formal/PRESERVATION-DESIGN.adoc §5.1`.   ***
   ***                                                                ***
-  ***  See `STATUS.adoc`, `PROOF-NEEDS.md`, and                      ***
-  ***  `formal/PRESERVATION-DESIGN.md`.                              ***
+  ***  See `STATUS.adoc`, `PROOF-NEEDS.adoc`, and                      ***
+  ***  `formal/PRESERVATION-DESIGN.adoc`.                              ***
   *********************************************************************
 
 *)
@@ -55,7 +53,7 @@
     judgment in [TypingL1.v]. The operational semantics [step] from
     [Semantics.v] is unchanged.
 
-    Per PRESERVATION-DESIGN.md §4.5, preservation under L1 is:
+    Per PRESERVATION-DESIGN.adoc §4.5, preservation under L1 is:
 
       [step (mu, R, e) (mu', R', e')] /\
       [has_type_l1 R G e T R_final G']
@@ -77,29 +75,24 @@
       [region_shrink_preserves_typing_l1_gen{,_m}] was FALSE-as-stated
       (witness pinned in [Counterexample_RegionShrink.v]) and is
       replaced by the multiset-permutation lemma; no residual admit here.
-    - [subst_preserves_typing_l1] — Qed (L1.C) with strengthened
-      statement (the original signature was demonstrably unsound — see
-      the lemma's header). Depended on a single isolated sub-Axiom
-      [loc_retype_at_R_l1] (task #27); the L1.F PR replaces that
-      unsound axiom with (i) a Qed-able [loc_retype_at_R_l1] requiring
-      [In r R_inner] and (ii) a narrower [region_liveness_at_split_l1]
-      axiom capturing only the genuine structural obligation that
-      remains. Two compound-rule cases (T_Lam_L1_Linear, T_Region_L1) are
-      discharged directly with no axiom; nine residual sites cite the
-      narrower axiom. See its header for closure approaches.
-    - [preservation_l1] — Admitted; the three swarm helpers above
-      unblock the per-case proof, but the bullet structure (per
-      design doc §4.5 + §12.16) is itself follow-up work (task #24).
+    - [subst_preserves_typing_l1] — Qed with a strengthened statement
+      (the original signature was demonstrably unsound; see the lemma
+      header). The former [region_liveness_at_split_l1] axiom was
+      removed as false-as-stated; current substitution routes through
+      the Qed no-exit formulation and explicit premises described by
+      [val_region_no_exit]. These helper results do not establish
+      preservation for every step.
+    - [preservation_l1] — still marked Admitted, but its unrestricted
+      statement is refuted by [Counterexample_PreservationL1.v]. Do not
+      treat the marker as unfinished routine proof debt. A replacement
+      requires an explicitly different judgment/step boundary or a
+      restricted theorem with proved premises; see [PROOF-NEEDS.adoc].
 
-    Per-case proof sketches were validated experimentally during this
-    file's authoring. The cases that close without any of the three
-    Admitted helpers are: S_StringNew (apply T_Loc_L1), S_StringConcat
-    (invert both T_Loc_L1 children, then apply T_Loc_L1), S_StringLen
-    (invert the borrow, apply T_I32_L1), S_If_True / S_If_False
-    (invert T_Bool_L1 on the condition, then assumption), S_Region_
-    Enter (re-apply T_Region_Active_L1 with the same R_body), and
-    S_Drop (apply T_Unit_L1). These can be inlined once the bullet
-    structure accounts for the per-region typing cross-cases
+    Older per-case proof sketches and closure estimates below are
+    historical authoring notes. The current theorem boundaries are the
+    pinned regressions and scoped lemmas identified above; local Qed
+    cases must not be read as evidence that the refuted universal
+    statement can be completed.
     (ERegion inverts to both T_Region_L1 and T_Region_Active_L1,
     doubling subgoals for the three region step rules).
 
@@ -982,9 +975,8 @@ Qed.
     [k] in both input and output. R is unchanged at every rule.
 
     L2-β restoration 2026-05-27: generalised to modality-polymorphic
-    [has_type_l1 m] mirroring [region_liveness_at_split_l1_gen]'s
-    shape. The Linear-only wrapper [shift_typing_gen_l1] preserves
-    the original signature for callers. Body ported from commit
+    [has_type_l1 m]. The Linear-only wrapper [shift_typing_gen_l1]
+    preserves the original signature for callers. Body ported from commit
     56f592f with new bullets for T_Lam_L1_Affine, T_Case_L1_Affine,
     T_If_L1_Affine — each Affine case mirrors its Linear counterpart
     since R and `insert_at` threading are modality-independent. *)
@@ -2068,10 +2060,11 @@ Qed.
 
 (** The substituted value's region has no exit inside [e]. For a linear
     value (always an [ELoc _ r] by [linear_value_is_loc_l1]) this is the
-    honest no-exit side condition; for any other value it is vacuous. This
-    is the premise that lets the 13 substitution sites below discharge
-    region-liveness through the TRUE [region_liveness_no_exit_l1_gen]
-    instead of the false [region_liveness_at_split_l1_gen]. *)
+    explicit no-exit premise; for any other value it is vacuous. The
+    substitution theorem below requires it and uses the Qed
+    [region_liveness_no_exit_l1_gen] lemma. The former unconditional
+    [region_liveness_at_split_l1_gen] statement was false and has been
+    removed; this conditional lemma does not prove preservation by itself. *)
 Definition val_region_no_exit (v e : expr) : Prop :=
   match v with
   | ELoc _ r => expr_no_exit_of_region r e
@@ -2137,10 +2130,10 @@ Definition val_region_no_exit (v e : expr) : Prop :=
     [formal/L1-REGION-REFOUNDATION-PLAN.md] (ADMIT 2 section). *)
 
 (** Generalized substitution: at depth [k] for a linear value [v].
-    Mirrors legacy [subst_typing_gen]. The only L1-specific gap is the
-    need to retype [v = ELoc l r] at the inner region environment of
-    compound rules. Closed via [region_liveness_at_split_l1_gen] +
-    [loc_retype_at_R_l1_m].
+    Mirrors legacy [subst_typing_gen] under the L1 judgment. The
+    strengthened theorem carries [val_region_no_exit] explicitly; its
+    Qed proof uses the no-exit liveness lemma and local retyping helpers.
+    It is conditional infrastructure, not a preservation theorem.
 
     L2-β follow-up #2 (closed): m-polymorphic generalisation
     mirroring [shift_typing_gen_l1_m]. The substituted value's typing
@@ -3191,9 +3184,16 @@ Qed.
 
 (** ** Preservation under the L1 judgment.
 
-    Case-by-case inversion + reconstruction over [step]. The proof
-    closes 30 of 33 residual subgoals (post-automation chain + L1.E
-    [count_occ_le_l1]); the 3 remaining [admit.]s surface a deeper
+    HISTORICAL proof decomposition (pre-counterexample; case counts and
+    proposed closure route below are not current proof debt). The
+    unrestricted theorem is now refuted as stated by
+    [Counterexample_PreservationL1.v]. Its [Admitted] is a transparent
+    marker for a false statement, not a proof expected to be completed.
+    The old case-by-case diagnosis follows only as design archaeology.
+
+    At the time, the proof sketch described 30 of 33 case subgoals as
+    closing; that accounting does not change the counterexample result or
+    establish any restricted replacement. The remaining diagnosis was a
     **soundness-class gap**:
 
       - S_StringConcat_Step2: TString r type — the lift is sound
@@ -3227,15 +3227,16 @@ Qed.
       multiset-perm hypothesis (an active region strictly drops its
       r-count, so its output cannot be a multiset-perm of its input).
 
-    Until the lambda-rigidity gap is resolved (likely via effect-
-    typed lambdas as an L2/L3 extension), [preservation_l1] remains
-    [Admitted.] but the proof body documents exactly which sub-cases
-    remain and the structural reason for each. *)
+    This historical lambda-rigidity diagnosis is incomplete in light of
+    [Counterexample_PreservationL1.v]. Do not treat the old case map or
+    effect-typed-lambda route as a proof plan for the refuted theorem.
+    Any replacement must state its changed judgment and premises
+    explicitly and be checked against all pinned regressions. *)
 
 (** ** P06 — [step_pop_disjoint_from_type_l1]
 
     Auxiliary lemma for the S_StringConcat_Step2 case of
-    [preservation_l1]. Per [PRESERVATION-DESIGN.md §4.7]: the
+    [preservation_l1]. Per [PRESERVATION-DESIGN.adoc §4.7]: the
     operational [step] never pops a region that appears free in the
     type of the stepping expression. Combined with [In r R] from a
     [TString r] value's typing (via [linear_value_is_loc_l1] +
@@ -3271,13 +3272,11 @@ Qed.
     to the static typing output — preservation itself (the §2 "same
     wall").
 
-    **Verdict (§6).** RELOCATES, not closes — but now to ONE minimal,
-    precisely-stated obligation (count-coherence at a congruence region
-    exit), not eleven scattered §4.8 admits. The closure route is the
-    tropically-graded choreography over time segments in
-    [formal/L1-ELIMINATOR-FORK.md] §3–§7. The single outer [Admitted]
-    and [preservation_l1]'s [admit] are unchanged; this is a clarity +
-    isolation improvement, not an axiom-count reduction. *)
+    **Verdict (historical §6, superseded).** This analysis isolated a
+    count-coherence obligation but did not establish it. The unrestricted
+    lemma above is now refuted by [Counterexample_StepPop.v]; its outer
+    [Admitted] is not routine proof debt. The choreography documents a
+    redesign direction, not a proof route for the current statement. *)
 Lemma step_pop_disjoint_from_type_l1 :
   forall mu R e mu' R' e' m G T R_final G',
     (mu, R, e) -->> (mu', R', e') ->
@@ -3309,9 +3308,9 @@ Proof.
          coherence at a region exit: the temporal/segment structure the
          snapshot env + result type cannot express, relocating to connecting
          the dynamic exit to the static typing output, i.e. preservation
-         itself.  Open research; the §6 "relocates" verdict and the
-         choreographic route are recorded in
-         [formal/L1-ELIMINATOR-FORK.md]. *)
+         itself. This unrestricted statement is refuted by
+         [Counterexample_StepPop.v]; the choreographic route is a
+         redesign direction, not a proof plan for this lemma. *)
       subst r. admit.
     + (* r <> r0 : remove_first r keeps every r0. *)
       apply remove_first_preserves_other; [exact Hne | exact HinR].
@@ -3328,10 +3327,10 @@ Theorem preservation_l1 :
       has_type_l1 m R G e T R_final G' ->
       has_type_l1 m R' G e' T R_final G'.
 Proof.
-  (* L2 partial: re-state under modality. Linear and Affine cases
-     both Admitted in this PR — Linear branch had pre-L2 partial
-     proof (12 admits) which becomes harder to maintain after the
-     mode-split; full restoration deferred to L2-β. *)
+  (* Deliberately remains Admitted: the unrestricted theorem statement
+     is refuted by Counterexample_PreservationL1.v. Do not fill this
+     proof body without first replacing the false statement with an
+     owner-approved, explicitly restricted soundness theorem. *)
   intros m mu R e mu0 R0 e0 Hstep G T R_final G_out Ht.
   admit.
 Admitted.
@@ -3347,8 +3346,8 @@ Admitted.
     Stated as two per-case lemmas + an umbrella theorem
     [preservation_l3] which is their conjunction.
 
-    Design constraint (PRESERVATION-DESIGN.md §6.3 +
-    PROOF-NEEDS.md §2): the L3 step rules are universally
+    Design constraint (PRESERVATION-DESIGN.adoc §6.3 +
+    PROOF-NEEDS.adoc §2): the L3 step rules are universally
     quantified over the witness type [T] in the [EEcho T v]
     residue. The non-determinism is resolved at the typing-
     derivation level — each L3 typing rule pins [T] to its body
@@ -3519,26 +3518,17 @@ Print Assumptions preservation_l3.
 
 (** ** P06 — axiom-dependency audit of [step_pop_disjoint_from_type_l1].
 
-    [step_pop_disjoint_from_type_l1] is [Admitted] in this commit (the
-    HARD cases — S_Let_Step, S_LetLin_Step, S_App_Step2, S_If_Step,
-    S_Pair_Step1/2, S_Inl_Step, S_Inr_Step, S_Case_Step, S_Region_Step
-    T_Region_L1 sub-case — are blocked on the §4.8 lambda-rigidity /
-    variable-typing strengthening, tracked at ephapax issues
-    #240 / #241 / #242).
+    Historical case analysis below records why the proof body was left
+    structured. It is superseded as a closure plan: the unrestricted
+    theorem is refuted by [Counterexample_StepPop.v], and a later
+    value-anchored witness in [Counterexample_PreservationL1.v] also
+    defeats the proposed restriction. Its [Admitted] is a transparency
+    marker for a false statement, not an unfinished routine proof.
 
-    The EASY cases (atomic non-region step rules; S_Region_Enter /
-    Exit / Exit_Echo; S_StringConcat_Step1/2; S_App_Step1;
-    S_Fst_Step / S_Snd_Step; S_Borrow_Step; S_Drop_Step; S_Copy_Step)
-    are Qed-closed via direct case analysis. The lemma's overall
-    status is therefore "Admitted" but with a structured proof body
-    enumerating the obstacle per case.
-
-    [Print Assumptions] will list the lemma itself as an axiom (the
-    Admitted form). When all internal admits close, this directive
-    will show only the remaining residual axioms
-    ([region_liveness_at_split_l1_gen] and the capstone
-    [preservation_l1]); the former region_shrink admit is now
-    closed (region_shrink_msperm, Qed). *)
+    The Qed cases in the body remain local proof facts; they do not
+    salvage the universal theorem. [Print Assumptions] reports the
+    admitted theorem as an axiom. Current replacement status is in
+    [PROOF-NEEDS.adoc]. *)
 
 Print Assumptions step_pop_disjoint_from_type_l1.
 

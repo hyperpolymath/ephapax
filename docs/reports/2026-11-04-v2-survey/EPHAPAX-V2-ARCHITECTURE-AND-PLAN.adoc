@@ -691,7 +691,7 @@ Items marked "*(external)*" in the Home column live outside `hyperpolymath/ephap
 |P1 Gate integrity
 |`assumptions-gate.sh` covers every headline and is required in `coq-build.yml`. The tripwire fails when an Admitted `X` coexists with a Qed `X_FALSE`. `status-gate.sh`/`.yml` read `PROOF-NEEDS.adoc`. `gen-proof-status.sh` generates PROOF-STATUS.
 |CI red when a dummy `Admitted.` is injected; `bash scripts/status-gate.sh --proofs` exits 0; generated file diff-clean
-|P0 (or a temporary allowlist entry)
+|P0. Until P0 lands, the gate runs report-only for the two refuted L1 names and never allowlists them.
 |S
 
 |P2 Land falsifiers
@@ -712,6 +712,7 @@ Items marked "*(external)*" in the Home column live outside `hyperpolymath/ephap
 * locally nameless region binders;
 * runtime-only `EFrame`;
 * `TArr Rin Rout` with prenex region abstraction;
+* signed integer literals and the I64/F32/F64 literal forms with their primitive step rules (today `Syntax.v` declares `TI64`/`TF32`/`TF64` but has only `EI32 : nat`);
 * grades {0,1,ω} with modality = preorder;
 * compound join;
 * `TEcho` grade 1 in Linear mode;
@@ -744,7 +745,7 @@ Includes `step_v2_deterministic`.
 |L
 
 |P8 Canonical forms
-|For every type former present at P4: unit, bool, i32, string, arr, sum, prod, ref, borrow, region, echo. The `mu` canonical form belongs to P17, when `TMu` is introduced.
+|For every type former present at P4: unit, bool, i32, i64, f32, f64, string, arr, sum, prod, ref, borrow, region, echo. The `mu` canonical form belongs to P17, when `TMu` is introduced.
 |CLOSED
 |P4
 |S–M
@@ -788,7 +789,7 @@ Includes `step_v2_deterministic`.
 |P15 Certified checker
 |`check_v2_sound`; `check_v2_complete` on the annotated fragment; `check_mod`; extraction (target per D9). If D9 picks derivation certificates (the recommended option): `check_v2_cert` and `check_v2_cert_sound` (an accepted certificate implies `has_type_v2`), extracted or run under Coq.
 |CLOSED; extracted oracle builds in CI and checks the corpus
-|P10, P13
+|P10, P13, D9 ratified (with the X10 prototype attached) before W5 starts
 |M–L
 
 |P16 Desugar seam
@@ -852,7 +853,7 @@ These are kept off the critical path.
 
 |E1 Fail loudly
 |Perform/Handle give a `CodegenError`. `@total`, `@pure` and `@comptime` give an "annotation not enforced" error. G5 FFI gets a clean error or contiguous indices (lib.rs:478, 579). `-O`, `--debug` and `check --mode` take effect or are rejected.
-|`tests/fail_loud.rs`: the perform/handle probes return `CodegenError` without producing a module. g5 either fails with a named clean error or compiles to a module whose FFI imports are contiguous and which passes structural validation. The `@total` loop is rejected. (`compile_match` legitimately emits an `unreachable` fallback, so the gate does not ban `unreachable` globally.)
+|`tests/fail_loud.rs`: the perform/handle probes return `CodegenError` without producing a module. g5 either fails with a named clean error or compiles to a module whose FFI imports are contiguous and which passes structural validation. The `@total` loop, an `@pure` function with an effect and an `@comptime` declaration are each rejected with the "annotation not enforced" error. `-O`, `--debug` and `check --mode` each have a test showing they either take effect or are rejected. (`compile_match` legitimately emits an `unreachable` fallback, so the gate does not ban `unreachable` globally.)
 |none
 |S
 
@@ -901,7 +902,7 @@ These are kept off the critical path.
 |E9 Recursive types + closures
 |Iso-recursive `TMu` with boxed codegen; funcref table with the ADR-005 ABI; behind `--unstable-core` until P17 is CLOSED.
 |IntList sum and `apply(f: I32 -> I32, x)` run and pass the gate
-|E5, D7
+|E5, D7; E8 for completing the gate (implementation behind `--unstable-core` can proceed earlier)
 |L
 
 |E10 stdlib port
@@ -918,13 +919,13 @@ These are kept off the critical path.
 
 |E12 Differential harness
 |core→SyntaxV2 translator, oracle runner, generator, mutation, corpus mode; report of fragment coverage.
-|soundness direction (Rust-accept ⇒ oracle-accept) at 0 tolerance from the first oracle; completeness reported
+|soundness direction (Rust-accept ⇒ oracle-accept) at 0 tolerance from the first oracle; completeness reported; for jointly accepted terms, normalized `(Ty, R', G')` tuples are compared and mismatches reported
 |P6 (naive oracle) for the initial harness. P15 is only a later upgrade, re-pointing it to `CheckV2` in W5.
 |M–L
 
 |E13 Rust v2 checker
 |`ephapax-check-v2` as an image of `CheckV2.v`; emits the typed core and, under the D9 certificate option, a derivation certificate that `check_v2_cert` checks per program; `ephapax-typing` delegates to it.
-|0 disagreements (both directions) over corpus + 100k generated + 10k mutated terms, in CI on every PR
+|0 disagreements (both directions, and on normalized `(Ty, R', G')` output tuples for jointly accepted terms) over corpus + 100k generated + 10k mutated terms, in CI on every PR
 |P15, D5
 |L
 
@@ -942,7 +943,7 @@ These are kept off the critical path.
 
 |E16 L3/L4 surface + RMR/RMO
 |echo/observe/`drop!`/`region!`, mode declarations, `Erasure.eph`, `Reversible.eph`, scrub-on-exit; docs: full-fiber Linear echo = RMR (retention), never "erasure".
-|unobserved Linear echo rejected; affine and linear outputs differ in ownership; freed sensitive cells read 0 (interpreter; wasmtime-level UNVERIFIED until a runner test exists)
+|unobserved Linear echo rejected; affine and linear outputs differ in ownership; freed sensitive cells read 0 both in the interpreter and in a wasmtime runner test (E4) that inspects the freed linear-memory range after region exit
 |P12, P13, Affine proposal
 |L
 
@@ -1093,6 +1094,7 @@ a|* T4a P11 rest
 * T4e P17 TMu re-check
 * T4f P19 ledger + `EchoBridge` (both checkers)
 * T4g typed-wasm Affine kind + mode-record proposal
+* T4h D9 decision record (checker oracle form) with the X10 results attached, ratified by the owner before W5
 |7
 |All CLOSED; EchoCopy untypable; `preservation_v2` CLOSED with TMu; every ledger row records both exit codes and versions; self-recursive `comptime_fn` fails to parse.
 |stdlib bulk port; effects

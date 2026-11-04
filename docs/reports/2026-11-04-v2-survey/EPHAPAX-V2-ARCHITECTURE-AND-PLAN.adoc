@@ -51,7 +51,7 @@ The survey ran in an ephemeral container, so its scratch files do not survive. T
 ** A scratch `Lemma env_inconsistent : False` compiles.
 ** The owner ratifies retiring both lemmas to `Definition …_stmt : Prop`.
 ** `preservation_l2_via_l1` and `preservation_l2_lift_case` (`formal/TypingL2.v:334-357`) are made conditional.
-** CI must *assert* `Print Assumptions` for every headline theorem against an *empty* allowlist. Today it only prints the output. No refuted `Admitted` may be allowlisted. That includes the legacy `Semantics.preservation`, because with `Counterexample.v` it derives `False` too. The legacy pair stays quarantined by import closure: `formal/v2` never imports `Semantics.v` or `Counterexample.v`. Whether to also split the build is owner decision D0b.
+** CI must *assert* `Print Assumptions` for every headline theorem against an *empty* allowlist. Today it only prints the output. No refuted `Admitted` may be allowlisted. That includes the legacy `Semantics.preservation`, because with `Counterexample.v` it derives `False` too. The legacy pair stays quarantined by import closure: nothing in `formal/v2` imports `Semantics.v` or `Counterexample.v`, directly or transitively. Whether to also split the build is owner decision D0b.
 . *Land the falsifiers in the repo before any design work (P2, size S).* The scratch counterexamples become in-repo Qed regression files against the *current* judgment:
 ** ClosedCex, EchoCex, EscapeCex, L2Comp, LetCheck;
 ** PairDup (`has_type_l1` lets a `TProd` variable duplicate a linear `TString` in Linear mode, CLOSED);
@@ -1163,9 +1163,9 @@ The legacy `Semantics.preservation` is `Admitted` by directive and is refuted by
 |===
 |Option |(a) |(b) |Comment
 
-|*Recommended (elegant default):* import-closure quarantine. `formal/v2` never imports `Semantics.v`/`Counterexample.v`; every headline's allowlist is empty; the tripwire names the legacy pair as a known refuted `Admitted`
+|*Recommended (elegant default):* import-closure quarantine. Nothing in `formal/v2` imports `Semantics.v` or `Counterexample.v`, directly *or transitively* (CI checks the `coqdep` closure). Every headline's allowlist is empty, and the tripwire names the legacy pair as a known refuted `Admitted`.
 |5 |4
-|No fenced file changes. Soundness is per theorem, read off `Print Assumptions`. Residual risk: an agent importing both modules can still prove `False`, which is why the gate is per headline.
+|No fenced file changes. Soundness is per theorem, read off `Print Assumptions`. This isolates the v2 environment but does *not* make the legacy environment consistent: `legacy_inconsistent` (F0) stays as positive evidence. Residual risk: an agent that imports both modules can still prove `False`, which is why the gate is per headline.
 
 |Split `_CoqProject` into a default `v2` target and a separate `legacy` target that builds `Semantics.v` + `Counterexample*.v`
 |4 |5

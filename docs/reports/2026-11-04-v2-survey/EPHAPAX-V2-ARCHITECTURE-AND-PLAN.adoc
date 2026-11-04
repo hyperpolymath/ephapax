@@ -703,7 +703,7 @@ Items marked "*(external)*" in the Home column live outside `hyperpolymath/ephap
 |P3 Decision record
 |`PRESERVATION-DESIGN.adoc` "Experiment 3 decision record" covering D1–D8 (section 9), each with the default labelled and the X3 prototype table attached.
 |merged and signed off by the owner
-|X3, X4, X9
+|X3, X4, X9, X11 (D8), X13 (D7)
 |S (plus owner time)
 
 |P4 v2 core skeleton
@@ -786,7 +786,7 @@ Includes `step_v2_deterministic`.
 |M
 
 |P15 Certified checker
-|`check_v2_sound`; `check_v2_complete` on the annotated fragment; `check_mod`; extraction (target per D9).
+|`check_v2_sound`; `check_v2_complete` on the annotated fragment; `check_mod`; extraction (target per D9). If D9 picks derivation certificates (the recommended option): `check_v2_cert` and `check_v2_cert_sound` (an accepted certificate implies `has_type_v2`), extracted or run under Coq.
 |CLOSED; extracted oracle builds in CI and checks the corpus
 |P10, P13
 |M–L
@@ -846,13 +846,13 @@ These are kept off the critical path.
 
 |E0 Holes first
 |`mark_used` routes through `demands_consumption` (lib.rs:191). `check_lambda` rejects consuming a captured linear value. `Ty::is_linear` takes the join over Prod/Sum/Tuple/List (conservative *reject*, aligned with the D5 ADR). Recursive `data` gives a `DesugarError`, not an overflow.
-|`tests/linearity_holes.rs`: dup2, dup4, pairdup, lamcap rejected with named `TypeError` kinds; rec1 exits ≠ 134; `cargo test --workspace` green (≥ 507)
+|`tests/linearity_holes.rs`: dup2, dup4, pairdup, lamcap rejected with named `TypeError` kinds; rec1 fails with the named `DesugarError` and the compiler's normal error exit, never a crash or abort; `cargo test --workspace` green (≥ 507)
 |none (escalation note for pairdup)
 |S–M
 
 |E1 Fail loudly
 |Perform/Handle give a `CodegenError`. `@total`, `@pure` and `@comptime` give an "annotation not enforced" error. G5 FFI gets a clean error or contiguous indices (lib.rs:478, 579). `-O`, `--debug` and `check --mode` take effect or are rejected.
-|`tests/fail_loud.rs`: perform, g5 and the `@total` loop are rejected; no `unreachable` in any emitted module
+|`tests/fail_loud.rs`: the perform/handle probes return `CodegenError` without producing a module. g5 either fails with a named clean error or compiles to a module whose FFI imports are contiguous and which passes structural validation. The `@total` loop is rejected. (`compile_match` legitimately emits an `unreachable` fallback, so the gate does not ban `unreachable` globally.)
 |none
 |S
 
@@ -923,7 +923,7 @@ These are kept off the critical path.
 |M–L
 
 |E13 Rust v2 checker
-|`ephapax-check-v2` as an image of `CheckV2.v`; emits the typed core; `ephapax-typing` delegates to it.
+|`ephapax-check-v2` as an image of `CheckV2.v`; emits the typed core and, under the D9 certificate option, a derivation certificate that `check_v2_cert` checks per program; `ephapax-typing` delegates to it.
 |0 disagreements (both directions) over corpus + 100k generated + 10k mutated terms, in CI on every PR
 |P15, D5
 |L
@@ -1007,7 +1007,7 @@ These are kept off the critical path.
 
 |X11
 |Halting-island grammar on a scratch pest copy: fraction of intended EBNF comptime uses that survive.
-|D12 (K9)
+|D8 (K9)
 
 |X12
 |Bench: corpus compile time cold and warm; `p1.wasm` size (959 B baseline); wasmtime time for a 1e6-iteration fold with and without scrub; LSP incremental latency on `bridge.eph` (target < 100 ms).
@@ -1053,7 +1053,7 @@ a|* T0a P0 dry run, then the ratification request (X2)
 |typed-wasm; any judgment design; `formal/v2`
 
 |*W1 Decisions and infrastructure* (1–2 weeks)
-a|* T1a decision packet D1–D8 with X3 + X4 + X9 attached
+a|* T1a decision packet D1–D8 with X3 + X4 + X9 + X11 + X13 attached
 * T1b X7 typed-wasm upstream PRs (offsets, bounds, taint)
 * T1c E3 driver + E4 runner
 * T1d E2 corpus + E7 grammar reconciliation draft
@@ -1452,7 +1452,7 @@ The legacy `Semantics.preservation` is `Admitted` by directive and is refuted by
 
 |Inconsistency or axiom regression
 |P1 gate and tripwire
-|*K5:* any axiom in a headline's `Print Assumptions` reverts the PR automatically (the allowlist starts empty)
+|*K5:* any axiom in a headline's `Print Assumptions` that is not on the owner-signed allowlist reverts the PR automatically. The allowlist starts empty and stays empty for every L1/L2 headline. Only named METAL-BOUNDARY entries for P21 may be added to it.
 
 |Rust/Coq drift; trusted oracle
 |Soundness direction at 0 tolerance; derivation certificates; report as "tested agreement", never "verified Rust checker"

@@ -4,8 +4,11 @@
 
     Re-checkable witnesses for the findings in
     docs/reports/2026-11-04-v2-survey/EPHAPAX-V2-ARCHITECTURE-AND-PLAN.adoc.
-    Every lemma here is against the CURRENT v2 judgment ([has_type_l1],
-    [step]); none touches or extends the legacy Semantics.v preservation.
+    Apart from F0, every lemma here is against the CURRENT v2 judgment
+    ([has_type_l1], [step]). F0 is the single exception: it *uses* the
+    legacy [Semantics.preservation] (Admitted by owner directive) together
+    with [Counterexample.v] to witness the legacy inconsistency. Nothing
+    here closes, edits or extends the legacy theorem or Semantics.v.
 
     Check (from repo root, after building formal/):
       cd formal && coq_makefile -f _CoqProject -o Makefile.coq \

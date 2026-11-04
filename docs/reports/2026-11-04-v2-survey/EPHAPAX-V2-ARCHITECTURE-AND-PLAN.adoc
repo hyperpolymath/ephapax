@@ -17,7 +17,7 @@ The survey ran the following toolchains:
 
 Idris2, Lean, Isabelle, zig, julia, z3 and the wasmtime CLI are not installed. Every claim that depends on them is marked *UNVERIFIED*.
 
-Nothing in this document proposes closing or extending `formal/Semantics.v` or `formal/Typing.v`. The legacy `Theorem preservation` is false (`formal/Counterexample.v`), and its `Admitted.` is correct.
+Nothing in this document proposes closing or extending `formal/Semantics.v` or `formal/Typing.v`. The legacy `Theorem preservation` is false (`formal/Counterexample.v`), and it stays `Admitted.` by owner directive. Because an `Admitted` statement is an axiom, the legacy theorem together with `Counterexample.v` also derives `False` (`evidence/SurveyCounterexamples.v`, F0). It therefore must never appear in the `Print Assumptions` of any headline theorem; see P0/P1 and D0.
 
 Throughout, *ephapax-affine* means the internal sublanguage. It is not AffineScript. The two projects share only the compile target, typed-wasm.
 
@@ -26,7 +26,7 @@ Throughout, *ephapax-affine* means the internal sublanguage. It is not AffineScr
 ====
 The survey ran in an ephemeral container, so its scratch files do not survive. The load-bearing witnesses were re-checked by hand and committed beside this plan:
 
-* `evidence/SurveyCounterexamples.v` (Coq 8.18, not part of `formal/_CoqProject`). It proves `False` from each of the two `Admitted.` v2 lemmas (F1). It also proves the closed-context preservation failure (ClosedCex, F2), the echo cross-path failure (EchoCex part 1, F3), the stuck `EObserve` (EchoCex part 2, F4), PairDup (F5) and EchoCopy (F6). Apart from F1, every lemma prints "Closed under the global context".
+* `evidence/SurveyCounterexamples.v` (Coq 8.18, not part of `formal/_CoqProject`). It proves `False` from each of the two `Admitted.` v2 lemmas (F1), and from the legacy `Admitted` `Semantics.preservation` together with `Counterexample.v` (F0). It also proves the closed-context preservation failure (ClosedCex, F2), the echo cross-path failure (EchoCex part 1, F3), the stuck `EObserve` (EchoCex part 2, F4), PairDup (F5) and EchoCopy (F6). Apart from F0 and F1, every lemma prints "Closed under the global context".
 * `evidence/probes/*.eph.txt`, with verdicts tabulated in `evidence/README.adoc`. These are the Rust-checker probes: `ephapax check` accepts dup2, dup4, pairdup and lamcap, and rec1 aborts with a stack overflow (exit 134).
 
 *Not re-checked:* the EscapeCex, L2Comp and LetCheck families were produced by a survey agent whose scratch files were lost to a container restart. Their statements in this plan are as that agent reported them. Rung P2 must re-create and land them before they are relied on.
@@ -51,7 +51,7 @@ The survey ran in an ephemeral container, so its scratch files do not survive. T
 ** A scratch `Lemma env_inconsistent : False` compiles.
 ** The owner ratifies retiring both lemmas to `Definition …_stmt : Prop`.
 ** `preservation_l2_via_l1` and `preservation_l2_lift_case` (`formal/TypingL2.v:334-357`) are made conditional.
-** CI must *assert* `Print Assumptions` against the allowlist `{Semantics.preservation}`. Today it only prints the output.
+** CI must *assert* `Print Assumptions` for every headline theorem against an *empty* allowlist. Today it only prints the output. No refuted `Admitted` may be allowlisted. That includes the legacy `Semantics.preservation`, because with `Counterexample.v` it derives `False` too. The legacy pair stays quarantined by import closure: `formal/v2` never imports `Semantics.v` or `Counterexample.v`. Whether to also split the build is owner decision D0b.
 . *Land the falsifiers in the repo before any design work (P2, size S).* The scratch counterexamples become in-repo Qed regression files against the *current* judgment:
 ** ClosedCex, EchoCex, EscapeCex, L2Comp, LetCheck;
 ** PairDup (`has_type_l1` lets a `TProd` variable duplicate a linear `TString` in Linear mode, CLOSED);
@@ -115,7 +115,7 @@ Sources: the scratch builds and probes recorded in the dossier, plus spot checks
 
 |Consistency of the global environment
 |implicitly consistent
-|*Inconsistent*: `False` is derivable from `preservation_l1` + `preservation_l1_FALSE`, and likewise for step_pop
+|*Inconsistent*: `False` is derivable from `preservation_l1` + `preservation_l1_FALSE`, and likewise for step_pop. The legacy `Semantics.preservation` (`Admitted`, kept by directive) together with `Counterexample.v` also derives `False` (F0).
 |critical; not recorded in any doc
 
 |`preservation_l1` partial progress
@@ -684,7 +684,7 @@ Items marked "*(external)*" in the Home column live outside `hyperpolymath/ephap
 
 |P0 Consistency restore
 |Owner-ratified retirement: `preservation_l1` and `step_pop_disjoint_from_type_l1` become `Definition …_stmt : Prop`. `preservation_l2_via_l1` and `lift_case` take `preservation_l1_stmt` as a hypothesis, or are deleted. The `*_FALSE` files still compile. The PR is framed as *retirement*, not closure (CLAUDE.md DO NOT #3 adjacency). The same PR corrects CLAUDE.md, V1-TO-V2.adoc, STATUS.adoc and PROOF-NEEDS, which currently send agents to "close the residual L1 admits". Docs are applied by the owner, GPG-signed.
-|ORACLE-COQ; scratch `env_inconsistent : False` fails to compile (expected-failure target); allowlist = `{Semantics.preservation}`
+|ORACLE-COQ; scratch `env_inconsistent : False` from the L1 pair fails to compile (expected-failure target); allowlist = `{}` for every headline. `legacy_inconsistent` still compiles until D0b is decided. It is recorded as a known, quarantined inconsistency that no headline may depend on.
 |owner ratification
 |S
 
@@ -1049,7 +1049,7 @@ a|* T0a P0 dry run, then the ratification request (X2)
 * T0e X1 probe battery + X8 aLib harness + E6 conformer
 * T0f doc-correction PR draft (owner applies)
 |6
-|`assumptions-gate.sh` exits 0 with allowlist `{Semantics.preservation}` (on the P0 branch; temporarily also the two retired names on main). Dummy `Admitted` turns CI red. `status-gate.sh --proofs` exits 0. `formal/regress/*` CLOSED. `linearity_holes.rs` and `fail_loud.rs` green. `alib_conformance` at 89/0 unexpected. *No cross-repo criterion.*
+|`assumptions-gate.sh` exits 0 with an empty allowlist for every headline (on the P0 branch; temporarily the two L1 names on main are reported, not allowlisted). The tripwire lists all three refuted `Admitted` lemmas, and no headline depends on any of them. Dummy `Admitted` turns CI red. `status-gate.sh --proofs` exits 0. `formal/regress/*` CLOSED. `linearity_holes.rs` and `fail_loud.rs` green. `alib_conformance` at 89/0 unexpected. *No cross-repo criterion.*
 |typed-wasm; any judgment design; `formal/v2`
 
 |*W1 Decisions and infrastructure* (1–2 weeks)
@@ -1067,11 +1067,11 @@ a|* T1a decision packet D1–D8 with X3 + X4 + X9 attached
 a|* T2a P4 skeleton
 * T2b P5 Regress
 * T2c P6 `Exec.v` + typed generator (X5)
-* T2d E12 translator + harness, report-only (X6)
+* T2d E12 translator + harness. The soundness direction (Rust-accept ⇒ oracle-accept) is asserted at zero tolerance against the naive `check_v2`, and only completeness is report-only (X6).
 * T2e E5 typed side-table codegen
 * T2f E8 if typed-wasm has merged; otherwise wait
 |6
-|ORACLE-COQ green on `formal/v2`. All Regress CLOSED; `let_unit_typable_v2` CLOSED. Falsifier: 0 counterexamples over 100k well-typed terms at ≥ 20% acceptance with full constructor coverage. `wasm_e2e` i64/f64/s1/s6/t3 green. `PORT-REPORT.adoc` committed.
+|ORACLE-COQ green on `formal/v2`. All Regress CLOSED; `let_unit_typable_v2` CLOSED. Falsifier: 0 counterexamples over 100k well-typed terms at ≥ 20% acceptance with full constructor coverage. `wasm_e2e` i64/f64/s1/s6/t3 green. Differential soundness direction: 0 disagreements over the translatable corpus and generated terms. `PORT-REPORT.adoc` committed.
 |`PreservationV2` main proof (no proving before the falsifier is green)
 
 |*W3 L1 metatheory* (3–5 weeks)
@@ -1100,7 +1100,7 @@ a|* T4a P11 rest
 |*W5 Certified checker and Rust as its image* (3–4 weeks)
 a|* T5a P15 `CheckV2` + extraction
 * T5b E13 `ephapax-check-v2`
-* T5c E12 soundness direction asserted
+* T5c E12 soundness direction re-pointed from the naive `check_v2` to the proved `CheckV2` (asserted since W2)
 * T5d P16 `Desugar.v`
 * T5e P18 `CarrierSpec` + Affine emission
 * T5f E10 stdlib port
@@ -1153,6 +1153,31 @@ Ratings run from 1 to 5. Column (a) is elegance and correctness; column (b) is d
 |Unconventional: keep them Admitted but sealed in a `Module Type` (never instantiated)
 |3 |3
 |Consistent, but confusing for agents; the tripwire still fires.
+|===
+
+=== D0b — Isolating the legacy refutation
+
+The legacy `Semantics.preservation` is `Admitted` by directive and is refuted by `Counterexample.v`, so any environment that loads both can derive `False` (F0). Every option keeps both files unchanged unless it says otherwise.
+
+[cols="3,1,1,4",options="header"]
+|===
+|Option |(a) |(b) |Comment
+
+|*Recommended (elegant default):* import-closure quarantine. `formal/v2` never imports `Semantics.v`/`Counterexample.v`; every headline's allowlist is empty; the tripwire names the legacy pair as a known refuted `Admitted`
+|5 |4
+|No fenced file changes. Soundness is per theorem, read off `Print Assumptions`. Residual risk: an agent importing both modules can still prove `False`, which is why the gate is per headline.
+
+|Split `_CoqProject` into a default `v2` target and a separate `legacy` target that builds `Semantics.v` + `Counterexample*.v`
+|4 |5
+|The default build becomes consistent. It touches only the project file, not the fenced `.v` files. It still needs owner sign-off because it changes what "the build" means.
+
+|Retire `Semantics.preservation` to `Definition preservation_stmt : Prop` and restate `Counterexample.v` against it
+|5 |5
+|Fully consistent and honest. It edits two fenced files, so it requires the owner to revise the 2026-05-27 fence.
+
+|Unconventional: keep everything and make `Counterexample.v` state the negation of `preservation_stmt` in a separate `Module Type` sandbox
+|3 |3
+|Consistent, but harder to read, and it changes the fenced counterexample's shape.
 |===
 
 === D1 — Where the v2 core lives
@@ -1427,7 +1452,7 @@ Ratings run from 1 to 5. Column (a) is elegance and correctness; column (b) is d
 
 |Inconsistency or axiom regression
 |P1 gate and tripwire
-|*K5:* any non-allowlisted axiom reverts the PR automatically
+|*K5:* any axiom in a headline's `Print Assumptions` reverts the PR automatically (the allowlist starts empty)
 
 |Rust/Coq drift; trusted oracle
 |Soundness direction at 0 tolerance; derivation certificates; report as "tested agreement", never "verified Rust checker"

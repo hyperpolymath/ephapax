@@ -20,6 +20,7 @@ Expected `Print Assumptions` output, as of commit `800030f` with coqc 8.18.0:
 [cols="2,3",options="header"]
 |===
 |Lemma |Assumptions
+|`legacy_inconsistent` |axiom `Semantics.preservation` (legacy, `Admitted` by directive)
 |`env_inconsistent_preservation_l1` |axiom `preservation_l1` (the `Admitted.` lemma)
 |`env_inconsistent_step_pop` |axiom `step_pop_disjoint_from_type_l1` (the `Admitted.` lemma)
 |`preservation_l1_FALSE_closed` |Closed under the global context
@@ -29,7 +30,7 @@ Expected `Print Assumptions` output, as of commit `800030f` with coqc 8.18.0:
 |`echo_copyable_linear_mode` |Closed under the global context
 |===
 
-The first two rows mean the global environment can derive `False`. That needs the P0 retirement in the plan, which requires the owner's decision. The `Admitted.` must not be closed, and no side-condition may be added.
+The first three rows mean the global environment can derive `False`. The L1 pair needs the P0 retirement in the plan. The legacy row needs decision D0b in the plan, because the legacy theorem is fenced. Both are owner decisions. The `Admitted.` must not be closed, and no side-condition may be added.
 
 == Rust checker probes
 

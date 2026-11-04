@@ -14,9 +14,21 @@
 *)
 
 From Ephapax Require Import Syntax Typing TypingL1 Semantics Semantics_L1
-  Modality Counterexample_PreservationL1 Counterexample_StepPop.
+  Modality Counterexample Counterexample_PreservationL1 Counterexample_StepPop.
 Require Import Coq.Lists.List Coq.Strings.String. Import ListNotations.
 Open Scope string_scope.
+
+(** ** F0. The legacy [Semantics.preservation] is [Admitted] (kept by
+    owner directive) and refuted by [Counterexample.v], so loading both
+    also derives [False]. This does not ask for the legacy theorem to
+    be closed or edited. It records that it must never appear in a
+    headline theorem's assumptions. *)
+Lemma legacy_inconsistent : False.
+Proof.
+  destruct (Semantics.preservation _ _ _ _ _ _ (Counterexample.bad_step nil)
+              _ _ _ Counterexample.bad_typable) as [G_out H].
+  exact (Counterexample.bad_post_untypable _ _ H).
+Qed.
 
 (** ** F1. The global environment is inconsistent.
     [preservation_l1] and [step_pop_disjoint_from_type_l1] are
@@ -158,8 +170,9 @@ Proof.
   apply T_Echo_L1; [constructor | now apply T_Loc_L1].
 Qed.
 
-(** Assumption audit. Expected: F1 lemmas list the refuted axiom;
+(** Assumption audit. Expected: F0/F1 lemmas list the refuted axiom;
     every other lemma is "Closed under the global context". *)
+Print Assumptions legacy_inconsistent.
 Print Assumptions env_inconsistent_preservation_l1.
 Print Assumptions env_inconsistent_step_pop.
 Print Assumptions preservation_l1_FALSE_closed.

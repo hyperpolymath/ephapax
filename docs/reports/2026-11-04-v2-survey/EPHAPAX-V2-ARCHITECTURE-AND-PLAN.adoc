@@ -97,7 +97,7 @@ The survey ran in an ephemeral container, so its scratch files do not survive. T
 
 == Ground truth as of this survey
 
-Sources: the scratch builds and probes recorded in the dossier, plus spot checks in this session. `_CoqProject` lists 18 `.v` files, and `Counterexample.v` appears once. There are 8 `canonical_*` lemmas in `Semantics_L1.v`. No region-renaming function exists in `formal/`. `scripts/status-gate.sh:41-45` still reads `PROOF-NEEDS.md`. `Counterexample.v:182` imports `TypingL1`. `ocaml`, `ocamlfind` and `coqtop` are installed.
+Sources: the scratch builds and probes recorded in the dossier, plus spot checks in this session. `_CoqProject` lists 18 `.v` files, and `Counterexample.v` appears once. There are 8 `canonical_*` lemmas in `Semantics_L1.v`. No region-renaming function exists in `formal/`. At the survey base, `scripts/status-gate.sh` still read `PROOF-NEEDS.md`. #418 fixed this, and it was re-run after `main` was merged into this branch (`10339b3`): `status-gate[proofs]: OK — admitted proofs: 3`. `Counterexample.v:182` imports `TypingL1`. `ocaml`, `ocamlfind` and `coqtop` are installed.
 
 [cols="2,3,3,3",options="header"]
 |===
@@ -134,7 +134,7 @@ Sources: the scratch builds and probes recorded in the dossier, plus spot checks
 |a hole in the v2 judgment itself
 
 |`preservation_l3`
-|"conditional on an L1 admit" (CLAUDE.md, V1-TO-V2, STATUS.adoc:147-182)
+|"conditional on an L1 admit" (pre-#418 CLAUDE.md, V1-TO-V2, STATUS.adoc)
 |CLOSED, but it is only a conjunction of two case lemmas (:3451-3467) with a weak/strict freedom mismatch
 |docs are stale and the scope is overstated
 
@@ -165,8 +165,8 @@ Sources: the scratch builds and probes recorded in the dossier, plus spot checks
 
 |`status-gate.sh --proofs`
 |working
-|exit 1: it reads `PROOF-NEEDS.md`, but the file was renamed to `.adoc`
-|broken
+|exit 1 at the survey base: it read `PROOF-NEEDS.md`, but the file had been renamed to `.adoc`
+|fixed on `main` by #418 (exit 0 at `10339b3`)
 
 |Rust workspace tests
 |488 (TEST-NEEDS.adoc:24)
@@ -683,7 +683,7 @@ Items marked "*(external)*" in the Home column live outside `hyperpolymath/ephap
 |Rung |Deliverable |Oracle |Depends |Size
 
 |P0 Consistency restore
-|Owner-ratified retirement: `preservation_l1` and `step_pop_disjoint_from_type_l1` become `Definition …_stmt : Prop`. `preservation_l2_via_l1` and `lift_case` take `preservation_l1_stmt` as a hypothesis, or are deleted. The `*_FALSE` files still compile. The PR is framed as *retirement*, not closure (CLAUDE.md DO NOT #3 adjacency). The same PR corrects CLAUDE.md, V1-TO-V2.adoc, STATUS.adoc and PROOF-NEEDS, which currently send agents to "close the residual L1 admits". Docs are applied by the owner, GPG-signed.
+|Owner-ratified retirement: `preservation_l1` and `step_pop_disjoint_from_type_l1` become `Definition …_stmt : Prop`. `preservation_l2_via_l1` and `lift_case` take `preservation_l1_stmt` as a hypothesis, or are deleted. The `*_FALSE` files still compile. The PR is framed as *retirement*, not closure (CLAUDE.md DO NOT #3 adjacency). #418 already corrected CLAUDE.md, V1-TO-V2.adoc and PROOF-NEEDS so they mark the L1 pair as refuted rather than residual debt. The same PR still has to record that these `Admitted` lemmas, and the legacy theorem, make the environment able to derive `False`. No document on `main` states that yet. Docs are applied by the owner, GPG-signed.
 |ORACLE-COQ; scratch `env_inconsistent : False` from the L1 pair fails to compile (expected-failure target); allowlist = `{}` for every headline. `legacy_inconsistent` still compiles until D0b is decided. It is recorded as a known, quarantined inconsistency that no headline may depend on.
 |owner ratification
 |S
@@ -1043,7 +1043,7 @@ These are kept off the critical path.
 
 |*W0 Honesty and holes* (1 week; ephapax only)
 a|* T0a P0 dry run, then the ratification request (X2)
-* T0b P1 gate, tripwire, `status-gate` fix, `gen-proof-status`
+* T0b P1 gate, tripwire, `gen-proof-status` (the `status-gate` path fix landed in #418)
 * T0c P2 land the 7 scratch falsifiers
 * T0d E0 + E1 Rust holes and fail-loud
 * T0e X1 probe battery + X8 aLib harness + E6 conformer

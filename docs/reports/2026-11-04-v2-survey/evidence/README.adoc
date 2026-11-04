@@ -15,7 +15,7 @@ coq_makefile -f _CoqProject -o Makefile.coq && make -f Makefile.coq -j4
 coqc -R . Ephapax ../docs/reports/2026-11-04-v2-survey/evidence/SurveyCounterexamples.v
 ----
 
-Expected `Print Assumptions` output, as of commit `800030f` with coqc 8.18.0:
+Expected `Print Assumptions` output with coqc 8.18.0. This was first checked at `800030f`, then re-checked after `main` (including #418) was merged into the branch at `10339b3`, with identical results:
 
 [cols="2,3",options="header"]
 |===

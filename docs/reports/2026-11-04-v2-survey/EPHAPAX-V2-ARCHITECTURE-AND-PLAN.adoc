@@ -920,7 +920,7 @@ These are kept off the critical path.
 
 |E12 Differential harness
 |core→SyntaxV2 translator, oracle runner, generator, mutation, corpus mode; report of fragment coverage.
-|soundness direction (Rust-accept ⇒ oracle-accept) at 0 tolerance from the first oracle; completeness reported; for jointly accepted terms, normalized `(Ty, R', G')` tuples are compared and mismatches reported
+|soundness direction (Rust-accept ⇒ oracle-accept) at 0 tolerance from the first oracle, counted over *every* Rust-accepted input: an input the translator cannot translate counts as a soundness failure unless it matches a named entry in `tools/ephapax-oracle/EXCLUSIONS.adoc` (each entry gives the fragment, the reason and the rung that removes it; the list may not grow after W2 without owner sign-off); completeness reported; for jointly accepted terms, normalized `(Ty, R', G')` tuples are compared and mismatches reported
 |P6 (naive oracle) for the initial harness. P15 is only a later upgrade, re-pointing it to `CheckV2` in W5.
 |M–L
 
@@ -1071,12 +1071,12 @@ a|* T1a P3 decision packet: D1–D8, D9a (extraction target / OCaml policy for t
 a|* T2a P4 skeleton
 * T2b P5 Regress
 * T2c P6 `Exec.v` + typed generator (X5)
-* T2d E12 translator + harness. The soundness direction (Rust-accept ⇒ oracle-accept) is asserted at zero tolerance against the naive `check_v2`, and only completeness is report-only (X6).
+* T2d E12 translator + harness. The soundness direction (Rust-accept ⇒ oracle-accept) is asserted at zero tolerance against the naive `check_v2` over every Rust-accepted input, with an untranslatable input outside `EXCLUSIONS.adoc` counted as a failure; only completeness is report-only (X6).
 * T2e E5 typed side-table codegen + aLib F64 re-binding (E6 widening)
 * T2f E8 if typed-wasm has merged; otherwise it carries over to each later wave until it does
 * T2g E7 completion (generics, `M.Ctor(x)` lowering, reconciled import/extern syntax) on top of the W1 draft
 |6
-|ORACLE-COQ green on `formal/v2`. All Regress CLOSED; `let_unit_typable_v2` CLOSED. Falsifier: 0 counterexamples over 100k well-typed terms at ≥ 20% acceptance with every `has_type_v2` constructor hit ≥ 100 times. `alib_conformance` pass ≥ 99, 0 unexpected FAIL. `wasm_e2e` i64/f32/f64/s1/s6/t3 green. Differential soundness direction: 0 disagreements over the translatable corpus and generated terms. E7 gate green (`gen_angle.eph` and `qa/app2.eph` compile and run; 0 EBNF productions unaccounted for).
+|ORACLE-COQ green on `formal/v2`. All Regress CLOSED; `let_unit_typable_v2` CLOSED. Falsifier: 0 counterexamples over 100k well-typed terms at ≥ 20% acceptance with every `has_type_v2` constructor hit ≥ 100 times. `alib_conformance` pass ≥ 99, 0 unexpected FAIL. `wasm_e2e` i64/f32/f64/s1/s6/t3 green. Differential soundness direction: 0 disagreements and 0 non-excluded translation failures over all Rust-accepted corpus files and generated terms; the `EXCLUSIONS.adoc` entry count is recorded as the baseline that later waves may only shrink. E7 gate green (`gen_angle.eph` and `qa/app2.eph` compile and run; 0 EBNF productions unaccounted for).
 |`PreservationV2` main proof (no proving before the falsifier is green)
 
 |*W3 L1 metatheory* (3–5 weeks)
@@ -1095,7 +1095,7 @@ a|* T4a P11 rest
 * T4b P12 L3 obligation
 * T4c P13 L4 boundary
 * T4d P14 + E15 comptime island
-* T4e P17 `TMu` desugar/target alignment
+* T4e P17 `TMu` desugar/target alignment (closes on tests per its acceptance row; it does not wait for P16, whose `Desugar.v` re-checks the fold/unfold insertion as T5d in W5)
 * T4f X14 (Agda re-pin), then P19 ledger + `EchoBridge` (both checkers)
 * T4g typed-wasm Affine kind + mode-record proposal
 * T4h D9 decision record (checker oracle form) with the X10 results attached, ratified by the owner before W5

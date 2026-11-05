@@ -359,7 +359,8 @@ Sources: the scratch builds and probes recorded in the dossier, plus spot checks
                     in the configuration (then increments it), so plain equality, not alpha, suffices; Exit removes the frame
      ConfigWF.v     R =_multiset frames(e) /\ store_typed mu /\ every ELoc tagged r occurs only while r is
                     framed /\ closed e /\ sigma_wf Sigma (every definition in Sigma
-                    has its declared type, checked against the whole recursive Sigma)
+                    has its declared type, checked against the whole recursive Sigma) /\ next_r is above every
+                    region name that is framed, free in e, or tags a store location
      ProgressV2.v / PreservationV2.v / SafetyV2.v
  meta MetaPlane.v   first-order comptime calculus; structural Fixpoint as the termination certificate
  tool CheckV2.v     check_v2 + check_v2_sound (+ complete on the annotated fragment) + Extraction
@@ -691,7 +692,7 @@ Items marked "*(external)*" in the Home column live outside `hyperpolymath/ephap
 |S
 
 |P1 Gate integrity
-|`assumptions-gate.sh` covers every headline and is required in `coq-build.yml`. The tripwire fails when an Admitted `X` coexists with a Qed `X_FALSE`, or with an entry in a registered refutation list (initially `Semantics.preservation` ↦ `Counterexample.bad_step`/`bad_typable`/`bad_post_untypable`). `status-gate.sh`/`.yml` read `PROOF-NEEDS.adoc`. `gen-proof-status.sh` generates PROOF-STATUS.
+|`assumptions-gate.sh` covers every headline and is required in `coq-build.yml`. The tripwire keeps two lists. It fails on any *new* refuted `Admitted`: an Admitted `X` coexisting with a Qed `X_FALSE`, or a refutation registered without D0b approval. Entries on the owner-approved *quarantine* list are reported but do not fail CI, provided no headline depends on them. Under the recommended D0b option that list holds `Semantics.preservation` ↦ `Counterexample.bad_step`/`bad_typable`/`bad_post_untypable`, plus the L1 pair until P0 merges. Adding to the quarantine list needs an owner-ratified D0b amendment. `status-gate.sh`/`.yml` read `PROOF-NEEDS.adoc`. `gen-proof-status.sh` generates PROOF-STATUS.
 |CI red when a dummy `Admitted.` is injected; `bash scripts/status-gate.sh --proofs` exits 0; generated file diff-clean
 |none. Until P0 lands, the gate runs report-only for the two refuted L1 names and never allowlists them.
 |S
@@ -711,9 +712,9 @@ Items marked "*(external)*" in the Home column live outside `hyperpolymath/ephap
 |P4 v2 core skeleton
 |`SyntaxV2` / `Regions` / `TypingV2` / `StepV2` / `ConfigWF` with:
 
-* locally nameless region binders;
+* region binders in the D3 representation: locally nameless with cofinite quantification under the recommended option (P7 then proves open/close lemmas); concrete names with fresh renaming at `Enter` under the concrete option (P7 proves the equivariance lemma instead); de Bruijn indices under that option (P7 proves the shifting lemmas instead);
 * runtime-only `EFrame`;
-* a fresh-region counter `next_r` in the configuration that `Enter` uses and increments, so `step_v2_deterministic` holds up to plain equality rather than modulo alpha-renaming;
+* a fresh-region counter `next_r` in the configuration that `Enter` uses and increments, so `step_v2_deterministic` holds up to plain equality rather than modulo alpha-renaming; `config_wf` requires `next_r` to exceed every framed, free or store-tagged region name, and P7 proves that `step_v2` preserves this (it is what `frames_fresh_at_enter` rests on);
 * `TArr Rin Rout` with prenex region abstraction;
 * signed integer literals and the I64/F32/F64 literal forms with their primitive step rules (today `Syntax.v` declares `TI64`/`TF32`/`TF64` but has only `EI32 : nat`);
 * grades {0,1,ω} with modality = preorder;
@@ -737,13 +738,13 @@ Includes `step_v2_deterministic`.
 |M
 
 |P6 Executable falsifier
-|`Exec.v` with `step_v2_fn_correct`; a naive `check_v2`; extraction; a typed generator; a proptest for preservation, progress and determinism.
+|`Exec.v` with `step_v2_fn_correct`; a naive `check_v2`; its executable form per D9a (extraction to OCaml or Guile, or in-Coq `vm_compute` evaluation, with the 100k-term budget re-sized by X10 for the latter); a typed generator; a proptest for preservation, progress and determinism.
 |ORACLE-COQ with `step_v2_fn_correct` CLOSED; `cargo test -p ephapax-differential --test preservation_property --test progress_property --test determinism_property`: 0 counterexamples over 100k *well-typed* terms; acceptance rate ≥ 20%; every `has_type_v2` constructor and every `step_v2` constructor (region exit, observe and the echo drop rules included) hit ≥ 100 times, because `step_v2_fn_correct` only relates the two steppers and cannot catch a rule both get wrong
 |P4
 |M
 
 |P7 Structural lemmas
-|Open/close/rename for region binders and typing equivariance; substitution (port `subst_typing_gen_l1_m`); `value_R_G_preserving_v2`; weakening and strengthening; `frames_unique`, `frames_fresh_at_enter`, store coherence preserved. Includes a porting report on how many of the 52 Semantics_L1 Qed lemmas carry over. Step-shaped lemmas must be re-proved against `step_v2`.
+|Open/close/rename for region binders (or the D3 branch's equivalent: equivariance under concrete names, shifting under de Bruijn) and typing equivariance; substitution (port `subst_typing_gen_l1_m`); `value_R_G_preserving_v2`; weakening and strengthening; `frames_unique`, `frames_fresh_at_enter`, store coherence preserved. Includes a porting report on how many of the 52 Semantics_L1 Qed lemmas carry over. Step-shaped lemmas must be re-proved against `step_v2`.
 |ORACLE-COQ CLOSED; `formal/v2/PORT-REPORT.adoc` with measured numbers
 |P4, X4
 |L
@@ -947,7 +948,7 @@ These are kept off the critical path.
 
 |E16 L3/L4 surface + RMR/RMO
 |echo/observe/`drop!`/`region!`, mode declarations, `Erasure.eph`, `Reversible.eph`, scrub-on-exit; docs: full-fiber Linear echo = RMR (retention), never "erasure".
-|unobserved Linear echo rejected; `drop!`/`region!` phase tests run; `Erasure.eph` and `Reversible.eph` check, compile, pass the gate and have runner tests; affine and linear outputs differ in ownership; freed sensitive cells read 0 both in the interpreter and in a wasmtime runner test (E4) that inspects the freed linear-memory range after region exit
+|unobserved Linear echo rejected; `drop!`/`region!` phase tests run; `Erasure.eph` and `Reversible.eph` check, compile, pass the gate and have runner tests; affine and linear outputs differ in ownership; freed sensitive cells read 0 both in the interpreter and in a wasmtime runner test (E4) that inspects the freed linear-memory range after region exit. That scrub test is for the recommended D12 option. Under crypto-shredding, E16 instead encrypts each sensitive region under a per-region key, erases the key at exit, and tests that the key cell reads 0 and that the receipt check accepts. Under "claim nothing", E16 ships no erasure claim and its docs label the rows designed-not-mechanised
 |P12, P13, T5h (upstream Affine kind merged and pinned), D12, X12 baseline (T5i), E8
 |L
 
@@ -1060,7 +1061,7 @@ a|* T0a P0 dry run, then one ratification request covering D0 and D0b (X2)
 |typed-wasm; any judgment design; `formal/v2`
 
 |*W1 Decisions and infrastructure* (1–2 weeks)
-a|* T1a P3 decision packet: D1–D8, D9a (extraction target / OCaml policy for the naive oracle) and the syntax ADR (normative grammar source; default: regenerate the EBNF from `ephapax.pest` for implemented productions while keeping every current EBNF production that `ephapax.pest` lacks, such as traits, handlers, contracts, capabilities and comptime, in the conformance inventory as UNIMPLEMENTED; removing one needs an explicit owner decision recorded in the ADR), with X3 + X4 + X9 + X11 + X13 attached; D9a is ratified separately, after T1f, with X10 attached, and the W1 exit requires it
+a|* T1a P3 decision packet: D1–D8, D9a, D10 (interop representation; it fixes the backend that E5, E9, E8 and E10 build on, so it cannot wait for W5) (extraction target / OCaml policy for the naive oracle) and the syntax ADR (normative grammar source; default: regenerate the EBNF from `ephapax.pest` for implemented productions while keeping every current EBNF production that `ephapax.pest` lacks, such as traits, handlers, contracts, capabilities and comptime, in the conformance inventory as UNIMPLEMENTED; removing one needs an explicit owner decision recorded in the ADR), with X3 + X4 + X9 + X11 + X13 attached; D9a is ratified separately, after T1f, with X10 attached, and the W1 exit requires it
 * T1b X7 typed-wasm upstream PRs (offsets, bounds, taint) and the D11 request to the typed-wasm owner
 * T1c E3 driver + E4 runner
 * T1d E2 corpus + E7 grammar reconciliation draft
@@ -1116,9 +1117,9 @@ a|* T5a P15 `CheckV2` + extraction
 * T5h typed-wasm Affine OwnershipKind and mode record implemented upstream, merged, and the ephapax pin bumped (follows the T4g proposal)
 * T5e P18 `CarrierSpec` + Affine emission (completes after T5h)
 * T5f E10 stdlib port
-* T5g D10 (interop representation) and D12 (certified-erasure statement) decision records, ratified by the owner before W6 starts T6b, T6d and T6e; also file the absolute-zero CNO-documentation and januskey MAA-restatement upstream PRs, and D12 plus the RMR/RMO citations wait on their merge (carry-over rule applies)
+* T5g D12 (certified-erasure statement) decision record, ratified by the owner before W6 starts T6b, T6d and T6e (D10 was ratified in W1); also file the absolute-zero CNO-documentation and januskey MAA-restatement upstream PRs, and D12 plus the RMR/RMO citations wait on their merge (carry-over rule applies)
 |6
-|`check_v2_sound` CLOSED. Differential: 0 disagreements in both directions over corpus + 100k generated + 10k mutated, on every PR. `ephapax-typing` delegates. Gate accepts 100% of compiled modules. Affine and linear outputs differ. stdlib 10/10 check, compile, pass the gate and pass their runner tests. `match_desugar_correct`, `ownership_kind_sound`, `check_v2_complete` and `check_mod` CLOSED; under the D9 certificate option `check_v2_cert_sound` CLOSED and the corrupted-certificate test rejected. D10 and D12 ratified.
+|`check_v2_sound` CLOSED. Differential: 0 disagreements in both directions over corpus + 100k generated + 10k mutated, on every PR. `ephapax-typing` delegates. Gate accepts 100% of compiled modules. Affine and linear outputs differ. stdlib 10/10 check, compile, pass the gate and pass their runner tests. `match_desugar_correct`, `ownership_kind_sound`, `check_v2_complete` and `check_mod` CLOSED; under the D9 certificate option `check_v2_cert_sound` CLOSED and the corrupted-certificate test rejected. D12 ratified.
 |L3/L4 surface beyond phase tests; effects
 
 |*W6 Growth* (open-ended)
@@ -1155,10 +1156,13 @@ Engineering tracks inside each wave run in parallel with the proof tracks. The o
 |D9a (naive-oracle extraction target) |W1 (T1a) |X10 / P6, E12 (W2)
 |D11 (typed-wasm owner) |W1, with the T1b upstream PRs |X7 / E8
 |D9 |W4 (T4h) |X10 / P15, E13 (W5)
-|D10, D12 |W5 (T5g) |layout-profile and erasure notes / E18, E16, P21 (W6)
+|D10 |W1 (T1a) |layout-profile note / E5 (W2), then E9, E8, E10, E18
+|D12 |W5 (T5g) |erasure notes / E16, P21 (W6)
 |===
 
 A rung whose dependency has not completed (for example E8 while the typed-wasm fix is unmerged) carries over to the next wave together with every rung that depends on it (E9 completion, E10, E14, P18, the W5 gate-acceptance exit). It is never declared done against a missing dependency.
+
+*Decision-branch rule.* Rung deliverables and gates are written against each decision's recommended option. Ratifying any other listed option is valid, but that decision record must then carry a branch table. The table restates the deliverable and acceptance of every dependent rung (the "first dependent" column above and everything downstream of it) before those rungs start. Where the option invalidates completed work, the table lists what is redone and in which wave. A rung whose branch has not been written does not start. Options marked *not eligible* (for example D9a's Rust hand-port) cannot be ratified without first rewriting the gate they would break. D3, D7, D8, D9a and D12 already carry inline branches; the rule covers the rest.
 
 == Options requiring owner decision
 
@@ -1400,9 +1404,9 @@ The naive `check_v2` and `step_v2_fn` from P6 need an executable form for the W2
 |3 |5
 |No extra trusted runtime and no policy question, but likely too slow for 100k terms per run. X10 measures the throughput.
 
-|Hand-port to Rust
+|Hand-port to Rust (*not eligible*)
 |1 |2
-|Loses the link to the Coq definition, so the differential compares Rust with Rust.
+|Loses the link to the Coq definition, so the differential would compare Rust with Rust and could not serve as the E12 zero-tolerance soundness gate. Listed only to record why it is excluded.
 |===
 
 === D9 — Checker oracle form

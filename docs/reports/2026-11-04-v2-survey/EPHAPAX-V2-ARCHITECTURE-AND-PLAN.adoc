@@ -369,7 +369,7 @@ Sources: the scratch builds and probes recorded in the dossier, plus spot checks
 
 === Components
 
-*Surface and grammar.* There is one normative grammar. The plan's default is to regenerate the EBNF from `ephapax.pest` and back it with a conformance fixture test. Productions that are not implemented must fail with a named error.
+*Surface and grammar.* There is one normative grammar. The plan's default is to regenerate the EBNF from `ephapax.pest` and back it with a conformance fixture test, keeping every current EBNF production that the parser lacks as UNIMPLEMENTED rather than deleting it. Productions that are not implemented must fail with a named error, and E7's "0 productions unaccounted for" counts them; the specification never shrinks to make that number.
 
 *Desugar.* It stays the only place where sugar lives: `data`/`match` become right-nested sums, records become products, traits become dictionary passing, and contracts become asserts. Each lowering either has a `Desugar.v` lemma or is a pure syntactic macro that has a test.
 
@@ -735,7 +735,7 @@ Includes `step_v2_deterministic`.
 
 |P6 Executable falsifier
 |`Exec.v` with `step_v2_fn_correct`; a naive `check_v2`; extraction; a typed generator; a proptest for preservation, progress and determinism.
-|ORACLE-COQ with `step_v2_fn_correct` CLOSED; `cargo test -p ephapax-differential --test preservation_property --test progress_property --test determinism_property`: 0 counterexamples over 100k *well-typed* terms; acceptance rate ≥ 20%; every `has_type_v2` constructor hit ≥ 100 times
+|ORACLE-COQ with `step_v2_fn_correct` CLOSED; `cargo test -p ephapax-differential --test preservation_property --test progress_property --test determinism_property`: 0 counterexamples over 100k *well-typed* terms; acceptance rate ≥ 20%; every `has_type_v2` constructor and every `step_v2` constructor (region exit, observe and the echo drop rules included) hit ≥ 100 times, because `step_v2_fn_correct` only relates the two steppers and cannot catch a rule both get wrong
 |P4
 |M
 
@@ -877,8 +877,8 @@ These are kept off the critical path.
 |S–M
 
 |E5 Typed codegen (stopgap)
-|Expr-id → Ty side table from the current checker; typed binop/literal/string/tuple; F64 rem lowering; I64 literals (probe `i64`).
-|`wasm_e2e`: i64, f32, f64, s1, s6, t3 return correct values (f32 = a literal plus arithmetic case with a checked result; f64 includes a `%` remainder expression with a checked result, so the integer-only `I32RemS` path cannot pass); corpus compile count > 14
+|Expr-id → Ty side table from the current checker; typed binop/literal/string/tuple; F32 and F64 rem lowering (Wasm has no float remainder instruction, so both lower to `x - trunc(x / y) * y`); I64 literals (probe `i64`, which as stored exercises only an I64 parameter).
+|`wasm_e2e`: i64, f32, f64, s1, s6, t3 return correct values (i64 evaluates an I64 literal outside the I32 range, such as `5000000000`, inside the returned expression with a checked result; f32 = a literal plus arithmetic case and a `%` remainder expression, each with a checked result; f64 includes a `%` remainder expression with a checked result, so the integer-only `I32RemS` path cannot pass); corpus compile count > 14
 |E3
 |M–L
 
@@ -938,7 +938,7 @@ These are kept off the critical path.
 
 |E15 Comptime island
 |Restricted grammar, `@comptime` parses, wired to `ephapax-meta`.
-|a self-recursive `comptime_fn` fails to parse; a fold over `@fields_of` compiles and is re-checked
+|Branches on D8. Recommended option or 2LTT: a self-recursive `comptime_fn` fails to parse; a fold over `@fields_of` compiles and is re-checked. Fuel-bounded option: the same fold compiles, and a non-terminating `comptime_fn` fails with a named fuel-exhausted diagnostic. Drop option: `@comptime` and `@fields_of` fail with a named UNIMPLEMENTED diagnostic, and P14 is not scheduled.
 |E3, D8
 |L
 
@@ -1057,7 +1057,7 @@ a|* T0a P0 dry run, then one ratification request covering D0 and D0b (X2)
 |typed-wasm; any judgment design; `formal/v2`
 
 |*W1 Decisions and infrastructure* (1–2 weeks)
-a|* T1a P3 decision packet: D1–D8, D9a (extraction target / OCaml policy for the naive oracle) and the syntax ADR (normative grammar source; default: regenerate the EBNF from `ephapax.pest`), with X3 + X4 + X9 + X11 + X13 attached
+a|* T1a P3 decision packet: D1–D8, D9a (extraction target / OCaml policy for the naive oracle) and the syntax ADR (normative grammar source; default: regenerate the EBNF from `ephapax.pest` for implemented productions while keeping every current EBNF production that `ephapax.pest` lacks, such as traits, handlers, contracts, capabilities and comptime, in the conformance inventory as UNIMPLEMENTED; removing one needs an explicit owner decision recorded in the ADR), with X3 + X4 + X9 + X11 + X13 attached
 * T1b X7 typed-wasm upstream PRs (offsets, bounds, taint) and the D11 request to the typed-wasm owner
 * T1c E3 driver + E4 runner
 * T1d E2 corpus + E7 grammar reconciliation draft
@@ -1076,7 +1076,7 @@ a|* T2a P4 skeleton
 * T2f E8 if typed-wasm has merged; otherwise it carries over to each later wave until it does
 * T2g E7 completion (generics, `M.Ctor(x)` lowering, reconciled import/extern syntax) on top of the W1 draft
 |6
-|ORACLE-COQ green on `formal/v2`. All Regress CLOSED; `let_unit_typable_v2` CLOSED. Falsifier: 0 counterexamples over 100k well-typed terms at ≥ 20% acceptance with every `has_type_v2` constructor hit ≥ 100 times. `alib_conformance` pass ≥ 99, 0 unexpected FAIL. `wasm_e2e` i64/f32/f64/s1/s6/t3 green. Differential soundness direction: 0 disagreements and 0 non-excluded translation failures over all Rust-accepted corpus files and generated terms; the `EXCLUSIONS.adoc` entry count is recorded as the baseline that later waves may only shrink. E7 gate green (`gen_angle.eph` and `qa/app2.eph` compile and run; 0 EBNF productions unaccounted for).
+|ORACLE-COQ green on `formal/v2`. All Regress CLOSED; `let_unit_typable_v2` CLOSED. Falsifier: 0 counterexamples over 100k well-typed terms at ≥ 20% acceptance with every `has_type_v2` and every `step_v2` constructor hit ≥ 100 times. `alib_conformance` pass ≥ 99, 0 unexpected FAIL. `wasm_e2e` i64/f32/f64/s1/s6/t3 green. Differential soundness direction: 0 disagreements and 0 non-excluded translation failures over all Rust-accepted corpus files and generated terms; the `EXCLUSIONS.adoc` entry count is recorded as the baseline that later waves may only shrink. E7 gate green (`gen_angle.eph` and `qa/app2.eph` compile and run; 0 EBNF productions unaccounted for).
 |`PreservationV2` main proof (no proving before the falsifier is green)
 
 |*W3 L1 metatheory* (3–5 weeks)
@@ -1101,7 +1101,7 @@ a|* T4a P11 rest
 * T4h D9 decision record (checker oracle form) with the X10 results attached, ratified by the owner before W5
 * T4i E9 promotion: once P17 is CLOSED (T4e), remove `--unstable-core` from recursive `data` and closures so plain `ephapax check`/`compile` accept them; the gate part still follows E8 under the carry-over rule. T5f (E10) waits on T4i.
 |7
-|All CLOSED; EchoCopy untypable; `preservation_v2` CLOSED with TMu; every ledger row records both exit codes and versions; self-recursive `comptime_fn` fails to parse; a fold over `@fields_of` compiles and is re-checked; D9 ratified.
+|All CLOSED; EchoCopy untypable; `preservation_v2` CLOSED with TMu; every ledger row records both exit codes and versions; E15 and P14 exit on the branch D8 selected (see the E15 row); D9 ratified.
 |stdlib bulk port; effects
 
 |*W5 Certified checker and Rust as its image* (3–4 weeks)
@@ -1469,7 +1469,7 @@ The legacy `Semantics.preservation` is `Admitted` by directive and is refuted by
 
 |Vacuous falsifier
 |Typed generator, acceptance floor, coverage
-|*K2:* below 20% well-typed acceptance or any `has_type_v2` constructor hit fewer than 100 times, the falsifier result does not count toward the W2 exit
+|*K2:* below 20% well-typed acceptance or any `has_type_v2` or `step_v2` constructor hit fewer than 100 times, the falsifier result does not count toward the W2 exit
 
 |Fork cost underestimated
 |X4 porting report

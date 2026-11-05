@@ -1,0 +1,5 @@
+// SPDX-License-Identifier: MPL-2.0
+// Survey probe (2026-11-04). Stored as .eph.txt so the repo-wide .eph corpus gate ignores it.
+data L = Nil | Cons(I32, L)
+fn f(l: L): I32 = 0
+fn main(): I32 = 0

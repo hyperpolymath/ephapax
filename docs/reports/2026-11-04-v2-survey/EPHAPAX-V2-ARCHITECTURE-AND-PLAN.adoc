@@ -722,7 +722,8 @@ Items marked "*(external)*" in the Home column live outside `hyperpolymath/ephap
 * `TEcho` grade 1 in Linear mode;
 * distinct echo forms;
 * `S_Observe`;
-* a typed foreign-signature environment Φ for `extern` declarations (stdlib `Argv.eph` and others), with a host-call step rule over a host relation that the metatheory takes as a *hypothesis* (`host_wf`: a host call returns a value of the declared type and touches only the buffers passed to it), never as an `Axiom`; P9 and P10 are stated for every `host_wf` host;
+* a typed foreign-signature environment Φ for `extern` declarations (stdlib `Argv.eph` and others), with a host-call step rule over a host *function* (total and deterministic by construction, so `step_v2_deterministic` survives). The metatheory takes `host_wf` as a *hypothesis*, never as an `Axiom`: a host call returns a value of the declared type, touches only the buffers passed to it, and preserves `store_typed`, region tags and ownership, and the rest of `config_wf`. P9 and P10 are stated for every `host_wf` host;
+* an explicit trap configuration: integer division or remainder by zero, and `MIN / -1`, step to `Trap` (matching the interpreter's `DivisionByZero` and the Wasm trap), and `progress_v2` reads "a value, a step, or `Trap`";
 * a global Σ for recursion, with a `sigma_wf` judgment (every definition checked against its declared type under the whole recursive Σ) that `config_wf` requires and that P9 and P10 take as a hypothesis;
 * the recursive-type form D7 selected (ratified in W1, before P4), so P7–P13 are proved against the full core: iso-recursive `TMu` with fold/unfold under the recommended option; nominal named types with unfold at `match` under the nominal option; no recursive type former under the no-core-recursion option, in which case P8 drops `mu`, P17 becomes the encoding-alignment rung, and E9/E10 use the bounded encodings;
 * store coherence in `config_wf`.
@@ -751,13 +752,13 @@ Includes `step_v2_deterministic`.
 |L
 
 |P8 Canonical forms
-|For every type former present at P4: unit, bool, i32, i64, f32, f64, string, arr, sum, prod, ref, borrow, region, echo, and the D7 recursive former (`mu`, or named types; none under the no-core-recursion option).
+|For every type former present at P4: unit, bool, i32, i64, f32, f64, string, arr, sum, prod, ref, borrow, region, echo, and the D7 recursive former (`mu`, or named types; none under the no-core-recursion option). Lists and n-ary tuples are not core formers: E12 lowers them to the D7 recursive sum and to nested pairs before translation.
 |CLOSED
 |P4
 |S–M
 
 |P9 `progress_v2`
-|For closed well-formed configurations. EscapeCex and the stuck `EObserve` are already ruled out at P5.
+|For closed well-formed configurations: every one is a value, steps, or is `Trap` (P4's trap configuration for integer division and remainder). EscapeCex and the stuck `EObserve` are already ruled out at P5.
 |CLOSED
 |P7, P8
 |M
@@ -882,8 +883,8 @@ These are kept off the critical path.
 |S–M
 
 |E5 Typed codegen (stopgap)
-|Expr-id → Ty side table from the current checker; typed binop/literal/string/tuple; F32 and F64 rem lowering to an exact `fmod` helper emitted into the module (Wasm has no float remainder instruction, and the naive `x - trunc(x / y) * y` is wrong under rounding, quotient overflow and signed zero, so it must match the interpreter, which uses Rust `%`, i.e. IEEE `fmod`); an F32 source literal form (an `f32` suffix such as `1.5f32` in `ephapax.pest`, producing `Literal::F32`, recorded in the syntax ADR with a conformance fixture), since today every float literal parses as `Literal::F64`; I64 literals (probe `i64`, which as stored exercises only an I64 parameter). Typed unary lowering (`i64.sub` from 0 for I64 negation, `f32.neg`/`f64.neg` for floats; today `compile_unaryop` always emits `I32Const(0)`/`I32Sub`, `ephapax-wasm/src/lib.rs:3047`). Wrapping integer overflow as the defined semantics, matching Wasm, with the interpreter switched to `wrapping_*` operations. Element-width-aware list storage and retrieval (today `list_append`/`list_get` are `(i32, i32) -> i32`), so I64, F32 and F64 elements are stored in full.
-|`wasm_e2e`: i64, f32, f64, s1, s6, t3 return correct values (i64 evaluates an I64 literal outside the I32 range, such as `5000000000`, inside the returned expression with a checked result; f32 = a literal plus arithmetic case and a `%` remainder expression, each with a checked result; f64 includes a `%` remainder expression with a checked result, so the integer-only `I32RemS` path cannot pass); an interpreter-vs-wasm remainder table for both float types covers `1.0 % 0.1` (rounding), `-0.0 % 1.0` (signed zero), `1e308 % 3.0` (extreme ratio), `x % inf` and NaN operands, with bit-identical results (NaN results need only both be NaN); a negative I64 result (`-5000000000`) and negated F32/F64 values are checked; interpreter-vs-wasm boundary cases for I32 and I64 add, subtract, multiply and negation at the type limits agree under wrapping; lists of I64 and F64 values round-trip a value outside the I32 range; corpus compile count > 14
+|Expr-id → Ty side table from the current checker; typed binop/literal/string/tuple; F32 and F64 rem lowering to an exact `fmod` helper emitted into the module (Wasm has no float remainder instruction, and the naive `x - trunc(x / y) * y` is wrong under rounding, quotient overflow and signed zero, so it must match the interpreter, which uses Rust `%`, i.e. IEEE `fmod`); an F32 source literal form (an `f32` suffix such as `1.5f32` in `ephapax.pest`, producing `Literal::F32`, recorded in the syntax ADR with a conformance fixture), since today every float literal parses as `Literal::F64`; I64 literals (probe `i64`, which as stored exercises only an I64 parameter). Typed unary lowering (`i64.sub` from 0 for I64 negation, `f32.neg`/`f64.neg` for floats; today `compile_unaryop` always emits `I32Const(0)`/`I32Sub`, `ephapax-wasm/src/lib.rs:3047`). Wrapping integer overflow as the defined semantics, matching Wasm, with the interpreter switched to `wrapping_*` operations. Element-width-aware list storage and retrieval (today `list_append`/`list_get` are `(i32, i32) -> i32`), so I64, F32 and F64 elements are stored in full. Beyond these named cases, E5 is driven by a generated *type × operation conformance matrix*: every operand type the checker accepts, for every binary operator, unary operator and comparison, and every value type in every container position (tuple field, list element, sum payload, closure parameter and result, extern parameter and result). Today sums use `I32Store`/`I32Load` regardless of payload, and comparisons emit I32 instructions for every type. String equality compares contents, as the interpreter does, not pointers.
+|`wasm_e2e`: i64, f32, f64, s1, s6, t3 return correct values (i64 evaluates an I64 literal outside the I32 range, such as `5000000000`, inside the returned expression with a checked result; f32 = a literal plus arithmetic case and a `%` remainder expression, each with a checked result; f64 includes a `%` remainder expression with a checked result, so the integer-only `I32RemS` path cannot pass); an interpreter-vs-wasm remainder table for both float types covers `1.0 % 0.1` (rounding), `-0.0 % 1.0` (signed zero), `1e308 % 3.0` (extreme ratio), `x % inf` and NaN operands, with bit-identical results (NaN results need only both be NaN); a negative I64 result (`-5000000000`) and negated F32/F64 values are checked; interpreter-vs-wasm boundary cases for I32 and I64 add, subtract, multiply and negation at the type limits agree under wrapping; lists of I64 and F64 values round-trip a value outside the I32 range; the full type × operation matrix runs interpreter-vs-wasm with 0 disagreements and 0 invalid modules, including I64 and F64 sum payloads, I64/F32/F64 comparisons and equal-content strings allocated separately; corpus compile count > 14
 |E3
 |M–L
 
@@ -907,12 +908,12 @@ These are kept off the critical path.
 
 |E9 Recursive types + closures
 |Iso-recursive `TMu` with boxed codegen; funcref table with the ADR-005 ABI; behind `--unstable-core` until P17 is CLOSED.
-|IntList sum and `apply(f: I32 -> I32, x)` run and pass the gate
+|IntList sum and `apply(f: I32 -> I32, x)` run and pass the gate; closures with I64, F32 and F64 parameters and results run through type-indexed `call_indirect` signatures (today every closure call uses the single `TYPE_CLOSURE_CALL` `(i32, i32) -> i32`)
 |E5, D7; E8 for completing the gate (implementation behind `--unstable-core` can proceed earlier)
 |L
 
 |E10 stdlib port
-|Prelude, IO, Region, Aggregate, Stream, Allen, Transactions, Argv and Coproc (the nine current `stdlib/` modules) in v2; `src/ephapax-stdlib` retired (default); package import tier.
+|Prelude, IO, Region, Aggregate, Stream, Allen, Transactions, Argv and Coproc (the nine current `stdlib/` modules) in v2; Coproc migrates from its five raw variadic `__ffi` calls to typed `extern` declarations, so it enters Φ like Argv; raw `__ffi` is otherwise rejected (E1); `src/ephapax-stdlib` retired (default); package import tier.
 |`ephapax check stdlib/*.eph` 10/10 (the nine current modules plus `ALib.eph`) and `ephapax compile` 10/10 with each module accepted by `typed_wasm_gate`; a runner test per module exercises its exported operations; a corpus file importing a stdlib module through the package tier checks and runs; corpus ≥ 22; aLib collection group attempted
 |E7, E9 promoted out of `--unstable-core` (T4i), E8
 |L
@@ -924,7 +925,7 @@ These are kept off the critical path.
 |M
 
 |E12 Differential harness
-|core→SyntaxV2 translator (extern blocks map to Φ), oracle runner, generator, mutation, corpus mode; report of fragment coverage.
+|core→SyntaxV2 translator (extern blocks map to Φ) with a checked-in *core coverage table*: every Rust core constructor maps to a `SyntaxV2` form or to a tested lowering (n-ary tuples to nested pairs; `List` to the D7 recursive sum), and any unmapped constructor is an `EXCLUSIONS.adoc` entry naming the rung that removes it; oracle runner, generator, mutation, corpus mode; report of fragment coverage.
 |soundness direction (Rust-accept ⇒ oracle-accept) at 0 tolerance from the first oracle, counted over *every* Rust-accepted input: an input the translator cannot translate counts as a soundness failure unless it matches a named entry in `tools/ephapax-oracle/EXCLUSIONS.adoc` (each entry gives the fragment, the reason and the rung that removes it; the list may not grow after W2 without owner sign-off); completeness reported; for jointly accepted terms, normalized `(Ty, R', G')` tuples are compared and mismatches reported
 |P6 (naive oracle) for the initial harness. P15 is only a later upgrade, re-pointing it to `CheckV2` in W5.
 |M–L

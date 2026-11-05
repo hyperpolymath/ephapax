@@ -80,8 +80,8 @@ grammar.v1.status     = SUPERSEDED  (pest surface; works for core, does not scal
 grammar.v2.status     = ACTIVE      (spec/ephapax-v2-grammar.ebnf; phases landing; tests green)
 grammar.v2.tractable  = YES
 
-proof.v1.status       = FALSIFIED   (formal/Semantics.v preservation; Counterexample.v, 5 Qed)
-proof.v1.action       = LEAVE AS Admitted; do NOT attempt to close (no closure exists)
+proof.v1.status       = FALSIFIED   (formal/Semantics.v preservation_stmt; Counterexample.v, 6 Qed incl. preservation_false)
+proof.v1.action       = RETIRED to Prop (D0b, 2026-11-05); do NOT attempt to close (no closure exists)
 proof.v2.status       = REDESIGN IN PROGRESS (four-layer architecture is not yet a sound replacement)
 proof.v2.tractable    = OPEN DESIGN — current unrestricted L1 preservation is refuted; no unconditional L2 preservation theorem exists; L3 results are scoped
 
@@ -222,9 +222,11 @@ dependency.
 A machine-checked counterexample to your own soundness theorem is a
 *good day* in language design. It converts "we think this is sound" into
 "we know exactly where and why it is not," which is the only solid ground
-to redesign from. The `Admitted.` on the legacy theorem is **correct and
-deliberate**: it marks a theorem we have *proven cannot be closed*, not a
-gap we are too lazy to fill.
+to redesign from. The legacy theorem marks a statement we have *proven
+cannot be closed*, not a gap we are too lazy to fill. Since D0b
+(2026-11-05) it is a `Prop` (`preservation_stmt`), refuted outright by
+`preservation_false`, rather than an `Admitted` theorem: an `Admitted`
+false statement let the build derive `False`.
 ====
 
 === v2: four-layer architecture, soundness work still open
@@ -241,9 +243,9 @@ any layer-level result as a language theorem.
 | Layer | Concern | v2 status
 
 | **L1** | Region capabilities | Judgment and helper infrastructure exist;
-  the unrestricted preservation statement is refuted. Two outer `Admitted.`
-  markers remain on false unrestricted statements, not routine proof debt;
-  redesign and restricted replacement are open.
+  the unrestricted preservation statement is refuted. The two false
+  unrestricted statements are retired to `Prop` (D0, 2026-11-05), so
+  `formal/` has no `Admitted`; redesign and restricted replacement are open.
 | **L2** | Structural modality (Linear vs Affine) | Core landed,
   `linear_to_affine` `Qed`, **zero axioms**.
 | **L3** | Echo / residue — what was *lost* at an irreversible step | Calculus
@@ -269,8 +271,9 @@ already enforced by the current judgment.
 This is the part that is *no less transparent than before*. Two things
 are closed, and closed for good reasons:
 
-. **Legacy preservation (`formal/Semantics.v`) is false.** Keep the
-  `Admitted.`. Do not attempt to close it, strengthen lemmas toward it,
+. **Legacy preservation (`formal/Semantics.v`) is false.** It is retired
+  to `preservation_stmt : Prop` (D0b, 2026-11-05). Do not restate it as a
+  theorem or attempt to close it, strengthen lemmas toward it,
   add side conditions for it, or follow any pre-2026-05-26 "closure
   plan." `formal/Counterexample.v` depends on its falsity. This wall is
   load-bearing.

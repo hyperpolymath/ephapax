@@ -152,12 +152,9 @@ Qed.
 
 (** ** THE REFUTATION *)
 Theorem preservation_l1_FALSE :
-  ~ (forall m mu R e mu' R' e',
-       step (mu, R, e) (mu', R', e') ->
-       forall G T R_final G',
-         has_type_l1 m R G e T R_final G' ->
-         has_type_l1 m R' G e' T R_final G').
+  ~ Semantics_L1.preservation_l1_stmt.
 Proof.
+  unfold Semantics_L1.preservation_l1_stmt.
   intro H.
   apply wit2_post_untypable.
   eapply (H Linear [] [rv] wit2).

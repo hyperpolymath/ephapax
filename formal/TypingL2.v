@@ -332,15 +332,16 @@ Proof. reflexivity. Qed.
     [preservation_l2] proof body. *)
 
 Theorem preservation_l2_via_l1 :
+  Semantics_L1.preservation_l1_stmt ->
   forall m mu R e mu' R' e',
     step (mu, R, e) (mu', R', e') ->
     forall G T R_final G',
       TypingL1.has_type_l1 m R G e T R_final G' ->
       has_type_l2 m R' G e' T R_final G'.
 Proof.
-  intros m mu R e mu' R' e' Hstep G T R_final G' Ht.
+  intros Hpres m mu R e mu' R' e' Hstep G T R_final G' Ht.
   apply L2_lift_l1.
-  eapply Semantics_L1.preservation_l1; eassumption.
+  eapply Hpres; eassumption.
 Qed.
 
 (** Corollary: the L2_lift_l1 case of [preservation_l2] over the
@@ -348,12 +349,13 @@ Qed.
     [preservation_l2_via_l1] by destructuring the lift. *)
 
 Corollary preservation_l2_lift_case :
+  Semantics_L1.preservation_l1_stmt ->
   forall m mu R e mu' R' e',
     step (mu, R, e) (mu', R', e') ->
     forall G T R_final G' (H1 : TypingL1.has_type_l1 m R G e T R_final G'),
       has_type_l2 m R' G e' T R_final G'.
 Proof.
-  intros m mu R e mu' R' e' Hstep G T R_final G' H1.
+  intros Hpres m mu R e mu' R' e' Hstep G T R_final G' H1.
   eapply preservation_l2_via_l1; eassumption.
 Qed.
 

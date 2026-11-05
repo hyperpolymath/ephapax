@@ -143,11 +143,9 @@ Proof. simpl. auto. Qed.
 
 (** ** THE REFUTATION *)
 Theorem step_pop_disjoint_from_type_l1_FALSE :
-  ~ (forall mu R e mu' R' e' m G T R_final G',
-       step (mu, R, e) (mu', R', e') ->
-       has_type_l1 m R G e T R_final G' ->
-       forall r, In r (Typing.free_regions T) -> In r R -> In r R').
+  ~ Semantics_L1.step_pop_disjoint_from_type_l1_stmt.
 Proof.
+  unfold Semantics_L1.step_pop_disjoint_from_type_l1_stmt.
   intro H.
   assert (Hin : In rv ([] : region_env)).
   { eapply (H [] [rv] wit (mem_free_region [] rv) [] (EPair (EI32 5) wit_e2)

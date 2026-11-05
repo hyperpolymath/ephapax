@@ -33,9 +33,24 @@ This file is the proof-status audit for Ephapax. It supersedes earlier
 versions that treated the legacy preservation closure plan as viable.
 Keep these categories distinct:
 
-* *Legacy archaeology*: the original `+preservation+` statement is false;
-  its durable `+Admitted.+` and pinned five-`+Qed+` regression in
-  `+formal/Counterexample.v+` are intentional and must remain together.
+* *Legacy archaeology*: the original `+preservation+` statement is false.
+  Since the owner-ratified D0b (2026-11-05) it is retired to
+  `+preservation_stmt : Prop+` (not closed) and refuted outright by
+  `+preservation_false+` in `+formal/Counterexample.v+` (6 `+Qed+`).
+
+[IMPORTANT]
+====
+*D0/D0b retirement (owner-ratified 2026-11-05).* `+formal/+` now has
+*0* `+Admitted.+` and *0* `+Axiom+`. The three refuted statements
+(`+Semantics.preservation+`, `+step_pop_disjoint_from_type_l1+`,
+`+preservation_l1+`) are `+Prop+` definitions, each refuted by a `+Qed+`
+counterexample. While they were `+Admitted+`, the build could derive
+`+False+`; CI's no-False gate (`+coq-build.yml+`) now blocks any new
+`+Admitted+`/`+Axiom+`/`+Parameter+`. The L2 corollaries
+`+preservation_l2_via_l1+` and `+preservation_l2_lift_case+` take
+`+preservation_l1_stmt+` as an explicit hypothesis. Dated sections below
+that count outer `+Admitted.+` markers are historical.
+====
 * *Redesigned judgments*: L1/L2 change typing interfaces; conceptual
   vocabulary or results from another repo do not discharge Ephapax's
   language-soundness obligations.
@@ -51,13 +66,12 @@ The current preservation boundary is:
 [cols="18%,26%,56%",options="header"]
 |===
 |Layer |Status |Evidence / boundary
-|Legacy |*False as stated; pinned archaeology* |`+Counterexample.v+` has
-5 `+Qed+` lemmas. Keep the one durable `+Admitted.+` in
-`+Semantics.v+`; do not relabel it ordinary debt or replace it with a fake
-proof.
-|L1 |*Current universal statement false as stated* |`+Counterexample_StepPop.v+`
-refutes `+step_pop_disjoint_from_type_l1+`; `+Counterexample_PreservationL1.v+`
-refutes the modality-polymorphic `+preservation_l1+` via its Linear
+|Legacy |*False as stated; retired, refuted* |`+Counterexample.v+` has
+6 `+Qed+` lemmas, including `+preservation_false : ~ preservation_stmt+`.
+The statement is a `+Prop+`, not a theorem; never state it as proved.
+|L1 |*Current universal statement false as stated; retired* |`+Counterexample_StepPop.v+`
+refutes `+step_pop_disjoint_from_type_l1_stmt+`; `+Counterexample_PreservationL1.v+`
+refutes the modality-polymorphic `+preservation_l1_stmt+` via its Linear
 instance (the pre-state witness types in both modes). It does not by itself
 refute a separate Affine-only theorem. The existing
 `+bad_input_untypable_l1+` only rejects the original legacy witness; it does
@@ -136,8 +150,8 @@ link:formal/PRESERVATION-DESIGN.adoc[`+formal/PRESERVATION-DESIGN.adoc+`].
 |`+formal/Echo.v+` |12 Qed, 0 admits
 
 |Linear-mode forward progress lemmas |`+formal/Semantics_L1.v+` |37 Qed;
-*2* outer `+Admitted.+` markers (`+step_pop_disjoint_from_type_l1+` /
-`+preservation_l1+`) cover *2* internal `+admit.+` cases at current
+0 `+Admitted.+` since D0 (2026-11-05). Historical note: *2* outer `+Admitted.+` markers (`+step_pop_disjoint_from_type_l1+` /
+`+preservation_l1+`) covered *2* internal `+admit.+` cases at then-current
 lines 3315/3336 (rebuilt `+coqc 8.18.0+` ground truth 2026-06-27; the
 earlier 5-internal / lines-576/646/1994/2014/3132 figure is
 pre-dissolution, superseded by the §4 marker = 3 total). Phase 3b Stage
@@ -201,9 +215,9 @@ graceful abandonment
 |Stage 3b and β-case helpers landed with explicit premises; they are not
 unconditional preservation theorems. The unrestricted region-shrink helper
 and former region-liveness lemma were refuted and removed; the restricted
-`+region_shrink_msperm+`/value/neutral results are Qed. Two outer L1
-`+Admitted+` markers remain, and both unrestricted statements are now
-refuted by pinned counterexamples (see §1 boundary and §4 seam audit).
+`+region_shrink_msperm+`/value/neutral results are Qed. The two former
+outer L1 `+Admitted+` markers are retired to `+Prop+` statements (D0,
+2026-11-05); both are refuted by pinned counterexamples.
 |===
 
 ==== Counterexample regression
@@ -429,8 +443,10 @@ These are not preferences. They are explicit, durable, owner-issued
 
 ==== A. Do not close the legacy preservation theorem
 
-* ❌ `+Theorem preservation+` in `+formal/Semantics.v+` is *provably
-false*. No proof closes it. The `+Admitted.+` is correct. Leave it.
+* ❌ The legacy preservation statement in `+formal/Semantics.v+` is *provably
+false*. No proof closes it. Since D0b (2026-11-05) it is
+`+preservation_stmt : Prop+`, refuted by `+Counterexample.preservation_false+`;
+do not restate it as a `+Theorem+` or `+Lemma+`.
 * ❌ Do not add lemmas to `+formal/Semantics.v+` aimed at that closure.
 Examples that have wasted real session time:
 ** Lemma B variants (`+step_preserves_type+`,
@@ -511,20 +527,19 @@ the owner*:
 
 === §4. Counts + file-by-file map
 
-Coq `+Admitted.+` marker count: *3* (current source inventory): one
-legacy marker plus two in `+Semantics_L1.v+`. This is a marker count, not
-a count of sound obligations still awaiting routine proof.
+Coq `+Admitted.+` marker count: *0* (D0/D0b retirement, 2026-11-05).
+The build is axiom-free; CI's no-False gate enforces it.
 
 CI count marker only (source markers, not routine proof debt):
-Coq admitted proofs remaining: 3
+Coq admitted proofs remaining: 0
 
 
-* `+formal/Semantics.v+` `+preservation+`: false as stated; durable
-  legacy archaeology, pinned by `+Counterexample.v+`.
-* `+formal/Semantics_L1.v+` `+step_pop_disjoint_from_type_l1+` and
-  `+preservation_l1+`: both unrestricted statements are refuted by
-  `+Counterexample_StepPop.v+` and
-  `+Counterexample_PreservationL1.v+`; neither is ordinary proof debt.
+* `+formal/Semantics.v+` `+preservation_stmt+`: false as stated; retired
+  to a `+Prop+` and refuted by `+Counterexample.preservation_false+`.
+* `+formal/Semantics_L1.v+` `+step_pop_disjoint_from_type_l1_stmt+` and
+  `+preservation_l1_stmt+`: both unrestricted statements are retired to
+  `+Prop+` and refuted by `+Counterexample_StepPop.v+` and
+  `+Counterexample_PreservationL1.v+`; neither is proof debt.
 * The false unrestricted region-shrink helper was replaced by
   `+region_shrink_msperm+` and proved value/neutral corollaries. The
   false unconditional region-liveness helper was removed and replaced at

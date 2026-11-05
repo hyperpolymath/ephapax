@@ -807,7 +807,7 @@ Includes `step_v2_deterministic`.
 |P18 Carrier seam E5a
 |`CarrierSpec.v` `ownership_kind_sound` (grade + mode → kind). Restate Idris E1/E5a against `has_type_v2` (*UNVERIFIED*).
 |CLOSED; gate acceptance from E8
-|P15, typed-wasm fixes
+|P15, typed-wasm fixes, E8 completed (re-scheduled after any W2 delay)
 |M
 
 |P19 Ledger + RMR
@@ -865,7 +865,7 @@ These are kept off the critical path.
 
 |E3 Driver
 |`src/ephapax-driver` used by every tool; `src/ephapax-tools` either joins the workspace or is excluded.
-|`driver_agreement.rs`: check == compile on all corpus files; `qualified-import/app.eph` and `bridge.eph` check
+|`driver_agreement.rs`: every entry point (check, compile, run, repl, lsp, query, fmt) loads each corpus file through `ephapax-driver` and agrees on parse/desugar success; check == compile on all corpus files; `qualified-import/app.eph` and `bridge.eph` check
 |none
 |M
 
@@ -877,7 +877,7 @@ These are kept off the critical path.
 
 |E5 Typed codegen (stopgap)
 |Expr-id → Ty side table from the current checker; typed binop/literal/string/tuple; F64 rem lowering; I64 literals (G4).
-|`wasm_e2e`: i64, f64, s1, s6, t3 return correct values; corpus compile count > 14
+|`wasm_e2e`: i64, f32, f64, s1, s6, t3 return correct values (f32 = a literal plus arithmetic case with a checked result); corpus compile count > 14
 |E3
 |M–L
 
@@ -925,7 +925,7 @@ These are kept off the critical path.
 
 |E13 Rust v2 checker
 |`ephapax-check-v2` as an image of `CheckV2.v`; emits the typed core and, under the D9 certificate option, a derivation certificate that `check_v2_cert` checks per program; `ephapax-typing` delegates to it.
-|0 disagreements (both directions, and on normalized `(Ty, R', G')` output tuples for jointly accepted terms) over corpus + 100k generated + 10k mutated terms, in CI on every PR
+|0 disagreements (both directions, and on normalized `(Ty, R', G')` output tuples for jointly accepted terms) over corpus + 100k generated + 10k mutated terms, in CI on every PR. Under the D9 certificate option: `check_v2_cert` accepts the certificate emitted for every Rust-accepted input, and a corrupted-certificate test case is rejected.
 |P15, D5
 |L
 
@@ -1043,14 +1043,15 @@ These are kept off the critical path.
 |Wave |Parallel tracks |Agents |Exit gate |Must not touch
 
 |*W0 Honesty and holes* (1 week; ephapax only)
-a|* T0a P0 dry run, then the ratification request (X2)
+a|* T0a P0 dry run, then one ratification request covering D0 and D0b (X2)
+* T0g implement the ratified D0b isolation: under the recommended option, a CI job that fails if any `formal/v2` file transitively imports `Semantics.v` or `Counterexample.v` (`coqdep` closure; vacuous until `formal/v2` exists)
 * T0b P1 gate, tripwire, `gen-proof-status` (the `status-gate` path fix landed in #418)
 * T0c P2 land the 7 scratch falsifiers
 * T0d E0 + E1 Rust holes and fail-loud
 * T0e X1 probe battery + X8 aLib harness + E6 conformer
 * T0f doc-correction PR draft (owner applies)
 |6
-|`assumptions-gate.sh` exits 0 with an empty allowlist for every headline (on the P0 branch; temporarily the two L1 names on main are reported, not allowlisted). The tripwire lists all three refuted `Admitted` lemmas, and no headline depends on any of them. Dummy `Admitted` turns CI red. `status-gate.sh --proofs` exits 0. `formal/regress/*` CLOSED. `linearity_holes.rs` and `fail_loud.rs` green. `alib_conformance` at 89/0 unexpected. *No cross-repo criterion.*
+|`assumptions-gate.sh` exits 0 with an empty allowlist for every headline (on the P0 branch; temporarily the two L1 names on main are reported, not allowlisted). The tripwire lists all three refuted `Admitted` lemmas, and no headline depends on any of them. Dummy `Admitted` turns CI red. `status-gate.sh --proofs` exits 0. `formal/regress/*` CLOSED. `linearity_holes.rs` and `fail_loud.rs` green. `alib_conformance` at 89/0 unexpected. D0 and D0b ratified, and the D0b CI job present. *No cross-repo criterion.*
 |typed-wasm; any judgment design; `formal/v2`
 
 |*W1 Decisions and infrastructure* (1–2 weeks)
@@ -1070,9 +1071,10 @@ a|* T2a P4 skeleton
 * T2c P6 `Exec.v` + typed generator (X5)
 * T2d E12 translator + harness. The soundness direction (Rust-accept ⇒ oracle-accept) is asserted at zero tolerance against the naive `check_v2`, and only completeness is report-only (X6).
 * T2e E5 typed side-table codegen
-* T2f E8 if typed-wasm has merged; otherwise wait
+* T2f E8 if typed-wasm has merged; otherwise it carries over to each later wave until it does
+* T2g E7 completion (generics, `M.Ctor(x)` lowering, reconciled import/extern syntax) on top of the W1 draft
 |6
-|ORACLE-COQ green on `formal/v2`. All Regress CLOSED; `let_unit_typable_v2` CLOSED. Falsifier: 0 counterexamples over 100k well-typed terms at ≥ 20% acceptance with full constructor coverage. `wasm_e2e` i64/f64/s1/s6/t3 green. Differential soundness direction: 0 disagreements over the translatable corpus and generated terms. `PORT-REPORT.adoc` committed.
+|ORACLE-COQ green on `formal/v2`. All Regress CLOSED; `let_unit_typable_v2` CLOSED. Falsifier: 0 counterexamples over 100k well-typed terms at ≥ 20% acceptance with full constructor coverage. `wasm_e2e` i64/f64/s1/s6/t3 green. Differential soundness direction: 0 disagreements over the translatable corpus and generated terms. `PORT-REPORT.adoc` committed. E7 gate green (`gen_angle.eph` and `qa/app2.eph` compile and run; 0 EBNF productions unaccounted for).
 |`PreservationV2` main proof (no proving before the falsifier is green)
 
 |*W3 L1 metatheory* (3–5 weeks)
@@ -1106,6 +1108,7 @@ a|* T5a P15 `CheckV2` + extraction
 * T5d P16 `Desugar.v`
 * T5e P18 `CarrierSpec` + Affine emission
 * T5f E10 stdlib port
+* T5g D10 (interop representation) and D12 (certified-erasure statement) decision records, ratified by the owner before W6 starts T6b and T6d
 |6
 |`check_v2_sound` CLOSED. Differential: 0 disagreements in both directions over corpus + 100k generated + 10k mutated, on every PR. `ephapax-typing` delegates. Gate accepts 100% of compiled modules. Affine and linear outputs differ. stdlib 9/9.
 |L3/L4 surface beyond phase tests; effects
@@ -1129,6 +1132,21 @@ Engineering tracks inside each wave run in parallel with the proof tracks. The o
 * E13 waits on P15;
 * E9's promotion out of `--unstable-core` waits on P17;
 * E16 waits on P12 and P13.
+
+*Owner-decision schedule.* Every decision is ratified before the first rung that depends on it:
+
+[cols="1,2,3",options="header"]
+|===
+|Decision |Ratified in |Evidence attached / first dependent
+
+|D0, D0b |W0 (T0a) |X2 dry run / P0, P1, T0g
+|D1–D8 |W1 (T1a) |X3, X4, X9, X11, X13 / P4 (W2)
+|D11 (typed-wasm owner) |W1, with the T1b upstream PRs |X7 / E8
+|D9 |W4 (T4h) |X10 / P15, E13 (W5)
+|D10, D12 |W5 (T5g) |layout-profile and erasure notes / E18, E16, P21 (W6)
+|===
+
+A rung whose dependency has not completed (for example E8 while the typed-wasm fix is unmerged) carries over to the next wave together with every rung that depends on it (E9 completion, P18, the W5 gate-acceptance exit). It is never declared done against a missing dependency.
 
 == Options requiring owner decision
 
@@ -1565,7 +1583,7 @@ The legacy `Semantics.preservation` is `Admitted` by directive and is refuted by
 
 *hyperpolymath/ephapax* (tracked here for completeness; all owner-applied):
 
-* The W0 doc-truth PR: CLAUDE.md, V1-TO-V2.adoc, STATUS.adoc, PROOF-STATUS.a2ml, PROOF-NEEDS §4, the `Echo.v` and `Semantics_L1.v` banners, and README.adoc:275-283 (erasure).
+* The W0 doc-truth PR: record the derivable-`False` finding in CLAUDE.md, V1-TO-V2.adoc, STATUS.adoc and PROOF-NEEDS §4 (#418 already marks the L1 pair refuted); fix PROOF-STATUS.a2ml, the `Echo.v` and `Semantics_L1.v` banners, README.adoc:275-283 (erasure), `docs/wikis/Home.md:55-56` (six L2 admits, conditional L3), `docs/testing-and-bench-strategy.adoc:34` (four outer L1 admits) and `spec/FRG-PROFILE.adoc:29-30` (obsolete `.md` links).
 * Stale typed-wasm pin comment in `Cargo.toml:60-64`.
 * Rust "Coq bridge" test equating `Ty::Effectful` with `TFunEff` (`src/ephapax-syntax/src/lib.rs:880-888`).
 

@@ -1007,8 +1007,8 @@ These are kept off the critical path.
 |how many programs D4/D5 reject (K8)
 
 |X10
-|Extraction feasibility: toy `check_v2` extracted to OCaml reading `ephapax-ir` S-expressions, timed on the corpus; plus a 100-line derivation-certificate prototype (D9 option D).
-|the D9 choice
+|Extraction feasibility: a toy `check_v2` extracted to OCaml and to Guile Scheme, and also run in-Coq under `vm_compute`, reading `ephapax-ir` S-expressions and timed on the corpus and on 1k generated terms; plus a 100-line derivation-certificate prototype (the recommended D9 option).
+|the D9a choice (W1) and the D9 choice (W4)
 
 |X11
 |Halting-island grammar on a scratch pest copy: fraction of intended EBNF comptime uses that survive.
@@ -1378,6 +1378,31 @@ The legacy `Semantics.preservation` is `Admitted` by directive and is refuted by
 |Unconventional: full 2LTT staging (typed quotes)
 |4 |4
 |The most final theory; XL effort.
+|===
+
+=== D9a — Naive-oracle extraction target (ratified in W1, after X10)
+
+The naive `check_v2` and `step_v2_fn` from P6 need an executable form for the W2 falsifier and the E12 differential. This is a test-only oracle that never ships in the compiler. D9 later decides the form of the certified checker, and that choice may reuse or replace this one.
+
+[cols="3,1,1,4",options="header"]
+|===
+|Option |(a) |(b) |Comment
+
+|*Recommended (elegant default):* Coq extraction to OCaml, confined to `tools/ephapax-oracle` as a test-only binary, with a policy exception recorded in the ADR
+|5 |4
+|Mature extractor, and OCaml is installed. The trusted base is the extractor, the OCaml runtime and the S-expression reader. The policy exception is narrow because nothing ships.
+
+|Extraction to Scheme (Guile, estate-allowed)
+|3 |4
+|Policy-clean, but extraction is less mature and slower on 100k terms. X10 measures both.
+
+|Unconventional: no extraction; evaluate inside Coq (`vm_compute` over serialised terms)
+|3 |5
+|No extra trusted runtime and no policy question, but likely too slow for 100k terms per run. X10 measures the throughput.
+
+|Hand-port to Rust
+|1 |2
+|Loses the link to the Coq definition, so the differential compares Rust with Rust.
 |===
 
 === D9 — Checker oracle form

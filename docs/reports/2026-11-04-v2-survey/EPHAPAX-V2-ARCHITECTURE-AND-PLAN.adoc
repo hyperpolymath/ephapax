@@ -17,7 +17,7 @@ The survey ran the following toolchains:
 
 Idris2, Lean, Isabelle, zig, julia, z3 and the wasmtime CLI are not installed. Every claim that depends on them is marked *UNVERIFIED*.
 
-Nothing in this document proposes closing or extending `formal/Semantics.v` or `formal/Typing.v`. The legacy `Theorem preservation` is false (`formal/Counterexample.v`), and it stays `Admitted.` by owner directive. Because an `Admitted` statement is an axiom, the legacy theorem together with `Counterexample.v` also derives `False` (`evidence/SurveyCounterexamples.v`, F0). It therefore must never appear in the `Print Assumptions` of any headline theorem; see P0/P1 and D0b.
+Nothing in this document proposes closing or extending `formal/Semantics.v` or `formal/Typing.v`. The legacy `Theorem preservation` is false (`formal/Counterexample.v`). It stayed `Admitted.` by owner directive until the owner ratified D0b (2026-11-05): P0 now retires it to a `Prop` statement, which the owner applies, rather than closing it. Because an `Admitted` statement is an axiom, the legacy theorem together with `Counterexample.v` also derives `False` (`evidence/SurveyCounterexamples.v`, F0). It therefore must never appear in the `Print Assumptions` of any headline theorem; see P0/P1 and D0b.
 
 Throughout, *ephapax-affine* means the internal sublanguage. It is not AffineScript. The two projects share only the compile target, typed-wasm.
 
@@ -687,7 +687,7 @@ Items marked "*(external)*" in the Home column live outside `hyperpolymath/ephap
 
 |P0 Consistency restore
 |Owner-ratified retirement: `preservation_l1` and `step_pop_disjoint_from_type_l1` become `Definition …_stmt : Prop`. `preservation_l2_via_l1` and `lift_case` take `preservation_l1_stmt` as a hypothesis, or are deleted. The `*_FALSE` files still compile. The PR is framed as *retirement*, not closure (CLAUDE.md DO NOT #3 adjacency). #418 already corrected CLAUDE.md, V1-TO-V2.adoc and PROOF-NEEDS so they mark the L1 pair as refuted rather than residual debt. The same PR still has to record that these `Admitted` lemmas, and the legacy theorem, make the environment able to derive `False`. No document on `main` states that yet. Docs are applied by the owner, GPG-signed.
-|ORACLE-COQ; `env_inconsistent_preservation_l1` and `env_inconsistent_step_pop` fail to compile (expected-failure targets); allowlist = `{}` for every headline. `legacy_inconsistent` still compiles under the recommended D0b option; only D0b's split or retire options change that. It is recorded as a known, quarantined inconsistency that no headline may depend on.
+|ORACLE-COQ; `env_inconsistent_preservation_l1` and `env_inconsistent_step_pop` fail to compile (expected-failure targets); allowlist = `{}` for every headline. Under the ratified D0b (retire), `Semantics.preservation` becomes `Definition preservation_stmt : Prop` and `Counterexample.v` proves `~ preservation_stmt`, so `legacy_inconsistent` (F0) also fails to compile (expected-failure target) and the environment no longer derives `False`.
 |owner ratification
 |S
 
@@ -1052,14 +1052,14 @@ These are kept off the critical path.
 |*W0 Honesty and holes* (1 week; ephapax only)
 a|* T0a P0 dry run, then one ratification request covering D0 and D0b (X2)
 * T0h after ratification, apply the P0 retirement from the X2 dry-run diff (an agent prepares the PR; the owner reviews and signs it)
-* T0g implement the ratified D0b isolation: under the recommended option, a CI job that fails if any `formal/v2` file transitively imports `Semantics.v` or `Counterexample.v` (`coqdep` closure; vacuous until `formal/v2` exists)
+* T0g implement the ratified D0b retirement inside P0: `Semantics.preservation` becomes `preservation_stmt : Prop`, `Counterexample.v` is restated as `preservation_false : ~ preservation_stmt` (Qed), and a CI probe confirms that `False` is not derivable from the full `_CoqProject`. The fenced-file edit and the CLAUDE.md fence revision are applied by the owner, GPG-signed.
 * T0b P1 gate, tripwire (runs before the X2 step of T0a), `gen-proof-status` (the `status-gate` path fix landed in #418)
 * T0c P2 land the 7 scratch falsifiers
 * T0d E0 + E1 Rust holes and fail-loud
 * T0e X1 probe battery + X8 aLib harness + E6 conformer
 * T0f doc-correction PR draft (owner applies)
 |6
-|`assumptions-gate.sh` exits 0 with an empty allowlist for every headline (on the P0 branch; temporarily the two L1 names on main are reported, not allowlisted). The tripwire reports every refuted `Admitted` still present (legacy `Semantics.preservation`, plus the L1 pair until P0 merges), and no headline depends on any of them. Dummy `Admitted` turns CI red. `status-gate.sh --proofs` exits 0. `formal/regress/*` CLOSED. `linearity_holes.rs` and `fail_loud.rs` green. `alib_conformance` at 89/0 unexpected. D0 and D0b ratified, and the D0b CI job present. *No cross-repo criterion.*
+|`assumptions-gate.sh` exits 0 with an empty allowlist for every headline (on the P0 branch; temporarily the two L1 names on main are reported, not allowlisted). After P0 merges, the tripwire finds no refuted `Admitted` at all and its quarantine list is empty (before then it reports the L1 pair and the legacy theorem). Dummy `Admitted` turns CI red. `status-gate.sh --proofs` exits 0. `formal/regress/*` CLOSED. `linearity_holes.rs` and `fail_loud.rs` green. `alib_conformance` at 89/0 unexpected. D0 and D0b ratified (2026-11-05), and the no-`False` CI probe present. *No cross-repo criterion.*
 |typed-wasm; any judgment design; `formal/v2`
 
 |*W1 Decisions and infrastructure* (1–2 weeks)
@@ -1217,6 +1217,29 @@ The legacy `Semantics.preservation` is `Admitted` by directive and is refuted by
 |3 |3
 |Consistent, but harder to read, and it changes the fenced counterexample's shape.
 |===
+
+=== Ratified: D0 and D0b (owner, 2026-11-05)
+
+* *D0:* the recommended option. `preservation_l1` and `step_pop_disjoint_from_type_l1` become `Definition …_stmt : Prop`; the `*_FALSE` refutations are kept; the L2 corollaries take the statement as a hypothesis.
+* *D0b:* *retire `Semantics.preservation` to `preservation_stmt`*. This is not the recommended option, so the decision-branch rule applies. Its branch table:
+
+[cols="1,4",options="header"]
+|===
+|Rung |Branch under the ratified D0b
+
+|P0
+|Also retires the legacy theorem: `Definition preservation_stmt : Prop`, and `Counterexample.v` restated as `preservation_false : ~ preservation_stmt` (Qed). The acceptance gains: `legacy_inconsistent` (F0) fails to compile, and the whole `_CoqProject` cannot derive `False`.
+|P1
+|The tripwire's quarantine list starts empty after P0. Any refuted `Admitted` fails CI.
+|T0g
+|Replaced: instead of the import-closure job, a CI probe confirms that `False` is not derivable from the full build.
+|T0f
+|The doc-correction PR also revises the 2026-05-27 fence in CLAUDE.md (DO NOT items 1, 2 and 5), PROOF-NEEDS, EXPLAINME and V1-TO-V2, and records that the legacy theorem is retired, not closed. Applied by the owner, GPG-signed.
+|Evidence
+|`evidence/SurveyCounterexamples.v` F0 becomes an expected-failure target, like F1.
+|===
+
+Beyond this repo: the memory entry `feedback_ephapax_no_patching_legacy_preservation.md` needs the same revision.
 
 === D1 — Where the v2 core lives
 

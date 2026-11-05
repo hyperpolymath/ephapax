@@ -355,9 +355,11 @@ Sources: the scratch builds and probes recorded in the dossier, plus spot checks
                     rule of the one judgment (fixes L2Comp)
  L1  TypingV2.v     has_type_v2 m Sigma R G e T R' G'; locally nameless region binders; runtime-only EFrame typed
                     only by T_Frame; arrows TArr Rin Rout T1 T2 with prenex region abstraction for top-level fns
-     StepV2.v       deterministic step_v2; Enter opens the binder with a fresh name; Exit removes the frame
+     StepV2.v       deterministic step_v2; Enter opens the binder with the canonical fresh name next_r carried
+                    in the configuration (then increments it), so plain equality, not alpha, suffices; Exit removes the frame
      ConfigWF.v     R =_multiset frames(e) /\ store_typed mu /\ every ELoc tagged r occurs only while r is
-                    framed /\ closed e
+                    framed /\ closed e /\ sigma_wf Sigma (every definition in Sigma
+                    has its declared type, checked against the whole recursive Sigma)
      ProgressV2.v / PreservationV2.v / SafetyV2.v
  meta MetaPlane.v   first-order comptime calculus; structural Fixpoint as the termination certificate
  tool CheckV2.v     check_v2 + check_v2_sound (+ complete on the annotated fragment) + Extraction
@@ -711,6 +713,7 @@ Items marked "*(external)*" in the Home column live outside `hyperpolymath/ephap
 
 * locally nameless region binders;
 * runtime-only `EFrame`;
+* a fresh-region counter `next_r` in the configuration that `Enter` uses and increments, so `step_v2_deterministic` holds up to plain equality rather than modulo alpha-renaming;
 * `TArr Rin Rout` with prenex region abstraction;
 * signed integer literals and the I64/F32/F64 literal forms with their primitive step rules (today `Syntax.v` declares `TI64`/`TF32`/`TF64` but has only `EI32 : nat`);
 * grades {0,1,ω} with modality = preorder;
@@ -718,7 +721,7 @@ Items marked "*(external)*" in the Home column live outside `hyperpolymath/ephap
 * `TEcho` grade 1 in Linear mode;
 * distinct echo forms;
 * `S_Observe`;
-* a global Σ for recursion;
+* a global Σ for recursion, with a `sigma_wf` judgment (every definition checked against its declared type under the whole recursive Σ) that `config_wf` requires and that P9 and P10 take as a hypothesis;
 * iso-recursive `TMu` with fold/unfold (D7 is ratified in W1, before P4), so P7–P13 are proved against the full core;
 * store coherence in `config_wf`.
 
@@ -871,8 +874,8 @@ These are kept off the critical path.
 |M
 
 |E4 Runner
-|`ephapax run` executes wasm; the interpreter becomes `run --interp` and is fixed or marked.
-|`ephapax run p1.eph` prints 162; interpreter and wasm agree on the compiling corpus, except files listed in a checked-in `interp-known-failures` list when the interpreter is marked
+|`ephapax run` executes wasm and forwards `Run.args` (today discarded as `args: _`, `src/ephapax-cli/src/main.rs:193`) through the wasmtime host imports `env::argv_count`, `argv_arg_len` and `argv_arg_get` that `stdlib/Argv.eph` needs; the interpreter becomes `run --interp` and is fixed or marked.
+|`ephapax run p1.eph` prints 162; an argv fixture prints its arguments correctly for at least three argument vectors (none, one, several); interpreter and wasm agree on the compiling corpus, except files listed in a checked-in `interp-known-failures` list when the interpreter is marked
 |E3
 |S–M
 
@@ -889,8 +892,8 @@ These are kept off the critical path.
 |S
 
 |E7 Grammar + generics
-|One normative grammar plus a conformance fixture test. `SurfaceDecl::Fn` type params (desugar lib.rs:323). `M.Ctor(x)` lowers to `Construct`. Import and extern syntax reconciled.
-|`gen_angle.eph` and `qa/app2.eph` compile and run; 0 EBNF productions unaccounted for
+|One normative grammar plus a conformance fixture test. `SurfaceDecl::Fn` type params (desugar lib.rs:323). Until E13 brings grades, unconstrained type parameters are treated as linear (today `Ty::is_linear` makes `Ty::Var`/`Ty::Unif` non-linear, `ephapax-syntax/src/lib.rs:154`), so a generic body cannot duplicate a value that is later instantiated at a linear type. `M.Ctor(x)` lowers to `Construct`. Import and extern syntax reconciled.
+|`gen_angle.eph` and `qa/app2.eph` compile and run; `fn dup<a>(x: a) = (x, x)` is rejected with a named `TypeError` (and so cannot be instantiated at a region-owned `String`); 0 EBNF productions unaccounted for
 |E3, the syntax ADR (normative grammar source) ratified in the W1 T1a packet
 |M
 
@@ -945,19 +948,19 @@ These are kept off the critical path.
 |E16 L3/L4 surface + RMR/RMO
 |echo/observe/`drop!`/`region!`, mode declarations, `Erasure.eph`, `Reversible.eph`, scrub-on-exit; docs: full-fiber Linear echo = RMR (retention), never "erasure".
 |unobserved Linear echo rejected; `drop!`/`region!` phase tests run; `Erasure.eph` and `Reversible.eph` check, compile, pass the gate and have runner tests; affine and linear outputs differ in ownership; freed sensitive cells read 0 both in the interpreter and in a wasmtime runner test (E4) that inspects the freed linear-memory range after region exit
-|P12, P13, T5h (upstream Affine kind merged and pinned), D12, X12 baseline (T5i)
+|P12, P13, T5h (upstream Affine kind merged and pinned), D12, X12 baseline (T5i), E8
 |L
 
 |E17 Effects / traits / contracts / capabilities
 |Annotation args and capabilities → contracts as asserts → traits by dictionary passing → one-shot handlers via evidence passing.
 |one phase test per feature that *runs* wasm through gate and runner; differential still 0
-|E13
+|E13, E8
 |XL
 
 |E18 Ecosystem
 |typell-ephapax v2; shared aLib runner in typed-wasm; linear-memory layout profile.
 |typell tests green on v2 fixtures; shared runner reproduces ephapax's pass count; the layout profile is merged upstream and `typed_wasm_gate` validates the stdlib against it
-|E6, D10
+|E6, D10, E8, E10 (the completed v2 stdlib port)
 |M
 |===
 
@@ -976,11 +979,11 @@ These are kept off the critical path.
 |the evidence package for owner ratification
 
 |X3
-|Frames prototype (time-boxed to 3 days): a scratch `SyntaxV2`/`StepV2`/`ConfigWF` with option (i); re-check all 8 families.
+|Frames prototype (time-boxed to 3 days): a scratch `SyntaxV2`/`StepV2`/`ConfigWF`, plus a scratch L1-only `TypingV2` (rule statements, no metatheory) for X4 to retarget against, with option (i); re-check all 8 families.
 |whether D2(i) kills every known class (input to K1)
 
 |X4
-|Porting rate: retarget the 52 Semantics_L1 Qed lemmas, and count verbatim / small edit / dead, with step-shaped lemmas counted separately.
+|Porting rate: retarget the 52 Semantics_L1 Qed lemmas against the X3 scratch `TypingV2`/`StepV2`, and count verbatim / small edit / dead, with step-shaped lemmas counted separately. The count is provisional and is re-measured against the real P4 core when P7 starts.
 |real sizes for P7 and P10
 
 |X5
@@ -1057,14 +1060,14 @@ a|* T0a P0 dry run, then one ratification request covering D0 and D0b (X2)
 |typed-wasm; any judgment design; `formal/v2`
 
 |*W1 Decisions and infrastructure* (1–2 weeks)
-a|* T1a P3 decision packet: D1–D8, D9a (extraction target / OCaml policy for the naive oracle) and the syntax ADR (normative grammar source; default: regenerate the EBNF from `ephapax.pest` for implemented productions while keeping every current EBNF production that `ephapax.pest` lacks, such as traits, handlers, contracts, capabilities and comptime, in the conformance inventory as UNIMPLEMENTED; removing one needs an explicit owner decision recorded in the ADR), with X3 + X4 + X9 + X11 + X13 attached
+a|* T1a P3 decision packet: D1–D8, D9a (extraction target / OCaml policy for the naive oracle) and the syntax ADR (normative grammar source; default: regenerate the EBNF from `ephapax.pest` for implemented productions while keeping every current EBNF production that `ephapax.pest` lacks, such as traits, handlers, contracts, capabilities and comptime, in the conformance inventory as UNIMPLEMENTED; removing one needs an explicit owner decision recorded in the ADR), with X3 + X4 + X9 + X11 + X13 attached; D9a is ratified separately, after T1f, with X10 attached, and the W1 exit requires it
 * T1b X7 typed-wasm upstream PRs (offsets, bounds, taint) and the D11 request to the typed-wasm owner
 * T1c E3 driver + E4 runner
 * T1d E2 corpus + E7 grammar reconciliation draft
 * T1e `Modality` join laws (P11 part 1)
-* T1f X10 extraction / certificate prototype
+* T1f X10 extraction / certificate prototype; it must finish before the D9a part of T1a is ratified
 |6
-|Decision record merged and signed off. Driver agreement passes; `ephapax run p1.eph` prints 162. Corpus gate asserts error kinds. typed-wasm PRs open with green tests (≥ 209). Join laws CLOSED.
+|Decision record merged and signed off, including D9a ratified with the X10 results attached. Driver agreement passes; `ephapax run p1.eph` prints 162 and the argv fixture passes. Corpus gate asserts error kinds. typed-wasm PRs open with green tests (≥ 209). Join laws CLOSED.
 |`formal/v2` beyond prototypes; Rust checker rewrite
 
 |*W2 v2 core and falsifier* (2–3 weeks)

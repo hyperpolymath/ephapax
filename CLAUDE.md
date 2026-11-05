@@ -100,7 +100,18 @@ redesign and state sound replacement theorems, not to prove refuted ones.
 - **Proof, L4** — Phase A scaffold landed; mother–child dyadic
   semantics (`PRESERVATION-DESIGN.adoc §7`) is the next design step.
 
-## 🛑 Owner directive snapshot (2026-05-27) — legacy fence plus later L1 regressions
+## 🛑 Owner directive snapshot (2026-05-27, revised 2026-11-05) — legacy fence plus later L1 regressions
+
+> **2026-11-05 revision (owner-ratified D0 and D0b).** The three refuted
+> statements are retired, not closed: `Semantics.preservation` is now
+> `preservation_stmt : Prop`, refuted by `Counterexample.preservation_false`;
+> `step_pop_disjoint_from_type_l1` and `preservation_l1` are now
+> `…_stmt : Prop`, refuted by `Counterexample_StepPop.v` and
+> `Counterexample_PreservationL1.v`. While they were `Admitted`, the build
+> could derive `False`. `formal/` now has **0 `Admitted` and 0 `Axiom`**,
+> and CI's no-False gate (`coq-build.yml`) blocks any new
+> `Admitted`/`Axiom`/`Parameter`. The fence below is unchanged in spirit:
+> never try to prove a refuted statement.
 
 > The guardrails below protect pinned counterexamples and the false
 > statements they refute. They do **not** mean "skip this repo." The
@@ -113,10 +124,10 @@ redesign and state sound replacement theorems, not to prove refuted ones.
 Ephapax preservation as originally stated in `formal/Semantics.v` is
 **provably false** — and that is a *result*, not a defeat:
 `formal/Counterexample.v` exhibits a concrete configuration that types,
-steps, and lands at an untypable post-state (5 lemmas `Qed`), which
+steps, and lands at an untypable post-state (now 6 lemmas `Qed`, incl. `preservation_false`), which
 named an invariant missing from the legacy judgment. So the work is **not**
-to close `Theorem preservation` in `Semantics.v` (no closure exists; the
-`Admitted` is deliberate). Nor should the current unrestricted L1
+to close the legacy preservation in `Semantics.v` (no closure exists; it
+is retired to `preservation_stmt : Prop`, refuted by `preservation_false`). Nor should the current unrestricted L1
 preservation be treated as routine debt: `Counterexample_StepPop.v` and
 `Counterexample_PreservationL1.v` refute its supporting claim and capstone.
 There is no unconditional L2 preservation theorem; the L2 β-case helpers
@@ -130,9 +141,11 @@ counterexample and state any replacement theorem with its exact boundary.
 These are anti-patterns that have wasted real session time. Refuse
 them if asked; if asked anyway, push back and link this section.
 
-1. **DO NOT close `Theorem preservation` in `formal/Semantics.v`.**
-   It is FALSE. No proof technique closes it because no proof
-   exists. The `Admitted.` is correct.
+1. **DO NOT prove or restate the legacy preservation in
+   `formal/Semantics.v`.** It is FALSE and is refuted by
+   `Counterexample.preservation_false`. It stays `preservation_stmt : Prop`;
+   never turn it back into a `Theorem`/`Lemma`, and never re-add an
+   `Admitted.` for it.
 
 2. **DO NOT extend `formal/Semantics.v`** with new lemmas aimed at
    closing the legacy preservation: not Lemma B variants
@@ -144,10 +157,12 @@ them if asked; if asked anyway, push back and link this section.
    invariant the counterexample demands; no lemma collection bolted
    onto it will help.
 
-3. **DO NOT try to complete the current unrestricted
-   `step_pop_disjoint_from_type_l1` or `preservation_l1` statements in
-   `formal/Semantics_L1.v`.** Both are refuted by pinned witnesses; their
-   `Admitted.` markers are transparent boundaries, not ordinary debt.
+3. **DO NOT try to prove the unrestricted
+   `step_pop_disjoint_from_type_l1_stmt` or `preservation_l1_stmt`
+   statements in `formal/Semantics_L1.v`.** Both are refuted by pinned
+   witnesses and retired to `Prop`; they are not debt. Results that need
+   them take them as explicit hypotheses (as `preservation_l2_via_l1`
+   now does).
    Do not route around the counterexamples with ad-hoc side conditions or
    helper-signature changes. A separately stated sound theorem after an
    owner-approved judgment/step redesign is allowed and expected.
@@ -162,7 +177,7 @@ them if asked; if asked anyway, push back and link this section.
 
 5. **DO NOT patch the legacy `Typing.v` judgment.** It is the
    pre-redesign judgment. `Counterexample.v` depends on its
-   falsity for the regression theorem. Leave it.
+   falsity for `preservation_false`. Leave it.
 
 ### DO
 
@@ -212,8 +227,9 @@ escalate to the owner:
 - region-weakening predicates indexed on syntactic shape,
 - admit-shuffling between `Semantics.v` and a new lemma,
 - "the previous-PR-line-of-attack just needs one more lemma,"
-- proposing to close `Theorem preservation` in `Semantics.v` to
-  `Qed.` by any chain of reasoning,
+- proposing to prove `preservation_stmt` (or turn it back into a
+  `Theorem`) by any chain of reasoning,
+- re-adding any `Admitted.` to `formal/` (the no-False gate will fail),
 - adding new `Axiom` declarations to discharge L1/L2 gaps.
 
 ### If you're unsure

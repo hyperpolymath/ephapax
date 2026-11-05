@@ -224,10 +224,14 @@ the exact preservation boundary is recorded below.
 .Post-counterexample 2026-05-26 — read this before any older proof claim
 ====
 The legacy preservation theorem in `formal/Semantics.v` is **provably
-false**. `formal/Counterexample.v` (5 Qed lemmas) demonstrates a
+false**. `formal/Counterexample.v` (6 Qed lemmas) demonstrates a
 configuration that types under the legacy judgment, steps via the
-operational semantics, and lands at an untypable post-state. The
-`Admitted.` on `Theorem preservation` is correct — no proof closes it.
+operational semantics, and lands at an untypable post-state, and
+`preservation_false` refutes the statement outright. No proof closes it:
+since the owner-ratified D0b (2026-11-05) it is retired to
+`preservation_stmt : Prop` rather than kept `Admitted`, because an
+`Admitted` false statement let the build derive `False`. `formal/` now has
+0 `Admitted` and 0 `Axiom`.
 
 The post-discovery architecture is a design program, not yet a sound
 replacement. The unrestricted L1 preservation statement is refuted by
@@ -257,7 +261,7 @@ Qed results are scoped to matching echo rule pairs.
 
 | L1 semantics
 | 🛑 Current unrestricted preservation statements refuted
-| `formal/Semantics_L1.v` has two outer `Admitted.` markers: `step_pop_disjoint_from_type_l1` and `preservation_l1`. Both unrestricted statements have pinned Coq counterexamples; they are not routine open proof debt. See `PROOF-NEEDS.adoc`.
+| `formal/Semantics_L1.v` retires `step_pop_disjoint_from_type_l1` and `preservation_l1` to `Prop` statements (`…_stmt`, D0, 2026-11-05); it has no `Admitted`. Both unrestricted statements have pinned Coq counterexamples; they are not open proof debt. See `PROOF-NEEDS.adoc`.
 
 | L2 modality (`Modality.v`)
 | ✅ Core landed (1 Qed, 0 axioms)
@@ -272,8 +276,8 @@ Qed results are scoped to matching echo rule pairs.
 | `PModeLinear` / `PModeAffine` / `PModeBoundaryMix` enum + `program_mode_to_modality` round-trip. No theorems by design. Design in `formal/PRESERVATION-DESIGN.adoc §7`.
 
 | Legacy `Theorem preservation` (`formal/Semantics.v`)
-| 🛑 Provably false (Admitted)
-| Pinned by `Counterexample.v`. **Do not attempt closure.** Archaeology.
+| 🛑 Provably false (retired to `preservation_stmt : Prop`, D0b 2026-11-05)
+| Refuted by `Counterexample.preservation_false`. **Do not attempt closure.** Archaeology.
 |===
 
 What's done = `Modality.linear_to_affine` (Linear ⇒ Affine weakening,
@@ -310,8 +314,8 @@ documentation comments were clarified.
 |Coq 8.18.0; project build recipe above
 |`+formal/Counterexample.v+`: `+bad_typable+`, `+bad_step+`, `+bad_post_untypable+`
 |Concrete witness refutes the legacy universal statement only. It proves
-no redesign or implementation refinement; retain the separate legacy
-`+Admitted.+` unchanged.
+no redesign or implementation refinement. The legacy statement is
+retired to `+preservation_stmt+` and refuted by `+preservation_false+`.
 
 |`+step_pop_disjoint_from_type_l1+` is false as stated |proven
 |Coq 8.18.0; project build recipe above

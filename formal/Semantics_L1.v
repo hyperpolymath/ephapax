@@ -1,7 +1,7 @@
 (* SPDX-License-Identifier: MPL-2.0 *)
 (* SPDX-FileCopyrightText: 2026 Jonathan D.A. Jewell *)
 
-(* hypatia: allow code_safety/admitted -- tracked proof boundary; not an honest-completion claim. The two remaining outer Admitted markers (step_pop_disjoint_from_type_l1, preservation_l1) are each refuted as currently stated: see Counterexample_StepPop.v and Counterexample_PreservationL1.v. Do not try to close either unrestricted claim by ad-hoc patching or relabel them routine debt. Replacement work must reformulate the judgment/step interface with an explicit invariant and state a new theorem. The former region_liveness_at_split_l1_gen false statement was removed (2026-06-26) via val_region_no_exit / region_liveness_no_exit_l1_gen. See PROOF-NEEDS.adoc for current classification. Build truth is the `Print Assumptions` CI gate, not this comment. *)
+(* hypatia: allow code_safety/admitted -- tracked proof boundary; not an honest-completion claim. The two former outer Admitted markers (step_pop_disjoint_from_type_l1, preservation_l1) are refuted as stated (Counterexample_StepPop.v, Counterexample_PreservationL1.v) and were retired to Prop statements (owner-ratified D0, 2026-11-05); this file now has no Admitted. Do not try to prove either unrestricted statement. Replacement work must reformulate the judgment/step interface with an explicit invariant and state a new theorem. The former region_liveness_at_split_l1_gen false statement was removed (2026-06-26) via val_region_no_exit / region_liveness_no_exit_l1_gen. See PROOF-NEEDS.adoc for current classification. Build truth is the `Print Assumptions` CI gate, not this comment. *)
 (* hypatia: allow coq_admit_tactic -- see preceding directive; same tracked admits. *)
 
 (**
@@ -11,8 +11,8 @@
   ***                                                                ***
   ***  This is the post-counterexample L1 redesign. Extend HERE.     ***
   ***                                                                ***
-  ***  2 outer `Admitted` lemmas remain; both unrestricted claims    ***
-  ***  are refuted by pinned regressions (see below). L1/L2 Qed      ***
+  ***  0 `Admitted` (D0, 2026-11-05). Both unrestricted claims are  ***
+  ***  refuted by pinned regressions (see below). L1/L2 Qed         ***
   ***  infrastructure is not a universal preservation theorem.       ***
   ***    - typing_preserves_bindings_l1 (now m-polymorphic)          ***
   ***    - unrestricted_flag_unchanged_l1                            ***
@@ -27,10 +27,10 @@
   ***    - typing_preserves_length_l1, output_shape_at_l1,           ***
   ***      loc_retype_at_R_l1 all generalised to m-polymorphic       ***
   ***                                                                ***
-  ***  Refuted statements still marked Admitted:                      ***
-  ***    - step_pop_disjoint_from_type_l1 — Counterexample_StepPop.v ***
-  ***    - preservation_l1 — Counterexample_PreservationL1.v         ***
-  ***  Their Admitted markers are transparency, not a proof plan.     ***
+  ***  Refuted statements, retired to Prop (not closed):            ***
+  ***    - step_pop_disjoint_from_type_l1_stmt — Counterexample_StepPop.v ***
+  ***    - preservation_l1_stmt — Counterexample_PreservationL1.v    ***
+  ***  They are kept only so the refutations can name them.         ***
   ***  Replacement theorems require an owner-approved redesign.       ***
   ***                                                                ***
   ***  DO NOT close them by:                                         ***
@@ -82,9 +82,9 @@
       the Qed no-exit formulation and explicit premises described by
       [val_region_no_exit]. These helper results do not establish
       preservation for every step.
-    - [preservation_l1] — still marked Admitted, but its unrestricted
-      statement is refuted by [Counterexample_PreservationL1.v]. Do not
-      treat the marker as unfinished routine proof debt. A replacement
+    - [preservation_l1_stmt] — retired from [Admitted] to a [Prop]
+      statement (D0, 2026-11-05); its unrestricted form is refuted by
+      [Counterexample_PreservationL1.v]. It is not proof debt. A replacement
       requires an explicitly different judgment/step boundary or a
       restricted theorem with proved premises; see [PROOF-NEEDS.adoc].
 
@@ -3277,63 +3277,25 @@ Qed.
     lemma above is now refuted by [Counterexample_StepPop.v]; its outer
     [Admitted] is not routine proof debt. The choreography documents a
     redesign direction, not a proof route for the current statement. *)
-Lemma step_pop_disjoint_from_type_l1 :
+Definition step_pop_disjoint_from_type_l1_stmt : Prop :=
   forall mu R e mu' R' e' m G T R_final G',
     (mu, R, e) -->> (mu', R', e') ->
     has_type_l1 m R G e T R_final G' ->
     forall r, In r (Typing.free_regions T) -> In r R -> In r R'.
-Proof.
-  (* 2026 §6-experiment reduction.  The original 255-line induction left
-     ELEVEN internal admits across the eliminator/erasing congruences
-     (Let / LetLin / App2 / If / Pair / Inl / Inr / Case / Region).  They
-     all collapse through [step_R_change_shape] (Semantics.v, Qed): a single
-     step leaves [R] unchanged, prepends a fresh region, or removes exactly
-     one.  So a region free in the result type survives UNLESS the step
-     exits that very region; the eleven admits become ONE. *)
-  intros mu R e mu' R' e' m G T R_final G' Hstep Ht r0 Hfree HinR.
-  pose proof (step_R_change_shape _ _ _ _ _ _ Hstep)
-    as [Heq | [[r [Hadd Hnotin]] | [r [Hrem Hr_in]]]].
-  - (* R = R' : no region change. *) subst R'. exact HinR.
-  - (* R' = r :: R : S_Region_Enter descent. *) subst R'. simpl. right. exact HinR.
-  - (* R' = remove_first r R : S_Region_Exit descent. *) subst R'.
-    destruct (string_dec r r0) as [Heqr | Hne].
-    + (* r = r0 : the step exits the very region we need live.  The single
-         residual obligation is [cnt r0 R >= 2] (i.e. [In r0 (remove_first
-         r0 R)]).  Its DIRECT-exit sub-case is vacuous: a head redex
-         [ERegion r0 v] is typed by [T_Region_Active_L1], whose
-         [~In r0 (free_regions T)] premise contradicts [Hfree].  The residue
-         is the CONGRUENCE-exit case, where the exiting [ERegion r0] sits
-         under an eliminator and [r0] is supplied by a sibling's type — a
-         DISTINCT occurrence.  Establishing that distinctness is region-count
-         coherence at a region exit: the temporal/segment structure the
-         snapshot env + result type cannot express, relocating to connecting
-         the dynamic exit to the static typing output, i.e. preservation
-         itself. This unrestricted statement is refuted by
-         [Counterexample_StepPop.v]; the choreographic route is a
-         redesign direction, not a proof plan for this lemma. *)
-      subst r. admit.
-    + (* r <> r0 : remove_first r keeps every r0. *)
-      apply remove_first_preserves_other; [exact Hne | exact HinR].
-Admitted.
 
-(** [Print Assumptions step_pop_disjoint_from_type_l1.] is emitted at
-    file end (alongside the other [Print Assumptions] audit calls) to
-    certify which axioms / admits this lemma depends on. *)
+(** [step_pop_disjoint_from_type_l1_stmt] and [preservation_l1_stmt] —
+    RETIRED, not closed (owner-ratified D0, 2026-11-05). Both were
+    [Admitted] and are refuted by [Counterexample_StepPop] and
+    [Counterexample_PreservationL1]; keeping them [Admitted] let the build
+    derive [False]. They remain as [Prop] statements so the refutations
+    and the conditional L2 corollaries can name them. *)
 
-Theorem preservation_l1 :
+Definition preservation_l1_stmt : Prop :=
   forall m mu R e mu' R' e',
     step (mu, R, e) (mu', R', e') ->
     forall G T R_final G',
       has_type_l1 m R G e T R_final G' ->
       has_type_l1 m R' G e' T R_final G'.
-Proof.
-  (* Deliberately remains Admitted: the unrestricted theorem statement
-     is refuted by Counterexample_PreservationL1.v. Do not fill this
-     proof body without first replacing the false statement with an
-     owner-approved, explicitly restricted soundness theorem. *)
-  intros m mu R e mu0 R0 e0 Hstep G T R_final G_out Ht.
-  admit.
-Admitted.
 
 (** ** L3 preservation theorem (slice 4 of L3 wiring — capstone)
 
@@ -3511,7 +3473,7 @@ Print Assumptions tfuneff_lambda_retype_l1_m.
 Print Assumptions subst_typing_gen_l1_m.
 Print Assumptions subst_typing_gen_l1_m_ground_nonlinear.
 Print Assumptions subst_typing_gen_l1_m_tfuneff.
-Print Assumptions preservation_l1.
+
 Print Assumptions preservation_l3_region_active_echo.
 Print Assumptions preservation_l3_drop_echo.
 Print Assumptions preservation_l3.
@@ -3530,7 +3492,7 @@ Print Assumptions preservation_l3.
     admitted theorem as an axiom. Current replacement status is in
     [PROOF-NEEDS.adoc]. *)
 
-Print Assumptions step_pop_disjoint_from_type_l1.
+
 
 (** ============================================================
     Canonical forms for the L1 judgment (proof-debt P43)

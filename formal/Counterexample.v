@@ -6,7 +6,8 @@
   *********************************************************************
   ***  📌 PINNED REGRESSION WITNESS                                   ***
   ***                                                                ***
-  ***  5 Qed lemmas. Authoritative source of the 2026-05-26          ***
+  ***  6 Qed lemmas, incl. preservation_false (D0b, 2026-11-05).    ***
+  ***  Authoritative source of the 2026-05-26                        ***
   ***  soundness gap.                                                ***
   ***                                                                ***
   ***  This file SHOULD NOT BE WEAKENED. Any future proof work must  ***
@@ -156,8 +157,10 @@ Section Counterexample.
       Historical closure attempts recorded 11 remaining admits on the
       [touches_region] RIGHT branches; that count is archival, not a
       current proof obligation. This witness refutes the universal theorem.
-      Its [Admitted] remains durable; a different sound theorem requires
-      an approved redesign, not closure of this statement. See
+      The legacy statement is retired to [Semantics.preservation_stmt]
+      and refuted outright by [preservation_false] below (D0b,
+      2026-11-05); a different sound theorem requires an approved
+      redesign, not closure of this statement. See
       [PRESERVATION-HANDOFF.adoc] for archaeology. *)
 
 End Counterexample.
@@ -254,3 +257,15 @@ Section L1Fix.
   Qed.
 
 End L1Fix.
+
+
+(** D0b retirement (owner-ratified 2026-11-05): the legacy preservation
+    statement is refuted outright. *)
+Theorem preservation_false : ~ preservation_stmt.
+Proof.
+  unfold preservation_stmt. intro H.
+  destruct (H _ _ _ _ _ _ (bad_step nil) _ _ _ bad_typable) as [G_out Hg].
+  exact (bad_post_untypable _ _ Hg).
+Qed.
+
+Print Assumptions preservation_false.

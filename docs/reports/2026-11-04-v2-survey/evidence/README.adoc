@@ -30,7 +30,7 @@ Expected `Print Assumptions` output with coqc 8.18.0. This was first checked at 
 |`echo_copyable_linear_mode` |Closed under the global context
 |===
 
-NOTE: These results describe `main` before the D0/D0b retirement in hyperpolymath/ephapax#422 (owner-ratified 2026-11-05). After #422 merges, the three refuted statements are `Prop` definitions rather than `Admitted` lemmas. `legacy_inconsistent`, `env_inconsistent_preservation_l1` and `env_inconsistent_step_pop` then fail to compile, which is the intended result: the environment no longer derives `False`. The five closed lemmas are unaffected in content, though `preservation_l1_FALSE_closed` and `preservation_l1_FALSE_echo_crosspath` must be restated against `preservation_l1_stmt` (P2 moves them into `formal/regress/`).
+NOTE: These results describe `main` before the D0/D0b retirement in hyperpolymath/ephapax#422 (owner-ratified 2026-11-05). After #422 merges, the three refuted statements are `Prop` definitions rather than `Admitted` lemmas. `legacy_inconsistent`, `env_inconsistent_preservation_l1` and `env_inconsistent_step_pop` then fail to compile, which is the intended result: the environment no longer derives `False`. The other five lemmas compile unchanged on top of #422 and stay "Closed under the global context" (checked with coqc 8.18.0 after removing F0/F1); P2 moves them into `formal/regress/`.
 
 The first three rows mean the global environment can derive `False`. The L1 pair needs the P0 retirement in the plan. The legacy row needs decision D0b in the plan, because the legacy theorem is fenced. Both are owner decisions. The `Admitted.` must not be closed, and no side-condition may be added.
 

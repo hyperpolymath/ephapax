@@ -878,7 +878,7 @@ These are kept off the critical path.
 
 |E5 Typed codegen (stopgap)
 |Expr-id → Ty side table from the current checker; typed binop/literal/string/tuple; F64 rem lowering; I64 literals (probe `i64`).
-|`wasm_e2e`: i64, f32, f64, s1, s6, t3 return correct values (f32 = a literal plus arithmetic case with a checked result); corpus compile count > 14
+|`wasm_e2e`: i64, f32, f64, s1, s6, t3 return correct values (f32 = a literal plus arithmetic case with a checked result; f64 includes a `%` remainder expression with a checked result, so the integer-only `I32RemS` path cannot pass); corpus compile count > 14
 |E3
 |M–L
 
@@ -896,7 +896,7 @@ These are kept off the critical path.
 
 |E8 Gate on by default
 |Pin bump to a typed-wasm rev with the fixes; add the `typed-wasm-gate` dependency; `compile` runs `gate_module` by default (`--no-verify` escape; also on the sexpr path); `ret_kind`; fix the seam-test comment overclaim; negative mutants.
-|`typed_wasm_full_gate.rs`: accepted == compiled corpus count, 0 rejected; `local.set` alias and count-0xFFFFFFFF mutants rejected with `Err`; `ret_kind` present on every emitted function; the sexpr compile path is gated; `--no-verify` skips the gate and says so
+|`typed_wasm_full_gate.rs`: accepted == compiled corpus count, 0 rejected; `local.set` alias and count-0xFFFFFFFF mutants rejected with `Err`; a fixture with a linear return type decodes to the matching non-Unrestricted `ret_kind`, and a mutant that flips it is rejected by the gate; the sexpr compile path is gated; `--no-verify` skips the gate and says so
 |typed-wasm upstream fixes from T1b/X7 (byte offsets, bounded counts, locals taint) merged; D11
 |S–M
 
@@ -933,7 +933,7 @@ These are kept off the critical path.
 |E14 Proving ground
 |`eph-agg` region-scoped CLI.
 |`ephapax run eph-agg -- 3 4 5` prints `sum=12 count=3 max=5`; gate Ok; LSP 0 diagnostics; within the X12 budget
-|E4, E8, E9, E10
+|E4, E8, E9, E10, X12 baseline (T5i)
 |M
 
 |E15 Comptime island
@@ -945,7 +945,7 @@ These are kept off the critical path.
 |E16 L3/L4 surface + RMR/RMO
 |echo/observe/`drop!`/`region!`, mode declarations, `Erasure.eph`, `Reversible.eph`, scrub-on-exit; docs: full-fiber Linear echo = RMR (retention), never "erasure".
 |unobserved Linear echo rejected; `drop!`/`region!` phase tests run; `Erasure.eph` and `Reversible.eph` check, compile, pass the gate and have runner tests; affine and linear outputs differ in ownership; freed sensitive cells read 0 both in the interpreter and in a wasmtime runner test (E4) that inspects the freed linear-memory range after region exit
-|P12, P13, T5h (upstream Affine kind merged and pinned), D12
+|P12, P13, T5h (upstream Affine kind merged and pinned), D12, X12 baseline (T5i)
 |L
 
 |E17 Effects / traits / contracts / capabilities
@@ -1013,7 +1013,7 @@ These are kept off the critical path.
 
 |X12
 |Bench: corpus compile time cold and warm; `p1.wasm` size (959 B baseline); wasmtime time for a 1e6-iteration fold with and without scrub; LSP incremental latency on `bridge.eph` (target < 100 ms).
-|budgets before E14 and E16
+|budgets before E14 and E16 (baseline in W5 via T5i with a scrub prototype; re-measured as validation in W6)
 
 |X13
 |Recursive-type probe: monomorphic IntList, iso-recursive vs nominal, termination of desugar, diagnostic quality.
@@ -1108,6 +1108,7 @@ a|* T5a P15 `CheckV2` + extraction
 * T5b E13 `ephapax-check-v2`
 * T5c E12 soundness direction re-pointed from the naive `check_v2` to the proved `CheckV2` (asserted since W2)
 * T5d P16 `Desugar.v`
+* T5i X12 budget baseline: compile time, `p1.wasm` size and LSP latency, plus the fold benchmark with and without a `memory.fill` scrub prototype, so E14 and E16 start in W6 with known budgets
 * T5h typed-wasm Affine OwnershipKind and mode record implemented upstream, merged, and the ephapax pin bumped (follows the T4g proposal)
 * T5e P18 `CarrierSpec` + Affine emission (completes after T5h)
 * T5f E10 stdlib port

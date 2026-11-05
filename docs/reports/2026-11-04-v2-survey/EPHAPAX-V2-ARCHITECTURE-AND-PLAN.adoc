@@ -907,9 +907,9 @@ These are kept off the critical path.
 |L
 
 |E10 stdlib port
-|Prelude, IO, Region, Aggregate, Stream, Allen and Transactions in v2; `src/ephapax-stdlib` retired (default); package import tier.
+|Prelude, IO, Region, Aggregate, Stream, Allen, Transactions, Argv and Coproc (the nine current `stdlib/` modules) in v2; `src/ephapax-stdlib` retired (default); package import tier.
 |`ephapax check stdlib/*.eph` 10/10 (the nine current modules plus `ALib.eph`) and `ephapax compile` 10/10 with each module accepted by `typed_wasm_gate`; a runner test per module exercises its exported operations; a corpus file importing a stdlib module through the package tier checks and runs; corpus ≥ 22; aLib collection group attempted
-|E7, E9, E8
+|E7, E9 promoted out of `--unstable-core` (T4i), E8
 |L
 
 |E11 LSP
@@ -926,7 +926,7 @@ These are kept off the critical path.
 
 |E13 Rust v2 checker
 |`ephapax-check-v2` as an image of `CheckV2.v`; emits the typed core and, under the D9 certificate option, a derivation certificate that `check_v2_cert` checks per program; `ephapax-typing` delegates to it.
-|0 disagreements (both directions, and on normalized `(Ty, R', G')` output tuples for jointly accepted terms) over corpus + 100k generated + 10k mutated terms, in CI on every PR. Under the D9 certificate option: `check_v2_cert` accepts the certificate emitted for every Rust-accepted input, and a corrupted-certificate test case is rejected.
+|0 disagreements (both directions, and on normalized `(Ty, R', G')` output tuples for jointly accepted terms) over corpus + 100k generated + 10k mutated terms, in CI on every PR. `EXCLUSIONS.adoc` is empty before `ephapax-typing` delegates to it; any fragment still excluded at that point is rejected by the delegated checker with a named diagnostic until its rung lands, so no accepted fragment goes unchecked by the oracle. Under the D9 certificate option: `check_v2_cert` accepts the certificate emitted for every Rust-accepted input, and a corrupted-certificate test case is rejected.
 |P15, D5
 |L
 
@@ -1034,7 +1034,7 @@ These are kept off the critical path.
 * Any cross-layer side condition triggers escalation under the CLAUDE.md anti-pattern detector.
 * No Idris2, Lean, Isabelle, zig or wasmtime-CLI result is ever reported as passing.
 * ephapax-affine ≠ AffineScript. typed-wasm "region" (a memory schema) ≠ ephapax L1 region. L1 maps to typed-wasm L9, not L2.
-* typed-wasm, aggregate-library and other external changes go only through upstream PRs. Never work around them in ephapax; in particular, never emit operator indices.
+* typed-wasm, aggregate-library and other external changes go only through upstream PRs. Never work around them in ephapax; in particular, never emit operator indices while D11 stands at its recommended option. If the typed-wasm owner instead ratifies the operator-index amendment, the fence lifts for that one change: ephapax migrates in a scheduled rung (E8 re-scoped to emit operator indices and pin the bumped `ACCESS_SITES_VERSION`) in the wave after ratification, through the normal carry-over rule.
 * No admin-merge before CI is green ("squabble, don't bypass"). Commits are GPG-signed with key `4A03639C…2867091E`. No licence edits.
 
 === Waves
@@ -1099,6 +1099,7 @@ a|* T4a P11 rest
 * T4f X14 (Agda re-pin), then P19 ledger + `EchoBridge` (both checkers)
 * T4g typed-wasm Affine kind + mode-record proposal
 * T4h D9 decision record (checker oracle form) with the X10 results attached, ratified by the owner before W5
+* T4i E9 promotion: once P17 is CLOSED (T4e), remove `--unstable-core` from recursive `data` and closures so plain `ephapax check`/`compile` accept them; the gate part still follows E8 under the carry-over rule. T5f (E10) waits on T4i.
 |7
 |All CLOSED; EchoCopy untypable; `preservation_v2` CLOSED with TMu; every ledger row records both exit codes and versions; self-recursive `comptime_fn` fails to parse; a fold over `@fields_of` compiles and is re-checked; D9 ratified.
 |stdlib bulk port; effects
@@ -1430,7 +1431,7 @@ The legacy `Semantics.preservation` is `Admitted` by directive and is refuted by
 
 |Amend to operator indices + `ACCESS_SITES_VERSION` bump
 |3 |3
-|Breaks other producers; re-pins all fixtures.
+|Breaks other producers; re-pins all fixtures. If ratified, ephapax follows it through the re-scoped E8 rung (see Global fences), not a workaround.
 |===
 
 === D12 — Certified erasure (RMO) statement
@@ -1488,7 +1489,7 @@ The legacy `Semantics.preservation` is `Admitted` by directive and is refuted by
 
 |typed-wasm upstream delay
 |Gate remains report-only and is labelled as such
-|*K7:* never switch ephapax to operator indices; never report the gate as passing
+|*K7:* never switch ephapax to operator indices unilaterally (only via a ratified D11 amendment and the re-scoped E8); never report the gate as passing
 
 |Language shrinkage from D4/D5
 |X9; region and grade inference; LetCheck completeness fix in the same revision

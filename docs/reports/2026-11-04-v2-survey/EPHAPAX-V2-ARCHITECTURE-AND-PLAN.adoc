@@ -51,7 +51,7 @@ The survey ran in an ephemeral container, so its scratch files do not survive. T
 ** `env_inconsistent_preservation_l1 : False` and `env_inconsistent_step_pop : False` compile (`evidence/SurveyCounterexamples.v`, F1).
 ** The owner ratifies retiring both lemmas to `Definition …_stmt : Prop`.
 ** `preservation_l2_via_l1` and `preservation_l2_lift_case` (`formal/TypingL2.v:334-357`) are made conditional.
-** CI must *assert* `Print Assumptions` for every headline theorem against an *empty* allowlist. Today it only prints the output. No refuted `Admitted` may be allowlisted. That includes the legacy `Semantics.preservation`, because with `Counterexample.v` it derives `False` too. The legacy pair stays quarantined by import closure: nothing in `formal/v2` imports `Semantics.v` or `Counterexample.v`, directly or transitively. Whether to also split the build is owner decision D0b.
+** CI must *assert* `Print Assumptions` for every headline theorem against an *empty* allowlist. Today it only prints the output. No refuted `Admitted` may be allowlisted. That includes the legacy `Semantics.preservation`, because with `Counterexample.v` it derives `False` too. Under the ratified D0b (2026-11-05), P0 retires `Semantics.preservation` to `preservation_stmt : Prop`, refuted by `Counterexample.preservation_false`, so no import-closure quarantine is needed (hyperpolymath/ephapax#422).
 . *Land the falsifiers in the repo before any design work (P2, size S).* The scratch counterexamples become in-repo Qed regression files against the *current* judgment:
 ** ClosedCex, EchoCex, EscapeCex, L2Comp, LetCheck;
 ** PairDup (`has_type_l1` lets a `TProd` variable duplicate a linear `TString` in Linear mode, CLOSED);
@@ -366,7 +366,8 @@ Sources: the scratch builds and probes recorded in the dossier, plus spot checks
  tool CheckV2.v     check_v2 + check_v2_sound (+ complete on the annotated fragment) + Extraction
      Exec.v         step_v2_fn + step_v2_fn_correct; typed term generator spec
      Regress.v      every counterexample family re-stated (untypable / not WF / preserved; LetCheck now typable)
- LEGACY (frozen): Syntax.v, Typing.v, Semantics.v (preservation Admitted, false), TypingL1.v, Semantics_L1.v
+ LEGACY (frozen): Syntax.v, Typing.v, TypingL1.v; Semantics.v and Semantics_L1.v frozen except the D0/D0b retirement
+                   (refuted statements now Prop: preservation_stmt, preservation_l1_stmt, step_pop_..._stmt)
                   (P0 retirement edits only), TypingL2.v (P0 only), Counterexample*.v (regression)
 ----
 
@@ -722,7 +723,7 @@ Items marked "*(external)*" in the Home column live outside `hyperpolymath/ephap
 * `TEcho` grade 1 in Linear mode;
 * distinct echo forms;
 * `S_Observe`;
-* a typed foreign-signature environment Φ for `extern` declarations (stdlib `Argv.eph` and others), with a host-call step rule over a host *function* (total and deterministic by construction, so `step_v2_deterministic` survives). The metatheory takes `host_wf` as a *hypothesis*, never as an `Axiom`: a host call returns a value of the declared type, touches only the buffers passed to it, and preserves `store_typed`, region tags and ownership, and the rest of `config_wf`: it never frees or retags a passed location, and its result refers to no freed region. Each signature in Φ carries its own instance of these conditions. P9 and P10 are stated for every `host_wf` host;
+* a typed foreign-signature environment Φ for `extern` declarations (stdlib `Argv.eph` and others), with a host-call step rule over a host *function* (total and deterministic by construction, so `step_v2_deterministic` survives). The host function also receives an immutable host input fixed for the whole run, which carries the argument vector `Run.args` (a finite list of byte strings, well-formed when every entry is valid UTF-8 and the list length fits in I32), so `env::argv_count`, `argv_arg_len` and `argv_arg_get` are deterministic functions of it and are covered by P9 and P10. The metatheory takes `host_wf` as a *hypothesis*, never as an `Axiom`: a host call returns a value of the declared type, touches only the buffers passed to it, and preserves `store_typed`, region tags and ownership, and the rest of `config_wf`: it never frees or retags a passed location, and its result refers to no freed region. Each signature in Φ carries its own instance of these conditions. P9 and P10 are stated for every `host_wf` host;
 * an explicit trap configuration: integer division or remainder by zero, and `MIN / -1`, step to `Trap`, while `MIN % -1` evaluates to 0 as Wasm `rem_s` does (matching the interpreter's `DivisionByZero` and the Wasm trap), and `progress_v2` reads "a value, a step, or `Trap`";
 * a global Σ for recursion, with a `sigma_wf` judgment (every definition checked against its declared type under the whole recursive Σ) that `config_wf` requires and that P9 and P10 take as a hypothesis;
 * the recursive-type form D7 selected (ratified in W1, before P4), so P7–P13 are proved against the full core: iso-recursive `TMu` with fold/unfold under the recommended option; nominal named types with unfold at `match` under the nominal option; no recursive type former under the no-core-recursion option, in which case P8 drops `mu`, P17 becomes the encoding-alignment rung, and E9/E10 use the bounded encodings;
@@ -833,7 +834,7 @@ These are kept off the critical path.
 * *IFC layer* over secret-types TINI. Size XL; deferred.
 * *Generalising L2 into an anytype-style single algebra.* This is a detour. No existing interface hosts usage grades, cost, HWM and labels together (idempotent ⊕ vs 1+1=ω), and doing so would break four-layer orthogonality.
 * *Full E5b* semantic compiler correctness. XL; deferred behind translation validation.
-* *Explicitly out of scope:* anything touching `Semantics.v`, `Typing.v`, `Syntax.v` or the legacy `Theorem preservation`.
+* *Explicitly out of scope:* anything touching `Semantics.v`, `Typing.v`, `Syntax.v` or the legacy preservation statement, except the owner-ratified D0/D0b retirement under P0/T0g (an agent prepares it; the owner reviews and signs it).
 
 === Theory hooks that could give a more final solution
 
@@ -853,14 +854,14 @@ These are kept off the critical path.
 |Rung |Deliverable |Gate |Depends |Size
 
 |E0 Holes first
-|`mark_used` routes through `demands_consumption` (lib.rs:191). `check_lambda` rejects consuming a captured linear value. `Ty::is_linear` takes the join over Prod/Sum/Tuple/List (conservative *reject*, D5-independent; D5 in W1 may relax it). Recursive `data` gives a `DesugarError`, not an overflow.
-|`tests/linearity_holes.rs`: dup2, dup4, pairdup, lamcap, and sum-, tuple- and list-of-linear duplication probes rejected with named `TypeError` kinds; rec1 fails with the named `DesugarError` and the compiler's normal error exit, never a crash or abort; `cargo test --workspace` green (≥ 507)
+|`mark_used` routes through `demands_consumption` (lib.rs:191). `check_lambda` rejects consuming a captured linear value. `Ty::is_linear` takes the join over Prod/Sum/Tuple/List (conservative *reject*, D5-independent; D5 in W1 may relax it). Recursive `data` gives a `DesugarError`, not an overflow. Dereferencing a borrow of a linear value may not consume ownership (today `check_deref` returns the owned inner type, `ephapax-typing/src/lib.rs:1739`, and borrows are not loan-tracked). A pattern may not discard a linear payload: a wildcard over a linear component, or a duplicate binder, is rejected (today a wildcard binds nothing, `lib.rs:1592`).
+|`tests/linearity_holes.rs`: dup2, dup4, pairdup, lamcap, sum-, tuple- and list-of-linear duplication probes, a double-borrow-then-drop probe, and a `(_, y)` match over a linear pair are each rejected with a named `TypeError` kind; rec1 fails with the named `DesugarError` and the compiler's normal error exit, never a crash or abort; `cargo test --workspace` green (≥ 507)
 |none (escalation note for pairdup)
 |S–M
 
 |E1 Fail loudly
-|Perform/Handle give a `CodegenError`. `@total`, `@pure` and `@comptime` give an "annotation not enforced" error. G5 FFI gets a clean error or contiguous indices (lib.rs:478, 579). `-O`, `--debug` and `check --mode` take effect or are rejected.
-|`tests/fail_loud.rs`: the perform/handle probes return `CodegenError` without producing a module. g5 either fails with a named clean error or compiles to a module whose FFI imports are contiguous and which passes structural validation. The `@total` loop, an `@pure` function with an effect and an `@comptime` declaration are each rejected with the "annotation not enforced" error. `-O`, `--debug` and `check --mode` each have a test showing they either take effect or are rejected. (`compile_match` legitimately emits an `unreachable` fallback, so the gate does not ban `unreachable` globally.)
+|Perform/Handle give a `CodegenError`. `@total`, `@pure` and `@comptime` give an "annotation not enforced" error. Raw variadic `__ffi` (probe g5) is rejected with a named error; typed `extern` declarations are the only FFI path, since only they have a formal-core representation (Φ). The import-index bug (lib.rs:478, 579) is fixed for `extern`. `-O`, `--debug` and `check --mode` take effect or are rejected.
+|`tests/fail_loud.rs`: the perform/handle probes return `CodegenError` without producing a module. g5 fails with the named raw-FFI error; an `extern`-based rewrite of g5 compiles to a module whose imports are contiguous and which passes structural validation. The `@total` loop, an `@pure` function with an effect and an `@comptime` declaration are each rejected with the "annotation not enforced" error. `-O`, `--debug` and `check --mode` each have a test showing they either take effect or are rejected. (`compile_match` legitimately emits an `unreachable` fallback, so the gate does not ban `unreachable` globally.)
 |none
 |S
 
@@ -883,7 +884,7 @@ These are kept off the critical path.
 |S–M
 
 |E5 Typed codegen (stopgap)
-|Expr-id → Ty side table from the current checker; typed binop/literal/string/tuple; F32 and F64 rem lowering to an exact `fmod` helper emitted into the module (Wasm has no float remainder instruction, and the naive `x - trunc(x / y) * y` is wrong under rounding, quotient overflow and signed zero, so it must match the interpreter, which uses Rust `%`, i.e. IEEE `fmod`); an F32 source literal form (an `f32` suffix such as `1.5f32` in `ephapax.pest`, producing `Literal::F32`, recorded in the syntax ADR with a conformance fixture), since today every float literal parses as `Literal::F64`; I64 literals (probe `i64`, which as stored exercises only an I64 parameter). Typed unary lowering (`i64.sub` from 0 for I64 negation, `f32.neg`/`f64.neg` for floats; today `compile_unaryop` always emits `I32Const(0)`/`I32Sub`, `ephapax-wasm/src/lib.rs:3047`). Wrapping integer overflow as the defined semantics, matching Wasm, with the interpreter switched to `wrapping_*` operations. Element-width-aware list storage and retrieval (today `list_append`/`list_get` are `(i32, i32) -> i32`), so I64, F32 and F64 elements are stored in full. Beyond these named cases, E5 is driven by a generated *type × operation conformance matrix*: every operand type the checker accepts, for every binary operator, unary operator and comparison, and every value type in every container position (tuple field, list element, sum payload, extern parameter and result). Closure parameter and result positions join the matrix in E9, where type-indexed closure lowering lands. List indexing is bounds-checked in Wasm (today `gen_list_get` computes the address and loads unchecked, `ephapax-wasm/src/lib.rs:1859`) and traps on a negative or oversized index, matching the interpreter's `IndexOutOfBounds`, which E5 treats as a trap. Today sums use `I32Store`/`I32Load` regardless of payload, and comparisons emit I32 instructions for every type. String equality compares contents, as the interpreter does, not pointers.
+|Expr-id → Ty side table from the current checker; typed binop/literal/string/tuple; F32 and F64 rem lowering to an exact `fmod` helper emitted into the module (Wasm has no float remainder instruction, and the naive `x - trunc(x / y) * y` is wrong under rounding, quotient overflow and signed zero, so it must match the interpreter, which uses Rust `%`, i.e. IEEE `fmod`); an F32 source literal form (an `f32` suffix such as `1.5f32` in `ephapax.pest`, producing `Literal::F32`, recorded in the syntax ADR with a conformance fixture), since today every float literal parses as `Literal::F64`; I64 literals (probe `i64`, which as stored exercises only an I64 parameter). Typed unary lowering (`i64.sub` from 0 for I64 negation, `f32.neg`/`f64.neg` for floats; today `compile_unaryop` always emits `I32Const(0)`/`I32Sub`, `ephapax-wasm/src/lib.rs:3047`). Wrapping integer overflow as the defined semantics, matching Wasm, with the interpreter switched to `wrapping_*` operations. Element-width-aware list storage and retrieval (today `list_append`/`list_get` are `(i32, i32) -> i32`), so I64, F32 and F64 elements are stored in full. Beyond these named cases, E5 is driven by a generated *type × operation conformance matrix*: every operand type the checker accepts, for every binary operator, unary operator and comparison, and every value type in every container position (tuple field, list element, sum payload, extern parameter and result), every control-flow result position (`if`, `case`/`match` and block results; today `compile_if` fixes the block result to I32, `ephapax-wasm/src/lib.rs:2963`), and the `copy` and `drop` forms (today `compile_copy` stores through an I32 temporary). Closure parameter and result positions join the matrix in E9, where type-indexed closure lowering lands. List indexing is bounds-checked in Wasm (today `gen_list_get` computes the address and loads unchecked, `ephapax-wasm/src/lib.rs:1859`) and traps on a negative or oversized index, matching the interpreter's `IndexOutOfBounds`, which E5 treats as a trap. Today sums use `I32Store`/`I32Load` regardless of payload, and comparisons emit I32 instructions for every type. String equality compares contents, as the interpreter does, not pointers.
 |`wasm_e2e`: i64, f32, f64, s1, s6, t3 return correct values (i64 evaluates an I64 literal outside the I32 range, such as `5000000000`, inside the returned expression with a checked result; f32 = a literal plus arithmetic case and a `%` remainder expression, each with a checked result; f64 includes a `%` remainder expression with a checked result, so the integer-only `I32RemS` path cannot pass); an interpreter-vs-wasm remainder table for both float types covers `1.0 % 0.1` (rounding), `-0.0 % 1.0` (signed zero), `1e308 % 3.0` (extreme ratio), `x % inf` and NaN operands, with bit-identical results (NaN results need only both be NaN); a negative I64 result (`-5000000000`) and negated F32/F64 values are checked; interpreter-vs-wasm boundary cases for I32 and I64 add, subtract, multiply and negation at the type limits agree under wrapping; integer `/` and `%` by zero, and `MIN / -1`, trap in both, and `MIN % -1` yields 0 in both (the interpreter reports `DivisionByZero` or overflow as a trap, never a wrapped value, matching P4's `Trap`); lists of I64 and F64 values round-trip a value outside the I32 range; negative and oversized list indices trap in both interpreter and Wasm; the full type × operation matrix runs interpreter-vs-wasm with 0 disagreements and 0 invalid modules, including I64 and F64 sum payloads, I64/F32/F64 comparisons and equal-content strings allocated separately; corpus compile count > 14
 |E3
 |M–L
@@ -1034,7 +1035,7 @@ These are kept off the critical path.
 
 === Global fences (all waves)
 
-* Never edit `formal/Semantics.v`, `formal/Typing.v`, `formal/Syntax.v` or the in-repo `formal/Counterexample*.v`.
+* Never edit `formal/Semantics.v`, `formal/Typing.v`, `formal/Syntax.v` or the in-repo `formal/Counterexample*.v`, except the owner-ratified D0/D0b retirement under P0/T0g: replacing the three refuted `Admitted` statements by `Prop` definitions and restating their refutations against them. The owner reviews and signs that change; nothing else in those files may change.
 * `formal/TypingL1.v` is frozen once the fork exists. `formal/Semantics_L1.v` and `formal/TypingL2.v` receive only the P0 retirement edits.
 * Never propose closing `Theorem preservation`. Never add an `Axiom` or `Admitted` outside the allowlist.
 * Any cross-layer side condition triggers escalation under the CLAUDE.md anti-pattern detector.
@@ -1052,14 +1053,14 @@ These are kept off the critical path.
 |*W0 Honesty and holes* (1 week; ephapax only)
 a|* T0a P0 dry run, then one ratification request covering D0 and D0b (X2)
 * T0h after ratification, apply the P0 retirement from the X2 dry-run diff (an agent prepares the PR; the owner reviews and signs it)
-* T0g implement the ratified D0b retirement inside P0: `Semantics.preservation` becomes `preservation_stmt : Prop`, `Counterexample.v` is restated as `preservation_false : ~ preservation_stmt` (Qed), and a CI probe confirms that `False` is not derivable from the full `_CoqProject`. The fenced-file edit and the CLAUDE.md fence revision are applied by the owner, GPG-signed.
+* T0g implement the ratified D0b retirement inside P0: `Semantics.preservation` becomes `preservation_stmt : Prop`, `Counterexample.v` is restated as `preservation_false : ~ preservation_stmt` (Qed), and a CI gate checks the enumerated conditions: no `Admitted`/`Axiom`/`Parameter` in any `_CoqProject` file, and the named refutations and L2 results closed under the global context. Consistency of the whole build then follows from Coq's own consistency, since no axiom remains; the gate does not claim more than that. The fenced-file edit and the CLAUDE.md fence revision are applied by the owner, GPG-signed.
 * T0b P1 gate, tripwire (runs before the X2 step of T0a), `gen-proof-status` (the `status-gate` path fix landed in #418)
 * T0c P2 land the 7 scratch falsifiers
 * T0d E0 + E1 Rust holes and fail-loud
 * T0e X1 probe battery + X8 aLib harness + E6 conformer
 * T0f doc-correction PR draft (owner applies)
 |6
-|`assumptions-gate.sh` exits 0 with an empty allowlist for every headline (on the P0 branch; temporarily the two L1 names on main are reported, not allowlisted). After P0 merges, the tripwire finds no refuted `Admitted` at all and its quarantine list is empty (before then it reports the L1 pair and the legacy theorem). Dummy `Admitted` turns CI red. `status-gate.sh --proofs` exits 0. `formal/regress/*` CLOSED. `linearity_holes.rs` and `fail_loud.rs` green. `alib_conformance` at 89/0 unexpected. D0 and D0b ratified (2026-11-05), and the no-`False` CI probe present. *No cross-repo criterion.*
+|`assumptions-gate.sh` exits 0 with an empty allowlist for every headline (on the P0 branch; temporarily the two L1 names on main are reported, not allowlisted). After P0 merges, the tripwire finds no refuted `Admitted` at all and its quarantine list is empty (before then it reports the L1 pair and the legacy theorem). Dummy `Admitted` turns CI red. `status-gate.sh --proofs` exits 0. `formal/regress/*` CLOSED. `linearity_holes.rs` and `fail_loud.rs` green. `alib_conformance` at 89/0 unexpected. D0 and D0b ratified (2026-11-05), and the no-`False` gate present (0 `Admitted`/`Axiom`/`Parameter`; named results closed). *No cross-repo criterion.*
 |typed-wasm; any judgment design; `formal/v2`
 
 |*W1 Decisions and infrastructure* (1–2 weeks)
@@ -1228,11 +1229,11 @@ The legacy `Semantics.preservation` is `Admitted` by directive and is refuted by
 |Rung |Branch under the ratified D0b
 
 |P0
-|Also retires the legacy theorem: `Definition preservation_stmt : Prop`, and `Counterexample.v` restated as `preservation_false : ~ preservation_stmt` (Qed). The acceptance gains: `legacy_inconsistent` (F0) fails to compile, and the whole `_CoqProject` cannot derive `False`.
+|Also retires the legacy theorem: `Definition preservation_stmt : Prop`, and `Counterexample.v` restated as `preservation_false : ~ preservation_stmt` (Qed). The acceptance gains: `legacy_inconsistent` (F0) fails to compile, and the build has no `Admitted`, `Axiom` or `Parameter`, so a derivation of `False` would contradict Coq's own consistency.
 |P1
 |The tripwire's quarantine list starts empty after P0. Any refuted `Admitted` fails CI.
 |T0g
-|Replaced: instead of the import-closure job, a CI probe confirms that `False` is not derivable from the full build.
+|Replaced: instead of the import-closure job, a CI gate checks that no `_CoqProject` file contains `Admitted`, `Axiom` or `Parameter`, and that the named refutations and L2 results print "Closed under the global context". With no axioms in the build, a closed proof of `False` would contradict the consistency of Coq's own theory; that meta-level argument, not the enumerated checks, is what rules out every other derivation.
 |T0f
 |The doc-correction PR also revises the 2026-05-27 fence in CLAUDE.md (DO NOT items 1, 2 and 5), PROOF-NEEDS, EXPLAINME and V1-TO-V2, and records that the legacy theorem is retired, not closed. Applied by the owner, GPG-signed.
 |Evidence
@@ -1381,9 +1382,9 @@ Beyond this repo: the memory entry `feedback_ephapax_no_patching_legacy_preserva
 |4 |4
 |Better diagnostics (X13); a larger core.
 
-|Unconventional: no core recursion; Church / bounded encodings only
+|Unconventional: no core recursion; Church / bounded encodings only (*not eligible*)
 |2 |4
-|Total, but unusable for the stdlib.
+|Total, but unusable for the stdlib, and E12 would have no translation for `List`. Listed only to record why it is excluded; ratifying it would first need a bounded `List` encoding with stated limits.
 |===
 
 === D8 — Comptime / reflection vs ADR-016 (meta plane)

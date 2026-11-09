@@ -5,6 +5,22 @@
 :toc:
 :toclevels: 2
 
+[IMPORTANT]
+.Divergence since v2 rung E0 (2026-11-09)
+====
+The Rust `Ty::is_linear()` now takes the *join* over `Ty::Prod`,
+`Ty::Sum`, `Ty::Tuple` and `Ty::List`: a compound type is linear as soon
+as one component is. Coq `is_linear_ty` still returns `false` for
+`TProd` and `TSum`, which is the shape refuted by
+`pair_dup_linear_string` (F5, `docs/reports/2026-11-04-v2-survey/`).
+The bridge claim below therefore *no longer holds* for `TProd` and
+`TSum`; it still holds for every other kernel constructor. This is a
+deliberate, conservative Rust-side reject (plan rung E0), independent of
+decision D5, which may relax it in W1. The Coq side is not changed here.
+The rows for `TProd` / `TSum` in the tables below record the Coq value
+only; the Rust value is the join.
+====
+
 This document closes proof-debt obligation **P28** from the
 comprehensive proof inventory: certify that the Rust-side
 `Ty::is_linear()` (at `src/ephapax-syntax/src/lib.rs:155-166`)
@@ -46,6 +62,11 @@ pub fn is_linear(&self) -> bool {
         } => true,
         Ty::Region { inner, .. } => inner.is_linear(),
         Ty::ForAll { body, .. } => body.is_linear(),
+        Ty::Prod { left, right } | Ty::Sum { left, right } => {
+            left.is_linear() || right.is_linear()
+        }
+        Ty::Tuple(elements) => elements.iter().any(Ty::is_linear),
+        Ty::List(inner) => inner.is_linear(),
         _ => false,
     }
 }
@@ -94,8 +115,8 @@ The four kernel cases compose as follows.
 | `TRegion r T'` | `Ty::Region { name: r, inner: T' }` | recurse | clauses 3
 | `TBase _` | `Ty::Base(_)` | **false** | fallthrough
 | `TFun _ _` | `Ty::Fun { .. }` | **false** | fallthrough
-| `TProd _ _` | `Ty::Prod { .. }` | **false** | fallthrough
-| `TSum _ _` | `Ty::Sum { .. }` | **false** | fallthrough
+| `TProd _ _` | `Ty::Prod { .. }` | Coq **false**; Rust join (diverges, E0) | `e0_prod_sum_join_diverges_from_coq`
+| `TSum _ _` | `Ty::Sum { .. }` | Coq **false**; Rust join (diverges, E0) | `e0_prod_sum_join_diverges_from_coq`
 | `TBorrow _` | `Ty::Borrow { .. }` | **false** | fallthrough
 | `TEcho _` | (no kernel-Rust counterpart yet)
                                          | n/a | n/a
@@ -119,8 +140,9 @@ on the witness.
 Recurses on `inner`. Same as Coq's `TRegion _ T'`. The bridge holds
 directly.
 
-The other recursive forms (`Ty::Borrow { inner, .. }`, `Ty::Fun`,
-`Ty::Prod`, `Ty::Sum`, `Ty::Effectful`, `Ty::List`, `Ty::Tuple`,
+Since E0, `Ty::Prod`, `Ty::Sum`, `Ty::Tuple` and `Ty::List` recurse
+(join) on the Rust side; see the divergence note at the top. The other
+recursive forms (`Ty::Borrow { inner, .. }`, `Ty::Fun`,
 `Ty::Effectful`) are intentionally **NOT** recursive for
 `is_linear` on either side — they always return `false`.  This is a
 deliberate kernel choice: a function `T1 → T2` is treated as a

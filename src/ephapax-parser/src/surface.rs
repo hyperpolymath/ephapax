@@ -692,11 +692,21 @@ fn match_arm_from_tuple_binder(
     span: Span,
 ) -> SurfaceExpr {
     // Build the pair pattern from the right: (a, b, c) → Pair(a, Pair(b, c)).
+    // A `_` binder is a wildcard, not a variable named `_`: it binds
+    // nothing, so the checker can see (and reject) a discarded linear
+    // component instead of reporting an unconsumed variable `_`.
+    let binder = |name: ephapax_surface::Var| {
+        if name.as_str() == "_" {
+            Pattern::Wildcard
+        } else {
+            Pattern::Var(name)
+        }
+    };
     let mut iter = binders.into_iter().rev();
     let last = iter.next().expect("at least 2 binders");
-    let mut pat = Pattern::Var(last);
+    let mut pat = binder(last);
     for name in iter {
-        pat = Pattern::Pair(Box::new(Pattern::Var(name)), Box::new(pat));
+        pat = Pattern::Pair(Box::new(binder(name)), Box::new(pat));
     }
     SurfaceExpr::new(
         SurfaceExprKind::Match {

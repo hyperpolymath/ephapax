@@ -152,6 +152,20 @@ impl Ty {
 
     /// Check if type is linear (must be used exactly once).
     ///
+    /// Compound data types take the *join* of their components
+    /// (v2 plan rung E0): a product, sum, tuple or list is linear as
+    /// soon as any component is. This is the conservative choice — it
+    /// rejects duplicating a container that holds a linear value
+    /// (`pairdup`), and D5 (compound-grade placement, W1) may relax it.
+    /// It deliberately diverges from Coq `is_linear_ty` on `TProd` /
+    /// `TSum`, which is the refuted F5 shape (`pair_dup_linear_string`);
+    /// see `docs/coq-rust-bridge/is_linear_ty.adoc`.
+    ///
+    /// Function types (`Fun`, `Effectful`) and borrows stay
+    /// unrestricted: a closure may not consume a captured linear value
+    /// (enforced in the type checker's `check_lambda`), and a borrow
+    /// never owns its referent.
+    ///
     /// Type variables (`Var`, `Unif`) are conservatively non-linear.
     /// Phase 2 will add linearity bounds (`T: Lin`) for generic linear code.
     pub fn is_linear(&self) -> bool {
@@ -163,6 +177,11 @@ impl Ty {
             } => true,
             Ty::Region { inner, .. } => inner.is_linear(),
             Ty::ForAll { body, .. } => body.is_linear(),
+            Ty::Prod { left, right } | Ty::Sum { left, right } => {
+                left.is_linear() || right.is_linear()
+            }
+            Ty::Tuple(elements) => elements.iter().any(Ty::is_linear),
+            Ty::List(inner) => inner.is_linear(),
             _ => false,
         }
     }
@@ -845,11 +864,11 @@ mod tests {
     }
 
     #[test]
-    fn coq_bridge_fun_prod_sum_borrow_fallthrough_unrestricted() {
-        // Coq: TFun / TProd / TSum / TBorrow all fall through → false
-        // regardless of constituent linearity. Linearity of CAPTURED
-        // resources is tracked at the judgment level (T_Lam_L1_*'s
-        // body context discipline), not at the type shape.
+    fn coq_bridge_fun_borrow_fallthrough_unrestricted() {
+        // Coq: TFun / TBorrow fall through → false regardless of
+        // constituent linearity. A closure may not consume a captured
+        // linear value (checked by the type checker's `check_lambda`),
+        // and a borrow does not own its referent.
         let lin = Box::new(Ty::String("r".into()));
         let unr = boxed_base();
 
@@ -857,23 +876,37 @@ mod tests {
             param: lin.clone(),
             ret: unr.clone(),
         };
-        let prod = Ty::Prod {
-            left: lin.clone(),
-            right: unr.clone(),
-        };
-        let sum = Ty::Sum {
-            left: lin.clone(),
-            right: unr.clone(),
-        };
         let borrow = Ty::Borrow {
             inner: lin.clone(),
             mutable: false,
         };
 
         assert!(!fun.is_linear(), "Coq bridge: TFun is NOT linear");
-        assert!(!prod.is_linear(), "Coq bridge: TProd is NOT linear");
-        assert!(!sum.is_linear(), "Coq bridge: TSum is NOT linear");
         assert!(!borrow.is_linear(), "Coq bridge: TBorrow is NOT linear");
+    }
+
+    #[test]
+    fn e0_prod_sum_join_diverges_from_coq() {
+        // Deliberate divergence from Coq `is_linear_ty` (v2 plan E0):
+        // TProd / TSum take the join of their components. Coq's
+        // fallthrough to false is the refuted F5 shape
+        // (`pair_dup_linear_string`), so the bridge no longer claims
+        // agreement on these two constructors.
+        let lin = Box::new(Ty::String("r".into()));
+        let unr = boxed_base();
+        for (l, r, expect) in [
+            (lin.clone(), unr.clone(), true),
+            (unr.clone(), lin.clone(), true),
+            (unr.clone(), unr.clone(), false),
+        ] {
+            let prod = Ty::Prod {
+                left: l.clone(),
+                right: r.clone(),
+            };
+            let sum = Ty::Sum { left: l, right: r };
+            assert_eq!(prod.is_linear(), expect, "Prod join");
+            assert_eq!(sum.is_linear(), expect, "Sum join");
+        }
     }
 
     #[test]
@@ -913,13 +946,20 @@ mod tests {
     }
 
     #[test]
-    fn surface_only_var_unif_list_tuple_unrestricted() {
+    fn surface_only_var_unif_unrestricted() {
         // Conservative non-linear for unsubstituted type variables
         // (see is_linear() docstring). Coq kernel has no equivalent —
-        // surface-only.
+        // surface-only. (E7 makes unconstrained type parameters linear.)
         assert!(!Ty::Var("T".into()).is_linear());
         assert!(!Ty::Unif(0).is_linear());
-        assert!(!Ty::List(Box::new(Ty::String("r".into()))).is_linear());
-        assert!(!Ty::Tuple(vec![Ty::String("r".into()), Ty::Base(BaseTy::I32)]).is_linear());
+    }
+
+    #[test]
+    fn e0_list_tuple_join() {
+        // Surface-only constructors take the join (v2 plan E0).
+        assert!(Ty::List(Box::new(Ty::String("r".into()))).is_linear());
+        assert!(!Ty::List(Box::new(Ty::Base(BaseTy::I32))).is_linear());
+        assert!(Ty::Tuple(vec![Ty::String("r".into()), Ty::Base(BaseTy::I32)]).is_linear());
+        assert!(!Ty::Tuple(vec![Ty::Base(BaseTy::I32), Ty::Base(BaseTy::Bool)]).is_linear());
     }
 }

@@ -95,6 +95,39 @@ pub enum TypeError {
 
     #[error("Match expression must have at least one arm")]
     EmptyMatch,
+
+    /// A closure body consumes a linear value captured from the
+    /// enclosing scope. Function types are unrestricted, so calling the
+    /// closure twice would consume the capture twice (probe `lamcap`).
+    #[error("Closure consumes captured linear variable `{0}`; a closure may be called more than once, so it may only borrow a captured linear value")]
+    LinearCaptureConsumed(Var),
+
+    /// Dereferencing a borrow of a linear value would yield an owned
+    /// copy of it while the owner keeps it too.
+    #[error("Cannot move a linear value of type {0:?} out of a borrow")]
+    CannotMoveOutOfBorrow(Ty),
+
+    /// A pattern wildcard would discard a linear component.
+    #[error("Pattern wildcard discards a linear value of type {0:?}; bind it and consume it")]
+    LinearPatternDiscard(Ty),
+
+    /// The same name is bound twice by one pattern; the second binding
+    /// would shadow (and silently discard) the first.
+    #[error("Variable `{0}` is bound more than once in the same pattern")]
+    DuplicatePatternBinder(Var),
+
+    /// A projection (`t.i` or `xs[i]`) would consume the container and
+    /// return one component, discarding unselected linear components.
+    #[error(
+        "Projection from {0:?} would discard its other linear components; destructure it instead"
+    )]
+    LinearProjectionDiscard(Ty),
+
+    /// Raw variadic `__ffi("sym", ...)` has no formal-core
+    /// representation and no sound wasm lowering (v2 plan E1); typed
+    /// `extern "abi" { fn ... }` declarations are the only FFI path.
+    #[error("Raw `__ffi(\"{0}\", ...)` is not supported: declare the function in a typed `extern \"abi\" {{ fn ... }}` block and call it by name")]
+    RawFfiNotSupported(SmolStr),
 }
 
 /// A type error with source location.
@@ -141,6 +174,9 @@ struct CtxEntry {
     binding_form: BindingForm,
     /// Which region this variable was bound in (None = top-level / no region).
     region: Option<RegionName>,
+    /// Identity of this binding occurrence, so a later binding of the
+    /// same name (shadowing) is not mistaken for this one.
+    id: u64,
 }
 
 impl CtxEntry {
@@ -152,6 +188,17 @@ impl CtxEntry {
             BindingForm::Param => self.ty.is_linear(),
         }
     }
+
+    /// Whether a second use of this binding is an error.
+    ///
+    /// Routes through [`CtxEntry::demands_consumption`] (a `let!` of any
+    /// type is exactly-once, probes `dup2`/`dup4`), and additionally
+    /// forbids reuse of any linear-typed binding: an affine `let` of a
+    /// linear value is *at most* once, so it may be dropped but never
+    /// duplicated.
+    fn forbids_reuse(&self) -> bool {
+        self.demands_consumption() || self.ty.is_linear()
+    }
 }
 
 /// Typing context: tracks variables and their usage
@@ -161,6 +208,8 @@ pub struct Context {
     vars: HashMap<Var, CtxEntry>,
     /// Active regions
     regions: Vec<RegionName>,
+    /// Counter for [`CtxEntry::id`].
+    next_id: u64,
 }
 
 impl Context {
@@ -171,6 +220,8 @@ impl Context {
     /// Extend context with new binding, tagged with the current region and binding form.
     pub fn extend(&mut self, name: Var, ty: Ty, binding_form: BindingForm) {
         let region = self.regions.last().cloned();
+        let id = self.next_id;
+        self.next_id += 1;
         self.vars.insert(
             name,
             CtxEntry {
@@ -178,8 +229,19 @@ impl Context {
                 used: false,
                 binding_form,
                 region,
+                id,
             },
         );
+    }
+
+    /// Bindings that forbid reuse and are still unused, keyed by name,
+    /// with the identity of the binding occurrence.
+    fn unused_restricted(&self) -> Vec<(Var, u64)> {
+        self.vars
+            .iter()
+            .filter(|(_, e)| e.forbids_reuse() && !e.used)
+            .map(|(n, e)| (n.clone(), e.id))
+            .collect()
     }
 
     /// Look up variable type
@@ -190,7 +252,7 @@ impl Context {
     /// Mark variable as used (for linear variables)
     pub fn mark_used(&mut self, name: &Var) -> Result<(), TypeError> {
         if let Some(entry) = self.vars.get_mut(name) {
-            if entry.ty.is_linear() && entry.used {
+            if entry.forbids_reuse() && entry.used {
                 return Err(TypeError::LinearVariableReused(name.clone()));
             }
             entry.used = true;
@@ -1113,6 +1175,11 @@ impl TypeChecker {
         param_ty: &Ty,
         body: &Expr,
     ) -> Result<Ty, SpannedTypeError> {
+        // Restricted (linear / `let!`) outer bindings not yet consumed.
+        // A function type is unrestricted, so the closure body must not
+        // consume any of them: each call would consume it again.
+        let captured_before = self.ctx.unused_restricted();
+
         self.ctx
             .extend(param.clone(), param_ty.clone(), BindingForm::Param);
         let body_ty = self.check(body)?;
@@ -1120,6 +1187,17 @@ impl TypeChecker {
         if let Some(entry) = self.ctx.vars.get(param) {
             if entry.demands_consumption() && !entry.used {
                 return Err(self.at(s, TypeError::LinearVariableNotConsumed(param.clone())));
+            }
+        }
+
+        for (name, id) in &captured_before {
+            if name == param {
+                continue;
+            }
+            if let Some(entry) = self.ctx.vars.get(name) {
+                if entry.id == *id && entry.used {
+                    return Err(self.at(s, TypeError::LinearCaptureConsumed(name.clone())));
+                }
             }
         }
 
@@ -1371,9 +1449,10 @@ impl TypeChecker {
         match inner_ty {
             Ty::Prod { left, right } => {
                 if right.is_linear() {
-                    return Err(
-                        self.at(s, TypeError::LinearVariableNotConsumed("_pair_snd".into()))
-                    );
+                    return Err(self.at(
+                        s,
+                        TypeError::LinearProjectionDiscard(Ty::Prod { left, right }),
+                    ));
                 }
                 Ok(*left)
             }
@@ -1396,9 +1475,10 @@ impl TypeChecker {
         match inner_ty {
             Ty::Prod { left, right } => {
                 if left.is_linear() {
-                    return Err(
-                        self.at(s, TypeError::LinearVariableNotConsumed("_pair_fst".into()))
-                    );
+                    return Err(self.at(
+                        s,
+                        TypeError::LinearProjectionDiscard(Ty::Prod { left, right }),
+                    ));
                 }
                 Ok(*right)
             }
@@ -1534,6 +1614,12 @@ impl TypeChecker {
             self.ctx = ctx_after_scrutinee.clone();
 
             let bound = self.check_pattern(s, &arm.pattern, &scrutinee_ty)?;
+            let mut seen: HashSet<&Var> = HashSet::new();
+            for name in &bound {
+                if !seen.insert(name) {
+                    return Err(self.at(s, TypeError::DuplicatePatternBinder(name.clone())));
+                }
+            }
 
             if let Some(guard) = &arm.guard {
                 let guard_ty = self.check(guard)?;
@@ -1589,7 +1675,15 @@ impl TypeChecker {
     ) -> Result<Vec<Var>, SpannedTypeError> {
         let expected = self.resolve(expected_ty);
         match pattern {
-            Pattern::Wildcard => Ok(Vec::new()),
+            // A wildcard binds nothing, so it would silently discard a
+            // linear component. (An unresolved unification variable is
+            // treated as unrestricted, like `Ty::Var`.)
+            Pattern::Wildcard => {
+                if expected.is_linear() {
+                    return Err(self.at(s, TypeError::LinearPatternDiscard(expected)));
+                }
+                Ok(Vec::new())
+            }
             Pattern::Var(name) => {
                 self.ctx.extend(name.clone(), expected, BindingForm::Param);
                 Ok(vec![name.clone()])
@@ -1736,7 +1830,24 @@ impl TypeChecker {
         let inner_ty = self.check(inner)?;
 
         match inner_ty {
-            Ty::Borrow { inner: boxed, .. } => Ok(*boxed),
+            // A borrow does not own its referent: dereferencing it may
+            // only copy an unrestricted value out. Borrows are not
+            // loan-tracked, so yielding an owned linear value here would
+            // let both the borrow and the owner consume it.
+            Ty::Borrow { inner: boxed, .. } => {
+                if boxed.is_linear() {
+                    return Err(self.at(s, TypeError::CannotMoveOutOfBorrow(*boxed)));
+                }
+                Ok(*boxed)
+            }
+            // An unrestricted reference may be dereferenced any number of
+            // times, so the same rule applies to it. A linear reference is
+            // itself consumed by the dereference, so it may yield its
+            // linear contents.
+            Ty::Ref {
+                linearity: ephapax_syntax::Linearity::Unrestricted,
+                inner,
+            } if inner.is_linear() => Err(self.at(s, TypeError::CannotMoveOutOfBorrow(*inner))),
             Ty::Ref { inner, .. } => Ok(*inner),
             _ => Err(self.at(
                 s,
@@ -1888,7 +1999,16 @@ impl TypeChecker {
         }
 
         match list_ty {
-            Ty::List(elem_ty) => Ok(*elem_ty),
+            // Indexing consumes the list and returns one element; every
+            // other element would be lost. A list of linear elements must
+            // be destructured instead (as `check_fst`/`check_snd` do for
+            // pairs).
+            Ty::List(elem_ty) => {
+                if elem_ty.is_linear() {
+                    return Err(self.at(s, TypeError::LinearProjectionDiscard(Ty::List(elem_ty))));
+                }
+                Ok(*elem_ty)
+            }
             _ => Err(self.at(
                 s,
                 TypeError::TypeMismatch {
@@ -1931,6 +2051,25 @@ impl TypeChecker {
         index: usize,
     ) -> Result<Ty, SpannedTypeError> {
         let tuple_ty = self.check(tuple)?;
+
+        // Projection consumes the container and returns one component;
+        // reject it when an unselected component is linear (it would be
+        // lost), as `check_fst` / `check_snd` already do for pairs.
+        let unselected_linear = match &tuple_ty {
+            Ty::Prod { left, right } => match index {
+                0 => right.is_linear(),
+                1 => left.is_linear(),
+                _ => false,
+            },
+            Ty::Tuple(elems) if index < elems.len() => elems
+                .iter()
+                .enumerate()
+                .any(|(i, t)| i != index && t.is_linear()),
+            _ => false,
+        };
+        if unselected_linear {
+            return Err(self.at(s, TypeError::LinearProjectionDiscard(tuple_ty)));
+        }
 
         match &tuple_ty {
             Ty::Prod { left, right } => {
@@ -2701,7 +2840,7 @@ mod tests {
         }))));
         assert!(matches!(
             err_kind(&tc.check(&expr)),
-            Some(TypeError::LinearVariableNotConsumed(_))
+            Some(TypeError::LinearProjectionDiscard(_))
         ));
     }
 

@@ -1174,6 +1174,7 @@ Engineering tracks inside each wave run in parallel with the proof tracks. The o
 |D9 |W4 (T4h) |X10 / P15, E13 (W5)
 |D10 |W1 (T1a) |layout-profile note / E5 (W2), then E9, E8, E10, E18
 |D12 |W5 (T5g) |erasure notes / E16, P21 (W6)
+|D13 (added 2026-11-09) |W1 (T1a) |the 2026-11-09 classification ruling / P4 and every later P-rung
 |===
 
 A rung whose dependency has not completed (for example E8 while the typed-wasm fix is unmerged) carries over to the next wave together with every rung that depends on it (E9 completion, E10, E14, P18, the W5 gate-acceptance exit). It is never declared done against a missing dependency.
@@ -1533,6 +1534,31 @@ The naive `check_v2` and `step_v2_fn` from P6 need an executable form for the W2
 |Claim nothing; label the README rows as designed-not-mechanised
 |3 |5
 |Mandatory *now* regardless of which option is chosen later. The full-fiber Linear drop echo is RMR (retention), never erasure.
+|===
+
+=== D13 — Order of Coq and Agda work for the theory obligations (added 2026-11-09)
+
+Follows the owner ruling of 2026-11-09 that the soundness statements are theory, with an Agda source of truth (see "Ratified: proof classification"). It decides how the P-ladder, written for Coq, meets that ruling. It does not change what is proved.
+
+[cols="3,1,1,4",options="header"]
+|===
+|Option |(a) |(b) |Comment
+
+|*Recommended:* Coq first per rung, Agda port of each headline statement before the rung closes, correspondence recorded as the rung's last step
+|4 |5
+|Keeps the executable oracle (D9a/D9 extract from Coq) and the Coq tooling the plan is sized for; every headline still gets its Agda source before it is cited, so nothing stays `ungraded` for long. The Coq proof becomes the Rocq leg once the statements are `RECONCILED`. Departure from the most elegant option: Agda-first would make the source of truth come first, but would put the oracle and every W2 gate behind a second toolchain that the plan has not sized.
+
+|Agda first, Coq as the recheck leg
+|5 |3
+|The policy order exactly. Costs a re-plan: P4–P15 re-sized for Agda, and the oracle needs Agda extraction or a separate Coq development anyway. `--safe --without-K --cubical-compatible` rules out the axioms the Coq development does not use either, so the core theory is portable.
+
+|Both together, rung by rung, with a statement-correspondence check in CI
+|4 |4
+|Highest assurance per rung and the earliest `PWG-2i`; roughly doubles proof effort per rung and needs two proof engineers or agents per rung.
+
+|Unconventional: one shared statement in Dedukti/Lambdapi, proved in Coq and transported to Agda
+|4 |3
+|PROOF-POLICY §2 prefers transport. Coq → Dedukti → Agda is the reverse of the policy's direction and depends on exporters the estate has not pinned; worth an X-experiment before relying on it.
 |===
 
 == Risks and kill criteria

@@ -54,6 +54,7 @@
 //! Some(x) ⟹ inr(x)
 //! ```
 
+use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 
 use ephapax_surface::{
@@ -124,6 +125,13 @@ pub enum DesugarError {
 
     #[error("member access on a non-module expression is not supported (only `Module.member` qualified access)")]
     FieldAccessOnNonModule,
+
+    /// A `data` declaration (or `type` alias) refers to itself. The core
+    /// has no recursive types: the binary-sum encoding expands every
+    /// named type structurally, so a self-reference would expand forever
+    /// (probe `rec1` used to abort with a stack overflow).
+    #[error("recursive type `{name}` is not supported: the core type language has no recursive types (expansion cycle: {cycle})")]
+    RecursiveType { name: String, cycle: String },
 }
 
 // =========================================================================
@@ -247,6 +255,9 @@ pub struct Desugarer {
     /// module reference at desugar time. Reset per-module by
     /// [`Desugarer::desugar_module`].
     module_qualifiers: HashSet<SmolStr>,
+    /// Named types currently being expanded by `desugar_named_type`,
+    /// innermost last. Re-entering one is a recursive type.
+    expanding: RefCell<Vec<SmolStr>>,
 }
 
 impl Desugarer {
@@ -255,6 +266,7 @@ impl Desugarer {
         Self {
             registry: DataRegistry::new(),
             module_qualifiers: HashSet::new(),
+            expanding: RefCell::new(Vec::new()),
         }
     }
 
@@ -263,6 +275,7 @@ impl Desugarer {
         Self {
             registry,
             module_qualifiers: HashSet::new(),
+            expanding: RefCell::new(Vec::new()),
         }
     }
 
@@ -714,7 +727,7 @@ impl Desugarer {
                     got: args.len(),
                 });
             }
-            return self.desugar_ty(&aliased);
+            return self.with_expansion(name, args, |this| this.desugar_ty(&aliased));
         }
 
         let (params, ctors) = self.registry.get_type_ctors(name.as_str()).ok_or_else(|| {
@@ -735,7 +748,43 @@ impl Desugarer {
         let subst: HashMap<&SmolStr, &SurfaceTy> = params.iter().zip(args.iter()).collect();
 
         // Build right-nested sum from constructor field types
-        self.build_sum_type(&ctors.clone(), &subst)
+        let ctors = ctors.clone();
+        self.with_expansion(name, args, |this| this.build_sum_type(&ctors, &subst))
+    }
+
+    /// Run `f` with the named type application `name(args)` pushed on the
+    /// expansion stack. Fails with [`DesugarError::RecursiveType`] if the
+    /// same application is already being expanded (a regular recursive
+    /// type such as `data L = Nil | Cons(I32, L)`), or if the stack grows
+    /// past a fixed bound (a non-regular recursive type, whose
+    /// applications never repeat).
+    fn with_expansion<T>(
+        &self,
+        name: &SmolStr,
+        args: &[SurfaceTy],
+        f: impl FnOnce(&Self) -> Result<T, DesugarError>,
+    ) -> Result<T, DesugarError> {
+        const MAX_EXPANSION_DEPTH: usize = 64;
+        let key: SmolStr = if args.is_empty() {
+            name.clone()
+        } else {
+            format!("{name}{args:?}").into()
+        };
+        {
+            let stack = self.expanding.borrow();
+            if stack.contains(&key) || stack.len() >= MAX_EXPANSION_DEPTH {
+                let mut cycle: Vec<String> = stack.iter().map(|k| k.to_string()).collect();
+                cycle.push(key.to_string());
+                return Err(DesugarError::RecursiveType {
+                    name: name.to_string(),
+                    cycle: cycle.join(" -> "),
+                });
+            }
+        }
+        self.expanding.borrow_mut().push(key);
+        let result = f(self);
+        self.expanding.borrow_mut().pop();
+        result
     }
 
     /// Build the right-nested binary sum type for a list of constructors.
@@ -1212,6 +1261,17 @@ impl Desugarer {
         match patterns.len() {
             0 => Ok(body),
             1 => self.bind_single_pattern(payload, &patterns[0], body, span),
+            // The payload is a right-nested product: destructure it with
+            // one core `match` on the equivalent right-nested pair
+            // pattern, so the payload is consumed once (see
+            // `bind_single_pattern`).
+            _ if patterns.iter().all(Self::is_irrefutable_pair_pattern) => {
+                let mut nested = patterns[patterns.len() - 1].clone();
+                for p in patterns[..patterns.len() - 1].iter().rev() {
+                    nested = Pattern::Pair(Box::new(p.clone()), Box::new(nested));
+                }
+                self.bind_single_pattern(payload, &nested, body, span)
+            }
             _ => {
                 // Multiple fields: payload is a right-nested product
                 // Extract with fst/snd
@@ -1269,6 +1329,23 @@ impl Desugarer {
             )),
             Pattern::Wildcard => Ok(body),
             Pattern::Unit => Ok(body),
+            // A pair pattern built only from pairs, variables, wildcards
+            // and unit lowers to a one-arm core `match`. The core checker
+            // then consumes the scrutinee exactly once, binds each
+            // component, and rejects a wildcard over a linear component
+            // (v2 plan E0). The `fst`/`snd` lowering below reads the
+            // scrutinee twice, which a linear pair does not allow.
+            Pattern::Pair(..) if Self::is_irrefutable_pair_pattern(pattern) => Ok(Expr::new(
+                ExprKind::Match {
+                    scrutinee: Box::new(value.clone()),
+                    arms: vec![ephapax_syntax::MatchArm {
+                        pattern: Self::core_pair_pattern(pattern),
+                        guard: None,
+                        body,
+                    }],
+                },
+                span,
+            )),
             Pattern::Pair(l, r) => {
                 let fst = Expr::new(ExprKind::Fst(Box::new(value.clone())), span);
                 let snd = Expr::new(ExprKind::Snd(Box::new(value.clone())), span);
@@ -1290,6 +1367,34 @@ impl Desugarer {
                 // For ADT matching, this shouldn't arise at the constructor level.
                 Ok(body)
             }
+        }
+    }
+
+    /// Whether `pattern` is built only from pairs, variables, wildcards
+    /// and unit (so it is irrefutable and has a direct core form).
+    fn is_irrefutable_pair_pattern(pattern: &Pattern) -> bool {
+        match pattern {
+            Pattern::Var(_) | Pattern::Wildcard | Pattern::Unit => true,
+            Pattern::Pair(l, r) => {
+                Self::is_irrefutable_pair_pattern(l) && Self::is_irrefutable_pair_pattern(r)
+            }
+            Pattern::Tuple(_) | Pattern::Constructor { .. } | Pattern::Literal(_) => false,
+        }
+    }
+
+    /// Convert a pattern accepted by [`Self::is_irrefutable_pair_pattern`]
+    /// to the core pattern type.
+    fn core_pair_pattern(pattern: &Pattern) -> ephapax_syntax::Pattern {
+        use ephapax_syntax::Pattern as CorePattern;
+        match pattern {
+            Pattern::Var(v) => CorePattern::Var(v.clone()),
+            Pattern::Unit => CorePattern::Unit,
+            Pattern::Pair(l, r) => CorePattern::Pair(
+                Box::new(Self::core_pair_pattern(l)),
+                Box::new(Self::core_pair_pattern(r)),
+            ),
+            // Only reachable for `Wildcard` (the guard excludes the rest).
+            _ => CorePattern::Wildcard,
         }
     }
 

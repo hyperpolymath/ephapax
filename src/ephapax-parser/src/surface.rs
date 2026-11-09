@@ -123,8 +123,11 @@ fn parse_surface_declaration(pair: pest::iterators::Pair<Rule>) -> Result<Surfac
     for ann in pair.clone().into_inner() {
         if ann.as_rule() == Rule::annotation {
             let span = span_from_pair(&ann);
-            let name = ann.as_str().trim_start_matches('@').trim();
-            ParseError::check_annotation(name, span)?;
+            let identifier = ann
+                .into_inner()
+                .find(|p| p.as_rule() == Rule::identifier)
+                .ok_or_else(|| ParseError::missing("annotation identifier"))?;
+            ParseError::check_annotation(identifier.as_str(), span)?;
         }
     }
     let inner = pair

@@ -745,7 +745,11 @@ impl Desugarer {
         }
 
         // Build substitution map: type param → concrete type
-        let subst: HashMap<&SmolStr, &SurfaceTy> = params.iter().zip(args.iter()).collect();
+        let core_args = args
+            .iter()
+            .map(|arg| self.desugar_ty(arg))
+            .collect::<Result<Vec<_>, _>>()?;
+        let subst: HashMap<&SmolStr, &Ty> = params.iter().zip(core_args.iter()).collect();
 
         // Build right-nested sum from constructor field types
         let ctors = ctors.clone();
@@ -754,26 +758,20 @@ impl Desugarer {
 
     /// Run `f` with the named type application `name(args)` pushed on the
     /// expansion stack. Fails with [`DesugarError::RecursiveType`] if the
-    /// same application is already being expanded (a regular recursive
-    /// type such as `data L = Nil | Cons(I32, L)`), or if the stack grows
-    /// to 64 active applications before this expansion begins (also bounding
-    /// non-regular recursion, whose applications may never repeat). Errors
-    /// returned by `f` propagate after this expansion is removed from the stack.
+    /// same declaration is already being expanded, including non-regular
+    /// recursion with changing arguments. Arguments are elaborated before
+    /// entering the declaration, so finite nested applications remain valid.
+    /// Errors propagate after removing this expansion from the stack.
     fn with_expansion<T>(
         &self,
         name: &SmolStr,
-        args: &[SurfaceTy],
+        _args: &[SurfaceTy],
         f: impl FnOnce(&Self) -> Result<T, DesugarError>,
     ) -> Result<T, DesugarError> {
-        const MAX_EXPANSION_DEPTH: usize = 64;
-        let key: SmolStr = if args.is_empty() {
-            name.clone()
-        } else {
-            format!("{name}{args:?}").into()
-        };
+        let key = name.clone();
         {
             let stack = self.expanding.borrow();
-            if stack.contains(&key) || stack.len() >= MAX_EXPANSION_DEPTH {
+            if stack.contains(&key) {
                 let mut cycle: Vec<String> = stack.iter().map(|k| k.to_string()).collect();
                 cycle.push(key.to_string());
                 return Err(DesugarError::RecursiveType {
@@ -798,7 +796,7 @@ impl Desugarer {
     fn build_sum_type(
         &self,
         ctors: &[ConstructorDef],
-        subst: &HashMap<&SmolStr, &SurfaceTy>,
+        subst: &HashMap<&SmolStr, &Ty>,
     ) -> Result<Ty, DesugarError> {
         assert!(
             !ctors.is_empty(),
@@ -826,7 +824,7 @@ impl Desugarer {
     fn build_payload_type(
         &self,
         fields: &[SurfaceTy],
-        subst: &HashMap<&SmolStr, &SurfaceTy>,
+        subst: &HashMap<&SmolStr, &Ty>,
     ) -> Result<Ty, DesugarError> {
         match fields.len() {
             0 => Ok(Ty::Base(BaseTy::Unit)),
@@ -847,12 +845,12 @@ impl Desugarer {
     fn subst_and_desugar_ty(
         &self,
         ty: &SurfaceTy,
-        subst: &HashMap<&SmolStr, &SurfaceTy>,
+        subst: &HashMap<&SmolStr, &Ty>,
     ) -> Result<Ty, DesugarError> {
         match ty {
             SurfaceTy::Var(v) => {
                 if let Some(replacement) = subst.get(v) {
-                    self.desugar_ty(replacement)
+                    Ok((*replacement).clone())
                 } else {
                     Ok(Ty::Var(v.clone()))
                 }
@@ -898,7 +896,7 @@ impl Desugarer {
         let payload = self.build_payload_expr(args, span)?;
 
         // Get the full sum type for the "other side" annotations
-        let empty_subst: HashMap<&SmolStr, &SurfaceTy> = HashMap::new();
+        let empty_subst: HashMap<&SmolStr, &Ty> = HashMap::new();
         let (_, ctor_defs) = self
             .registry
             .get_type_ctors(info.data_name.as_str())
@@ -940,7 +938,7 @@ impl Desugarer {
         payload: Expr,
         index: usize,
         ctors: &[ConstructorDef],
-        subst: &HashMap<&SmolStr, &SurfaceTy>,
+        subst: &HashMap<&SmolStr, &Ty>,
         span: Span,
     ) -> Result<Expr, DesugarError> {
         let total = ctors.len();
@@ -2128,5 +2126,89 @@ mod tests {
             }
             other => panic!("expected Decl::Extern, got {other:?}"),
         }
+    }
+}
+
+#[cfg(test)]
+mod expansion_regressions {
+    use super::*;
+    fn named(name: &str) -> SurfaceTy {
+        SurfaceTy::Named {
+            name: name.into(),
+            args: vec![],
+        }
+    }
+    #[test]
+    fn nested_finite_application_and_nonregular_recursion() {
+        let mut registry = DataRegistry::new();
+        registry.types.insert(
+            "Id".into(),
+            (
+                vec!["a".into()],
+                vec![ConstructorDef {
+                    name: "IdValue".into(),
+                    fields: vec![SurfaceTy::Var("a".into())],
+                }],
+            ),
+        );
+        let inner = SurfaceTy::Named {
+            name: "Id".into(),
+            args: vec![SurfaceTy::Base(BaseTy::I32)],
+        };
+        let nested = SurfaceTy::Named {
+            name: "Id".into(),
+            args: vec![inner],
+        };
+        assert_eq!(
+            Desugarer::with_registry(registry.clone())
+                .desugar_ty(&nested)
+                .unwrap(),
+            Ty::Base(BaseTy::I32)
+        );
+        registry.types.insert(
+            "Grow".into(),
+            (
+                vec!["a".into()],
+                vec![ConstructorDef {
+                    name: "More".into(),
+                    fields: vec![SurfaceTy::Named {
+                        name: "Grow".into(),
+                        args: vec![SurfaceTy::List(Box::new(SurfaceTy::Var("a".into())))],
+                    }],
+                }],
+            ),
+        );
+        let recursive = SurfaceTy::Named {
+            name: "Grow".into(),
+            args: vec![SurfaceTy::Base(BaseTy::I32)],
+        };
+        assert!(matches!(
+            Desugarer::with_registry(registry).desugar_ty(&recursive),
+            Err(DesugarError::RecursiveType { .. })
+        ));
+    }
+    #[test]
+    fn long_finite_alias_chain_and_cycle() {
+        let mut registry = DataRegistry::new();
+        for i in 0..65 {
+            registry.register_type_alias(
+                format!("A{i}").into(),
+                if i == 64 {
+                    SurfaceTy::Base(BaseTy::I32)
+                } else {
+                    named(&format!("A{}", i + 1))
+                },
+            );
+        }
+        let desugarer = Desugarer::with_registry(registry.clone());
+        assert_eq!(
+            desugarer.desugar_ty(&named("A0")).unwrap(),
+            Ty::Base(BaseTy::I32)
+        );
+        registry.register_type_alias("A64".into(), named("A0"));
+        assert!(matches!(
+            Desugarer::with_registry(registry).desugar_ty(&named("A0")),
+            Err(DesugarError::RecursiveType { .. })
+        ));
     }
 }

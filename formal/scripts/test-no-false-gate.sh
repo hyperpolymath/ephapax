@@ -75,6 +75,8 @@ expect_decls d_defs $'Definition d1 : nat := 0.\nDefinition\n  d2 : True.\nProof
 # them. "<:" keeps every field visible, so its results are required.
 expect_decls d_sealed $'Module Type S.\n Parameter t : Type.\nEnd S.\nModule M : S.\n Definition t := nat.\n Lemma hidden : True. Proof. exact I. Qed.\nEnd M.\nModule N <: S.\n Definition t := nat.\n Lemma shown : True. Proof. exact I. Qed.\nEnd N.\nModule W : S with Definition t := nat.\n Definition t := nat.\n Lemma hidden2 : True. Proof. exact I. Qed.\nEnd W.\nModule V:S.\n Definition t := nat.\nEnd V.\nModule A := N.' \
   $'?P.M.t\n?P.M.hidden\nP.N.t\nP.N.shown\n?P.W.t\n?P.W.hidden2\n?P.V.t'
+expect_decls d_function $'Module M.\n Function f (n : nat) := n.\nEnd M.' 'P.M.f'
+expect_decls d_accent $'Module M : S.\n Definition café := 0.\nEnd M.' '?P.M.café'
 # An unmatched End must fail loudly, not mis-qualify.
 f=$(frag d_bad $'Module A.\nLemma x : True. Proof. exact I. Qed.\nEnd B.')
 if nofalse_decls P "$f" >/dev/null 2>&1; then bad "unmatched End accepted"; else ok; fi
@@ -96,11 +98,13 @@ Require Import Coq.Logic.FunctionalExtensionality.
 Module Type SIG.
   Parameter uses_funext : forall f g : nat -> nat, (forall x, f x = g x) -> f = g.
   Parameter clean : True.
+  Parameter café : True.
 End SIG.
 Module M : SIG.
   Lemma uses_funext : forall f g : nat -> nat, (forall x, f x = g x) -> f = g.
   Proof. intros; apply functional_extensionality; auto. Qed.
   Lemma clean : True. Proof. exact I. Qed.
+  Lemma café : True. Proof. exact I. Qed.
   Lemma hidden : forall f g : nat -> nat, (forall x, f x = g x) -> f = g.
   Proof. intros; apply functional_extensionality; auto. Qed.
 End M.
@@ -108,9 +112,9 @@ COQ
   if (cd "$T/coq" && coqc -q -R . NFT Sealed.v) >/dev/null 2>&1; then
     names=$(nofalse_strip "$T/coq/Sealed.v" > "$T/coq/Sealed.stripped" \
             && nofalse_decls NFT.Sealed "$T/coq/Sealed.stripped" | tr '\n' ' ')
-    if [ "$names" = "?NFT.Sealed.M.uses_funext ?NFT.Sealed.M.clean ?NFT.Sealed.M.hidden " ]; then ok
+    if [ "$names" = "?NFT.Sealed.M.uses_funext ?NFT.Sealed.M.clean ?NFT.Sealed.M.café ?NFT.Sealed.M.hidden " ]; then ok
     else bad "sealed census names: $names"; fi
-    for c in "M.uses_funext open" "M.clean closed" "M.hidden hidden"; do
+    for c in "M.uses_funext open" "M.clean closed" "M.café closed" "M.hidden hidden"; do
       read -r nm want <<< "$c"
       got=$(cd "$T/coq" && nofalse_sealed_check NFT Sealed "NFT.Sealed.$nm" | head -1)
       if [ "$got" = "$want" ]; then ok; else bad "sealed check $nm: expected $want, got $got"; fi

@@ -14,14 +14,17 @@ as one component is. Coq `is_linear_ty` still returns `false` for
 `TProd` and `TSum`, which is the shape refuted by
 `pair_dup_linear_string` (F5, `docs/reports/2026-11-04-v2-survey/`).
 The bridge claim below therefore *no longer holds* for `TProd` and
-`TSum`; it still holds for every other kernel constructor. This is a
+`TSum`, including under `TRegion` when a component is linear; it
+still holds for the other kernel constructors, with region recursion
+restricted to the agreeing subset. This is a
 deliberate, conservative Rust-side reject (plan rung E0), independent of
 decision D5, which may relax it in W1. The Coq side is not changed here.
 The rows for `TProd` / `TSum` in the tables below record the Coq value
 only; the Rust value is the join.
 ====
 
-This document closes proof-debt obligation **P28** from the
+Proof-debt obligation **P28** remains **open**. This document records
+partial evidence for the obligation from the
 comprehensive proof inventory: certify that the Rust-side
 `Ty::is_linear()` (at `src/ephapax-syntax/src/lib.rs:155-166`)
 agrees with the Coq-side `is_linear_ty` (at `formal/Syntax.v:467-473`)
@@ -93,13 +96,16 @@ Specifically:
 
 The **kernel subset** is the image of an elaboration function
 `erase_surface_to_kernel : Rust::Ty → option Coq::ty` that fails on
-the surface-only constructors. The bridge claim is then:
+the surface-only constructors. Restrict the bridge claim further by
+excluding `TProd` and `TSum` and requiring a `TRegion` inner type to
+belong to this restricted subset. The remaining claim is:
 
 [NOTE]
 .Bridge claim (P28-kernel)
 ====
 For every `t : Rust::Ty` and `t_kernel : Coq::ty` such that
-`erase_surface_to_kernel(t) = Some(t_kernel)`,
+`erase_surface_to_kernel(t) = Some(t_kernel)` and `t_kernel` belongs
+to the restricted subset above,
 
   `Rust::is_linear(t) == Coq::is_linear_ty(t_kernel)`.
 ====
@@ -138,7 +144,7 @@ on the witness.
 
 `Ty::Region { inner, .. }`::
 Recurses on `inner`. Same as Coq's `TRegion _ T'`. The bridge holds
-directly.
+when the inner type belongs to the restricted agreeing subset.
 
 Since E0, `Ty::Prod`, `Ty::Sum`, `Ty::Tuple` and `Ty::List` recurse
 (join) on the Rust side; see the divergence note at the top. The other
@@ -153,21 +159,23 @@ context discipline), not at the type-shape level.
 
 == Mechanical verification
 
-Two artefacts pin the bridge claim:
+Two artefacts provide definition-level and sampled test evidence;
+neither establishes a universal Rust–Coq correspondence:
 
 1. **`formal/Syntax.v:467-473`** — the canonical Coq definition; build
    oracle `coqc 8.18.0` is authoritative.
 2. **`src/ephapax-syntax/src/lib.rs`, `mod tests`** — Rust unit tests
-   that hardcode the truth table for every kernel `Ty` variant and
-   assert `Ty::is_linear()` matches. Added in the same PR as this
-   document.
+   that sample constructor behaviour and explicitly pin the product/sum
+   divergence. These tests do not prove the restricted claim universally.
 
-Future work for the full Rust ↔ Coq reflection arc (P25–P27):
+Remaining work for P28 and the full Rust ↔ Coq reflection arc (P25–P27):
 
 * Define `erase_surface_to_kernel` formally in either Coq (as a
   Definition over a Coq-side AST of `Rust::Ty`) or in a separate
   Idris2 module that bridges both.
-* Lift this lemma from `is_linear_ty` to the full typing judgment:
+* Prove the restricted predicate correspondence, and resolve the
+  product/sum divergence before claiming agreement on the full kernel.
+* Lift the eventual lemma from `is_linear_ty` to the full typing judgment:
   if Rust's `LinearChecker::check(e)` accepts, then the elaborated
   expression types in `has_type_l1 Linear`.
 

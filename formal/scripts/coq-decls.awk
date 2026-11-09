@@ -10,7 +10,7 @@
 # keyword and its name may sit on different lines.
 #
 # A named result is a Theorem, Lemma, Corollary, Proposition, Fact,
-# Remark, Example, named Instance, Definition, Fixpoint or CoFixpoint
+# Remark, Example, named Instance, Definition, Fixpoint, CoFixpoint or Function
 # (with any Program/Local/Global prefix), so a proof closed with
 # "Defined." or a definition built by tactics is censused like a lemma.
 # For a mutual "Fixpoint f ... with g ...", only f is listed: f and g are
@@ -51,7 +51,7 @@ END {
 
 function trim(x) { sub(/^ +/, "", x); sub(/ +$/, "", x); return x }
 
-function sentence(s,    w, k, i, name, kind, skip, opt, path, rest) {
+function sentence(s,    w, k, i, name, kind, skip, opt, path, rest, valid) {
   s = trim(s)
   # Drop attributes and locality/flag prefixes.
   while (match(s, /^#\[[^]]*\] */)) s = substr(s, RLENGTH + 1)
@@ -84,9 +84,11 @@ function sentence(s,    w, k, i, name, kind, skip, opt, path, rest) {
   if (w[1] == "Section") { push(w[2], "section"); return }
   if (w[1] == "End") { pop(w[2]); return }
 
-  if (w[1] ~ /^(Theorem|Lemma|Corollary|Proposition|Fact|Remark|Example|Instance|Definition|Fixpoint|CoFixpoint)$/) {
-    name = w[2]; sub(/[^A-Za-z0-9_'].*$/, "", name)
-    if (name !~ /^[A-Za-z_][A-Za-z0-9_']*$/) return   # anonymous Instance
+  if (w[1] ~ /^(Theorem|Lemma|Corollary|Proposition|Fact|Remark|Example|Instance|Definition|Fixpoint|CoFixpoint|Function)$/) {
+    name = w[2]; sub(/[(:{].*$/, "", name)
+    # Accept non-ASCII identifier bytes intact; never census a prefix.
+    valid = name; gsub(/[A-Za-z0-9_']/, "", valid)
+    if (name == "" || name ~ /^[0-9']/ || valid ~ /[[:cntrl:][:punct:][:space:]]/) return
     skip = 0; opt = ""; path = prefix
     for (i = 1; i <= depth; i++) {
       if (kinds[i] == "mtype" || kinds[i] == "functor") skip = 1

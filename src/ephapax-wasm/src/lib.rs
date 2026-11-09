@@ -2217,11 +2217,22 @@ impl Codegen {
         self.compile_expr(func, value);
 
         // Bind it to a local
+        let outer_idx = self.locals.name_to_idx.get(name).copied();
+        let outer_ty = self.locals.name_to_type.get(name).copied();
         let local_idx = self.locals.bind_typed(name, is_linear, local_ty);
         func.instruction(&Instruction::LocalSet(local_idx));
 
         // Compile the body
         self.compile_expr(func, body);
+
+        self.locals.name_to_idx.remove(name);
+        self.locals.name_to_type.remove(name);
+        if let Some(idx) = outer_idx {
+            self.locals.name_to_idx.insert(name.to_string(), idx);
+        }
+        if let Some(ty) = outer_ty {
+            self.locals.name_to_type.insert(name.to_string(), ty);
+        }
 
         // Handle unconsumed linear locals (mode-aware):
         // - Linear mode: Type checker already validated consumption, no action needed
@@ -3796,6 +3807,33 @@ mod tests {
     // -----------------------------------------------------------------------
     // Let bindings
     // -----------------------------------------------------------------------
+
+    #[test]
+    fn let_restores_shadowed_local_maps() {
+        let mut codegen = Codegen::new();
+        let outer = codegen.locals.bind_typed("x", false, ValType::I64);
+        let mut func = Function::new([]);
+        codegen.compile_let(
+            &mut func,
+            "x",
+            None,
+            &e(ExprKind::Lit(Literal::I32(1))),
+            &e(ExprKind::Var("x".into())),
+            false,
+        );
+        assert_eq!(codegen.locals.get("x"), Some(outer));
+        assert_eq!(codegen.locals.get_type("x"), Some(ValType::I64));
+        codegen.compile_let(
+            &mut func,
+            "y",
+            None,
+            &e(ExprKind::Lit(Literal::I32(1))),
+            &e(ExprKind::Var("y".into())),
+            false,
+        );
+        assert_eq!(codegen.locals.get("y"), None);
+        assert_eq!(codegen.locals.get_type("y"), None);
+    }
 
     #[test]
     fn compile_let_x_42_in_x() {

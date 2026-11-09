@@ -371,8 +371,12 @@ impl Context {
     }
 
     /// Merge two contexts after branch checking.
-    pub fn merge_branches(&mut self, _other: &Context) {
-        // After branch agreement is verified, the usage should be identical.
+    pub fn merge_branches(&mut self, other: &Context) {
+        for (name, entry) in &mut self.vars {
+            if let Some(other_entry) = other.vars.get(name) {
+                entry.used |= other_entry.used;
+            }
+        }
     }
 }
 
@@ -856,6 +860,7 @@ pub struct TypeChecker {
     ctx: Context,
     /// Next fresh unification variable ID.
     next_unif: u32,
+    wildcard_obligations: Vec<(Span, Ty)>,
     /// Solved unification variables: id -> type.
     unif_solutions: HashMap<u32, Ty>,
     /// Data declarations visible to the current module.
@@ -870,6 +875,7 @@ impl TypeChecker {
         Self {
             ctx: Context::new(),
             next_unif: 0,
+            wildcard_obligations: Vec::new(),
             unif_solutions: HashMap::new(),
             data_registry: DataCtorRegistry::new(),
         }
@@ -912,6 +918,16 @@ impl TypeChecker {
         ty.resolve(&self.unif_solutions)
     }
 
+    fn validate_wildcards(&self) -> Result<(), SpannedTypeError> {
+        for (span, ty) in &self.wildcard_obligations {
+            let resolved = self.resolve(ty);
+            if resolved.is_linear() {
+                return Err(self.at(*span, TypeError::LinearPatternDiscard(resolved)));
+            }
+        }
+        Ok(())
+    }
+
     /// Unify two types. On success, updates unification solutions.
     /// On failure, returns a TypeMismatch error at the given span.
     fn unify(&mut self, s: Span, a: &Ty, b: &Ty) -> Result<(), SpannedTypeError> {
@@ -934,7 +950,7 @@ impl TypeChecker {
                     ));
                 }
                 self.unif_solutions.insert(*id, b);
-                Ok(())
+                self.validate_wildcards()
             }
             (_, Ty::Unif(id)) => {
                 if a.contains_unif(*id) {
@@ -947,7 +963,7 @@ impl TypeChecker {
                     ));
                 }
                 self.unif_solutions.insert(*id, a);
-                Ok(())
+                self.validate_wildcards()
             }
 
             // Structural cases
@@ -1179,7 +1195,10 @@ impl TypeChecker {
         let value_ty = self.check(value)?;
 
         if let Some(declared) = ty_ann {
-            self.unify(s, declared, &value_ty).map_err(|_| {
+            self.unify(s, declared, &value_ty).map_err(|error| {
+                if matches!(error.error, TypeError::LinearPatternDiscard(_)) {
+                    return error;
+                }
                 self.at(
                     s,
                     TypeError::AnnotationMismatch {
@@ -1199,8 +1218,9 @@ impl TypeChecker {
         let shadowed = self
             .ctx
             .bind_scoped(name.clone(), resolved_ty, BindingForm::Let);
-        let body_ty = self.check(body)?;
+        let body_ty = self.check(body);
         self.ctx.end_scope(name, shadowed);
+        let body_ty = body_ty?;
 
         // `let` is AFFINE — unconsumed bindings are allowed (implicit drop).
         Ok(body_ty)
@@ -1310,6 +1330,7 @@ impl TypeChecker {
             .map_err(|e| self.at(s, e))?;
 
         self.ctx = ctx_after_then;
+        self.ctx.merge_branches(&ctx_after_else);
 
         Ok(self.resolve(&then_ty))
     }
@@ -1618,6 +1639,7 @@ impl TypeChecker {
                     .map_err(|e| self.at(s, e))?;
 
                 self.ctx = ctx_after_left;
+                self.ctx.merge_branches(&ctx_after_right);
 
                 Ok(self.resolve(&left_result_ty))
             }
@@ -1699,11 +1721,12 @@ impl TypeChecker {
             }
             arm_result_ty = Some(body_ty);
 
-            match &first_post_ctx {
+            match &mut first_post_ctx {
                 Some(first) => {
                     first
                         .check_branch_agreement(&ctx_after_arm)
                         .map_err(|e| self.at(s, e))?;
+                    first.merge_branches(&ctx_after_arm);
                 }
                 None => first_post_ctx = Some(ctx_after_arm),
             }
@@ -1729,12 +1752,12 @@ impl TypeChecker {
         let expected = self.resolve(expected_ty);
         match pattern {
             // A wildcard binds nothing, so it would silently discard a
-            // linear component. (An unresolved unification variable is
-            // treated as unrestricted, like `Ty::Var`.)
+            // linear component. Inferred types are rechecked after unification.
             Pattern::Wildcard => {
                 if expected.is_linear() {
                     return Err(self.at(s, TypeError::LinearPatternDiscard(expected)));
                 }
+                self.wildcard_obligations.push((s, expected));
                 Ok(Vec::new())
             }
             Pattern::Var(name) => {
@@ -2636,6 +2659,7 @@ fn type_check_module_inner(tc: &mut TypeChecker, module: &Module) -> Result<(), 
                 tc.ctx = saved_ctx;
                 tc.next_unif = saved_unif;
                 tc.unif_solutions.clear();
+                tc.wildcard_obligations.clear();
             }
             Decl::Type { .. } => {}
             Decl::Const { .. } => {} // Constants are handled in module registration
@@ -4812,5 +4836,98 @@ mod tests {
             }
             other => panic!("expected NonExhaustiveMatch, got {other:?}"),
         }
+    }
+}
+
+#[cfg(test)]
+mod review_regressions {
+    use super::*;
+    fn expr(kind: ExprKind) -> Expr {
+        Expr::new(kind, Span::dummy())
+    }
+    #[test]
+    fn failed_let_restores_outer_binding() {
+        let mut tc = TypeChecker::new();
+        tc.ctx
+            .extend("x".into(), Ty::Base(BaseTy::Bool), BindingForm::Let);
+        assert!(tc
+            .check_let(
+                Span::dummy(),
+                &"x".into(),
+                None,
+                &expr(ExprKind::Lit(Literal::I32(1))),
+                &expr(ExprKind::Var("missing".into()))
+            )
+            .is_err());
+        assert_eq!(
+            tc.check(&expr(ExprKind::Var("x".into()))).unwrap(),
+            Ty::Base(BaseTy::Bool)
+        );
+    }
+    #[test]
+    fn wildcard_obligation_follows_unification() {
+        let mut tc = TypeChecker::new();
+        let ty = tc.fresh_unif();
+        tc.check_pattern(Span::dummy(), &Pattern::Wildcard, &ty)
+            .unwrap();
+        assert!(matches!(
+            tc.unify(Span::dummy(), &ty, &Ty::String("r".into()))
+                .unwrap_err()
+                .error,
+            TypeError::LinearPatternDiscard(_)
+        ));
+    }
+    #[test]
+    fn match_join_reaches_closure_capture_check() {
+        let mut tc = TypeChecker::new();
+        tc.ctx.extend(
+            "x".into(),
+            Ty::Prod {
+                left: Box::new(Ty::String("r".into())),
+                right: Box::new(Ty::Base(BaseTy::Unit)),
+            },
+            BindingForm::Let,
+        );
+        let body = expr(ExprKind::Match {
+            scrutinee: Box::new(expr(ExprKind::Lit(Literal::I32(0)))),
+            arms: vec![
+                MatchArm {
+                    pattern: Pattern::Literal(Literal::I32(0)),
+                    guard: None,
+                    body: expr(ExprKind::Lit(Literal::Unit)),
+                },
+                MatchArm {
+                    pattern: Pattern::Literal(Literal::I32(1)),
+                    guard: None,
+                    body: expr(ExprKind::Drop(Box::new(expr(ExprKind::Var("x".into()))))),
+                },
+                MatchArm {
+                    pattern: Pattern::Wildcard,
+                    guard: None,
+                    body: expr(ExprKind::Lit(Literal::Unit)),
+                },
+            ],
+        });
+        let result = tc.check_lambda(Span::dummy(), &"arg".into(), &Ty::Base(BaseTy::Unit), &body);
+        assert!(matches!(
+            result.unwrap_err().error,
+            TypeError::LinearCaptureConsumed(_)
+        ));
+    }
+    #[test]
+    fn affine_branch_consumption_is_joined() {
+        let mut tc = TypeChecker::new();
+        tc.ctx
+            .extend("x".into(), Ty::String("r".into()), BindingForm::Let);
+        let branch = expr(ExprKind::If {
+            cond: Box::new(expr(ExprKind::Lit(Literal::Bool(true)))),
+            then_branch: Box::new(expr(ExprKind::Lit(Literal::Unit))),
+            else_branch: Box::new(expr(ExprKind::Drop(Box::new(expr(ExprKind::Var(
+                "x".into(),
+            )))))),
+        });
+        tc.check(&branch).unwrap();
+        assert!(tc.ctx.vars["x"].used);
+        assert!(tc.check(&expr(ExprKind::Var("x".into()))).is_err());
     }
 }

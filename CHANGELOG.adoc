@@ -21,7 +21,9 @@ overflow. Pair destructuring now lowers to a core `+match+`.
 `+perform+`/`+handle+` are a `+CodegenError+` (no module is written, and
 `+check+` reports the same error); raw variadic `+__ffi+` is rejected
 (`+RawFfiNotSupported+`), so typed `+extern+` is the only FFI path and
-the import index space is contiguous; `+@total+`, `+@pure+` and
+the import index space is contiguous. The interpreter does not bind typed
+`+extern+` declarations: calling one fails with an unbound-variable error
+even with `+-L+`; `+@total+`, `+@pure+` and
 `+@comptime+` are a parse error (`+AnnotationNotEnforced+`); `+-O+` above 0
 and `+--mode+` are rejected; `+--debug+` now adds the `+ephapax.debug.mode+`
 section as well as writing the source map. `+stdlib/Coproc.eph+` and

@@ -97,9 +97,11 @@ rules in `formal/TypingL1.v`. This is the redesign's intended capability
 accounting, but the current judgment does **not** establish that a region
 used by a surviving sibling remains live across another sibling's step.
 
-* `formal/Counterexample.v` contains five Qed lemmas. Three prove the
-  legacy witness types, steps, and becomes untypable; the L1 regression
-  proves only that this particular input is rejected in both modes.
+* `formal/Counterexample.v` contains six Qed lemmas. Three prove the
+  legacy witness types, steps, and becomes untypable; `preservation_false`
+  packages them as the refutation of `preservation_stmt`; the two L1
+  regression lemmas prove only that this particular input is rejected in
+  both modes.
 * `formal/Counterexample_StepPop.v` refutes the unrestricted
   `step_pop_disjoint_from_type_l1` statement.
 * `formal/Counterexample_PreservationL1.v` refutes the

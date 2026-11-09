@@ -58,11 +58,13 @@ suite).
 
 **The soundness proof (v1 → v2).** On 2026-05-26 a machine-checked Coq
 counterexample (link:formal/Counterexample.v[`formal/Counterexample.v`],
-5 Qed lemmas) *proved* that preservation as stated in the legacy
+then 5 Qed lemmas, now 6 with `preservation_false`) *proved* that preservation as stated in the legacy
 single-judgment design is unsound — a region exit could invalidate a
 sibling's assumptions untracked. Discovering that **with a proof, before
 anyone depended on it**, is the rare correct thing, not a failure. The four-layer architecture is a design program, not an established
-preservation result. The legacy theorem stays `Admitted` on purpose; later
+preservation result. The legacy statement is retired to
+`preservation_stmt : Prop` and refuted by `Counterexample.preservation_false`;
+the no-False gate rejects any `Admitted`, so it must not be restored. Later
 pinned counterexamples also refute the unrestricted L1 preservation claim.
 There is no unconditional L2 preservation theorem, while the L2 β-case
 helpers are conditional. L3's `preservation_l3` and case lemmas are Qed
@@ -429,8 +431,9 @@ based calculus. Post-2026-05-26 the formalisation is layered:
   mechanised, but the unrestricted `preservation_l1` statement is
   refuted by `Counterexample_PreservationL1.v`; its supporting
   `step_pop_disjoint_from_type_l1` statement is separately refuted by
-  `Counterexample_StepPop.v`. Their `Admitted.` markers must not be
-  treated as routine proof debt. A sound replacement requires a
+  `Counterexample_StepPop.v`. Both are retired to `Prop` statements
+  (`preservation_l1_stmt`, `step_pop_disjoint_from_type_l1_stmt`; D0,
+  2026-11-05) and are not proof debt. A sound replacement requires a
   judgment/step redesign and an explicit theorem boundary. See
   `PROOF-NEEDS.adoc`.
 

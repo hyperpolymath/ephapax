@@ -32,7 +32,7 @@ Expected `Print Assumptions` output with coqc 8.18.0. This was first checked at 
 
 NOTE: The F0/F1 results above describe `main` before the D0/D0b retirement in hyperpolymath/ephapax#422 (owner-ratified 2026-11-05), when the three refuted statements were `Admitted` and the environment derived `False`. Since #422 they are `Prop` definitions, and `SurveyCounterexamples.v` restates F0 and F1 to take them as hypotheses (`preservation_stmt -> False` and the two L1 forms). Re-checked 2026-11-09 with coqc 8.18.0 against `main` at `32d8eb7`: all eight lemmas, F0 and F1 included, print "Closed under the global context". P2 moves the other five into `formal/regress/`.
 
-The first three rows mean the global environment can derive `False`. The L1 pair needs the P0 retirement in the plan. The legacy row needs decision D0b in the plan, because the legacy theorem is fenced. Both are owner decisions. The `Admitted.` must not be closed, and no side-condition may be added.
+Historical, before #422: the first three rows meant the global environment could derive `False`; the L1 pair needed the P0 retirement and the legacy row needed decision D0b. That retirement is complete: on `main` today none of the three statements is assumed, the environment does not derive `False`, and the no-False gate (`formal/scripts/no-false-gate.sh`) rejects any `Admitted`. The refuted statements must not be closed, and no side-condition may be added.
 
 == Rust checker probes
 

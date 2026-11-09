@@ -988,8 +988,8 @@ map.
 — canonical four-layer design doctrine.
 * link:CLAUDE.md[`+CLAUDE.md+`] — agent guidance; owner directive
 2026-05-27.
-* link:formal/Counterexample.v[`+formal/Counterexample.v+`] — the 5 Qed
-lemmas that pin the soundness gap.
+* link:formal/Counterexample.v[`+formal/Counterexample.v+`] — the 6 Qed
+lemmas, including `preservation_false`, that pin the soundness gap.
 * https://github.com/hyperpolymath/echo-types[`+https://github.com/hyperpolymath/echo-types+`]
 — upstream Agda foundation for L3.
 * https://github.com/hyperpolymath/nextgen-languages/blob/main/docs/disambiguation/ephapax-vs-affinescript.md[Disambiguation:

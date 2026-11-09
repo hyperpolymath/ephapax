@@ -13,10 +13,13 @@
 # Four independent checks; any one failing fails the gate:
 #   1. token scan on comment- and string-stripped source for assumption
 #      vernacular and admit tactics (comment-aware, word-boundary);
-#   2. token scan for kernel bypass flags (guard, positivity, universe
-#      checking, Bypass Check, type-in-type);
+#   2. scan of the whitespace-collapsed source for kernel bypass flags
+#      (guard, positivity, universe checking, Bypass Check, type-in-type),
+#      so a flag split across lines is caught;
 #   3. census: `Print Assumptions` on every Theorem/Lemma/Corollary/
-#      Proposition/Fact/Remark/Example/Instance; each must print
+#      Proposition/Fact/Remark/Example/Instance, found by sentence (so a
+#      keyword and its name may be on different lines) and qualified
+#      through nested Modules (coq-decls.awk); each must print
 #      "Closed under the global context", and the count must match;
 #   4. independent recheck of the compiled .vo files with coqchk: no
 #      axiom in the Ephapax namespace, nothing relying on type-in-type,
@@ -30,50 +33,35 @@ MODS=$(for f in $FILES; do m=${f%.v}; printf '%s ' "${m//\//.}"; done)
 WORK=$(mktemp -d)
 trap 'rm -rf "$WORK"' EXIT
 
-# Strip nested Coq comments and string literals, keeping line structure.
-strip() {
-  awk '
-    BEGIN { depth = 0; instr = 0 }
-    {
-      out = ""; n = length($0); i = 1
-      while (i <= n) {
-        c = substr($0, i, 1); d = substr($0, i, 2)
-        if (instr) {
-          if (c == "\"") { if (substr($0, i + 1, 1) == "\"") { i += 2; continue } instr = 0 }
-          i++; continue
-        }
-        if (d == "(*") { depth++; i += 2; continue }
-        if (depth > 0 && d == "*)") { depth--; i += 2; continue }
-        if (depth > 0) { i++; continue }
-        if (c == "\"") { instr = 1; i++; continue }
-        out = out c; i++
-      }
-      print out
-    }' "$1"
-}
+# shellcheck source=no-false-lib.sh
+. "$(dirname "${BASH_SOURCE[0]}")/no-false-lib.sh"
 
 fail=0
-for f in $FILES; do mkdir -p "$(dirname "$WORK/$f")"; strip "$f" > "$WORK/$f"; done
+for f in $FILES; do mkdir -p "$(dirname "$WORK/$f")"; nofalse_strip "$f" > "$WORK/$f"; done
 
 # 1. Assumption vernacular and admit tactics.
-ASSUME='(^|[^A-Za-z0-9_'"'"'.])(Admitted|admit|give_up|Axiom|Axioms|Parameter|Parameters|Conjecture|Hypothesis|Hypotheses|Variable|Variables|Context)([^A-Za-z0-9_'"'"']|$)'
-if (cd "$WORK" && grep -nE "$ASSUME" $FILES); then
+# shellcheck disable=SC2086 # FILES is a deliberate word list
+hits=$(cd "$WORK" && nofalse_assume_scan $FILES)
+if [ -n "$hits" ]; then
+  printf '%s\n' "$hits"
   echo "no-False gate [1]: assumption vernacular or admit tactic found above -> FAIL"; fail=1
 fi
 
-# 2. Kernel bypass flags.
-BYPASS='(Unset[[:space:]]+(Guard|Positivity|Universe)[[:space:]]+Checking|Bypass[[:space:]]+Check|Set[[:space:]]+Type[[:space:]]+In[[:space:]]+Type|-type-in-type|bypass_check)'
-if (cd "$WORK" && grep -nE "$BYPASS" $FILES); then
+# 2. Kernel bypass flags (whitespace-collapsed, so split lines are caught).
+# shellcheck disable=SC2086 # FILES is a deliberate word list
+hits=$(cd "$WORK" && nofalse_bypass_scan $FILES)
+if [ -n "$hits" ]; then
+  printf '%s\n' "$hits"
   echo "no-False gate [2]: kernel-check bypass found above -> FAIL"; fail=1
 fi
 
-# 3. Census of every named result.
+# 3. Census of every named result, qualified through nested Modules.
 NAMES="$WORK/names"
 : > "$NAMES"
 for f in $FILES; do
   m=${f%.v}; m=${m//\//.}
-  { grep -oE '(^|[[:space:]])(Theorem|Lemma|Corollary|Proposition|Fact|Remark|Example|Instance)[[:space:]]+[A-Za-z_][A-Za-z0-9_'"'"']*' "$WORK/$f" || true; } \
-    | awk -v m="$m" '{print "Ephapax." m "." $NF}' >> "$NAMES"
+  nofalse_decls "Ephapax.$m" "$WORK/$f" >> "$NAMES" \
+    || { echo "no-False gate [3]: could not read the declarations of $f -> FAIL"; fail=1; }
 done
 total=$(wc -l < "$NAMES")
 # The headline results must stay in the census under these names.
@@ -98,6 +86,7 @@ fi
 
 # 4. Independent kernel recheck of the compiled libraries.
 QUAL=$(for m in $MODS; do printf 'Ephapax.%s ' "$m"; done)
+# shellcheck disable=SC2086 # QUAL is a deliberate word list
 coqchk -o -silent -R . Ephapax $QUAL > "$WORK/coqchk.out" 2>&1 || { tail -30 "$WORK/coqchk.out"; echo "no-False gate [4]: coqchk rejected a library -> FAIL"; fail=1; }
 awk '/^\* Axioms:/{a=1;next} /^\* /{a=0} a && NF' "$WORK/coqchk.out" > "$WORK/axioms"
 if grep -q 'Ephapax\.' "$WORK/axioms"; then

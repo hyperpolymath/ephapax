@@ -130,6 +130,43 @@ fn binding(key: &str) -> Option<Binding> {
     }
 }
 
+/// A binding table: the current one, or the frozen historical one.
+type Bind = fn(&str) -> Option<Binding>;
+
+/// The operations bound when the survey measured 89/1/13/51 (48b7694).
+/// Frozen: a binding added to `binding` later must not reach the
+/// historical reproduction, or it could silently change that tally.
+const HISTORICAL_BOUND: &[&str] = &[
+    "arithmetic/absolute",
+    "arithmetic/add",
+    "arithmetic/divide",
+    "arithmetic/max",
+    "arithmetic/min",
+    "arithmetic/modulo",
+    "arithmetic/multiply",
+    "arithmetic/negate",
+    "arithmetic/subtract",
+    "comparison/equal",
+    "comparison/not_equal",
+    "comparison/less_than",
+    "comparison/less_equal",
+    "comparison/greater_than",
+    "comparison/greater_equal",
+    "logical/and",
+    "logical/or",
+    "logical/not",
+    "conditional/if_then_else",
+];
+
+/// The historical binding table: `binding`, restricted to `HISTORICAL_BOUND`.
+fn historical_binding(key: &str) -> Option<Binding> {
+    if HISTORICAL_BOUND.contains(&key) {
+        binding(key)
+    } else {
+        None
+    }
+}
+
 /// Why a whole category has no binding yet.
 fn unimplemented_reason(category: &str) -> &'static str {
     match category {
@@ -349,6 +386,7 @@ fn eval(
     want: Kind,
     runner: &mut Runner,
     ops: &BTreeMap<String, String>,
+    bind: Bind,
 ) -> Result<V, Stop> {
     match e {
         Expr::Bool(b) => match want {
@@ -371,7 +409,7 @@ fn eval(
             let cat = category_of(op, ops)
                 .ok_or_else(|| Stop::Fail(format!("unknown operation `{op}`")))?;
             let key = format!("{cat}/{op}");
-            let b = binding(&key).ok_or_else(|| {
+            let b = bind(&key).ok_or_else(|| {
                 Stop::Unimplemented(format!(
                     "condition calls `{key}`: {}",
                     unimplemented_reason(&cat)
@@ -391,7 +429,7 @@ fn eval(
             }
             let mut vals = Vec::new();
             for (a, k) in args.iter().zip(b.params) {
-                vals.push(eval(a, *k, runner, ops)?);
+                vals.push(eval(a, *k, runner, ops, bind)?);
             }
             runner.call(&b, &vals).map_err(Stop::Fail)
         }
@@ -404,13 +442,14 @@ fn lower_arg(
     k: Kind,
     runner: &mut Runner,
     ops: &BTreeMap<String, String>,
+    bind: Bind,
 ) -> Result<V, Stop> {
     match (k, v) {
         (Kind::Bool, Value::Bool(b)) => Ok(V::Bool(*b)),
         // A Boolean-typed string is a condition expression (GRAMMAR.adoc).
         (Kind::Bool, Value::String(s)) => {
             let e = parse_condition(s).map_err(|m| Stop::Fail(format!("bad condition: {m}")))?;
-            eval(&e, Kind::Bool, runner, ops)
+            eval(&e, Kind::Bool, runner, ops, bind)
         }
         (Kind::I32, Value::Number(n)) => n
             .as_i64()
@@ -454,8 +493,9 @@ fn run_vector(
     vector: &Value,
     runner: &mut Runner,
     ops: &BTreeMap<String, String>,
+    bind: Bind,
 ) -> Verdict {
-    let Some(b) = binding(key) else {
+    let Some(b) = bind(key) else {
         return Verdict::SkipUnimplemented(unimplemented_reason(category).into());
     };
     let result = (|| -> Result<Verdict, Stop> {
@@ -483,7 +523,7 @@ fn run_vector(
         let want = lower_expected(&vector["output"], b.result)?;
         let mut args = Vec::new();
         for (v, k) in raw.iter().zip(b.params) {
-            args.push(lower_arg(v, *k, runner, ops)?);
+            args.push(lower_arg(v, *k, runner, ops, bind)?);
         }
         let got = runner.call(&b, &args).map_err(Stop::Fail)?;
         if got == want {
@@ -598,7 +638,7 @@ impl Tally {
 }
 
 /// Evaluate every vector of `files` against the compiled module.
-fn conform(files: &[Value], runner: &mut Runner) -> Tally {
+fn conform(files: &[Value], runner: &mut Runner, bind: Bind) -> Tally {
     // Operation name -> category, for condition calls.
     let mut ops = BTreeMap::new();
     for f in files {
@@ -622,7 +662,7 @@ fn conform(files: &[Value], runner: &mut Runner) -> Tally {
             {
                 let id = format!("{key}#{}", i + 1);
                 let desc = v["description"].as_str().unwrap_or("");
-                let (tag, detail) = match run_vector(&key, cat, op, v, runner, &ops) {
+                let (tag, detail) = match run_vector(&key, cat, op, v, runner, &ops, bind) {
                     Verdict::Pass => {
                         t.pass += 1;
                         ("PASS", String::new())
@@ -660,7 +700,7 @@ fn alib_conformance_ratchet() {
     let root = repo_root();
     let files = load_pinned(&root);
     let mut runner = alib_runner(&root);
-    let t = conform(&files, &mut runner);
+    let t = conform(&files, &mut runner, binding);
 
     println!("{}", t.table);
     println!(
@@ -711,6 +751,9 @@ fn alib_conformance_ratchet() {
 ///     literal `[true]` (output stays `true`), and
 ///   - string/substring: drop the two boundary vectors a877c2e appended
 ///     (vectors 7 and 8).
+///
+/// It binds only `HISTORICAL_BOUND`, so bindings added later leave this
+/// tally unchanged; the ratchet test above tracks them.
 #[test]
 fn alib_reproduces_survey_baseline_48b7694() {
     let root = repo_root();
@@ -733,8 +776,14 @@ fn alib_reproduces_survey_baseline_48b7694() {
             }
         }
     }
+    for key in HISTORICAL_BOUND {
+        assert!(
+            binding(key).is_some(),
+            "historical binding {key} is gone from the binding table"
+        );
+    }
     let mut runner = alib_runner(&root);
-    let t = conform(&files, &mut runner);
+    let t = conform(&files, &mut runner, historical_binding);
     println!("aLib conformance (reconstructed 48b7694): {}", t.summary());
     assert_eq!(
         (t.pass, t.fail, t.out_of_domain, t.unimplemented),
@@ -746,6 +795,25 @@ fn alib_reproduces_survey_baseline_48b7694() {
         t.fails[0].0, "logical/not#3",
         "the one FAIL is the spec defect"
     );
+}
+
+/// The pinned aLib modulo vectors use only nonnegative operands, and aLib
+/// leaves the sign of a remainder with negative operands to the
+/// implementation. This binding's choice is the truncated remainder (wasm
+/// `i32.rem_s`: the result takes the dividend's sign). An unsigned lowering
+/// would still pass the pinned vectors, so pin the choice here, through the
+/// compiled `modulo` export, without touching the pinned files.
+#[test]
+fn alib_modulo_is_the_signed_truncated_remainder() {
+    let root = repo_root();
+    let mut runner = alib_runner(&root);
+    let b = binding("arithmetic/modulo").expect("modulo is bound");
+    for (a, d, want) in [(-7, 3, -1), (7, -3, 1), (-7, -3, -1), (7, 3, 1)] {
+        let got = runner
+            .call(&b, &[V::I32(a), V::I32(d)])
+            .unwrap_or_else(|e| panic!("modulo({a}, {d}) failed: {e}"));
+        assert_eq!(got, V::I32(want), "modulo({a}, {d})");
+    }
 }
 
 #[test]

@@ -51,3 +51,24 @@ nofalse_bypass_scan() {
 
 # Fully qualified named results of one stripped file (see coq-decls.awk).
 nofalse_decls() { awk -v prefix="$1" -f "$NOFALSE_DIR/coq-decls.awk" "$2"; }
+
+# Check one result from a ":"-sealed module body. A sealed body may hide a
+# field or expose it through the signature; Print Assumptions on an exposed
+# field reports the axioms of its implementation. Usage:
+#   nofalse_sealed_check <logical-root> "<Require list>" <qualified name>
+# Run from the load-path root. Prints "hidden" when Coq reports that the name
+# was not found, "closed" when it is closed under the global context, and
+# otherwise "open" followed by Coq's output.
+nofalse_sealed_check() {
+  local out
+  out=$(printf 'From %s Require %s.\nPrint Assumptions %s.\n' "$1" "$2" "$3" \
+        | coqtop -quiet -R . "$1" 2>&1 || true)
+  if printf '%s\n' "$out" | grep -qF "The reference $3 was not found"; then
+    echo hidden
+  elif printf '%s\n' "$out" | grep -qF 'Closed under the global context' \
+       && ! printf '%s\n' "$out" | grep -qE '^Axioms:|Error'; then
+    echo closed
+  else
+    echo open; printf '%s\n' "$out"
+  fi
+}

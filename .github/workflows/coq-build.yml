@@ -118,8 +118,9 @@ jobs:
 
       - name: No-False gate scanner self-test
         working-directory: formal
-        # Fixtures for the gate's source scanners: split bypass flags,
-        # split declarations, nested Module qualification. No Coq needed.
+        # Fixtures for the gate's scanners: split bypass flags, split
+        # declarations, nested Module qualification, and (using the Coq just
+        # installed) the census of results in ":"-sealed modules.
         run: bash scripts/test-no-false-gate.sh
 
       - name: Build formal/ via coq_makefile (the merge-oracle command)

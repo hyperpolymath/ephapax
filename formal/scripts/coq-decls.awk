@@ -20,14 +20,20 @@
 #
 # Module and Section scopes are tracked. A Module adds its name to the
 # qualification; a Section does not. "Module X := ..." opens no scope.
-# Results are skipped, because the census cannot name them from outside,
-# inside a Module Type, inside a functor (a Module with parameters), and
-# inside a module sealed by a signature ("Module M : S."), whose body
-# fields need not be visible. A transparently ascribed module
-# ("Module M <: S.") keeps every field and is censused. Skipped bodies are
-# still covered by gate checks 1, 2 and 4 (no assumption vernacular or
-# admit, no kernel bypass, no Ephapax axiom under coqchk); check 3 does
-# not see a dependency of a skipped result on a standard-library axiom.
+# Results inside a Module Type or a functor (a Module with parameters) are
+# skipped, because the census cannot name them from outside. Gate checks
+# 1, 2 and 4 still cover them (no assumption vernacular or admit, no kernel
+# bypass, no Ephapax axiom under coqchk); check 3 does not see a dependency
+# of such a result on a standard-library axiom.
+#
+# Inside a module sealed by a signature ("Module M : S."), a field the
+# signature exposes can be named, and Print Assumptions on it reports the
+# axioms its implementation uses; a field the signature hides cannot be
+# named. The parser cannot tell the two apart, so it lists every result in
+# a sealed body with a leading "?" (an optional name). The gate checks each
+# optional name and skips it only when Coq reports that it was not found.
+# A transparently ascribed module ("Module M <: S.") keeps every field and
+# is censused normally.
 #
 # Usage: awk -v prefix=Ephapax.File -f coq-decls.awk stripped.v
 BEGIN { buf = ""; depth = 0 }
@@ -45,7 +51,7 @@ END {
 
 function trim(x) { sub(/^ +/, "", x); sub(/ +$/, "", x); return x }
 
-function sentence(s,    w, k, i, name, kind, skip, path, rest) {
+function sentence(s,    w, k, i, name, kind, skip, opt, path, rest) {
   s = trim(s)
   # Drop attributes and locality/flag prefixes.
   while (match(s, /^#\[[^]]*\] */)) s = substr(s, RLENGTH + 1)
@@ -81,12 +87,13 @@ function sentence(s,    w, k, i, name, kind, skip, path, rest) {
   if (w[1] ~ /^(Theorem|Lemma|Corollary|Proposition|Fact|Remark|Example|Instance|Definition|Fixpoint|CoFixpoint)$/) {
     name = w[2]; sub(/[^A-Za-z0-9_'].*$/, "", name)
     if (name !~ /^[A-Za-z_][A-Za-z0-9_']*$/) return   # anonymous Instance
-    skip = 0; path = prefix
+    skip = 0; opt = ""; path = prefix
     for (i = 1; i <= depth; i++) {
-      if (kinds[i] == "mtype" || kinds[i] == "functor" || kinds[i] == "sealed") skip = 1
-      if (kinds[i] == "module") path = path "." names[i]
+      if (kinds[i] == "mtype" || kinds[i] == "functor") skip = 1
+      if (kinds[i] == "sealed") opt = "?"
+      if (kinds[i] == "module" || kinds[i] == "sealed") path = path "." names[i]
     }
-    if (!skip) print path "." name
+    if (!skip) print opt path "." name
   }
 }
 

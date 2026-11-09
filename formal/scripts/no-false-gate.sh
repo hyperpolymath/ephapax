@@ -21,9 +21,10 @@
 #      CoFixpoint, found by sentence (so a keyword and its name may be on
 #      different lines) and qualified through nested Modules
 #      (coq-decls.awk); each must print "Closed under the global context",
-#      and the count must match. Results in a Module Type, a functor or a
-#      ":"-sealed module cannot be named and are not censused; checks 1,
-#      2 and 4 still cover them;
+#      and the count must match. Results in a Module Type or a functor
+#      cannot be named and are not censused; checks 1, 2 and 4 still cover
+#      them. A result in a ":"-sealed module is checked on its own and must
+#      be closed, unless Coq reports that the signature hides it;
 #   4. independent recheck of the compiled .vo files with coqchk: no
 #      axiom in the Ephapax namespace, nothing relying on type-in-type,
 #      unsafe (co)fixpoints or assumed positivity.
@@ -66,6 +67,10 @@ for f in $FILES; do
   nofalse_decls "Ephapax.$m" "$WORK/$f" >> "$NAMES" \
     || { echo "no-False gate [3]: could not read the declarations of $f -> FAIL"; fail=1; }
 done
+# Optional names ("?" prefix) come from ":"-sealed module bodies; see below.
+grep '^?' "$NAMES" | sed 's/^?//' > "$WORK/optional" || true
+grep -v '^?' "$NAMES" > "$WORK/required" || true
+mv "$WORK/required" "$NAMES"
 total=$(wc -l < "$NAMES")
 # The headline results must stay in the census under these names.
 for h in Counterexample.preservation_false \
@@ -86,6 +91,20 @@ fi
 if [ "$closed" -ne "$total" ]; then
   echo "no-False gate [3]: $closed of $total named results closed -> FAIL"; fail=1
 fi
+# A result in a ":"-sealed module body is reachable only if the signature
+# exposes it. Check each one alone: "not found" means the signature hides
+# it and it is skipped; any other outcome must be "Closed".
+sealed_closed=0; sealed_hidden=0
+while IFS= read -r n; do
+  [ -n "$n" ] || continue
+  out=$(nofalse_sealed_check Ephapax "$MODS" "$n")
+  case "$out" in
+    hidden) sealed_hidden=$((sealed_hidden + 1)) ;;
+    closed) sealed_closed=$((sealed_closed + 1)) ;;
+    *) printf '%s\n' "$out" | head -20
+       echo "no-False gate [3]: sealed-module result $n is not closed -> FAIL"; fail=1 ;;
+  esac
+done < "$WORK/optional"
 
 # 4. Independent kernel recheck of the compiled libraries.
 QUAL=$(for m in $MODS; do printf 'Ephapax.%s ' "$m"; done)
@@ -102,6 +121,7 @@ for k in 'type-in-type' 'unsafe (co)fixpoints' 'positivity is assumed'; do
 done
 
 echo "--- census: $closed/$total named results closed under the global context"
+echo "--- sealed-module results: $sealed_closed exposed and closed, $sealed_hidden hidden by their signature"
 echo "--- coqchk environment axioms (loaded libraries, not necessarily used):"
 sed 's/^/    /' "$WORK/axioms"
 if [ "$fail" -ne 0 ]; then echo "no-False gate: FAIL"; exit 1; fi

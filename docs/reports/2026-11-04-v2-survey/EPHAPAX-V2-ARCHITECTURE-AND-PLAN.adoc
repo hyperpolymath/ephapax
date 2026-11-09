@@ -1235,14 +1235,25 @@ The legacy `Semantics.preservation` is `Admitted` by directive and is refuted by
 |P1
 |The tripwire's quarantine list starts empty after P0. Any refuted `Admitted` fails CI.
 |T0g
-|Replaced: instead of the import-closure job, a CI gate checks that no `_CoqProject` file contains `Admitted`, `Axiom` or `Parameter`, and that the named refutations and L2 results print "Closed under the global context". With no axioms in the build, a closed proof of `False` would contradict the consistency of Coq's own theory; that meta-level argument, not the enumerated checks, is what rules out every other derivation.
+|Replaced: instead of the import-closure job, a CI gate checks that no `_CoqProject` file contains `Admitted`, `Axiom` or `Parameter`, and that the named refutations and L2 results print "Closed under the global context". With no axioms in the build, a closed proof of `False` would contradict the consistency of Coq's own theory; that meta-level argument, not the enumerated checks, is what rules out every other derivation. (Hardened on 2026-11-09 in `formal/scripts/no-false-gate.sh`: a comment-aware scan of every assumption form, a census of every named result, and a `coqchk` recheck.)
 |T0f
 |The doc-correction PR also revises the 2026-05-27 fence in CLAUDE.md (DO NOT items 1, 2 and 5), PROOF-NEEDS, EXPLAINME and V1-TO-V2, and records that the legacy theorem is retired, not closed. Applied by the owner, GPG-signed.
 |Evidence
-|`evidence/SurveyCounterexamples.v` F0 becomes an expected-failure target, like F1.
+|`evidence/SurveyCounterexamples.v` F0 becomes an expected-failure target, like F1. (Applied differently on 2026-11-09: F0 and F1 were restated to take the retired statements as hypotheses, so all eight survey lemmas still compile and are closed.)
 |===
 
 Beyond this repo: the memory entry `feedback_ephapax_no_patching_legacy_preservation.md` needs the same revision.
+
+=== Ratified: proof classification (owner, 2026-11-09)
+
+Ephapax's soundness statements are *theory* under PROOF-POLICY §1: the typing judgment and step relation as a calculus, progress, preservation, the layer obligations (L1–L4) and the refutations of the retired statements. Each gets an Agda source of truth.
+
+* *Grades.* Every such result is `ungraded` until its Agda proof checks under `agda --safe --without-K --cubical-compatible` (`PWG-3`). A grade is derived from receipts, never asserted (§8.4).
+* *Coq becomes a recheck leg.* The existing Coq proofs, and the Coq P-rungs of this plan, are the Rocq leg of §2. A Coq proof counts towards `PWG-2i`/`PWG-2ii` only once the matching Agda statement exists and the correspondence is `RECONCILED` (§2.2). Until then it is target-only evidence (§3). The Lean leg is transported through Dedukti where the pinned exporter allows it, and otherwise re-proved by hand without Mathlib.
+* *First targets.* The refutations are small and closed (`preservation_false`, `step_pop_disjoint_from_type_l1_FALSE`, `preservation_l1_FALSE`). Porting them needs only the fragment of the legacy and L1 judgments their witnesses touch. They are the first Agda rows, and they test the correspondence method before the v2 core is ported.
+* *What stays engineering.* The Idris2 ABI, the Rust checker and code generator (Creusot/Pearlite and Verus, #378) and typed-wasm emission are about this repository's implementation. They keep the §1 engineering mapping and are not graded.
+* *Plan impact.* The P-ladder is written for Coq, because the executable oracle (D9a, D9) extracts from Coq. This ruling adds an Agda port obligation to every headline rung. The order of the two is a new decision, *D13*, in the W0 packet: Coq first then Agda port, Agda first with Coq as the recheck leg, or both developed together. Under the decision-branch rule, no P-rung past P4 starts until D13 is ratified with its branch table.
+* *Beyond this repo.* The PWG ledger lives in `PROOF-NEEDS.adoc`. Mathesis may catalogue the grades it derives from those receipts (PROOF-POLICY §8.5). The memory entry `feedback_ephapax_no_patching_legacy_preservation.md` should record the classification.
 
 === D1 — Where the v2 core lives
 

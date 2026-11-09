@@ -110,13 +110,19 @@ uses the §5 tokens only). The Coq results are Coq evidence: a Coq `+Qed+`
 is not `PWG-3`, and it can count as a Rocq recheck leg only after an Agda
 source exists and the two statements are `RECONCILED` (§2.2, §3).
 
-*The classification itself is open.* The `+has_type+`/`+step+` statements
-name Ephapax's own judgment, which reads as engineering under the §1 test,
-but the soundness of a calculus is listed as theory. Until the owner
-classifies each obligation, record Coq results as Coq evidence, keep
-`+COUNTEREXAMPLE+` for refuted statements, and assign no PWG. Policy §3 adds
-a consequence: an engineering proof held in a prover other than Idris2 moves
-to Idris2 when next touched, unless a §4 exception is recorded beside it.
+*Classification: theory (owner ruling, 2026-11-09).* The soundness
+statements (the typing judgment and step relation as a calculus, progress,
+preservation, the L1–L4 obligations, and the refutations of the retired
+statements) are theory under §1, and each gets an Agda source of truth.
+Until an Agda proof checks, each is `ungraded`. The Coq proofs are the Rocq
+recheck leg (§2): target-only evidence (§3) until the matching Agda
+statement exists and the correspondence is `RECONCILED`. Keep
+`+COUNTEREXAMPLE+` for refuted statements. The first Agda targets are the
+three refutations; the order of Coq and Agda work for the v2 core is
+decision D13 in the v2 plan
+(`+docs/reports/2026-11-04-v2-survey/EPHAPAX-V2-ARCHITECTURE-AND-PLAN.adoc+`,
+"Ratified: proof classification"). The Idris2 ABI, the Rust implementation
+and typed-wasm emission stay engineering and are not graded.
 A future `PWG-3` receipt must record the exact proposition, assumptions,
 source commit, pinned Agda and standard library, the canonical invocation
 `agda --safe --without-K --cubical-compatible`, the import cone, and evidence

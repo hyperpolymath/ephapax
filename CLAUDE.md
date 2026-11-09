@@ -210,9 +210,10 @@ them if asked; if asked anyway, push back and link this section.
    `agda --safe --without-K --cubical-compatible`; Coq `Qed` is Coq
    evidence, not `PWG-3`, and counts as a recheck leg only once an Agda
    source exists and the statements are `RECONCILED`. Always write the
-   `PWG-` prefix. Standards maps
-   Ephapax-specific engineering claims to Idris2 unless an
-   implementation-independent theory statement is explicitly defined.
+   `PWG-` prefix. Owner ruling 2026-11-09: the soundness statements
+   (calculus, progress, preservation, L1–L4 obligations, refutations) are
+   *theory*, with an Agda source of truth; the Idris2 ABI and the Rust
+   implementation stay engineering.
    Do not assign a PWG until that classification and exact
    statement correspondence are recorded in `EXPLAINME.adoc` and
    `PROOF-NEEDS.adoc`.

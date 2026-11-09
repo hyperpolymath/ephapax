@@ -408,12 +408,12 @@ all L1 regressions remain mandatory controls.
 transparently depends on the refuted L1 statement.
 
 |`PWG-3` receipt for Ephapax language soundness |open
-|Agda receipt required by PROOF-POLICY §8 (if classed as theory)
+|Agda receipt required by PROOF-POLICY §8 (classed as theory, owner ruling 2026-11-09)
 |No Agda proof recorded; every Ephapax result is `ungraded` or off the PWG ladder
-|The existing witnesses are Coq, not `PWG-3`. Standards classifies local
-Ephapax-specific typing/step claims as engineering (Idris2) unless a genuine
-implementation-independent theory statement is defined. Resolve this
-mapping before assigning any PWG; see `+PROOF-NEEDS.adoc+`.
+|The existing witnesses are Coq, not `PWG-3`. The owner classed the soundness
+statements as theory on 2026-11-09, so each needs an Agda source; the Coq
+proofs become the Rocq recheck leg once statements are `RECONCILED`. See
+`+PROOF-NEEDS.adoc+`.
 |===
 
 Proof Witness Grades are not interchangeable with this ledger's statuses.

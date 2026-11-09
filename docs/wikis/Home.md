@@ -45,7 +45,7 @@ Both compile to [typed-wasm](https://github.com/hyperpolymath/typed-wasm). The c
 
 ## Current formal proof status (2026-06-05)
 
-> 🔄 **Foundational redesign in progress.** On 2026-05-26, a verified Coq counterexample ([`formal/Counterexample.v`](https://github.com/hyperpolymath/ephapax/blob/main/formal/Counterexample.v), 5 Qed lemmas) showed that preservation as stated in the legacy typing judgment is **provably false**. The old `Theorem preservation` in `Semantics.v` stays `Admitted` — this is correct. The work is the **four-layer principled redesign**.
+> 🔄 **Foundational redesign in progress.** On 2026-05-26, a verified Coq counterexample ([`formal/Counterexample.v`](https://github.com/hyperpolymath/ephapax/blob/main/formal/Counterexample.v), now 6 Qed lemmas) showed that preservation as stated in the legacy typing judgment is **provably false**. Since 2026-11-05 (D0/D0b) the legacy statement in `Semantics.v` is `preservation_stmt : Prop`, refuted by `Counterexample.preservation_false`; `formal/` has no `Admitted` and no `Axiom`. The work is the **four-layer principled redesign**.
 
 The four layers and their current state:
 

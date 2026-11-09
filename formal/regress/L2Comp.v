@@ -5,8 +5,11 @@
     [L2_lift_l1] (any [has_type_l1] derivation) and [T_App_L2_Eff]
     (application of a [TFunEff]). There is no L2-level pair / let /
     lambda / region rule, and [has_type_l1] has no rule eliminating
-    [TFunEff]. So an effect-typed application, once formed by
-    [T_App_L2_Eff], cannot be placed inside any compound form.
+    [TFunEff]. So an effect-typed application formed by [T_App_L2_Eff]
+    can appear only as an operand of another [T_App_L2_Eff] (compatible
+    L2 applications do nest); it cannot be placed inside a pair, let,
+    lambda body, region or any other form typed only by [has_type_l1].
+    The lemma below shows the pairing case.
 
     "Compose" here means the L1 pairing rule [T_Pair_L1], lifted to L2:
       L2 ⊢ e1 : T1 [R→R1, G→G1] and L2 ⊢ e2 : T2 [R1→R2, G1→G2]

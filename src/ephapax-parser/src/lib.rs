@@ -140,6 +140,15 @@ pub(crate) fn parse_import(pair: pest::iterators::Pair<Rule>) -> Result<Import, 
 fn parse_declaration(pair: pest::iterators::Pair<Rule>) -> Result<Decl, ParseError> {
     // Skip leading `@identifier` annotations — they're parser-only metadata
     // today; see the `annotation` rule in ephapax.pest.
+    // `@total`, `@pure` and `@comptime` name properties the compiler
+    // does not check; reject them instead of dropping them (v2 plan E1).
+    for ann in pair.clone().into_inner() {
+        if ann.as_rule() == Rule::annotation {
+            let span = span_from_pair(&ann);
+            let name = ann.as_str().trim_start_matches('@').trim();
+            ParseError::check_annotation(name, span)?;
+        }
+    }
     let inner = pair
         .into_inner()
         .find(|p| p.as_rule() != Rule::annotation)

@@ -118,6 +118,15 @@ fn parse_surface_declaration(pair: pest::iterators::Pair<Rule>) -> Result<Surfac
     // | extern_block | const_decl)`. Skip past any leading annotations to
     // find the actual decl pair. Annotation metadata is dropped at the
     // parser layer for now — see the `annotation` rule in ephapax.pest.
+    // `@total`, `@pure` and `@comptime` name properties the compiler
+    // does not check; reject them instead of dropping them (v2 plan E1).
+    for ann in pair.clone().into_inner() {
+        if ann.as_rule() == Rule::annotation {
+            let span = span_from_pair(&ann);
+            let name = ann.as_str().trim_start_matches('@').trim();
+            ParseError::check_annotation(name, span)?;
+        }
+    }
     let inner = pair
         .into_inner()
         .find(|p| p.as_rule() != Rule::annotation)

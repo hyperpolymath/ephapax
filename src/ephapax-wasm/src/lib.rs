@@ -256,7 +256,10 @@ pub fn first_unsupported(expr: &Expr) -> Option<CodegenError> {
     children.into_iter().find_map(first_unsupported)
 }
 
-/// Module-level [`first_unsupported`]: checks every function body.
+/// Check every function body using [`first_unsupported`].
+///
+/// Returns the first unsupported-construct error in declaration order, with
+/// the function name added. Non-function declarations are ignored.
 pub fn validate_supported(module: &AstModule) -> Result<(), CodegenError> {
     for decl in &module.decls {
         let (name, expr, kind) = match decl {
@@ -784,6 +787,9 @@ impl Codegen {
     /// 1. Collects function signatures and assigns WASM indices.
     /// 2. Emits the type, import, memory, function, and code sections.
     /// 3. If a `main` function exists, exports it.
+    ///
+    /// Returns a [`CodegenError`] for unsupported constructs before emitting
+    /// sections, and propagates errors from function compilation.
     pub fn compile_ast_module(&mut self, ast: &AstModule) -> Result<Vec<u8>, CodegenError> {
         // ----- Phase 0: reject constructs with no wasm lowering ------------
         // (v2 plan E1: fail loudly, before any section is emitted.)
@@ -832,8 +838,13 @@ impl Codegen {
         Ok(self.module.clone().finish())
     }
 
-    /// Compile a module that has a `main` function with a body expression.
+    /// Try full module compilation, falling back to `main_body` as a standalone
+    /// `main` expression if compilation fails.
     /// (Legacy helper retained for backward compatibility.)
+    ///
+    /// Unsupported constructs in either `module` or `main_body` return a
+    /// [`CodegenError`] before compilation, even when `main_body` would not be
+    /// used. Other module-compilation errors are caught to select the fallback.
     pub fn compile_module_with_main(
         &mut self,
         module: &AstModule,

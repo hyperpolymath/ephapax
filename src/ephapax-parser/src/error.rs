@@ -60,7 +60,9 @@ impl ParseError {
     /// enforce. Any of these on a declaration is a parse error.
     pub const UNENFORCED_ANNOTATIONS: &'static [&'static str] = &["total", "pure", "comptime"];
 
-    /// Reject an annotation pair if it names an unenforced property.
+    /// Reject `total`, `pure` or `comptime` with
+    /// [`ParseError::AnnotationNotEnforced`] at `span`. Other names are accepted;
+    /// acceptance does not mean their properties are enforced.
     pub fn check_annotation(name: &str, span: Span) -> Result<(), ParseError> {
         if Self::UNENFORCED_ANNOTATIONS.contains(&name) {
             Err(ParseError::AnnotationNotEnforced {

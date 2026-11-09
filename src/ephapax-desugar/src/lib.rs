@@ -756,8 +756,9 @@ impl Desugarer {
     /// expansion stack. Fails with [`DesugarError::RecursiveType`] if the
     /// same application is already being expanded (a regular recursive
     /// type such as `data L = Nil | Cons(I32, L)`), or if the stack grows
-    /// past a fixed bound (a non-regular recursive type, whose
-    /// applications never repeat).
+    /// to 64 active applications before this expansion begins (also bounding
+    /// non-regular recursion, whose applications may never repeat). Errors
+    /// returned by `f` propagate after this expansion is removed from the stack.
     fn with_expansion<T>(
         &self,
         name: &SmolStr,
@@ -1249,7 +1250,9 @@ impl Desugarer {
     /// Bind pattern variables from a constructor's payload.
     ///
     /// For `Some(x)` with payload `p`: `let x = p in body`
-    /// For `Pair(a, b)` with payload `p`: `let a = p.0 in let b = p.1 in body`
+    /// For `Pair(a, b)` with payload `p`: `match p { (a, b) => body }`.
+    /// Multiple irrefutable fields destructure a right-nested product in one
+    /// match; other field patterns use projections. No patterns returns `body`.
     fn bind_pattern_vars(
         &self,
         payload: &Expr,
@@ -1309,7 +1312,11 @@ impl Desugarer {
         }
     }
 
-    /// Bind a single pattern variable.
+    /// Wrap `body` with bindings extracted from `value` by `pattern`.
+    ///
+    /// Irrefutable pair patterns use one core match; other pairs and tuples
+    /// are destructured recursively. Wildcards, unit, constructors and literals
+    /// return `body` without adding bindings or checking the pattern.
     fn bind_single_pattern(
         &self,
         value: &Expr,

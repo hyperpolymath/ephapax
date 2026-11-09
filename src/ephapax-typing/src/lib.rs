@@ -279,7 +279,12 @@ impl Context {
         self.vars.get(name).map(|e| &e.ty)
     }
 
-    /// Mark variable as used (for linear variables)
+    /// Record a use of the current binding of `name`.
+    ///
+    /// Returns [`TypeError::UnboundVariable`] if the name is absent, or
+    /// [`TypeError::LinearVariableReused`] on a second use of a linear-typed
+    /// binding or any binding that demands consumption (including `let!`).
+    /// Unrestricted bindings may be used repeatedly.
     pub fn mark_used(&mut self, name: &Var) -> Result<(), TypeError> {
         if let Some(entry) = self.vars.get_mut(name) {
             if entry.forbids_reuse() && entry.used {

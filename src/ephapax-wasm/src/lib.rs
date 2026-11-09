@@ -259,10 +259,13 @@ pub fn first_unsupported(expr: &Expr) -> Option<CodegenError> {
 /// Module-level [`first_unsupported`]: checks every function body.
 pub fn validate_supported(module: &AstModule) -> Result<(), CodegenError> {
     for decl in &module.decls {
-        if let Decl::Fn { name, body, .. } = decl {
-            if let Some(CodegenError(msg)) = first_unsupported(body) {
-                return Err(CodegenError(format!("{msg} in function `{name}`")));
-            }
+        let (name, expr, kind) = match decl {
+            Decl::Fn { name, body, .. } => (name, body, "function"),
+            Decl::Const { name, value, .. } => (name, value, "constant"),
+            _ => continue,
+        };
+        if let Some(CodegenError(msg)) = first_unsupported(expr) {
+            return Err(CodegenError(format!("{msg} in {kind} `{name}`")));
         }
     }
     Ok(())

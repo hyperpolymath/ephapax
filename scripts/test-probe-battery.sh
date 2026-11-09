@@ -29,7 +29,7 @@ cat >"$T/stub" <<'STUB'
 case "$2" in
   p_err.eph) echo "Type error: fixture" >&2; exit 1 ;;
   p_crash.eph) echo "fixture abort" >&2; kill -ABRT $$ ;;
-  p_slow.eph) sleep 10 ;;
+  p_slow.eph) exec sleep 10 ;;
 esac
 exit 1
 STUB

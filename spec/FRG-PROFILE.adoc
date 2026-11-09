@@ -26,14 +26,14 @@
 
 Ephapax has reached FRG-D: preservation/progress theorems stated,
 operational semantics formalised, layered redesign committed
-(`formal/PRESERVATION-DESIGN.md`), open obligations enumerated in
-`PROOF-NEEDS.md` and tracked in `formal/PROOF-STATUS.a2ml`. The
+(`formal/PRESERVATION-DESIGN.adoc`), open obligations enumerated in
+`PROOF-NEEDS.adoc` and tracked in `formal/PROOF-STATUS.a2ml`. The
 language *was* FRG-F for the period during which
 `formal/Counterexample.v` had `Qed`'d a refutation of the original
 preservation statement without a redesign commitment; the F-grade
 was *evacuated* on 2026-05-27 by the owner directive locking in the
-four-layer redesign as canonical (legacy `Theorem preservation` in
-`Semantics.v` is now archaeology per the lockdown banner).
+four-layer redesign as canonical (the legacy preservation in `Semantics.v` is archaeology: since 2026-11-05 it
+is the retired `preservation_stmt : Prop`, refuted by `preservation_false`).
 
 FRG = D. The full chain of axes:
 

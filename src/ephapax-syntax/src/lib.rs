@@ -877,14 +877,17 @@ mod tests {
     }
 
     #[test]
-    fn coq_bridge_effectful_fallthrough_unrestricted() {
-        // Coq: TFunEff _ _ _ _ falls through → false.
+    fn effectful_fallthrough_unrestricted() {
+        // Rust-only behaviour, NOT a Coq bridge: `Ty::Effectful` is a
+        // function type with a named-effect row, while Coq's `TFunEff`
+        // carries region lists (R_in, R_out). The two do not correspond;
+        // they only agree that neither is linear.
         let effectful = Ty::Effectful {
             param: Box::new(Ty::String("r".into())),
             ret: boxed_base(),
             effects: vec!["IO".into()],
         };
-        assert!(!effectful.is_linear(), "Coq bridge: TFunEff is NOT linear");
+        assert!(!effectful.is_linear(), "Ty::Effectful is NOT linear");
     }
 
     #[test]

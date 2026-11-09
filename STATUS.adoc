@@ -155,7 +155,7 @@ and its assumptions explicitly.
   `preservation_l3_region_active_echo`, `preservation_l3_drop_echo`,
   and `preservation_l3` are Qed for the matching echo rule pairs. This
   scoped result is not general L1/L2 preservation.
-| `Echo.v`: **12 / 0** (plus 3 new Qed in `Semantics_L1.v` for the wiring).
+| `Echo.v`: **19 / 0** (counted 2026-11-09) (plus 3 new Qed in `Semantics_L1.v` for the wiring).
 
 | L4
 | Dyadic interaction semantics (mother–child distinction)

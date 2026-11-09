@@ -269,7 +269,7 @@ Qed results are scoped to matching echo rule pairs.
 | `formal/Modality.v` + `m : Modality` in `has_type_l1`. PRs #176 + #177. `linear_to_affine` Qed with zero axioms.
 
 | L3 echo / residue calculus
-| ✅ Calculus 12 Qed + wiring landed (slice 4, 2026-05-27)
+| ✅ Calculus + wiring landed (slice 4, 2026-05-27); `Echo.v` has 19 Qed, 0 admits (counted 2026-11-09)
 | `formal/Echo.v` — one type former (fiber `Echo f y := Σ x. f x ≡ y`) + degrade map + no-section-collapse-to-residue proof. The Qed wiring lemmas cover matching echo-emitting rule pairs only; they do not prove general L1/L2 preservation.
 
 | L4 dyadic interaction

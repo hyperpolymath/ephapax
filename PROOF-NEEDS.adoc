@@ -159,7 +159,7 @@ link:formal/PRESERVATION-DESIGN.adoc[`+formal/PRESERVATION-DESIGN.adoc+`].
 |`+formal/Modality.v+` |1 Qed, zero axioms
 
 |L3 calculus (echo / residue fiber + degrade + no-section proof)
-|`+formal/Echo.v+` |12 Qed, 0 admits
+|`+formal/Echo.v+` |19 Qed, 0 admits (counted 2026-11-09)
 
 |Linear-mode forward progress lemmas |`+formal/Semantics_L1.v+` |37 Qed;
 0 `+Admitted.+` since D0 (2026-11-05). Historical note: *2* outer `+Admitted.+` markers (`+step_pop_disjoint_from_type_l1+` /

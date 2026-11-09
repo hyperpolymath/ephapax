@@ -18,6 +18,7 @@
 #
 # Paths are repo-root-relative, one per line, '#' comments allowed.
 examples/pattern_matching.eph
+stdlib/ALib.eph
 stdlib/Argv.eph
 tests/v2-grammar/fixtures/extern-abstract-types.eph
 tests/v2-grammar/fixtures/extern-callsite.eph

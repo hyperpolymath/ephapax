@@ -68,6 +68,15 @@ test:
 conformance:
     cargo test --test conformance
 
+# Exit 2 means a row reached its plan target: record it with --update.
+# X1 probe battery: survey-probe verdicts vs tests/probes/expectations.tsv
+probe-battery *ARGS:
+    bash scripts/probe-battery.sh {{ARGS}}
+
+# E6 aLib conformer: pinned aLib vectors against stdlib/ALib.eph under wasmtime
+alib-conformance:
+    cargo test -p ephapax-cli --test alib_conformance -- --nocapture
+
 # Fail if proof/test counts in docs drift from repo state
 status-gate:
     ./scripts/status-gate.sh

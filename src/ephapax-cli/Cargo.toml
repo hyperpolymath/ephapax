@@ -58,3 +58,5 @@ default = ["typed-wasm-verify"]
 wasmtime.workspace = true
 proptest = { workspace = true }
 tempfile = "3"
+# SHA-256 pin check of the vendored aLib vectors (tests/alib_conformance.rs).
+sha2 = "0.10"

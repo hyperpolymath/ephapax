@@ -1,0 +1,53 @@
+// SPDX-License-Identifier: CC-BY-SA-4.0
+// SPDX-FileCopyrightText: 2026 Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk>
+= Pinned aLib conformance vectors
+
+The six `*.json` files here are byte-identical copies of `vectors/<category>.json`
+from hyperpolymath/aggregate-library, taken so that the ephapax conformer
+(`src/ephapax-cli/tests/alib_conformance.rs`, plan rung E6) never reads another
+repository at test time.
+
+[cols="1,3",options="header"]
+|===
+|Field |Value
+|Source repository |hyperpolymath/aggregate-library
+|Source commit |`a877c2e9917d8617a70c86169d3cc9a7590f3d9c` (PR #65, branch `claude/ephapax-architecture-plan-gzyctr`)
+|Format |`alib-vectors-1` (I-JSON, JCS form; layout and expression grammar in aLib `vectors/GRAMMAR.adoc`)
+|Contents |29 operations, 156 vectors
+|Licence |MPL-2.0 (the aggregate-library licence; JSON carries no header)
+|===
+
+Copied with
+`git -C <aggregate-library> show a877c2e:vectors/<category>.json > <category>.json`.
+The conformer checks each file's SHA-256 against the table below and fails if
+a file changes, so a re-pin is always a deliberate edit of this file, the
+hashes in the test, and the recorded counts together.
+
+[cols="1,3",options="header"]
+|===
+|File |SHA-256
+|`arithmetic.json` |`d38140c9b75f3fbbbad35ad2750ad6bc1336635cc201e4794f365133b7cc033d`
+|`collection.json` |`6e5bc689712509e02e27a6a1707966f429a23cfd862ede9cc761d1d9f14bbc93`
+|`comparison.json` |`40f90f945b15e91f29068a8845d7d1099d552ceecb340a10807065c45b453443`
+|`conditional.json` |`0e3a592286d3506741103240d40aa27c9c8b0ebe3ba7727316f6ea715683a0f5`
+|`logical.json` |`ce252d1c5e65b4625b3153d0c4e0a598a1f9ed2e1ae268ea664086134aaf4088`
+|`string.json` |`bee65a9ed2d2c9e44c5e6667ae5d6b101220bff36c33e9fe3c1ac1f9d3f42320`
+|===
+
+== Relation to the survey baseline
+
+The 2026-11-04 survey measured a scratch conformer against aggregate-library
+`48b7694` (154 vectors, read from the spec YAML): 89 pass / 1 fail / 13 out of the
+I32 domain / 51 unimplemented. `a877c2e` differs in exactly two ways that move
+those numbers: `logical/not` vector 3 now passes the condition `"not(true)"`
+instead of the contradictory literal `true` (the 1 fail becomes a pass), and
+`string/substring` gains two boundary vectors (154 to 156, both in the
+unimplemented string group). Both commits have 29 operations; "22" was the
+aLib v0.1.0 core count in its docs, not a different spec set.
+
+Measured with the Rust/wasmtime conformer on these files: 90 pass / 0 fail /
+13 skip out of the I32 domain (10 decimal + 3 string-valued `if_then_else`) /
+53 skip unimplemented (30 collection + 23 string). The test
+`alib_reproduces_survey_baseline_48b7694` undoes exactly the two vector changes
+above in memory and asserts the survey's 89 / 1 / 13 / 51, with the one FAIL
+being `logical/not#3`.

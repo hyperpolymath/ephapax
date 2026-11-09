@@ -1,0 +1,82 @@
+// SPDX-License-Identifier: MPL-2.0
+// Owner: Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk>
+// Copyright (c) 2026 Jonathan D.A. Jewell (hyperpolymath) <j.d.a.jewell@open.ac.uk>
+//
+// Ephapax.ALib — the scalar subset of aggregate-library (aLib) that
+// ephapax can express and compile to wasm today (plan rung E6).
+//
+// aLib (hyperpolymath/aggregate-library) specifies a minimal "overlap"
+// library as conformance vectors. This module implements the operations
+// whose aLib types bind onto the types ephapax lowers correctly today:
+//
+//   aLib Number   ->  I32   (vectors with a decimal argument or result are
+//                            out of this binding's domain and are SKIPPED
+//                            by the conformer with that reason)
+//   aLib Boolean  ->  Bool  (lowered to wasm i32 0 / 1)
+//   aLib A        ->  I32   (if_then_else is bound at A = I32 only)
+//
+// Not implemented here (the conformer SKIPS them with a reason):
+//   - string/*      : no host <-> wasm String ABI yet, and String.len
+//                     lowering is wrong today (probes s1, s6).
+//   - collection/*  : no host <-> wasm Collection ABI and no lambda
+//                     arguments; closures are E9.
+//   - decimals      : need the E5 typed side table and an F64 binding.
+//
+// Export names: wasm exports every top-level fn by name. `and`, `or` and
+// `not` are spelled `and_`, `or_` and `not_` here so they cannot collide
+// with operator keywords; the conformer's binding table maps the aLib
+// names onto these.
+//
+// Conformance: src/ephapax-cli/tests/alib_conformance.rs runs the pinned
+// vectors in tests/alib_vectors/ against the compiled module under
+// wasmtime.
+
+module ALib
+
+// ---- arithmetic -------------------------------------------------------
+
+pub fn add(a: I32, b: I32): I32 = a + b
+
+pub fn subtract(a: I32, b: I32): I32 = a - b
+
+pub fn multiply(a: I32, b: I32): I32 = a * b
+
+// Truncating integer division (wasm i32.div_s). Division by zero traps;
+// aLib leaves it out of the conformance domain.
+pub fn divide(a: I32, b: I32): I32 = a / b
+
+pub fn modulo(a: I32, b: I32): I32 = a % b
+
+pub fn negate(a: I32): I32 = 0 - a
+
+pub fn absolute(a: I32): I32 = if a < 0 then 0 - a else a
+
+pub fn max(a: I32, b: I32): I32 = if a > b then a else b
+
+pub fn min(a: I32, b: I32): I32 = if a < b then a else b
+
+// ---- comparison -------------------------------------------------------
+
+pub fn equal(a: I32, b: I32): Bool = a == b
+
+pub fn not_equal(a: I32, b: I32): Bool = a != b
+
+pub fn less_than(a: I32, b: I32): Bool = a < b
+
+pub fn less_equal(a: I32, b: I32): Bool = a <= b
+
+pub fn greater_than(a: I32, b: I32): Bool = a > b
+
+pub fn greater_equal(a: I32, b: I32): Bool = a >= b
+
+// ---- logical ----------------------------------------------------------
+
+pub fn and_(a: Bool, b: Bool): Bool = if a then b else false
+
+pub fn or_(a: Bool, b: Bool): Bool = if a then true else b
+
+pub fn not_(a: Bool): Bool = if a then false else true
+
+// ---- conditional ------------------------------------------------------
+
+pub fn if_then_else(c: Bool, t: I32, e: I32): I32 = if c then t else e

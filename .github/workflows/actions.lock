@@ -7,7 +7,7 @@ workflows:
         - 'actions/checkout@v7.0.1'
     '.github/workflows/codeql.yml':
         - 'actions/checkout@v7.0.1'
-        - 'github/codeql-action@1fc58d04a4d4374f921bdac573c3811c240f9c26'
+        - 'github/codeql-action@33d7b85da1a04171e211befe2c739303b9a4c066'
     '.github/workflows/coq-build.yml':
         - 'actions/checkout@v7.0.1'
     '.github/workflows/ffi-seams.yml':
@@ -89,9 +89,9 @@ dependencies:
         commit: 'sha1-54075bcc5e249e4758d363f27d099f55d843f124'
         owner_id: 47606891
         repo_id: 331103973
-    'github/codeql-action@1fc58d04a4d4374f921bdac573c3811c240f9c26':
-        ref: 'v4.39.2'
-        commit: 'sha1-1fc58d04a4d4374f921bdac573c3811c240f9c26'
+    'github/codeql-action@33d7b85da1a04171e211befe2c739303b9a4c066':
+        ref: 'v4.39.3'
+        commit: 'sha1-33d7b85da1a04171e211befe2c739303b9a4c066'
         owner_id: 9919
         repo_id: 259445878
     'github/codeql-action@db488ddef3bf6cb639b32c2e9a7c0a7ea8271d28':

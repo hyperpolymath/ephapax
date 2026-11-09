@@ -19,7 +19,8 @@ kernel-check bypass. `+formal/scripts/no-false-gate.sh+` enforces this in CI
 (`+coq-build.yml+`): a comment-aware token scan, a `+Print Assumptions+` census
 of every named result (each must be closed under the global context), and an
 independent `+coqchk+` recheck of the compiled libraries. Its census on
-2026-11-09 found 257 of 257 named results closed. `+coqchk+` lists
+2026-11-09 found 299 of 299 named results closed, including the P2
+regression families in `+formal/regress/+`. `+coqchk+` lists
 `+Coq.Logic.Eqdep.Eq_rect_eq.eq_rect_eq+` among the axioms of the *loaded
 standard library*; the census shows no Ephapax result depends on it.
 
@@ -55,6 +56,32 @@ lambda) record distinct counterexample classes for broader L2
 hypotheses exclude those classes; nor do they establish full L2
 preservation. Any future L2 theorem must name and prove its restricted
 boundary without inheriting the L1 counterexample by assumption.
+
+==== Idris2 ABI seam (`+src/abi/+`): 12 erased postulates
+
+* *Status*: `ASSUMED`. Twelve top-level `+0 name : …+` declarations have no
+  clauses: `+typePreservation+`, `+linearConsumptionAcrossControlFlow+`,
+  `+ReferencesRegion+`, `+regionNoRuntimeEscape+`, `+noRuntimeGC+`,
+  `+WasmTyped+`, `+compile+`, `+wasmCompilationPreservesTyping+`, `+SStep+`,
+  `+lowerIR+`, `+irLoweringPreservesSemantics+` (all in
+  `+src/abi/Ephapax/ABI/Invariants.idr+`) and `+compileOkImpliesWasmTyped+`
+  (`+src/abi/Ephapax/ABI/Foreign.idr+`). Idris2 0.8.0 accepts such a
+  declaration as a postulate even under `+%default total+`; a test module
+  with `+0 bad : Void+` proves `+1 = 2+` with no warning (checked
+  2026-11-09).
+* *Consistency*: reading `+WellTyped+` and `+Step+` as empty (they have no
+  constructors) makes every postulated proposition vacuously true, and the
+  postulated types and functions are abstract constants over inhabited
+  types. So the set is consistent, and for the same reason it asserts
+  nothing about Ephapax. E1 (`+typePreservation+`) is refuted for the
+  legacy judgment by `+Counterexample.preservation_false+`; the obligation
+  moves to the v2 judgment.
+* *Build*: `+idris2 --build ephapax-abi.ipkg+` and
+  `+idris2 --build ephapax-formal.ipkg+` exit 0 with Idris2 0.8.0
+  (2026-11-09). `+src/formal/+` has no undefined declarations.
+* *Detection*: textual escape-hatch scans that look only for `+believe_me+`
+  or `+assert_total+` miss these. The mathesis census scanner reports them
+  as `+undefined declaration+` axiom candidates (hyperpolymath/mathesis#27).
 
 ==== `+idris2/src/Main.idr:22+` — global `+%default partial+`
 

@@ -193,6 +193,17 @@ Definitions only — no theorems, zero axioms.
 |5 + 5 Qed pinning the Phase 4c (fresh-region scope crossing) and Phase
 3b (nested TFunEff) soundness-gap classes
 
+|P2 survey regression families (2026-11-09)
+|`+formal/regress/+` (`+SurveyFamilies.v+`, `+EscapeCex.v+`, `+L2Comp.v+`,
+`+LetCheck.v+`)
+|Against the current judgment, all Qed and closed: ClosedCex (closed-context
+preservation failure), EchoCex (echo cross-path failure and stuck
+`+EObserve+`), PairDup and EchoCopy (compound-linearity holes), EscapeCex
+(a typed configuration whose closure carries an `+ELoc+` out of its region
+is stuck: a progress failure), L2Comp (`+has_type_l2+` is not closed under
+pairing) and LetCheck (a completeness gap: every `+ELet+` with a non-linear
+bound type is untypable). Regressions only; v2 rung P5 restates them.
+
 |Pinned legacy counterexample + L1 positive regression
 |`+formal/Counterexample.v+` |6 Qed in total: three lemmas establish the
 legacy counterexample; `+preservation_false+` refutes `+preservation_stmt+`; `+t_loc_l1_R_preserving+` supports the L1 argument;

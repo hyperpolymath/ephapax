@@ -29,11 +29,21 @@ import Ephapax.ABI.Types
 --         formal/Typing.v step-respects-typing supporting lemmas.
 --
 -- Statement (informal): if `well_typed t T` and `t ⇒ t'` then
--- `well_typed t' T`. Currently `Admitted` in Coq — the proof script at
--- formal/Semantics.v L3215–L3326 leaves residual open goals
--- (`coqc` 8.18.0 rejects the `Qed.` with "Attempt to save an incomplete
--- proof"). This Idris2 seam states the obligation; discharge happens on
--- the Coq side.
+-- `well_typed t' T`. For the legacy judgment this is FALSE: formal/Semantics.v
+-- retires it to `preservation_stmt : Prop` and formal/Counterexample.v proves
+-- `preservation_false : ~ preservation_stmt` (2026-11-05, D0/D0b). The
+-- obligation is restated for the v2 judgment (plan rung P10,
+-- `preservation_v2`); per the owner ruling of 2026-11-09 it is theory, with
+-- an Agda source of truth. Until then this seam states only the shape.
+--
+-- NOTE: `typePreservation` below has no clauses, so Idris2 treats it as a
+-- postulate (Idris2 0.8.0 accepts it even under %default total). So are
+-- the other `0 name : …` declarations without clauses here and in
+-- Foreign.idr: 12 in all. They are jointly consistent: reading `WellTyped`
+-- and `Step` as empty (they have no constructors) makes every postulated
+-- proposition vacuously true, and `ReferencesRegion`, `WasmTyped`, `SStep`,
+-- `compile` and `lowerIR` are abstract constants over inhabited types. For
+-- the same reason they assert nothing about Ephapax.
 --------------------------------------------------------------------------------
 
 ||| Abstract typing relation. The Coq formalisation `formal/Typing.v`
@@ -51,11 +61,10 @@ data WellTyped : TypeCtx -> Term -> Ty -> Type where
 public export
 data Step : Term -> Term -> Type where
 
-||| E1 (OWED — Coq side). If `t` is well-typed at `T` in `g` and steps
-||| to `t'`, then `t'` is also well-typed at `T` in `g`. **The Coq
-||| `preservation` theorem in formal/Semantics.v is currently Admitted**
-||| (see PROOF-NEEDS.md L1–L18). The Idris2 seam states the obligation
-||| so a SPARK/Ada implementation sees what is owed.
+||| E1 (OWED, for the v2 judgment). If `t` is well-typed at `T` in `g` and
+||| steps to `t'`, then `t'` is also well-typed at `T` in `g`. For the legacy
+||| judgment this is refuted (`Counterexample.preservation_false`); see
+||| PROOF-NEEDS.adoc. An erased postulate over abstract, empty relations.
 public export
 0 typePreservation :
   (g : TypeCtx) -> (t, t' : Term) -> (T : Ty) ->

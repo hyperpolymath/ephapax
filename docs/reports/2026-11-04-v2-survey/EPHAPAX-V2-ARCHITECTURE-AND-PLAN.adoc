@@ -17,6 +17,17 @@ The survey ran the following toolchains:
 
 Idris2, Lean, Isabelle, zig, julia, z3 and the wasmtime CLI are not installed. Every claim that depends on them is marked *UNVERIFIED*.
 
+[NOTE]
+.Re-check, 2026-11-09 (toolchains installed in a later session)
+====
+* *P2 landed (T0c).* EscapeCex, L2Comp and LetCheck were re-created against the current judgment and land with F2–F6 in `formal/regress/` (in `_CoqProject`): 299 of 299 named results in `formal/` are closed under the global context. The re-created statements differ from the reported ones in two places. EscapeCex is a *progress* failure: `S_Region_Exit`'s guard catches the captured `ELoc`, so the typed configuration is stuck rather than stepping to an untypable one (`escaped_value_untypable_at_type` shows the unguarded exit would be untypable at the original type). LetCheck is broader than reported: every `ELet` whose bound type is non-linear is untypable, in both `has_type_l1` and the legacy `has_type`.
+* *Idris2 0.8.0.* `ephapax-abi.ipkg` and `ephapax-formal.ipkg` build (exit 0). The ABI's 12 clause-less `0 name : …` declarations are postulates (Idris2 accepts them under `%default total`); they are jointly consistent and assert nothing about Ephapax (`docs/proof-debt.adoc`). `idris2/ephapax-affine.ipkg` needs the `proven` package, which is not installed: still UNVERIFIED.
+* *Zig.* `zig test tools/coproc/ephapax_coproc.zig`: 2/2 pass (Zig 0.14.0). typed-wasm `ffi/zig`: 7/7 pass with Zig 0.15.1, the version its CI uses (it does not build with 0.14).
+* *wasmtime CLI 36.0.2.* `p1.wasm` (959 B) validates; with stub `env.print_i32`/`env.print_string` imports, `main` returns 162.
+* *z3 4.8.12.* absolute-zero `OND_checks.smt2` reproduces sat/unsat/sat; its OND-3 dir 2 block was vacuous and is fixed in hyperpolymath/absolute-zero#198.
+* *Still UNVERIFIED here:* Lean (elan installs, but the toolchain download is refused by the network proxy), Isabelle, julia and Creusot.
+====
+
 Nothing in this document proposes closing or extending `formal/Semantics.v` or `formal/Typing.v`. The legacy `Theorem preservation` is false (`formal/Counterexample.v`). It stayed `Admitted.` by owner directive until the owner ratified D0b (2026-11-05): P0 now retires it to a `Prop` statement, which the owner applies, rather than closing it. Because an `Admitted` statement is an axiom, the legacy theorem together with `Counterexample.v` also derives `False` (`evidence/SurveyCounterexamples.v`, F0). It therefore must never appear in the `Print Assumptions` of any headline theorem; see P0/P1 and D0b.
 
 Throughout, *ephapax-affine* means the internal sublanguage. It is not AffineScript. The two projects share only the compile target, typed-wasm.

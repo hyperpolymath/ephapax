@@ -26,7 +26,7 @@
 set -euo pipefail
 
 FILES=$(grep -E '^[^#].*\.v[[:space:]]*$' _CoqProject | awk '{print $1}' | tr '\n' ' ')
-MODS=$(for f in $FILES; do printf '%s ' "${f%.v}"; done)
+MODS=$(for f in $FILES; do m=${f%.v}; printf '%s ' "${m//\//.}"; done)
 WORK=$(mktemp -d)
 trap 'rm -rf "$WORK"' EXIT
 
@@ -53,7 +53,7 @@ strip() {
 }
 
 fail=0
-for f in $FILES; do strip "$f" > "$WORK/$f"; done
+for f in $FILES; do mkdir -p "$(dirname "$WORK/$f")"; strip "$f" > "$WORK/$f"; done
 
 # 1. Assumption vernacular and admit tactics.
 ASSUME='(^|[^A-Za-z0-9_'"'"'.])(Admitted|admit|give_up|Axiom|Axioms|Parameter|Parameters|Conjecture|Hypothesis|Hypotheses|Variable|Variables|Context)([^A-Za-z0-9_'"'"']|$)'
@@ -71,7 +71,7 @@ fi
 NAMES="$WORK/names"
 : > "$NAMES"
 for f in $FILES; do
-  m=${f%.v}
+  m=${f%.v}; m=${m//\//.}
   { grep -oE '(^|[[:space:]])(Theorem|Lemma|Corollary|Proposition|Fact|Remark|Example|Instance)[[:space:]]+[A-Za-z_][A-Za-z0-9_'"'"']*' "$WORK/$f" || true; } \
     | awk -v m="$m" '{print "Ephapax." m "." $NF}' >> "$NAMES"
 done

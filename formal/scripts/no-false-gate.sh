@@ -17,10 +17,13 @@
 #      (guard, positivity, universe checking, Bypass Check, type-in-type),
 #      so a flag split across lines is caught;
 #   3. census: `Print Assumptions` on every Theorem/Lemma/Corollary/
-#      Proposition/Fact/Remark/Example/Instance, found by sentence (so a
-#      keyword and its name may be on different lines) and qualified
-#      through nested Modules (coq-decls.awk); each must print
-#      "Closed under the global context", and the count must match;
+#      Proposition/Fact/Remark/Example/Instance/Definition/Fixpoint/
+#      CoFixpoint, found by sentence (so a keyword and its name may be on
+#      different lines) and qualified through nested Modules
+#      (coq-decls.awk); each must print "Closed under the global context",
+#      and the count must match. Results in a Module Type, a functor or a
+#      ":"-sealed module cannot be named and are not censused; checks 1,
+#      2 and 4 still cover them;
 #   4. independent recheck of the compiled .vo files with coqchk: no
 #      axiom in the Ephapax namespace, nothing relying on type-in-type,
 #      unsafe (co)fixpoints or assumed positivity.

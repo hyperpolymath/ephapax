@@ -31,7 +31,10 @@ nofalse_strip() {
 
 # Assumption vernacular and admit tactics: single tokens, so a line scan
 # with word boundaries is enough. Prints file:line:text for each hit.
-NOFALSE_ASSUME='(^|[^A-Za-z0-9_'"'"'.])(Admitted|admit|give_up|Axiom|Axioms|Parameter|Parameters|Conjecture|Hypothesis|Hypotheses|Variable|Variables|Context)([^A-Za-z0-9_'"'"']|$)'
+# "Admit" catches "Admit Obligations" however the two words are split
+# across whitespace; with no obligation pending it would leave no axiom
+# for checks 3 and 4 to find.
+NOFALSE_ASSUME='(^|[^A-Za-z0-9_'"'"'.])(Admitted|Admit|admit|give_up|Axiom|Axioms|Parameter|Parameters|Conjecture|Hypothesis|Hypotheses|Variable|Variables|Context)([^A-Za-z0-9_'"'"']|$)'
 nofalse_assume_scan() { grep -nHE "$NOFALSE_ASSUME" "$@" || true; }
 
 # Kernel bypass flags. These are multi-word, so each stripped file is

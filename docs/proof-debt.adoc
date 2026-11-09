@@ -19,7 +19,9 @@ kernel-check bypass. `+formal/scripts/no-false-gate.sh+` enforces this in CI
 (`+coq-build.yml+`): a comment-aware token scan, a `+Print Assumptions+` census
 of every named result (each must be closed under the global context), and an
 independent `+coqchk+` recheck of the compiled libraries. Its census on
-2026-11-09 found 299 of 299 named results closed, including the P2
+2026-11-09 found 446 of 446 named results closed (every theorem-class
+result and every `+Definition+`, `+Fixpoint+` and `+CoFixpoint+`; the earlier
+tally of 299 counted theorem-class results only), including the P2
 regression families in `+formal/regress/+`. `+coqchk+` lists
 `+Coq.Logic.Eqdep.Eq_rect_eq.eq_rect_eq+` among the axioms of the *loaded
 standard library*; the census shows no Ephapax result depends on it.

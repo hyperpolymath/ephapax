@@ -48,7 +48,10 @@ expect_no_assume() {
 }
 expect_assume a_axiom $'Axiom\n  bad : False.'
 expect_assume a_admitted $'Lemma x : False.\nProof. Admitted.'
+expect_assume a_admit_obl $'Program Definition p : nat := _.\nAdmit Obligations.'
+expect_assume a_admit_obl_split $'Program Definition p : nat := _.\nAdmit\n  Obligations of p.'
 expect_no_assume a_qualified 'Lemma x : True. Proof. exact Foo.Axiom_free. Qed.'
+expect_no_assume a_admit_ident 'Definition Admit_free := 0. Definition Admittance := 1.'
 
 # --- declaration census ------------------------------------------------
 expect_decls() { # name fragment expected(newline-separated)
@@ -64,9 +67,20 @@ expect_decls d_skip $'Module Type MT.\n Lemma hidden : True. Proof. exact I. Qed
   $'P.named\nP.loc'
 expect_decls d_qualid $'Lemma q : True.\nProof. apply Coq.Init.Logic.I. Qed.\nLemma r : True. Proof. exact I. Qed.' \
   $'P.q\nP.r'
+# Definitions, fixpoints and tactic-built definitions closed with Defined.
+expect_decls d_defs $'Definition d1 : nat := 0.\nDefinition\n  d2 : True.\nProof. exact I. Defined.\nProgram Definition d3 : nat := 0.\nFixpoint f (n : nat) : nat := match n with 0 => 0 | S m => g m end\nwith g (n : nat) : nat := match n with 0 => 1 | S m => f m end.\nCoFixpoint c : nat := 0.\nSection S.\n Let hidden := 0.\n Definition d4 := hidden.\nEnd S.' \
+  $'P.d1\nP.d2\nP.d3\nP.f\nP.c\nP.d4'
+# A module sealed by ":" hides its body; "<:" keeps every field visible.
+expect_decls d_sealed $'Module Type S.\n Parameter t : Type.\nEnd S.\nModule M : S.\n Definition t := nat.\n Lemma hidden : True. Proof. exact I. Qed.\nEnd M.\nModule N <: S.\n Definition t := nat.\n Lemma shown : True. Proof. exact I. Qed.\nEnd N.\nModule W : S with Definition t := nat.\n Definition t := nat.\n Lemma hidden2 : True. Proof. exact I. Qed.\nEnd W.\nModule V:S.\n Definition t := nat.\nEnd V.\nModule A := N.' \
+  $'P.N.t\nP.N.shown'
 # An unmatched End must fail loudly, not mis-qualify.
 f=$(frag d_bad $'Module A.\nLemma x : True. Proof. exact I. Qed.\nEnd B.')
 if nofalse_decls P "$f" >/dev/null 2>&1; then bad "unmatched End accepted"; else ok; fi
+# A scope left open (no End at all) must fail too, independently of d_bad.
+f=$(frag d_unclosed $'Module A.\nLemma x : True. Proof. exact I. Qed.')
+if nofalse_decls P "$f" >/dev/null 2>&1; then bad "unclosed scope accepted"; else ok; fi
+f=$(frag d_unclosed_sec $'Section S.\nLemma x : True. Proof. exact I. Qed.')
+if nofalse_decls P "$f" >/dev/null 2>&1; then bad "unclosed Section accepted"; else ok; fi
 
 echo "no-false-gate self-test: $pass passed, $failn failed"
 [ "$failn" -eq 0 ]

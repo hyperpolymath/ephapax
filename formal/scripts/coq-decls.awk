@@ -9,10 +9,25 @@
 # into Coq sentences at a "." followed by whitespace or end of input, so a
 # keyword and its name may sit on different lines.
 #
+# A named result is a Theorem, Lemma, Corollary, Proposition, Fact,
+# Remark, Example, named Instance, Definition, Fixpoint or CoFixpoint
+# (with any Program/Local/Global prefix), so a proof closed with
+# "Defined." or a definition built by tactics is censused like a lemma.
+# For a mutual "Fixpoint f ... with g ...", only f is listed: f and g are
+# bodies of one mutual block, so Print Assumptions on f reaches g's
+# dependencies. "Let" is not listed: inside a Section it is discharged
+# and has no name afterwards.
+#
 # Module and Section scopes are tracked. A Module adds its name to the
-# qualification; a Section does not. Results inside a Module Type or a
-# functor (a Module with parameters) are skipped, because they cannot be
-# named from outside. "Module X := ..." opens no scope.
+# qualification; a Section does not. "Module X := ..." opens no scope.
+# Results are skipped, because the census cannot name them from outside,
+# inside a Module Type, inside a functor (a Module with parameters), and
+# inside a module sealed by a signature ("Module M : S."), whose body
+# fields need not be visible. A transparently ascribed module
+# ("Module M <: S.") keeps every field and is censused. Skipped bodies are
+# still covered by gate checks 1, 2 and 4 (no assumption vernacular or
+# admit, no kernel bypass, no Ephapax axiom under coqchk); check 3 does
+# not see a dependency of a skipped result on a standard-library axiom.
 #
 # Usage: awk -v prefix=Ephapax.File -f coq-decls.awk stripped.v
 BEGIN { buf = ""; depth = 0 }
@@ -30,7 +45,7 @@ END {
 
 function trim(x) { sub(/^ +/, "", x); sub(/ +$/, "", x); return x }
 
-function sentence(s,    w, k, i, name, kind, skip, path) {
+function sentence(s,    w, k, i, name, kind, skip, path, rest) {
   s = trim(s)
   # Drop attributes and locality/flag prefixes.
   while (match(s, /^#\[[^]]*\] */)) s = substr(s, RLENGTH + 1)
@@ -45,19 +60,30 @@ function sentence(s,    w, k, i, name, kind, skip, path) {
     if (w[i] == "Import" || w[i] == "Export") i++
     name = w[i]; sub(/[(:].*$/, "", name)
     if (name == "") return
-    if (index(s, ":=") > 0) return                 # alias / definition: no scope
+    # ":=" outside a "with Definition/Module x := ..." constraint makes
+    # this an alias or a module defined by an expression: no scope.
+    rest = s
+    while (match(rest, /with +(Definition|Module) +[A-Za-z0-9_'.]+ *:=/))
+      rest = substr(rest, 1, RSTART - 1) substr(rest, RSTART + RLENGTH)
+    if (index(rest, ":=") > 0) return
     kind = (w[i] ~ /\(/ || w[i + 1] ~ /^\(/) ? "functor" : "module"
+    if (kind == "module") {
+      # Text after the name; a lone ":" (not "<:") seals the module.
+      rest = s; sub(/^Module +((Import|Export) +)?/, "", rest)
+      rest = substr(rest, length(name) + 1)
+      if (rest ~ /^ *:([^=]|$)/) kind = "sealed"
+    }
     push(name, kind); return
   }
   if (w[1] == "Section") { push(w[2], "section"); return }
   if (w[1] == "End") { pop(w[2]); return }
 
-  if (w[1] ~ /^(Theorem|Lemma|Corollary|Proposition|Fact|Remark|Example|Instance)$/) {
+  if (w[1] ~ /^(Theorem|Lemma|Corollary|Proposition|Fact|Remark|Example|Instance|Definition|Fixpoint|CoFixpoint)$/) {
     name = w[2]; sub(/[^A-Za-z0-9_'].*$/, "", name)
     if (name !~ /^[A-Za-z_][A-Za-z0-9_']*$/) return   # anonymous Instance
     skip = 0; path = prefix
     for (i = 1; i <= depth; i++) {
-      if (kinds[i] == "mtype" || kinds[i] == "functor") skip = 1
+      if (kinds[i] == "mtype" || kinds[i] == "functor" || kinds[i] == "sealed") skip = 1
       if (kinds[i] == "module") path = path "." names[i]
     }
     if (!skip) print path "." name

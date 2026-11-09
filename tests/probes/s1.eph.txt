@@ -1,0 +1,10 @@
+// SPDX-License-Identifier: MPL-2.0
+// Survey probe s1 (X1, recreated 2026-11-09 from the survey scratch copy).
+// String.len on a region-owned string: the checker accepts it, but codegen
+// lowers String.len wrongly (plan: "String.len ... produce invalid wasm").
+// Target (E5): compiles to a valid module and main returns 2.
+fn main(): I32 =
+  region r {
+    let! s = String.new@r("hi")
+    String.len(s)
+  }

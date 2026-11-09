@@ -1,0 +1,5 @@
+// SPDX-License-Identifier: MPL-2.0
+// Survey probe s6 (X1, recreated 2026-11-09 from the survey scratch copy).
+// String.len on a String@r parameter, never called. Target (E5): valid wasm.
+fn sl(s: String@r): I32 = String.len(s)
+fn main(): I32 = 0

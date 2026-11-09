@@ -1,0 +1,77 @@
+# SPDX-License-Identifier: MPL-2.0
+# Owner: Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk>
+#
+# expectations.tsv — X1 probe battery baseline (scripts/probe-battery.sh).
+#
+# Columns (tab-separated):
+#   probe     tests/probes/<probe>.eph.txt, or conformance/invalid/<name>
+#   command   check | compile | run | wasm-run
+#   baseline  the verdict recorded for the tree as it is (known-bad
+#             behaviour included); the battery reports SAME / IMPROVED /
+#             CHANGED against it
+#   target    the plan's target verdict, a bash glob
+#   ref       the plan rung or experiment that moves the row to target
+#
+# Baseline recorded 2026-11-09 on the w0-t0e branch (base 25cef13), before
+# any W0 code fix. A PR that moves a row records the new baseline in the
+# same PR with `scripts/probe-battery.sh --update`.
+# Plan: docs/reports/2026-11-04-v2-survey/EPHAPAX-V2-ARCHITECTURE-AND-PLAN.adoc
+probe	command	baseline	target	ref
+dup2	check	ok	error:TypeError	E0 tests/linearity_holes.rs: reuse of a linear value is a named TypeError
+dup2	compile	ok	error:TypeError	E0: compile runs the same checker
+dup2	wasm-run	ok:10	no-module	E0: no module for a rejected program
+dup4	check	ok	error:TypeError	E0 tests/linearity_holes.rs: reuse of a linear value is a named TypeError
+dup4	compile	ok	error:TypeError	E0: compile runs the same checker
+dup4	wasm-run	ok:10	no-module	E0: no module for a rejected program
+pairdup	check	ok	error:TypeError	E0 tests/linearity_holes.rs: reuse of a linear value is a named TypeError
+pairdup	compile	ok	error:TypeError	E0: compile runs the same checker
+pairdup	wasm-run	ok:0	no-module	E0: no module for a rejected program
+lamcap	check	ok	error:TypeError	E0 tests/linearity_holes.rs: reuse of a linear value is a named TypeError
+lamcap	compile	ok	error:TypeError	E0: compile runs the same checker
+lamcap	wasm-run	ok:0	no-module	E0: no module for a rejected program
+rec1	check	crash:134-stack-overflow	error:DesugarError	E0: recursive data is a named DesugarError, never a crash
+rec1	compile	crash:134-stack-overflow	error:DesugarError	E0
+rec1	wasm-run	no-module	no-module	E0
+i64	check	ok	ok	E5 (already accepted)
+i64	compile	error:InvalidWasm	ok	E5 typed side table: I64 binops lower to i64
+i64	wasm-run	no-module	ok:0	E5
+s1	check	ok	ok	E5 (already accepted)
+s1	compile	error:InvalidWasm	ok	E5: String.len lowering
+s1	wasm-run	no-module	ok:2	E5: wasm_e2e s1 returns the length of "hi"
+s6	check	ok	ok	E5 (already accepted)
+s6	compile	error:InvalidWasm	ok	E5: String.len on a String@r parameter
+s6	wasm-run	no-module	ok:0	E5
+t3	check	ok	ok	E5 (already accepted)
+t3	compile	error:InvalidWasm	ok	E5: n-ary tuples
+t3	wasm-run	no-module	ok:0	E5
+perform	check	ok	error:CodegenError	E1 + E3: check runs the same unsupported-feature validation as codegen
+perform	compile	ok	error:CodegenError	E1 tests/fail_loud.rs: perform/handle is a CodegenError
+perform	wasm-run	error:Trap:wasm_`unreachable`_instruction_executed	no-module	E1
+g5	check	ok	error:*	E1: raw variadic __ffi rejected with a named error (kind name set by E1)
+g5	compile	error:InvalidWasm	error:*	E1: named raw-FFI error, not an invalid module
+g5	wasm-run	no-module	no-module	E1
+gen_angle	check	error:TypeError	ok	E7 generics: id<a> instantiated at I32
+gen_angle	compile	error:TypeError	ok	E7
+gen_angle	run	ok:3	ok:3	E7 (interpreter already prints 3: check and run disagree, E3)
+gen_angle	wasm-run	no-module	ok:3	E7
+qa/app2	check	error:DesugarError	ok	E7: qualified M.Ctor(x) across modules
+qa/app2	compile	error:DesugarError	ok	E7
+qa/app2	run	error:TypeError	ok:9	E7 + E3 (run goes through ephapax-driver::load_program)
+qa/app2	wasm-run	no-module	ok:9	E7
+p1	check	ok	ok	already accepted
+p1	compile	ok	ok	already compiles (959 B in the survey)
+p1	run	error:ParseError	ok:162	E3/E4: ephapax run executes the wasm and prints 162
+p1	wasm-run	ok:162	ok:162	survey: main returns 162 under wasmtime CLI 36.0.2
+total_loop	check	ok	error:AnnotationNotEnforced	E1: @total is an "annotation not enforced" error until enforced
+total_loop	compile	ok	error:AnnotationNotEnforced	E1
+total_loop	wasm-run	ok:0	no-module	E1
+conformance/invalid/branch_inconsistent	check	error:ParseError	error:TypeError	rejected for the discipline violation it documents (E001-E005), not a ParseError: needs a v2-syntax rewrite (owner/T0d)
+conformance/invalid/branch_inconsistent	compile	error:ParseError	error:TypeError	as above
+conformance/invalid/linear_not_consumed	check	error:ParseError	error:TypeError	rejected for the discipline violation it documents (E001-E005), not a ParseError: needs a v2-syntax rewrite (owner/T0d)
+conformance/invalid/linear_not_consumed	compile	error:ParseError	error:TypeError	as above
+conformance/invalid/linear_used_twice	check	error:ParseError	error:TypeError	rejected for the discipline violation it documents (E001-E005), not a ParseError: needs a v2-syntax rewrite (owner/T0d)
+conformance/invalid/linear_used_twice	compile	error:ParseError	error:TypeError	as above
+conformance/invalid/region_escape	check	error:ParseError	error:TypeError	rejected for the discipline violation it documents (E001-E005), not a ParseError: needs a v2-syntax rewrite (owner/T0d)
+conformance/invalid/region_escape	compile	error:ParseError	error:TypeError	as above
+conformance/invalid/region_linear_not_consumed	check	error:ParseError	error:TypeError	rejected for the discipline violation it documents (E001-E005), not a ParseError: needs a v2-syntax rewrite (owner/T0d)
+conformance/invalid/region_linear_not_consumed	compile	error:ParseError	error:TypeError	as above

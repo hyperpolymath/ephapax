@@ -1,0 +1,24 @@
+// SPDX-License-Identifier: MPL-2.0
+// Survey probe p1 (X1, recreated 2026-11-09 from the survey scratch copy).
+// A small program using data/match, recursion and let!. 40 + 2 + 120 = 162.
+// Survey: p1.wasm (959 B) validates and, with stub env imports, main
+// returns 162 under the wasmtime CLI 36.0.2.
+// Target (E3/E4): `ephapax run p1.eph` prints 162 via the wasm path.
+module p1
+
+data Option(a) = None | Some(a)
+
+fn unwrap_or(opt: Option(I32), d: I32): I32 =
+  match opt of
+  | None => d
+  | Some(v) => v
+  end
+
+fn fact(n: I32): I32 =
+  if n <= 1 then 1 else n * fact(n - 1)
+
+fn main(): I32 =
+  let! x = 40
+  let y = unwrap_or(Some(2), 0)
+  let z = fact(5)
+  x + y + z

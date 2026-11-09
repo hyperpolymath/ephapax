@@ -1,0 +1,9 @@
+// SPDX-License-Identifier: MPL-2.0
+// Survey probe "the @total loop" (X1, written 2026-11-09 from the plan's
+// description; the survey copy was lost). A function annotated @total that
+// never terminates. Target (E1): rejected with the "annotation not
+// enforced" error until @total is actually checked.
+@total
+fn spin(n: I32): I32 = spin(n)
+
+fn main(): I32 = 0

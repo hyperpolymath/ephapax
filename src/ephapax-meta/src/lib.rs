@@ -188,7 +188,9 @@ impl WasmStager {
     /// validity (the same floor the CLI enforces).
     pub fn compile_stage(&self, expr: &Expr) -> Result<Vec<u8>, MetaError> {
         let mut cg = Codegen::new();
-        let wasm = cg.compile_program(expr);
+        let wasm = cg
+            .compile_program(expr)
+            .map_err(|e| MetaError::InvalidModule(e.to_string()))?;
         wasmparser::validate(&wasm).map_err(|e| MetaError::InvalidModule(e.to_string()))?;
         Ok(wasm)
     }

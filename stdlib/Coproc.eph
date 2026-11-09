@@ -15,12 +15,26 @@
 // The shared seam is a thin C ABI: `libephapax_coproc.so` (see
 // `tools/coproc/ephapax_coproc.zig`) exports flat `eph_coproc_*` symbols
 // that dispatch to whatever native coprocessor backend is linked behind
-// them. ephapax reaches them through its ordinary `__ffi(...)` path (load
-// with `-L libephapax_coproc.so`). When the library is absent each call
-// falls through to ephapax's `[ffi:stub]` -> 0 path, so the surface stays
-// usable with no coprocessor present.
+// them. ephapax reaches them through the typed `extern "ephapax_coproc"`
+// block below. Raw variadic `__ffi(...)` is rejected since v2 plan rung E1:
+// a typed `extern` declaration is the only FFI path. This is a minimal
+// migration that restates the old call sites (the capability tag stays I32
+// and is widened to the shim's i64 at the boundary, as before). The full
+// port, including the linearity annotation on `CoprocBuf`, the wire types
+// and a host binding for the `ephapax_coproc` import module, is rung E10.
+// The interpreter's `-L` / `[ffi:stub]` path served only raw `__ffi`, so
+// it no longer reaches this seam.
 
 module Coproc
+
+// ── The C-ABI seam (`tools/coproc/ephapax_coproc.zig`) ────────────────────
+extern "ephapax_coproc" {
+  fn eph_coproc_available(cap_tag: I32): I64
+  fn eph_coproc_upload(cap_tag: I32, data_ptr: I64, len: I64): I64
+  fn eph_coproc_dispatch(buf_id: I64, op: I64, arg0: I64, arg1: I64): I64
+  fn eph_coproc_download(buf_id: I64, out_ptr: I64): I64
+  fn eph_coproc_release(buf_id: I64): I64
+}
 
 // ── Capabilities ──────────────────────────────────────────────────────────
 //
@@ -54,8 +68,9 @@ pub data CoprocBuf =
 // The stable i64 tag for the shim's dispatch switch. Kept explicit (not
 // reliant on the runtime's sum-discriminant encoding) so the wire contract
 // survives any change to how nullary variants are represented: Audio=0 ..
-// Fpga=9. (Returns I32 — integer literals default to I32, and `__ffi`
-// accepts any integer arg, widening to the i64 C ABI at the boundary.)
+// Fpga=9. (Returns I32 — integer literals default to I32; the extern
+// declarations take the tag as I32, widened to the i64 C ABI at the
+// boundary.)
 fn cap_tag(c: Capability): I32 =
   match c of
     | Audio => 0
@@ -76,7 +91,7 @@ fn cap_tag(c: Capability): I32 =
 // 0 otherwise (including when `libephapax_coproc.so` is not linked). Lets a
 // caller branch to a pure path BEFORE allocating any linear `CoprocBuf`.
 fn available(c: Capability): I64 =
-  __ffi("eph_coproc_available", cap_tag(c))
+  eph_coproc_available(cap_tag(c))
 
 // ── Upload: host buffer -> LINEAR device handle ───────────────────────────
 //
@@ -86,7 +101,7 @@ fn available(c: Capability): I64 =
 // application is currently only accepted in match-arm tail position, the
 // same shape `decode_msg` uses in the v2 fixtures.)
 fn upload(c: Capability, data_ptr: I64, len: I64): CoprocBuf =
-  let raw = __ffi("eph_coproc_upload", cap_tag(c), data_ptr, len)
+  let raw = eph_coproc_upload(cap_tag(c), data_ptr, len)
   match raw of
     | _ => CoprocBuf(raw)
   end
@@ -98,7 +113,7 @@ fn upload(c: Capability, data_ptr: I64, len: I64): CoprocBuf =
 // streaming retry.
 fn dispatch(buf: CoprocBuf, op: I64, arg0: I64, arg1: I64): CoprocBuf =
   match buf of
-    | CoprocBuf(id) => CoprocBuf(__ffi("eph_coproc_dispatch", id, op, arg0, arg1))
+    | CoprocBuf(id) => CoprocBuf(eph_coproc_dispatch(id, op, arg0, arg1))
   end
 
 // ── Download: TERMINAL consumer that pulls the result ─────────────────────
@@ -108,7 +123,7 @@ fn dispatch(buf: CoprocBuf, op: I64, arg0: I64, arg1: I64): CoprocBuf =
 // reusing it is a static linear-use-after-consume error.
 fn download(buf: CoprocBuf, out_ptr: I64): I64 =
   match buf of
-    | CoprocBuf(id) => __ffi("eph_coproc_download", id, out_ptr)
+    | CoprocBuf(id) => eph_coproc_download(id, out_ptr)
   end
 
 // ── Release: TERMINAL abort consumer ──────────────────────────────────────
@@ -118,5 +133,5 @@ fn download(buf: CoprocBuf, out_ptr: I64): I64 =
 // device buffer is ever leaked.
 fn release(buf: CoprocBuf): I64 =
   match buf of
-    | CoprocBuf(id) => __ffi("eph_coproc_release", id)
+    | CoprocBuf(id) => eph_coproc_release(id)
   end

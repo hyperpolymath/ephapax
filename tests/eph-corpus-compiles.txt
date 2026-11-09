@@ -17,9 +17,11 @@
 # passing files IN THE SAME PR.
 #
 # Paths are repo-root-relative, one per line, '#' comments allowed.
+conformance/valid/ffi_basic.eph
 examples/pattern_matching.eph
 stdlib/ALib.eph
 stdlib/Argv.eph
+stdlib/Coproc.eph
 tests/v2-grammar/fixtures/extern-abstract-types.eph
 tests/v2-grammar/fixtures/extern-callsite.eph
 tests/v2-grammar/fixtures/hypatia-port/bridge.eph

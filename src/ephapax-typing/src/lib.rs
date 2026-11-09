@@ -1066,7 +1066,7 @@ impl TypeChecker {
             ExprKind::ListIndex { list, index } => self.check_list_index(s, list, index),
             ExprKind::TupleLit(elements) => self.check_tuple_lit(s, elements),
             ExprKind::TupleIndex { tuple, index } => self.check_tuple_index(s, tuple, *index),
-            ExprKind::FFI { args, .. } => self.check_ffi(s, args),
+            ExprKind::FFI { symbol, .. } => self.check_ffi(s, symbol),
             ExprKind::Perform { op, args } => self.check_perform(s, op, args),
             ExprKind::Handle { body, clauses } => self.check_handle(s, body, clauses),
             ExprKind::Match { scrutinee, arms } => self.check_match(s, scrutinee, arms),
@@ -2110,23 +2110,16 @@ impl TypeChecker {
         }
     }
 
-    /// Type-check an FFI call.
+    /// Reject a raw variadic FFI call.
     ///
-    /// String literal arguments are allowed WITHOUT region allocation.
-    /// Linear variables passed to FFI are consumed.
-    /// Return type is I64 (opaque C handle).
-    fn check_ffi(&mut self, _s: Span, args: &[Expr]) -> Result<Ty, SpannedTypeError> {
-        for arg in args {
-            match &arg.kind {
-                ExprKind::Lit(Literal::String(_)) => {
-                    // OK — string literal is passed as C string pointer
-                }
-                _ => {
-                    self.check(arg)?;
-                }
-            }
-        }
-        Ok(Ty::Base(BaseTy::I64))
+    /// `__ffi("sym", args...)` has no declared signature: every argument
+    /// and the result were assumed to be `I64`, it has no formal-core
+    /// representation, and codegen indexed its import outside the import
+    /// section (probe g5 produced an invalid module). Typed
+    /// `extern "abi" { fn ... }` declarations are the only FFI path
+    /// (v2 plan rung E1).
+    fn check_ffi(&mut self, s: Span, symbol: &str) -> Result<Ty, SpannedTypeError> {
+        Err(self.at(s, TypeError::RawFfiNotSupported(SmolStr::new(symbol))))
     }
 
     /// Type check a perform expression: `perform op(args...)`.

@@ -69,7 +69,7 @@ fn invariant_well_typed_program_produces_valid_wasm() {
     let mut tc = TypeChecker::new();
     tc.check(&expr).expect("type-check must succeed");
     let mut codegen = Codegen::new();
-    let wasm_bytes = codegen.compile_program(&expr);
+    let wasm_bytes = codegen.compile_program(&expr).unwrap();
 
     assert!(
         !wasm_bytes.is_empty(),

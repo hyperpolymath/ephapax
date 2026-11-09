@@ -22,7 +22,7 @@ deliberately clean (no framework internals cross into the language):
 |===
 | `stdlib/Coproc.eph` | The typed ephapax surface: a `Capability` sum type (the ten classes), a `cap_tag` wire-tag map, and a LINEAR `CoprocBuf` device-buffer handle with an `upload → dispatch* → (download \| release)` lifecycle. Type-checks under `ephapax check`.
 | `tools/coproc/ephapax_coproc.zig` | The single C-ABI seam: a Zig shared library exporting flat `eph_coproc_*` symbols (`i64 (...) -> i64`) that dispatch to whatever native coprocessor backend is linked behind them. The in-tree build is a STUB (reports unavailable, with one loopback for the seam test). No external framework, no Julia, no Axiom runtime.
-| ephapax `__ffi` path | ephapax reaches the seam through its ordinary foreign-call mechanism — no new language feature. Load with `-L libephapax_coproc.so`.
+| typed `extern` block | `Coproc.eph` declares the five `eph_coproc_*` symbols in an `extern "ephapax_coproc" { ... }` block. Raw variadic `__ffi` is rejected since v2 plan rung E1, so this is the only FFI path. The full port (wire types, a host binding for the `ephapax_coproc` import module, the `CoprocBuf` linearity annotation) is rung E10.
 |===
 
 == The safety story (why a language, not a library, owns this)
@@ -43,6 +43,12 @@ linear guarantee.
 
 == Build & use
 
+NOTE: Since v2 plan rung E1 (2026-11-09) the type checker rejects raw
+`__ffi`, so `ephapax run ... -L libephapax_coproc.so` no longer reaches the
+shim: the interpreter's `-L` loader serves only raw `__ffi` calls and does
+not yet bind `extern` declarations. The 42-vs-0 proof below is historical.
+Re-wiring the seam through `extern` is rung E10.
+
 [source,sh]
 ----
 # Build the (stub) seam:
@@ -60,8 +66,11 @@ shim.
 
 == Wiring status (honest)
 
-*WIRED:* the seam build target (`just build-coproc` / `just test-coproc`),
-and the raw `__ffi` path reaching it (the 42-vs-0 proof above).
+*WIRED:* the seam build target (`just build-coproc` / `just test-coproc`).
+The raw `__ffi` path that reached it (the 42-vs-0 proof above) was retired
+by rung E1; `Coproc.eph` now declares the symbols in a typed `extern`
+block, which type-checks and compiles to wasm imports from the
+`ephapax_coproc` module, but no host binds that module yet (rung E10).
 
 *NOT YET WIRED:* no `.eph` program can use the *typed* `Coproc` API. The v2
 toolchain has no working module-import + qualified-member access, so
@@ -69,8 +78,7 @@ toolchain has no working module-import + qualified-member access, so
 "construct_expr") nor resolves (`import` does not bring members into scope →
 "unknown constructor"). This is the **same keystone gap that strands the
 whole stdlib** (Region/Stream/… are equally un-consumable) — see
-`docs/v2-grammar-and-codegen-gaps-2026-06-16.adoc`. Until module-import lands,
-the seam is reachable only through raw `__ffi("eph_coproc_*", …)`. The typed
+`docs/v2-grammar-and-codegen-gaps-2026-06-16.adoc`. The typed
 surface is a *foundation*, not yet a consumable feature.
 
 == Wiring a real backend

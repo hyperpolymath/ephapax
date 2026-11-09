@@ -22,7 +22,7 @@ fn compile(source: &str) -> Vec<u8> {
     let mut tc = TypeChecker::new();
     tc.check(&expr).expect("type-check failed");
     let mut codegen = Codegen::new();
-    let wasm = codegen.compile_program(&expr);
+    let wasm = codegen.compile_program(&expr).unwrap();
     wasmparser::validate(&wasm).expect("emitted wasm failed wasmparser validation");
     wasm
 }

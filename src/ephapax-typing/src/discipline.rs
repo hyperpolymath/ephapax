@@ -76,6 +76,21 @@
 //! | Dereferencing a borrow (or an unrestricted ref) of a linear value is an error (borrows are not loan-tracked) | `check_deref` — `CannotMoveOutOfBorrow` |
 //! | Products, sums, tuples and lists are linear when any component is (conservative join; D5 may relax it) | `Ty::is_linear` |
 //!
+//! ## 4c. Scoping and shadowing (W0 follow-up)
+//!
+//! Every binder (`let`, `let!`, lambda parameter, `case` binder, pattern
+//! binder, handler-clause parameter) is scoped: `Context::bind_scoped`
+//! saves the binding it shadows and `Context::end_scope` removes the inner
+//! binding and reinstates the outer one. A shadowed `let!` therefore keeps
+//! its consumption obligation, and each scope-exit check (`check_let_lin`,
+//! `check_lambda`, `check_case`, `check_match`) inspects its own binding
+//! rather than whatever entry now has the same name. Two parameters of one
+//! function may not share a name (`DuplicateParameter`).
+//!
+//! Because a `let!` scope always closes before the enclosing region does,
+//! an unconsumed `let!` in a region is reported at its own scope exit as
+//! `LinearVariableNotConsumed`; the region-exit check (§3) is a backstop.
+//!
 //! ## 5. Effect Resume (future — not yet implemented)
 //!
 //! | Discipline | Rule | Planned enforcement |

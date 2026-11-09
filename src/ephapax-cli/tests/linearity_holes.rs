@@ -473,3 +473,222 @@ fn multi_field_constructor_destructuring_checks() {
     // not assert the runtime value of a three-field payload.
     pipeline(DESTRUCT3).expect("three-field constructor destructuring type-checks");
 }
+
+// ---------------------------------------------------------------------
+// Shadowing (W0 follow-up). Before the fix a binder that reused an outer
+// name overwrote the outer context entry and never gave it back, so the
+// outer binding's consumption check ran against the inner entry (or
+// against nothing): a shadowed `let!` could leak, and a consumed `let!`
+// shadowed by an unused `let` was falsely reported as unconsumed. Every
+// negative probe below was accepted by `ephapax check` (exit 0) on the
+// base commit c0ff0a0, except `SHADOW_LAMBDA_CAPTURE` (rejected for the
+// wrong reason, `UnnecessaryDrop`) and `SHADOW_INNER_UNCONSUMED` (the
+// dual, which must keep working).
+// ---------------------------------------------------------------------
+
+/// A linear string shadowed by an affine `let` and never consumed.
+const SHADOW_LET_LEAK: &str = "\
+fn main(): I32 =
+  region r {
+    let! s = String.new@r(\"hi\") in
+    let s = 5 in
+    s
+  }
+";
+
+/// A linear string shadowed by a second `let!` that *is* consumed: the
+/// outer string still leaks.
+const SHADOW_LET_BANG_LEAK: &str = "\
+fn main(): I32 =
+  region r {
+    let! s = String.new@r(\"hi\") in
+    let! s = String.new@r(\"ho\") in
+    drop(s);
+    0
+  }
+";
+
+/// `let!` of an unrestricted value, shadowed and consumed through the
+/// inner name only.
+const SHADOW_LET_BANG_INT_LEAK: &str = "\
+fn main(): I32 =
+  let! x = 5 in
+  let! x = 6 in
+  x
+";
+
+/// The dual: the outer `let!` is consumed by the inner value, and the
+/// inner `let!` itself is never consumed — its own check must remain.
+const SHADOW_INNER_UNCONSUMED: &str = "\
+fn main(): I32 =
+  let! x = 5 in
+  let! x = x + 1 in
+  0
+";
+
+/// A pair-pattern binder that shadows a linear string, which then leaks.
+const SHADOW_PATTERN_LEAK: &str = "\
+fn main(): I32 =
+  region r {
+    let! s = String.new@r(\"hi\") in
+    let p = (1, 2) in
+    let (s, y) = p in
+    y
+  }
+";
+
+/// A `case` binder that shadows a linear string, which then leaks.
+const SHADOW_CASE_LEAK: &str = "\
+fn main(): I32 =
+  region r {
+    let! s = String.new@r(\"hi\") in
+    let v = inl[I32](1) in
+    case v of inl(s) -> s inr(t) -> t end
+  }
+";
+
+/// A lambda parameter that shadows a linear string, which then leaks.
+const SHADOW_LAMBDA_PARAM_LEAK: &str = "\
+fn main(): I32 =
+  region r {
+    let! s = String.new@r(\"hi\") in
+    let f = fn(n: I32) -> n + 1 in
+    let g = fn(s: I32) -> s + 1 in
+    f(1) + g(2)
+  }
+";
+
+/// A closure that frees its capture and then shadows the name: the
+/// capture check must still see the captured binding (else the string is
+/// freed by every call and again by the enclosing scope).
+const SHADOW_LAMBDA_CAPTURE: &str = "\
+fn main(): I32 =
+  region r {
+    let! s = String.new@r(\"hi\") in
+    let f = fn(u: ()) -> let s = drop(s) in 0 in
+    drop(s);
+    0
+  }
+";
+
+/// Two parameters with one name: the second hides the first (linear)
+/// one for the whole body.
+const DUPLICATE_PARAMETER_LEAK: &str = "\
+fn f(s: String@r, s: I32): I32 = s
+fn main(): I32 =
+  region r {
+    let! a = String.new@r(\"hi\") in
+    f(a, 2)
+  }
+";
+
+/// Consuming a `let!` in the value of a shadowing `let` is fine; the
+/// base commit wrongly reported the outer `s` as unconsumed.
+const SHADOW_CONSUMED_THEN_REBOUND_OK: &str = "\
+fn main(): I32 =
+  region r {
+    let! s = String.new@r(\"hi\") in
+    let s = drop(s) in
+    0
+  }
+";
+
+/// Ordinary shadowing of unrestricted values keeps working.
+const SHADOW_UNRESTRICTED_OK: &str = "\
+fn main(): I32 =
+  let x = 5 in
+  let x = x + 1 in
+  let f = fn(x: I32) -> x + 1 in
+  f(x) + x
+";
+
+/// Pattern and `case` binders that do not shadow anything linear, with
+/// the outer string consumed after them.
+const SHADOW_SCOPED_BINDERS_OK: &str = "\
+fn main(): I32 =
+  region r {
+    let! s = String.new@r(\"hi\") in
+    let v = inl[I32](1) in
+    let n = case v of inl(s) -> s inr(t) -> t end in
+    let p = (1, 2) in
+    let (s2, y) = p in
+    drop(s);
+    n + s2 + y
+  }
+";
+
+fn assert_not_consumed(name: &str, src: &str, var: &str) {
+    let err = type_error(src);
+    assert!(
+        matches!(err, TypeError::LinearVariableNotConsumed(ref v) if v == var),
+        "{name}: expected LinearVariableNotConsumed({var}), got {err:?}"
+    );
+    assert_cli_rejects(name, src);
+}
+
+#[test]
+fn shadowed_let_bang_by_let_must_still_be_consumed() {
+    assert_not_consumed("shadow_let_leak", SHADOW_LET_LEAK, "s");
+}
+
+#[test]
+fn shadowed_let_bang_by_let_bang_must_still_be_consumed() {
+    assert_not_consumed("shadow_let_bang_leak", SHADOW_LET_BANG_LEAK, "s");
+    assert_not_consumed("shadow_let_bang_int_leak", SHADOW_LET_BANG_INT_LEAK, "x");
+}
+
+#[test]
+fn shadowing_let_bang_keeps_its_own_consumption_check() {
+    assert_not_consumed("shadow_inner_unconsumed", SHADOW_INNER_UNCONSUMED, "x");
+}
+
+#[test]
+fn shadowed_by_pattern_binder_must_still_be_consumed() {
+    assert_not_consumed("shadow_pattern_leak", SHADOW_PATTERN_LEAK, "s");
+}
+
+#[test]
+fn shadowed_by_case_binder_must_still_be_consumed() {
+    assert_not_consumed("shadow_case_leak", SHADOW_CASE_LEAK, "s");
+}
+
+#[test]
+fn shadowed_by_lambda_parameter_must_still_be_consumed() {
+    assert_not_consumed("shadow_lambda_param_leak", SHADOW_LAMBDA_PARAM_LEAK, "s");
+}
+
+#[test]
+fn closure_consuming_then_shadowing_a_capture_rejected() {
+    let err = type_error(SHADOW_LAMBDA_CAPTURE);
+    assert!(
+        matches!(err, TypeError::LinearCaptureConsumed(ref v) if v == "s"),
+        "expected LinearCaptureConsumed(s), got {err:?}"
+    );
+    assert_cli_rejects("shadow_lambda_capture", SHADOW_LAMBDA_CAPTURE);
+}
+
+#[test]
+fn duplicate_function_parameter_rejected() {
+    let err = type_error(DUPLICATE_PARAMETER_LEAK);
+    assert!(
+        matches!(err, TypeError::DuplicateParameter(ref v) if v == "s"),
+        "expected DuplicateParameter(s), got {err:?}"
+    );
+    assert_cli_rejects("duplicate_parameter_leak", DUPLICATE_PARAMETER_LEAK);
+}
+
+#[test]
+fn rebinding_a_consumed_let_bang_still_checks() {
+    pipeline(SHADOW_CONSUMED_THEN_REBOUND_OK)
+        .expect("the outer `s` is consumed by the shadowing binding's value");
+}
+
+#[test]
+fn shadowing_unrestricted_values_still_checks() {
+    pipeline(SHADOW_UNRESTRICTED_OK).expect("unrestricted shadowing is ordinary scoping");
+}
+
+#[test]
+fn scoped_pattern_and_case_binders_still_check() {
+    pipeline(SHADOW_SCOPED_BINDERS_OK).expect("binders are scoped to their arm");
+}

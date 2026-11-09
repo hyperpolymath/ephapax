@@ -116,6 +116,11 @@ pub enum TypeError {
     #[error("Variable `{0}` is bound more than once in the same pattern")]
     DuplicatePatternBinder(Var),
 
+    /// Two parameters of one function share a name; the second would
+    /// shadow the first, hiding its consumption obligation.
+    #[error("Parameter `{0}` is declared more than once in the same function")]
+    DuplicateParameter(Var),
+
     /// A projection (`t.i` or `xs[i]`) would consume the container and
     /// return one component, discarding unselected linear components.
     #[error(
@@ -232,6 +237,31 @@ impl Context {
                 id,
             },
         );
+    }
+
+    /// Bind `name` for a lexical scope that the caller closes with
+    /// [`Context::end_scope`]. Returns the binding it shadows, if any,
+    /// which must be handed back to `end_scope` so the outer binding —
+    /// and its consumption obligation — is restored when the inner
+    /// scope ends. Without this, a shadowed `let!` would be checked
+    /// against the inner binding's entry and could leak.
+    fn bind_scoped(&mut self, name: Var, ty: Ty, binding_form: BindingForm) -> Option<CtxEntry> {
+        let shadowed = self.vars.get(&name).cloned();
+        self.extend(name, ty, binding_form);
+        shadowed
+    }
+
+    /// Close the scope opened by [`Context::bind_scoped`]: remove the
+    /// inner binding of `name` (returned, so its own consumption can be
+    /// checked) and reinstate the binding it shadowed. The outer binding
+    /// could not be named inside the inner scope, so it is restored
+    /// exactly as it was when it was shadowed.
+    fn end_scope(&mut self, name: &Var, shadowed: Option<CtxEntry>) -> Option<CtxEntry> {
+        let inner = self.vars.remove(name);
+        if let Some(outer) = shadowed {
+            self.vars.insert(name.clone(), outer);
+        }
+        inner
     }
 
     /// Bindings that forbid reuse and are still unused, keyed by name,
@@ -1161,8 +1191,11 @@ impl TypeChecker {
             value_ty
         };
 
-        self.ctx.extend(name.clone(), resolved_ty, BindingForm::Let);
+        let shadowed = self
+            .ctx
+            .bind_scoped(name.clone(), resolved_ty, BindingForm::Let);
         let body_ty = self.check(body)?;
+        self.ctx.end_scope(name, shadowed);
 
         // `let` is AFFINE — unconsumed bindings are allowed (implicit drop).
         Ok(body_ty)
@@ -1180,16 +1213,20 @@ impl TypeChecker {
         // consume any of them: each call would consume it again.
         let captured_before = self.ctx.unused_restricted();
 
-        self.ctx
-            .extend(param.clone(), param_ty.clone(), BindingForm::Param);
+        let shadowed = self
+            .ctx
+            .bind_scoped(param.clone(), param_ty.clone(), BindingForm::Param);
         let body_ty = self.check(body)?;
 
-        if let Some(entry) = self.ctx.vars.get(param) {
+        if let Some(entry) = self.ctx.end_scope(param, shadowed) {
             if entry.demands_consumption() && !entry.used {
                 return Err(self.at(s, TypeError::LinearVariableNotConsumed(param.clone())));
             }
         }
 
+        // Inner bindings of the body have been scoped out, so every
+        // captured name now resolves to its outer binding again — a
+        // capture consumed and then shadowed inside the body is caught.
         for (name, id) in &captured_before {
             if name == param {
                 continue;
@@ -1419,12 +1456,16 @@ impl TypeChecker {
             }
         }
 
-        self.ctx
-            .extend(name.clone(), value_ty.clone(), BindingForm::LetBang);
+        let shadowed = self
+            .ctx
+            .bind_scoped(name.clone(), value_ty.clone(), BindingForm::LetBang);
         let body_ty = self.check(body)?;
 
-        // let! bindings MUST be consumed — regardless of type.
-        if let Some(entry) = self.ctx.vars.get(name) {
+        // let! bindings MUST be consumed — regardless of type. The entry
+        // checked is this binding's own (closing the scope also restores
+        // any binding it shadowed, whose obligation is checked at the end
+        // of that binding's own scope).
+        if let Some(entry) = self.ctx.end_scope(name, shadowed) {
             if !entry.used {
                 return Err(self.at(s, TypeError::LinearVariableNotConsumed(name.clone())));
             }
@@ -1528,12 +1569,16 @@ impl TypeChecker {
             Ty::Sum { left, right } => {
                 let ctx_after_scrutinee = self.ctx.snapshot();
 
-                // Check left branch
-                self.ctx
-                    .extend(left_var.clone(), *left.clone(), BindingForm::Param);
+                // Check left branch. The case binder is scoped to its arm:
+                // closing it restores any outer binding of the same name
+                // (rather than deleting it), so a shadowed linear outer
+                // binding keeps its consumption obligation.
+                let shadowed =
+                    self.ctx
+                        .bind_scoped(left_var.clone(), *left.clone(), BindingForm::Param);
                 let left_result_ty = self.check(left_body)?;
 
-                if let Some(entry) = self.ctx.vars.get(left_var) {
+                if let Some(entry) = self.ctx.end_scope(left_var, shadowed) {
                     if entry.demands_consumption() && !entry.used {
                         return Err(
                             self.at(s, TypeError::LinearVariableNotConsumed(left_var.clone()))
@@ -1541,17 +1586,17 @@ impl TypeChecker {
                     }
                 }
 
-                let mut ctx_after_left = self.ctx.snapshot();
-                ctx_after_left.vars.remove(left_var);
+                let ctx_after_left = self.ctx.snapshot();
 
                 // Check right branch
                 self.ctx = ctx_after_scrutinee;
 
-                self.ctx
-                    .extend(right_var.clone(), *right.clone(), BindingForm::Param);
+                let shadowed =
+                    self.ctx
+                        .bind_scoped(right_var.clone(), *right.clone(), BindingForm::Param);
                 let right_result_ty = self.check(right_body)?;
 
-                if let Some(entry) = self.ctx.vars.get(right_var) {
+                if let Some(entry) = self.ctx.end_scope(right_var, shadowed) {
                     if entry.demands_consumption() && !entry.used {
                         return Err(
                             self.at(s, TypeError::LinearVariableNotConsumed(right_var.clone()))
@@ -1559,8 +1604,7 @@ impl TypeChecker {
                     }
                 }
 
-                let mut ctx_after_right = self.ctx.snapshot();
-                ctx_after_right.vars.remove(right_var);
+                let ctx_after_right = self.ctx.snapshot();
 
                 self.unify(s, &left_result_ty, &right_result_ty)?;
 
@@ -1636,9 +1680,13 @@ impl TypeChecker {
                 }
             }
 
+            // Scope the pattern binders out of the arm. A binder that
+            // shadowed an outer binding gives the outer one back (as it
+            // was after the scrutinee: it could not be named in the arm),
+            // so its consumption obligation is not lost.
             let mut ctx_after_arm = self.ctx.snapshot();
             for name in &bound {
-                ctx_after_arm.vars.remove(name);
+                ctx_after_arm.end_scope(name, ctx_after_scrutinee.vars.get(name).cloned());
             }
 
             if let Some(prev_ty) = &arm_result_ty {
@@ -2171,18 +2219,27 @@ impl TypeChecker {
             if clause.op.is_empty() {
                 // Return clause: return(x) => body
                 // x has the body's type
-                if let Some(param) = clause.params.first() {
-                    self.ctx
-                        .extend(param.clone(), body_ty.clone(), BindingForm::Let);
-                }
+                let scoped = clause.params.first().map(|param| {
+                    let shadowed =
+                        self.ctx
+                            .bind_scoped(param.clone(), body_ty.clone(), BindingForm::Let);
+                    (param, shadowed)
+                });
                 let clause_ty = self.check(&clause.body)?;
+                if let Some((param, shadowed)) = scoped {
+                    self.ctx.end_scope(param, shadowed);
+                }
                 result_ty = Some(clause_ty);
             } else {
                 // Operation clause: op(params..., resume?) => body
                 // Parameters get fresh unification variables
+                let mut scoped = Vec::with_capacity(clause.params.len());
                 for param in &clause.params {
                     let param_ty = self.fresh_unif();
-                    self.ctx.extend(param.clone(), param_ty, BindingForm::Let);
+                    let shadowed = self
+                        .ctx
+                        .bind_scoped(param.clone(), param_ty, BindingForm::Let);
+                    scoped.push((param, shadowed));
                 }
 
                 // If resume mode is specified, add a resume callback to scope
@@ -2203,6 +2260,11 @@ impl TypeChecker {
                 }
 
                 let clause_ty = self.check(&clause.body)?;
+                // Close the parameter scopes innermost-first, so a repeated
+                // parameter name restores the outer binding last.
+                for (param, shadowed) in scoped.into_iter().rev() {
+                    self.ctx.end_scope(param, shadowed);
+                }
 
                 // All clauses must produce the same type
                 if let Some(ref rt) = result_ty {
@@ -2532,6 +2594,19 @@ fn type_check_module_inner(tc: &mut TypeChecker, module: &Module) -> Result<(), 
             } => {
                 let saved_ctx = tc.ctx.clone();
                 let saved_unif = tc.next_unif;
+
+                // A repeated parameter name would shadow the earlier
+                // parameter for the whole body, so a linear earlier
+                // parameter could never be consumed or checked.
+                let mut seen_params: HashSet<&Var> = HashSet::new();
+                for (param_name, _) in params {
+                    if !seen_params.insert(param_name) {
+                        return Err(SpannedTypeError {
+                            error: TypeError::DuplicateParameter(param_name.clone()),
+                            span: body.span,
+                        });
+                    }
+                }
 
                 for (param_name, param_ty) in params {
                     tc.ctx

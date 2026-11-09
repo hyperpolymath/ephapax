@@ -109,8 +109,10 @@ redesign and state sound replacement theorems, not to prove refuted ones.
 > `…_stmt : Prop`, refuted by `Counterexample_StepPop.v` and
 > `Counterexample_PreservationL1.v`. While they were `Admitted`, the build
 > could derive `False`. `formal/` now has **0 `Admitted` and 0 `Axiom`**,
-> and CI's no-False gate (`coq-build.yml`) blocks any new
-> `Admitted`/`Axiom`/`Parameter`. The fence below is unchanged in spirit:
+> and CI's no-False gate (`formal/scripts/no-false-gate.sh`, run by
+> `coq-build.yml`) fails on any assumption vernacular or `admit` outside
+> comments, on any kernel-check bypass, on any named result not closed under
+> the global context, and on any Ephapax axiom that `coqchk` finds. The fence below is unchanged in spirit:
 > never try to prove a refuted statement.
 
 > The guardrails below protect pinned counterexamples and the false
@@ -202,13 +204,16 @@ them if asked; if asked anyway, push back and link this section.
    prove it locally and report its assumptions and regressions.
 
 4. **DO follow estate proofing and grading policy.** Consult
-   `hyperpolymath/mathesis/estate-mathematical-architecture` for grades
-   and `hyperpolymath/standards/3-practice/PROOF-POLICY.adoc` for prover
-   mapping. Mathesis Grade 3 specifically requires a local Agda proof;
-   Coq `Qed` is Coq evidence, not Grade 3. Standards maps
+   `hyperpolymath/standards/3-practice/PROOF-POLICY.adoc` for prover
+   mapping and for Proof Witness Grades (§8, which supersedes the grades in
+   the mathesis brief). `PWG-3` requires a local Agda proof checked with
+   `agda --safe --without-K --cubical-compatible`; Coq `Qed` is Coq
+   evidence, not `PWG-3`, and counts as a recheck leg only once an Agda
+   source exists and the statements are `RECONCILED`. Always write the
+   `PWG-` prefix. Standards maps
    Ephapax-specific engineering claims to Idris2 unless an
    implementation-independent theory statement is explicitly defined.
-   Do not assign a Grade 3 label until that classification and exact
+   Do not assign a PWG until that classification and exact
    statement correspondence are recorded in `EXPLAINME.adoc` and
    `PROOF-NEEDS.adoc`.
 

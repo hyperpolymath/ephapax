@@ -90,7 +90,8 @@ backend (lowering to a different operational model), and the Zig FFI
   DISCHARGED** at `Ephapax.Formal.Qualifier.splitLinearCoverage`
   (cited). **E3 narrow-form is DISCHARGED** at
   `Ephapax.Formal.RegionLinear.noEscapeTheorem` (cited). E1
-  (preservation) is OWED on the Coq side and remains `Admitted`.
+  (preservation) is OWED on the Coq side: the legacy statement is refuted
+  (`Counterexample.preservation_false`) and no replacement theorem exists yet.
   E2 control-flow generalisation, E3 operational form, E4
   (no-runtime-GC), E5 (WASM compilation), E6 (IR lowering) are stated
   as erased postulates so the obligations are explicit and discoverable.

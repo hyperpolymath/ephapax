@@ -312,8 +312,8 @@ field closed.
   counterexamples, scoped results, ledger, and replacement obligations.
 * **Agent guidance**: `CLAUDE.md` (root) — the 2026-05-27 owner
   directive, anti-pattern detector, escalation rule.
-* **Counterexample**: `formal/Counterexample.v` — the 5 Qed lemmas
-  that pin the soundness gap.
+* **Counterexample**: `formal/Counterexample.v` — the 6 Qed lemmas,
+  including `preservation_false`, that pin the soundness gap.
 * **Upstream Echo foundation**: https://github.com/hyperpolymath/echo-types
   — the Agda fiber/degrade/no-section calculus this repo's L3 builds on.
 

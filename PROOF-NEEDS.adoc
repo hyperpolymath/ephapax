@@ -86,36 +86,42 @@ side conditions and state exact replacement preservation theorems. These
 are new obligations; the refuted legacy and L1 statements remain pinned.
 |===
 
-==== Estate proofing policy and Grade 3 target
+==== Estate proofing policy and Proof Witness Grades
 
-Follow the estate's canonical references for proof method and grade:
+Follow the estate's canonical policy:
+link:https://github.com/hyperpolymath/standards/blob/main/3-practice/PROOF-POLICY.adoc[`hyperpolymath/standards/3-practice/PROOF-POLICY.adoc`].
+It assigns implementation-specific engineering obligations to Idris2 and
+implementation-independent theory to Agda, rechecked in Rocq and Lean. Its
+deciding test is whether a claim names a repository-specific type, function
+or wire format. Its §8 (owner ruling 2026-11-04) defines the *Proof Witness
+Grades* `PWG-3`, `PWG-2i`, `PWG-2ii` and `PWG-1`, and supersedes the grades
+in the mathesis brief (`docs/proposals/estate-mathematical-architecture.adoc`).
+The
+link:https://github.com/hyperpolymath/standards/blob/main/docs/README-EXPLAINME-STANDARD.adoc[proof-ledger standard]
+also requires every claimed proof (including open and refuted claims) to
+appear in `+EXPLAINME.adoc+` with status, checker, location and trust
+boundary.
 
-* link:https://github.com/hyperpolymath/mathesis/blob/main/estate-mathematical-architecture[`hyperpolymath/mathesis/estate-mathematical-architecture`]
-  defines Grade 3 as an Agda proof that type-checks locally and has not been
-  independently translated. Grade 2/1 claims require their separate
-  translation/API evidence.
-* link:https://github.com/hyperpolymath/standards/blob/main/3-practice/PROOF-POLICY.adoc[`hyperpolymath/standards/3-practice/PROOF-POLICY.adoc`]
-  assigns implementation-specific engineering obligations to Idris2 and
-  implementation-independent theory to Agda, rechecked in Rocq and Lean.
-  Its deciding test is whether a claim names a repository-specific type,
-  function, or wire format. The
-  link:https://github.com/hyperpolymath/standards/blob/main/docs/README-EXPLAINME-STANDARD.adoc[proof-ledger standard]
-  also requires every claimed proof (including open/refuted claims) to
-  appear in `+EXPLAINME.adoc+` with status, checker, location, and trust
-  boundary.
+*No result in this repository carries a PWG.* PWG applies only to theory
+obligations whose source of truth is an Agda proof (§8.1). No Ephapax result
+has an Agda source, so any result classed as theory is `ungraded`, and any
+result classed as engineering is not on the PWG ladder at all (§8.1: it
+uses the §5 tokens only). The Coq results are Coq evidence: a Coq `+Qed+`
+is not `PWG-3`, and it can count as a Rocq recheck leg only after an Agda
+source exists and the two statements are `RECONCILED` (§2.2, §3).
 
-*Grade 3 is the requested target, not a status to apply retroactively.* The
-current regression witnesses are Coq scripts (`+Qed+`), so they are not
-Mathesis Grade 3 receipts. The Ephapax-specific `+has_type_l1+`/`+step+`
-claims also appear engineering-specific under the current standards mapping;
-that mapping does not automatically make them Agda theory. Until an
-owner-approved formulation resolves this boundary, record current Coq
-results as Coq evidence, retain `+COUNTEREXAMPLE+` for refuted statements,
-and do not label them Grade 3. A future Agda Grade 3 receipt must include
-the exact proposition, assumptions, source commit, pinned Agda/toolchain,
-canonical invocation, and evidence that it is the same Ephapax statement;
-it must not be inferred from shared vocabulary or another repository's
-proof. No Grade 2/1 claim is made here.
+*The classification itself is open.* The `+has_type+`/`+step+` statements
+name Ephapax's own judgment, which reads as engineering under the §1 test,
+but the soundness of a calculus is listed as theory. Until the owner
+classifies each obligation, record Coq results as Coq evidence, keep
+`+COUNTEREXAMPLE+` for refuted statements, and assign no PWG. Policy §3 adds
+a consequence: an engineering proof held in a prover other than Idris2 moves
+to Idris2 when next touched, unless a §4 exception is recorded beside it.
+A future `PWG-3` receipt must record the exact proposition, assumptions,
+source commit, pinned Agda and standard library, the canonical invocation
+`agda --safe --without-K --cubical-compatible`, the import cone, and evidence
+that it states the same Ephapax proposition. It must not be inferred from
+shared vocabulary or from another repository's proof.
 
 The audit is split by sublanguage:
 
@@ -182,8 +188,8 @@ Definitions only — no theorems, zero axioms.
 3b (nested TFunEff) soundness-gap classes
 
 |Pinned legacy counterexample + L1 positive regression
-|`+formal/Counterexample.v+` |5 Qed in total: three lemmas establish the
-legacy counterexample; `+t_loc_l1_R_preserving+` supports the L1 argument;
+|`+formal/Counterexample.v+` |6 Qed in total: three lemmas establish the
+legacy counterexample; `+preservation_false+` refutes `+preservation_stmt+`; `+t_loc_l1_R_preserving+` supports the L1 argument;
 `+bad_input_untypable_l1+` rejects this one input in both modes. This is
 not a proof of L1 preservation.
 

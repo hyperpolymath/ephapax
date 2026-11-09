@@ -19,7 +19,8 @@ architecture lives in:
 |Layer |Concern |File(s) |Status
 |*L1* |Region capabilities + capability environment threading
 |`+formal/TypingL1.v+` + `+formal/Semantics_L1.v+` |judgment 100%,
-semantics 15 Qed / 9 admits (L2-integration debt)
+semantics: no admits; the unrestricted `preservation_l1` is refuted
+(`Counterexample_PreservationL1.v`) and retired to a `Prop`
 
 |*L2* |Structural modality (Linear vs Affine) |`+formal/Modality.v+` +
 `+m : Modality+` in `+has_type_l1+` |core landed, `+linear_to_affine+`

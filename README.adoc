@@ -416,9 +416,10 @@ Operational semantics with small-step reduction over a substitution-
 based calculus. Post-2026-05-26 the formalisation is layered:
 
 * **Legacy** (`formal/Semantics.v`, `formal/Typing.v`) — the original
-  pre-discovery judgment. `Theorem preservation` here is **provably
-  false** (the counterexample at `formal/Counterexample.v` is 5 Qed
-  lemmas proving it). The `Admitted.` is correct. **Do not extend.**
+  pre-discovery judgment. Its preservation statement is **provably
+  false**: it is now `preservation_stmt : Prop`, refuted by
+  `Counterexample.preservation_false` (Qed). The former `Admitted.` was
+  retired on 2026-11-05 (owner-ratified D0/D0b). **Do not extend.**
   Treat as archaeology — see link:STATUS.adoc[`STATUS.adoc`] for the
   pre-discovery PR list and the explicit do-not-do reasoning.
 
@@ -459,7 +460,7 @@ link:PROOF-NEEDS.adoc[`PROOF-NEEDS.adoc`]. The four-layer architecture
 rationale is in
 link:formal/PRESERVATION-DESIGN.adoc[`formal/PRESERVATION-DESIGN.adoc`].
 The counterexample itself is
-link:formal/Counterexample.v[`formal/Counterexample.v`] (5 Qed).
+link:formal/Counterexample.v[`formal/Counterexample.v`] (6 Qed, including `preservation_false`).
 
 [source,bash]
 ----
@@ -596,8 +597,8 @@ generics, effects, traits, comptime, contracts) lives on
 |
 
 | Coq legacy `preservation`
-| 🛑 Admitted — provably false
-| Counterexample at `formal/Counterexample.v` (5 Qed). Not closable. Archaeology.
+| 🛑 Retired to `preservation_stmt : Prop` — provably false
+| Refuted by `Counterexample.preservation_false` (Qed, closed under the global context). Not closable. Archaeology.
 
 | Coq L1 (region capabilities)
 | Judgment and helpers mechanised; unrestricted preservation refuted
@@ -652,7 +653,7 @@ generics, effects, traits, comptime, contracts) lives on
   motivated the four-layer proposal; not proof that preservation holds per layer.
 
 | link:formal/Counterexample.v[formal/Counterexample.v]
-| The 5 Qed lemmas that pin the soundness gap of the legacy judgment.
+| The 6 Qed lemmas, including `preservation_false`, that pin the soundness gap of the legacy judgment.
   Authoritative source of the gap; future proofs must coexist with it.
 
 | link:CLAUDE.md[CLAUDE.md]
@@ -777,10 +778,11 @@ The highest-leverage open work, in priority order:
 
 [NOTE]
 ====
-*Closing the legacy `Theorem preservation` in `formal/Semantics.v` is
-NOT a valid contribution.* That theorem is provably false (sealed by
-`formal/Counterexample.v`); its `Admitted.` is correct and durable per
-owner directive 2026-05-27. `formal/PRESERVATION-HANDOFF.adoc` is
+*Proving the legacy preservation statement in `formal/Semantics.v` is
+NOT a valid contribution.* It is provably false: it is retired to
+`preservation_stmt : Prop` and refuted by `Counterexample.preservation_false`
+(owner directive 2026-05-27; retirement owner-ratified as D0/D0b on
+2026-11-05). `formal/PRESERVATION-HANDOFF.adoc` is
 archaeology kept for context. The redesigned judgments are a separate development, not yet a sound
 replacement: `preservation_l1` is refuted as stated, and no unconditional
 `preservation_l2` theorem exists. L2 β-case lemmas have explicit

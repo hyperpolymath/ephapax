@@ -3187,8 +3187,9 @@ Qed.
     HISTORICAL proof decomposition (pre-counterexample; case counts and
     proposed closure route below are not current proof debt). The
     unrestricted theorem is now refuted as stated by
-    [Counterexample_PreservationL1.v]. Its [Admitted] is a transparent
-    marker for a false statement, not a proof expected to be completed.
+    [Counterexample_PreservationL1.v]. It is now the [Prop]
+    [preservation_l1_stmt] (D0, 2026-11-05), not a proof expected to be
+    completed.
     The old case-by-case diagnosis follows only as design archaeology.
 
     At the time, the proof sketch described 30 of 33 case subgoals as
@@ -3484,12 +3485,12 @@ Print Assumptions preservation_l3.
     structured. It is superseded as a closure plan: the unrestricted
     theorem is refuted by [Counterexample_StepPop.v], and a later
     value-anchored witness in [Counterexample_PreservationL1.v] also
-    defeats the proposed restriction. Its [Admitted] is a transparency
-    marker for a false statement, not an unfinished routine proof.
+    defeats the proposed restriction. It is now the [Prop]
+    [step_pop_disjoint_from_type_l1_stmt] (D0, 2026-11-05), not an
+    unfinished routine proof.
 
     The Qed cases in the body remain local proof facts; they do not
-    salvage the universal theorem. [Print Assumptions] reports the
-    admitted theorem as an axiom. Current replacement status is in
+    salvage the universal theorem. Current replacement status is in
     [PROOF-NEEDS.adoc]. *)
 
 

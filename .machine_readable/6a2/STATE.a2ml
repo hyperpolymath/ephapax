@@ -8,10 +8,10 @@
 # current_* fields below supersede the 2026-06 journal text and the dated
 # owner-directive snapshot; see CLAUDE.md and PROOF-NEEDS.adoc for policy.
 phase: "implementation"
-next_action: "Owner-approved L1/L2 soundness redesign: preserve the legacy five-Qed counterexample and durable Admitted; do not prove the refuted step_pop_disjoint_from_type_l1 or preservation_l1 statements; do not claim unconditional L2 preservation. First classify each exact obligation under hyperpolymath/mathesis/estate-mathematical-architecture and standards/3-practice/PROOF-POLICY.adoc. Grade 3 is Agda-only; current Coq witnesses are not Grade 3, and Ephapax-specific engineering claims map to Idris2 unless an implementation-independent Agda theory statement is explicitly defined. Update the proof ledger after policy resolution; no proof build was run in this environment."
+next_action: "Owner-approved L1/L2 soundness redesign: preserve the legacy five-Qed counterexample; do not prove the refuted step_pop_disjoint_from_type_l1 or preservation_l1 statements; do not claim unconditional L2 preservation. First classify each exact obligation under hyperpolymath/mathesis/estate-mathematical-architecture and standards/3-practice/PROOF-POLICY.adoc. Grade 3 is Agda-only; current Coq witnesses are not Grade 3, and Ephapax-specific engineering claims map to Idris2 unless an implementation-independent Agda theory statement is explicitly defined. Update the proof ledger after policy resolution; no proof build was run in this environment."
 last_action: "Proof + stdlib wave 2026-06-01 → 02 landed (13 PRs): canonical-forms L1 modality-polymorphic (#274, P43, 7 lemmas axiom-free, prerequisite for progress_l1/P42); Print Assumptions audit framework across L1 + L3 keystones (#270, closes P10/P32); step_pop_disjoint_from_type_l1 stated + EASY cases Qed-closed (#280, P06, HARD cases blocked on #240/#241/#242); Rust↔Coq is_linear_ty truth-table mechanical assertion (#273, P28); OwnershipKind from_byte/to_byte round-trip (#277, P59, typed-wasm ADR-0002 carrier handshake); 4 stdlib DB-theory additions — Transactions as linear scopes (#275, D04), Allen's interval algebra (#272, D11), MessageHandle as linear typestate (#279, D17), monoidal aggregates (#281, D18); doc truth-restore + banned-preservation framing buried (#263); cluster-D L3/L4 status meander (#278); Track C panic-attack triage (#271); coq-build noble apt CI fix (#282, unblocks ~5 PRs); R5b standards SHA bump (#276). Plus CHANGELOG sync (#283). Build oracle clean across all 12 .v files. Print Assumptions: canonical_*_l1_m + most new lemmas zero-axiom; expected residuals (preservation_l1, region_liveness_at_split_l1_gen, region_shrink_preserves_typing_l1_gen_m) tracked. Stages 2-4 (#240/#241/#242) still un-touched. Wiki Proof-status.md refreshed 2026-06-02. | INFRA (2026-06-24, non-proof track): governance docs landed (#314 — CODEOWNERS/GOVERNANCE.adoc/MAINTAINERS.adoc); standards reusable-workflow pins remediated (#315) and current at d135b05 (#316); Hypatia neurosymbolic gate now active and reporting 37 pre-existing findings (5 crit / 7 high / 25 med) — triage handed off (docs/governance/HYPATIA-HANDOFF.md), standards visibility patch drafted-not-applied. No .v files touched; no proof-state change."
 current_last_action: "2026-11-01 proof-honesty audit: updated local status surfaces, retained all proof terms, and recorded Mathesis Grade 3/standards mapping without promoting Coq evidence to Grade 3. No Coq build run; coqc unavailable."
-current_proof_boundary: "Legacy preservation is refuted and its Admitted is durable; step_pop_disjoint_from_type_l1 and modality-polymorphic preservation_l1 are refuted as stated; no unconditional preservation_l2 theorem is declared; preserve all Coq regressions."
+current_proof_boundary: "Legacy preservation is refuted; step_pop_disjoint_from_type_l1 and modality-polymorphic preservation_l1 are refuted as stated; no unconditional preservation_l2 theorem is declared; preserve all Coq regressions."
 current_grade_target: "Mathesis Grade 3 requested but not claimed. Grade 3 requires local Agda checking; current regressions are Coq. Standards proof policy maps repo-specific engineering claims to Idris2 unless an implementation-independent Agda theory statement is explicitly identified."
 proof_policy_sources: ["https://github.com/hyperpolymath/mathesis/blob/main/estate-mathematical-architecture", "https://github.com/hyperpolymath/standards/blob/main/3-practice/PROOF-POLICY.adoc"]
 proof_status_source: "PROOF-NEEDS.adoc + EXPLAINME.adoc proof ledger"
@@ -61,11 +61,6 @@ updated: 2026-11-01
 #     and their at_pre helpers are Qed but support legacy-preservation
 #     closure attempts that are now ruled out. Retained for diagnostic
 #     value; no new lemmas in this class.
-#   - formal/Semantics_L1.v `preservation_l1`: stated `forall m`; body
-#     Admitted (lambda-rigidity gap, closes at Phase D / L2 effect-typed
-#     TFun per PRESERVATION-DESIGN.md §5.1). 5 inner `admit.` cases
-#     (3 distinct structural blockers + 2 mechanical mirrors) covered
-#     by 3 outer Admitted markers. Zero new debt introduced post-L2.
 #   - formal/Semantics_L1.v `preservation_l3`: Qed, both modes, slice 4
 #     of L3 wiring landed 2026-05-27 (PR #196).
 #   - formal/TypingL1.v: m-indexed (`has_type_l1 m R G e T R' G'`),
@@ -99,11 +94,11 @@ updated: 2026-11-01
 
 @artifacts:
 # Layered files on main (post-slice-4 + Phase A):
-#   formal/Counterexample.v   — 5 Qed lemmas; preservation FALSE
+#   formal/Counterexample.v   — preservation FALSE
 #   formal/Echo.v             — L3 calculus, K-free, 12 Qed
 #   formal/Modality.v         — L2 thin poset, all Qed
 #   formal/TypingL1.v         — m-indexed has_type_l1 + Echo/Observe rules
-#   formal/Semantics_L1.v     — 26 Qed, 3 outer Admitted (5 inner admit.)
+#   formal/Semantics_L1.v
 #   formal/TypingL2.v         — L2_lift_l1 + T_App_L2_Eff +
 #                                preservation_l2_via_l1 (Phase D slice 4 partial)
 #   formal/L4.v               — ProgramMode labelling discipline (Phase A)

@@ -107,7 +107,8 @@ used by a surviving sibling remains live across another sibling's step.
   instance. It does not establish that a separate Affine-only statement
   is false.
 * The local proof artifacts are Coq evidence only. The exact open
-  replacement boundary and Grade 3 policy are in `PROOF-NEEDS.adoc`.
+  replacement boundary and the Proof Witness Grade (PWG) position are in
+  `PROOF-NEEDS.adoc`.
 
 == Claim: Irreversibility residue is first-class (L3, wired)
 
@@ -251,7 +252,7 @@ Qed results are scoped to matching echo rule pairs.
 |===
 | Component | Status | Where
 
-| Counterexample regression (5 Qed)
+| Counterexample regression (6 Qed, incl. `preservation_false`)
 | ✅ Pinned
 | `formal/Counterexample.v` — `bad_input_untypable_l1` Qed under both modes
 
@@ -305,6 +306,18 @@ name the relevant scripts. The Coq 8.18.0 build recipe is
 not a proof-build receipt. No fresh build is claimed here; the source proof
 scripts and theorem statements were not changed in this audit, only their
 documentation comments were clarified.
+
+Local re-check, 2026-11-09, source `32d8eb7` (main, after the D0/D0b
+retirement in ephapax#422): Coq 8.18.0 (Ubuntu noble `coq` package) built all
+18 `+_CoqProject+` modules; `+formal/scripts/no-false-gate.sh+` found no
+assumption vernacular and no kernel bypass, and its `+Print Assumptions+`
+census found 257 of 257 named results closed under the global context;
+`+coqchk -o+` re-checked the compiled libraries and reported no Ephapax
+axiom, nothing relying on type-in-type, unsafe fixpoints or assumed
+positivity (it lists the standard library's `+eq_rect_eq+`, which no Ephapax
+result uses). This was an agent-session run, not a pinned isolated CI
+receipt. No Ephapax result carries a Proof Witness Grade; see
+`+PROOF-NEEDS.adoc+` (Estate proofing policy and Proof Witness Grades).
 
 [cols="2,1,2,2,3",options="header"]
 |===
@@ -394,21 +407,22 @@ all L1 regressions remain mandatory controls.
 |Current β-case helpers are conditional; `+preservation_l2_via_l1+`
 transparently depends on the refuted L1 statement.
 
-|Mathesis Grade 3 receipt for Ephapax language soundness |open
-|Agda receipt required by the Mathesis architecture
-|No Agda Grade 3 proof currently recorded
-|The existing witnesses are Coq, not Grade 3. Standards classifies local
+|`PWG-3` receipt for Ephapax language soundness |open
+|Agda receipt required by PROOF-POLICY §8 (if classed as theory)
+|No Agda proof recorded; every Ephapax result is `ungraded` or off the PWG ladder
+|The existing witnesses are Coq, not `PWG-3`. Standards classifies local
 Ephapax-specific typing/step claims as engineering (Idris2) unless a genuine
 implementation-independent theory statement is defined. Resolve this
-mapping before assigning a Grade 3 label; see `+PROOF-NEEDS.adoc+`.
+mapping before assigning any PWG; see `+PROOF-NEEDS.adoc+`.
 |===
 
-Grade labels are not interchangeable with this ledger's statuses. Per
-`+hyperpolymath/mathesis/estate-mathematical-architecture+`, Grade 3 means
-locally checked in Agda without independent translation. Per
+Proof Witness Grades are not interchangeable with this ledger's statuses.
+Per `+hyperpolymath/standards/3-practice/PROOF-POLICY.adoc+` §8 (which
+supersedes the grades of the mathesis brief), `PWG-3` means locally checked
+in Agda under the canonical invocation, with no recheck leg yet counted. Per
 `+hyperpolymath/standards/3-practice/PROOF-POLICY.adoc+`, engineering and
 theory obligations follow different verifier routes. Therefore no Coq
-`+Qed+` row above is labelled Grade 3, and no upstream or cross-repo
+`+Qed+` row above is labelled `PWG-3`, and no upstream or cross-repo
 conceptual result discharges an Ephapax-specific obligation.
 
 === Idris2 (`idris2/src/Ephapax/` + `src/formal/`)
@@ -532,8 +546,9 @@ so this is not a reproducibly pinned toolchain receipt.
 |===
 
 Idris2 evidence follows the Standards route for repository-specific
-engineering claims, but it is not thereby Mathesis Grade 3: Grade 3
-requires a locally checked Agda proof. The current Coq and Idris2 rows
+engineering claims, and engineering proofs are not on the PWG ladder at all
+(PROOF-POLICY §8.1): `PWG-3` requires a locally checked Agda proof of a
+theory obligation. The current Coq and Idris2 rows
 must retain their checker labels and cannot be upgraded by cross-repo
 vocabulary or by the proof-policy mapping alone.
 

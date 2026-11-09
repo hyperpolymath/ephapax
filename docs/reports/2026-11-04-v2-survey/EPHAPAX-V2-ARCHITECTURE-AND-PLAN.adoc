@@ -306,8 +306,10 @@ Sources: the scratch builds and probes recorded in the dossier, plus spot checks
  ephapax-parser (pest) --> ephapax-surface AST (type params, mode decls, echo/observe/drop!, @comptime island)
      |  S2 desugar    [O2: golden + metamorphic desugar tests; formal/v2/Desugar.v match_desugar_correct
      |                     (data/match -> right-nested sums); surface sugar (traits, contracts) = pure desugar]
+     |  S2b elaborate [infer type arguments, check generic bodies once (type variables linear), then
+     |                     monomorphise; polymorphic recursion rejected]
      v
- ephapax-desugar --> CORE v2 AST (src/ephapax-syntax mirrors formal/v2/SyntaxV2.v constructor-for-constructor)
+ ephapax-desugar + elaborate --> CORE v2 AST (src/ephapax-syntax mirrors formal/v2/SyntaxV2.v constructor-for-constructor)
      |        \______ ephapax-ir S-expr codec --> core->SyntaxV2 translator --> tools/ephapax-oracle
      |                                                                 (extracted check_v2 + step_v2_fn)
  ephapax-driver::load_program (import resolver + package tier + surface + desugar)
@@ -724,9 +726,9 @@ Items marked "*(external)*" in the Home column live outside `hyperpolymath/ephap
 * distinct echo forms;
 * `S_Observe`;
 * a typed foreign-signature environment Φ for `extern` declarations (stdlib `Argv.eph` and others), with a host-call step rule over a host *function* (total and deterministic by construction, so `step_v2_deterministic` survives). The host function also receives an immutable host input fixed for the whole run, which carries the argument vector: the program path as element 0 followed by `Run.args`, matching `stdlib/Argv.eph`'s contract that `argv_count()` includes `argv[0]` (a finite list of byte strings, well-formed when every entry is valid UTF-8 and the list length fits in I32), so `env::argv_count`, `argv_arg_len` and `argv_arg_get` are deterministic functions of it and are covered by P9 and P10. The metatheory takes `host_wf` as a *hypothesis*, never as an `Axiom`: a host call returns a value of the declared type, touches only the buffers passed to it, and preserves `store_typed`, region tags and ownership, and the rest of `config_wf`: it never frees or retags a passed location, and its result refers to no freed region. Each signature in Φ carries its own instance of these conditions. P9 and P10 are stated for every `host_wf` host;
-* an explicit trap configuration: integer division or remainder by zero, and `MIN / -1`, step to `Trap`, while `MIN % -1` evaluates to 0 as Wasm `rem_s` does (matching the interpreter's `DivisionByZero` and the Wasm trap), and `progress_v2` reads "a value, a step, or `Trap`";
+* an explicit trap configuration: integer division or remainder by zero, and `MIN / -1`, step to `Trap`, while `MIN % -1` evaluates to 0 as Wasm `rem_s` does (matching the interpreter's `DivisionByZero` and the Wasm trap), and `progress_v2` reads "a value, a step, or `Trap`". `Trap` is a terminal configuration with no `has_type_v2` judgment, so `preservation_v2` concludes "a typed successor or `Trap`" (P10), and `type_safety_v2` reads "never stuck: a value, `Trap`, or a further step";
 * a global Σ for recursion, with a `sigma_wf` judgment (every definition checked against its declared type under the whole recursive Σ) that `config_wf` requires and that P9 and P10 take as a hypothesis;
-* the recursive-type form D7 selected (ratified in W1, before P4), so P7–P13 are proved against the full core: iso-recursive `TMu` with fold/unfold under the recommended option; nominal named types with unfold at `match` under the nominal option; no recursive type former under the no-core-recursion option, in which case P8 drops `mu`, P17 becomes the encoding-alignment rung, and E9/E10 use the bounded encodings;
+* the recursive-type form D7 selected (ratified in W1, before P4), so P7–P13 are proved against the full core: iso-recursive `TMu` with fold/unfold under the recommended option; nominal named types with unfold at `match` under the nominal option; no recursive type former under the no-core-recursion option, in which case P8 drops `mu`, P17 becomes the encoding-alignment rung, and E9/E10 use the bounded encodings. Grades of recursive types are defined, not left to unfolding: the grade of `TMu X. T` is the least fixed point of `g ↦ grade(T[X := g])` over the finite lattice {0,1,ω}, computed by Kleene iteration from 0, which stabilises after at most three steps per bound variable, so it is decidable and needs no unfolding (for example `μX. 1 + (String × X)` gets the grade of `String`). Under the nominal option each named type carries the same fixed point, checked against any declared grade annotation. P4 defines this `grade_of`, P8 and P10 use it, and the E9/E13 checker computes the same function, with a fixture that agrees with the extracted `grade_of` on every recursive type in the corpus;
 * store coherence in `config_wf`.
 
 Includes `step_v2_deterministic`.
@@ -759,13 +761,13 @@ Includes `step_v2_deterministic`.
 |S–M
 
 |P9 `progress_v2`
-|For closed well-formed configurations: every one is a value, steps, or is `Trap` (P4's trap configuration for integer division and remainder). EscapeCex and the stuck `EObserve` are already ruled out at P5.
+|For closed configurations that are well formed (`config_wf`) *and* well typed (`has_type_v2` of the expression under the configuration's store typing and Σ): every one is a value, steps, or is `Trap`. Well-formedness alone does not suffice: a closed well-formed configuration such as an integer applied as a function is neither a value, nor `Trap`, nor able to step. (`Trap` is P4's trap configuration for integer division and remainder.) EscapeCex and the stuck `EObserve` are already ruled out at P5.
 |CLOSED
 |P7, P8
 |M
 
 |P10 `preservation_v2` (L1 + L2 folded)
-|All step cases, including an unconditional effect-typed beta. This discharges what #240–#242 were working toward. Corollary `type_safety_v2`. Sub-agents work by case family: region, drop, app/beta, let/case/pair, ref/borrow, echo/observe.
+|All step cases, including an unconditional effect-typed beta. The conclusion is "the successor is typed at the same type, or it is `Trap`" (P4); the division and remainder steps to `Trap` take the second disjunct. This discharges what #240–#242 were working toward. Corollary `type_safety_v2`. Sub-agents work by case family: region, drop, app/beta, let/case/pair, ref/borrow, echo/observe.
 |CLOSED; allowlist unchanged
 |P7, P8, P9
 |L–XL
@@ -789,7 +791,7 @@ Includes `step_v2_deterministic`.
 |L
 
 |P14 Meta plane
-|`MetaPlane.v`: `comptime_normalises` (structural Fixpoint) and `comptime_ignores_runtime`.
+|Branches on D8, like E15. Recommended option (halting island): `MetaPlane.v` with `comptime_normalises` (structural Fixpoint) and `comptime_ignores_runtime`. Fuel-bounded option: `comptime_normalises_or_fuel_exhausted` (every evaluation returns a normal form or the named fuel-exhausted outcome, never anything else) and `comptime_ignores_runtime`. 2LTT option: a typed-staging normalisation argument (`stage_normalises`: every well-typed meta-level term normalises, by a logical relation over the meta-level types) and `comptime_ignores_runtime`. Drop option: P14 is not scheduled, and E15's UNIMPLEMENTED diagnostics stand.
 |CLOSED
 |E15 grammar (parallel)
 |M
@@ -854,8 +856,8 @@ These are kept off the critical path.
 |Rung |Deliverable |Gate |Depends |Size
 
 |E0 Holes first
-|`mark_used` routes through `demands_consumption` (lib.rs:191). `check_lambda` rejects consuming a captured linear value. `Ty::is_linear` takes the join over Prod/Sum/Tuple/List (conservative *reject*, D5-independent; D5 in W1 may relax it). Recursive `data` gives a `DesugarError`, not an overflow. Dereferencing a borrow of a linear value may not consume ownership (today `check_deref` returns the owned inner type, `ephapax-typing/src/lib.rs:1739`, and borrows are not loan-tracked). A pattern may not discard a linear payload: a wildcard over a linear component, or a duplicate binder, is rejected (today a wildcard binds nothing, `lib.rs:1592`).
-|`tests/linearity_holes.rs`: dup2, dup4, pairdup, lamcap, sum-, tuple- and list-of-linear duplication probes, a double-borrow-then-drop probe, and a `(_, y)` match over a linear pair are each rejected with a named `TypeError` kind; rec1 fails with the named `DesugarError` and the compiler's normal error exit, never a crash or abort; `cargo test --workspace` green (≥ 507)
+|`mark_used` routes through `demands_consumption` (lib.rs:191). `check_lambda` rejects consuming a captured linear value. `Ty::is_linear` takes the join over Prod/Sum/Tuple/List (conservative *reject*, D5-independent; D5 in W1 may relax it). Recursive `data` gives a `DesugarError`, not an overflow. Dereferencing a borrow of a linear value may not consume ownership (today `check_deref` returns the owned inner type, `ephapax-typing/src/lib.rs:1739`, and borrows are not loan-tracked). A pattern may not discard a linear payload: a wildcard over a linear component, or a duplicate binder, is rejected (today a wildcard binds nothing, `lib.rs:1592`). Projection may not discard one either: `check_tuple_index` and `check_list_index` reject a projection from a container whose unselected fields or elements are linear (today they consume the container and return one element, so the rest are lost), as `check_fst`/`check_snd` already do; such containers must be destructured.
+|`tests/linearity_holes.rs`: dup2, dup4, pairdup, lamcap, sum-, tuple- and list-of-linear duplication probes, a double-borrow-then-drop probe, a `(_, y)` match over a linear pair, a tuple projection `t.0` from a tuple of two linear strings and a list index from a list of linear strings are each rejected with a named `TypeError` kind; rec1 fails with the named `DesugarError` and the compiler's normal error exit, never a crash or abort; `cargo test --workspace` green (≥ 507)
 |none (escalation note for pairdup)
 |S–M
 
@@ -873,7 +875,7 @@ These are kept off the critical path.
 
 |E3 Driver
 |`src/ephapax-driver` used by every tool; `src/ephapax-tools` either joins the workspace or is excluded.
-|`driver_agreement.rs`: every entry point (check, compile, run, repl, lsp, query, fmt) loads each corpus file through `ephapax-driver` and agrees on parse/desugar success; check == compile on all corpus files, which holds because `check` runs the same unsupported-feature validation as codegen (so the E1 fail-loud forms, such as the `perform` probe, are rejected by both with the same named diagnostic until E17); an integer literal above `i64::MAX` is a named `ParseError` on every entry point (today the core-parser fallback turns it into 0 via `unwrap_or(0)`, `ephapax-parser/src/lib.rs:965`), with a corpus-gate fixture; `qualified-import/app.eph` and `bridge.eph` check
+|`driver_agreement.rs`: every entry point (check, compile, run, repl, lsp, query, fmt) loads each corpus file through `ephapax-driver` and agrees on parse/desugar success; check == compile on all corpus files, which holds because `check` runs the same unsupported-feature validation as codegen (so the E1 fail-loud forms, such as the `perform` probe, are rejected by both with the same named diagnostic until E17); an integer literal above `i64::MAX` is a named `ParseError` on every entry point, except that `-9223372036854775808` (unary negation applied directly to the literal `9223372036854775808`, which today parses as `UnaryOp::Neg` over an unsigned token, `ephapax.pest:331-336`) is folded into the single literal `i64::MIN` before the range check; a fixture checks that it evaluates to `i64::MIN`, and that `9223372036854775808` alone, `-9223372036854775809` and `-(9223372036854775808)` (where the literal is not the direct operand of the minus sign) are each the named `ParseError` (today the core-parser fallback turns it into 0 via `unwrap_or(0)`, `ephapax-parser/src/lib.rs:965`), with a corpus-gate fixture; `qualified-import/app.eph` and `bridge.eph` check
 |none
 |M
 
@@ -896,7 +898,7 @@ These are kept off the critical path.
 |S
 
 |E7 Grammar + generics
-|One normative grammar plus a conformance fixture test. `SurfaceDecl::Fn` type params (desugar lib.rs:323). Until E13 brings grades, unconstrained type parameters are treated as linear (today `Ty::is_linear` makes `Ty::Var`/`Ty::Unif` non-linear, `ephapax-syntax/src/lib.rs:154`), so a generic body cannot duplicate a value that is later instantiated at a linear type. Desugar monomorphises type parameters before the core, so the core, the translator and `CheckV2` only see monomorphic terms; polymorphic recursion is rejected with a named error. `M.Ctor(x)` lowers to `Construct`. Match guards are honoured by desugar (today `build_arm_body_inner` never consults `arm.guard`, `ephapax-desugar/src/lib.rs:1169`, so `Some(x) if false` is taken unconditionally), or guarded constructor arms are rejected with a named error until they are; P16 proves the lowering later. Import and extern syntax reconciled.
+|One normative grammar plus a conformance fixture test. `SurfaceDecl::Fn` type params (desugar lib.rs:323). Until E13 brings grades, unconstrained type parameters are treated as linear (today `Ty::is_linear` makes `Ty::Var`/`Ty::Unif` non-linear, `ephapax-syntax/src/lib.rs:154`), so a generic body cannot duplicate a value that is later instantiated at a linear type. Generic functions are checked once, polymorphically, by a new elaboration step S2b between desugar and S3: it infers the type arguments of every call (or reads explicit type applications), and checks each generic body with its type variables treated as linear. Only after that check succeeds does it monomorphise: each instantiation is specialised and the generic definition erased, so the core, the translator and `CheckV2` see only monomorphic terms. Desugar itself never specialises, because it runs before inference and has no substitution for `a` in `id(3)`. Polymorphic recursion is rejected with a named error. `M.Ctor(x)` lowers to `Construct`. Match guards are honoured by desugar (today `build_arm_body_inner` never consults `arm.guard`, `ephapax-desugar/src/lib.rs:1169`, so `Some(x) if false` is taken unconditionally), or guarded constructor arms are rejected with a named error until they are; P16 proves the lowering later. Import and extern syntax reconciled.
 |`gen_angle.eph` and `qa/app2.eph` compile and run; a guarded constructor match whose guard is false falls through to the next arm in both interpreter and wasm (or is rejected with the named error); `fn dup<a>(x: a) = (x, x)` is rejected with a named `TypeError` (and so cannot be instantiated at a region-owned `String`); `id<a>` instantiated at two types desugars to two monomorphic core functions that translate to `SyntaxV2`; 0 EBNF productions unaccounted for
 |E3, the syntax ADR (normative grammar source) ratified in the W1 T1a packet
 |M

@@ -75,8 +75,9 @@
         now with a machine-checked forcing argument.
 
     Owner escalation, not patching: this file only ADDS a regression
-    witness. [Semantics_L1.v] is untouched; its Admitted markers stand
-    until the owner ratifies a reformulation. *)
+    witness. (2026-11-05: the refuted statement is now the [Prop]
+    [step_pop_disjoint_from_type_l1_stmt]; see the D0 retirement note in
+    [Semantics_L1.v].) *)
 
 Require Import Coq.Lists.List.
 Import ListNotations.

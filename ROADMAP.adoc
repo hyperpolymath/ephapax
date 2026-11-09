@@ -302,7 +302,8 @@ audio buffer management:
       results are scoped to matching echo rule pairs.
 
 NOTE: The legacy `Theorem preservation` in `formal/Semantics.v` is
-provably false (`formal/Counterexample.v`) and its `Admitted.` is durable.
+provably false: it is retired to `preservation_stmt : Prop` and refuted by
+`Counterexample.preservation_false` (D0/D0b, 2026-11-05).
 It is archaeological, not ordinary proof debt, and any replacement must
 be a separately stated theorem.
 * [ ] Idris2 `Parse/Parser.idr` upgraded from `%default covering` to

@@ -129,38 +129,11 @@ jobs:
 
       - name: No-False gate (D0/D0b, owner-ratified 2026-11-05)
         working-directory: formal
-        run: |
-          # The build is axiom-free: no `Admitted.` and no `Axiom` /
-          # `Parameter` in any `_CoqProject` file. While a refuted
-          # statement was `Admitted`, the build could derive `False`
-          # (see docs/reports/2026-11-04-v2-survey, F0/F1). Assuming
-          # Coq's own consistency, an axiom-free build cannot.
-          set -euo pipefail
-          FILES=$(grep -E '\.v$' _CoqProject)
-          if grep -nE '^[[:space:]]*(Admitted\.|Axiom[[:space:]]|Parameter[[:space:]])' $FILES; then
-            echo "no-False gate: Admitted/Axiom/Parameter found above -> FAIL"
-            exit 1
-          fi
-          # Every headline and refutation must be closed under the global
-          # context; any `Axioms:` block fails the gate.
-          OUT=$(coqtop -R . Ephapax 2>&1 <<'EOF2'
-          From Ephapax Require Import Semantics Semantics_L1 TypingL2.
-          From Ephapax Require Import Counterexample Counterexample_StepPop Counterexample_PreservationL1.
-          Print Assumptions Counterexample.preservation_false.
-          Print Assumptions Counterexample_StepPop.step_pop_disjoint_from_type_l1_FALSE.
-          Print Assumptions Counterexample_PreservationL1.preservation_l1_FALSE.
-          Print Assumptions preservation_l2_via_l1.
-          Print Assumptions preservation_l2_app_eff_beta_linear.
-          Print Assumptions preservation_l2_app_eff_beta_ground_nonlinear.
-          EOF2
-          )
-          echo "$OUT" | tail -60
-          if echo "$OUT" | grep -qE '^Axioms:|Error'; then
-            echo "no-False gate: a printed result depends on an axiom, or coqtop errored -> FAIL"
-            exit 1
-          fi
-          test "$(echo "$OUT" | grep -c 'Closed under the global context')" -eq 6
-          echo "no-False gate: PASS (0 Admitted, 0 Axiom, 6/6 closed)"
+        # Comment-aware token scan, kernel-bypass scan, a Print Assumptions
+        # census of every named result (the six headlines must be present),
+        # and an independent coqchk recheck of the compiled libraries. See the
+        # header of formal/scripts/no-false-gate.sh for the exact claim.
+        run: bash scripts/no-false-gate.sh
 
   # Always-on aggregator. This is the ONLY job listed in the Base ruleset's
   # required_status_checks rule (#244). If detect-relevant-changes determined

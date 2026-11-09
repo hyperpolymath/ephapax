@@ -25,7 +25,9 @@
 #             (compile always runs wasmparser validation before writing)
 #   run       ephapax run <probe>.eph   (today: the interpreter)
 #   wasm-run  compile, then `wasmtime run --preload env=env.wat --invoke main`
-#             with the wasmtime CLI; verdict `no-module` if compile fails,
+#             with the wasmtime CLI; verdict `no-module` if compile fails
+#             with an ordinary error, `timeout` or `crash:<exit>` if the
+#             compile times out or dies by a signal, and
 #             `unavailable:no-wasmtime` (status SKIP) if the CLI is absent.
 #
 # Verdicts: ok | ok:<value> | error:<Kind> | crash:<exit>[-stack-overflow]
@@ -52,10 +54,14 @@
 #                  target/debug/ephapax)
 #     --update     rewrite the baseline column of expectations.tsv with the
 #                  observed verdicts (targets are kept); SKIP rows unchanged
+#   Environment: PROBE_BATTERY_DIR replaces tests/probes (the self-test
+#   scripts/test-probe-battery.sh uses it); PROBE_TIMEOUT is the per-command
+#   limit in seconds (default 60).
 set -uo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-PROBES="$ROOT_DIR/tests/probes"
+PROBES="${PROBE_BATTERY_DIR:-$ROOT_DIR/tests/probes}"
+PROBE_TIMEOUT="${PROBE_TIMEOUT:-60}"
 EXPECT="$PROBES/expectations.tsv"
 ENV_WAT="$PROBES/env.wat"
 
@@ -67,7 +73,7 @@ while [ $# -gt 0 ]; do
     --bin) bin="$2"; shift 2 ;;
     --out) out="$2"; shift 2 ;;
     --update) update=1; shift ;;
-    -h|--help) sed -n '2,52p' "$0"; exit 0 ;;
+    -h|--help) sed -n '2,59p' "$0"; exit 0 ;;
     *) echo "probe-battery: unknown argument $1" >&2; exit 3 ;;
   esac
 done
@@ -158,34 +164,49 @@ source_of() {
 run_row() { # PROBE COMMAND -> sets CODE TEXT VERDICT
   local probe="$1" cmd="$2" src dir base wasm
   src="$(source_of "$probe")"
-  [ -f "$src" ] || die "missing probe source for $probe ($src)"
+  [[ -f "$src" ]] || die "missing probe source for $probe ($src)"
   dir="$(dirname "$src")"
   base="$(basename "$src")"
   wasm="$stage/out/${probe//\//_}.wasm"
   mkdir -p "$stage/out"
   case "$cmd" in
     check|run)
-      TEXT="$(cd "$dir" && timeout 60 "$bin" "$cmd" "$base" 2>&1)"
+      TEXT="$(cd "$dir" && timeout "$PROBE_TIMEOUT" "$bin" "$cmd" "$base" 2>&1)"
       CODE=$?
       ;;
     compile)
-      TEXT="$(cd "$dir" && timeout 60 "$bin" compile "$base" -o "$wasm" 2>&1)"
+      TEXT="$(cd "$dir" && timeout "$PROBE_TIMEOUT" "$bin" compile "$base" -o "$wasm" 2>&1)"
       CODE=$?
       ;;
     wasm-run)
-      if ! { (cd "$dir" && timeout 60 "$bin" compile "$base" -o "$wasm" >/dev/null 2>&1); } 2>/dev/null; then
-        CODE=1; TEXT="compile failed"; VERDICT="no-module"; return
+      # Keep the compiler's exit status and output. An ordinary compile
+      # error means there is no module to run (`no-module`); a compile
+      # that times out or dies by a signal is reported as such (`timeout`,
+      # `crash:<exit>`), so it cannot pass as SAME against a no-module row.
+      TEXT="$(cd "$dir" && timeout "$PROBE_TIMEOUT" "$bin" compile "$base" -o "$wasm" 2>&1)"
+      CODE=$?
+      if [[ "$CODE" -ne 0 ]]; then
+        if [[ "$CODE" -eq 126 || "$CODE" -eq 127 ]]; then
+          die "could not execute compile for $probe (exit $CODE): $TEXT"
+        fi
+        TEXT="$(strip_ansi <<<"$TEXT")"
+        if [[ "$CODE" -eq 124 || "$CODE" -ge 128 ]]; then
+          VERDICT="$(classify compile "$CODE" "$TEXT")"
+        else
+          VERDICT="no-module"
+        fi
+        return
       fi
-      if [ -z "$wasmtime_bin" ]; then
+      if [[ -z "$wasmtime_bin" ]]; then
         CODE=0; TEXT="wasmtime CLI not found"; VERDICT="unavailable:no-wasmtime"; return
       fi
-      TEXT="$(timeout 60 "$wasmtime_bin" run --preload "env=$ENV_WAT" --invoke main "$wasm" 2>&1)"
+      TEXT="$(timeout "$PROBE_TIMEOUT" "$wasmtime_bin" run --preload "env=$ENV_WAT" --invoke main "$wasm" 2>&1)"
       CODE=$?
       ;;
     *) die "unknown command '$cmd' in $EXPECT" ;;
   esac
   # 126/127: the command itself could not be executed; never a verdict.
-  if [ "$CODE" -eq 126 ] || [ "$CODE" -eq 127 ]; then
+  if [[ "$CODE" -eq 126 || "$CODE" -eq 127 ]]; then
     die "could not execute $cmd for $probe (exit $CODE): $TEXT"
   fi
   TEXT="$(strip_ansi <<<"$TEXT")"

@@ -73,6 +73,10 @@ conformance:
 probe-battery *ARGS:
     bash scripts/probe-battery.sh {{ARGS}}
 
+# Self-test of the probe runner's verdicts (stub compiler; no cargo, no wasmtime)
+probe-battery-selftest:
+    bash scripts/test-probe-battery.sh
+
 # E6 aLib conformer: pinned aLib vectors against stdlib/ALib.eph under wasmtime
 alib-conformance:
     cargo test -p ephapax-cli --test alib_conformance -- --nocapture

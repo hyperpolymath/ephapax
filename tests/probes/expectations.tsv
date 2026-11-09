@@ -65,13 +65,13 @@ p1	wasm-run	ok:162	ok:162	survey: main returns 162 under wasmtime CLI 36.0.2
 total_loop	check	error:ParseError	error:ParseError	E1: @total is ParseError::AnnotationNotEnforced until enforced
 total_loop	compile	error:ParseError	error:ParseError	E1: ParseError::AnnotationNotEnforced
 total_loop	wasm-run	no-module	no-module	E1
-conformance/invalid/branch_inconsistent	check	error:ParseError	error:TypeError	rejected for the discipline violation it documents (E001-E005), not a ParseError: needs a v2-syntax rewrite (owner/T0d)
-conformance/invalid/branch_inconsistent	compile	error:ParseError	error:TypeError	as above
-conformance/invalid/linear_not_consumed	check	error:ParseError	error:TypeError	rejected for the discipline violation it documents (E001-E005), not a ParseError: needs a v2-syntax rewrite (owner/T0d)
-conformance/invalid/linear_not_consumed	compile	error:ParseError	error:TypeError	as above
-conformance/invalid/linear_used_twice	check	error:ParseError	error:TypeError	rejected for the discipline violation it documents (E001-E005), not a ParseError: needs a v2-syntax rewrite (owner/T0d)
-conformance/invalid/linear_used_twice	compile	error:ParseError	error:TypeError	as above
-conformance/invalid/region_escape	check	error:ParseError	error:TypeError	rejected for the discipline violation it documents (E001-E005), not a ParseError: needs a v2-syntax rewrite (owner/T0d)
-conformance/invalid/region_escape	compile	error:ParseError	error:TypeError	as above
-conformance/invalid/region_linear_not_consumed	check	error:ParseError	error:TypeError	rejected for the discipline violation it documents (E001-E005), not a ParseError: needs a v2-syntax rewrite (owner/T0d)
-conformance/invalid/region_linear_not_consumed	compile	error:ParseError	error:TypeError	as above
+conformance/invalid/branch_inconsistent	check	error:TypeError	error:TypeError	rejected for the discipline violation it documents (E001-E005), not a ParseError: rewritten in v2 syntax (W0 fix-up); eph_corpus_gate.rs asserts the exact TypeError
+conformance/invalid/branch_inconsistent	compile	error:TypeError	error:TypeError	as above
+conformance/invalid/linear_not_consumed	check	error:TypeError	error:TypeError	rejected for the discipline violation it documents (E001-E005), not a ParseError: rewritten in v2 syntax (W0 fix-up); eph_corpus_gate.rs asserts the exact TypeError
+conformance/invalid/linear_not_consumed	compile	error:TypeError	error:TypeError	as above
+conformance/invalid/linear_used_twice	check	error:TypeError	error:TypeError	rejected for the discipline violation it documents (E001-E005), not a ParseError: rewritten in v2 syntax (W0 fix-up); eph_corpus_gate.rs asserts the exact TypeError
+conformance/invalid/linear_used_twice	compile	error:TypeError	error:TypeError	as above
+conformance/invalid/region_escape	check	error:TypeError	error:TypeError	rejected for the discipline violation it documents (E001-E005), not a ParseError: rewritten in v2 syntax (W0 fix-up); eph_corpus_gate.rs asserts the exact TypeError
+conformance/invalid/region_escape	compile	error:TypeError	error:TypeError	as above
+conformance/invalid/region_linear_not_consumed	check	error:TypeError	error:TypeError	rejected for the discipline violation it documents (E001-E005), not a ParseError: rewritten in v2 syntax (W0 fix-up); eph_corpus_gate.rs asserts the exact TypeError
+conformance/invalid/region_linear_not_consumed	compile	error:TypeError	error:TypeError	as above

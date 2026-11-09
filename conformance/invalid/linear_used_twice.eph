@@ -1,11 +1,10 @@
 // SPDX-License-Identifier: MPL-2.0
 // Owner: Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk>
 // Conformance test: linear binding used twice — must be rejected.
-// Expected: compile error E002 "linear variable 'x' already consumed"
+// Expected: TypeError::LinearVariableReused(x) (E002), not a ParseError.
 
-fn example() -> i32 {
-    let! x = 42;
-    let a = x;     // first use — consumes x
-    let b = x;     // second use — ERROR: x already consumed
-    a + b
-}
+fn example(): I32 =
+  let! x = 42
+  let a = x
+  let b = x
+  a + b

@@ -1,11 +1,13 @@
 // SPDX-License-Identifier: MPL-2.0
 // Owner: Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk>
 // Conformance test: linear variable in region NOT consumed before exit.
-// Expected: compile error E004 "linear variable 'conn' in region 'r' not consumed"
+// Expected: a linear-not-consumed TypeError for `conn` (E004), not a
+// ParseError. Today the checker reports it at the end of the `let!` scope
+// (TypeError::LinearVariableNotConsumed), which closes before the region
+// does; TypeError::RegionLinearNotConsumed is accepted too.
 
-fn bad_region() -> i32 {
-    region r:
-        let! conn = Db.connect@r("postgres://localhost/test")
-        // conn is linear but never closed — region exit with unconsumed linear!
-        42
-}
+fn bad_region(): I32 =
+  region r {
+    let! conn = String.new@r("postgres://localhost/test")
+    42
+  }

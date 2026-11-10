@@ -141,6 +141,11 @@ pub enum TypeError {
     )]
     PolymorphicRecursion(Var),
 
+    /// `main` is the entry point: no call gives it type arguments, so no
+    /// monomorphic copy of it would exist.
+    #[error("`main` is the entry point of a program and cannot have type parameters")]
+    GenericMain,
+
     /// A projection (`t.i` or `xs[i]`) would consume the container and
     /// return one component, discarding unselected linear components.
     #[error(
@@ -2752,6 +2757,12 @@ fn type_check_module_inner(tc: &mut TypeChecker, module: &Module) -> Result<(), 
         check_fn(tc, name, type_params, params, ret_ty, body)?;
         if type_params.is_empty() {
             continue;
+        }
+        if name == "main" {
+            return Err(SpannedTypeError {
+                error: TypeError::GenericMain,
+                span: body.span,
+            });
         }
         // A type parameter can stand for a linear type. The check above
         // took each type parameter as an opaque type, so the body uses

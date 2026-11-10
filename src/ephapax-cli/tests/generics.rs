@@ -55,6 +55,18 @@ fn a_generic_function_runs_at_each_type_it_is_used_with() {
         }
     }
 
+    // An upper-case type parameter, also in an annotation of the body.
+    write(
+        tmp.path(),
+        "upper.eph",
+        "module upper\n\nfn apply<T>(x: T): T =\n  let f = fn(y: T) -> y\n  f(x)\n\n\
+         fn main(): I32 = apply(3)\n",
+    );
+    for args in [&["run", "upper.eph"][..], &["run", "--interp", "upper.eph"]] {
+        let out = ephapax(tmp.path(), args);
+        assert_eq!(String::from_utf8_lossy(&out.stdout).trim(), "3", "{args:?}");
+    }
+
     // A generic function of another module, and one that calls another
     // generic function.
     write(
@@ -130,6 +142,11 @@ fn generic_programs_the_checker_refuses() {
         (
             "fn zero<a>(): I32 = 0\n\nfn main(): I32 = zero()\n",
             "Cannot infer a type argument of the generic function `zero`",
+        ),
+        // No call gives the entry point its type arguments.
+        (
+            "fn main<a>(): I32 = 0\n",
+            "`main` is the entry point of a program and cannot have type parameters",
         ),
     ] {
         write(tmp.path(), "bad.eph", &format!("module bad\n\n{program}"));

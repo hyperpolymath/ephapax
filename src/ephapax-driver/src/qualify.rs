@@ -143,83 +143,58 @@ fn rename(name: &mut Var, scope: &Renames) {
 /// local `let helper = ...` is renamed together with its uses, so it
 /// shadows the renamed function as it shadowed the function before.
 fn rename_expr(expr: &mut Expr, scope: &Renames) {
-    // No `_` arm: a new expression form must say where its names are.
-    let children: Vec<&mut Expr> = match &mut expr.kind {
-        ExprKind::Lit(_) | ExprKind::StringNew { .. } => vec![],
-        ExprKind::Var(name) => {
-            rename(name, scope);
-            vec![]
-        }
-        ExprKind::StringConcat { left, right }
-        | ExprKind::Pair { left, right }
-        | ExprKind::BinOp { left, right, .. } => vec![left, right],
-        ExprKind::App { func, arg } => vec![func, arg],
-        ExprKind::ListIndex { list, index } => vec![list, index],
-        ExprKind::StringLen(e)
-        | ExprKind::Fst(e)
-        | ExprKind::Snd(e)
-        | ExprKind::Deref(e)
-        | ExprKind::Drop(e)
-        | ExprKind::Copy(e) => vec![e],
-        ExprKind::Inl { value: e, .. }
-        | ExprKind::Inr { value: e, .. }
-        | ExprKind::Region { body: e, .. }
-        | ExprKind::Borrow { inner: e, .. }
-        | ExprKind::UnaryOp { operand: e, .. }
-        | ExprKind::TupleIndex { tuple: e, .. } => vec![e],
-        ExprKind::Let {
-            name, value, body, ..
-        }
-        | ExprKind::LetLin {
-            name, value, body, ..
-        } => {
-            rename(name, scope);
-            vec![value, body]
-        }
-        ExprKind::Lambda { param, body, .. } => {
-            rename(param, scope);
-            vec![body]
-        }
+    // The names of this node: a use or a binder. No `_` arm: a new
+    // expression form must say if it has a name.
+    match &mut expr.kind {
+        ExprKind::Var(name)
+        | ExprKind::Let { name, .. }
+        | ExprKind::LetLin { name, .. }
+        | ExprKind::Lambda { param: name, .. } => rename(name, scope),
         ExprKind::Case {
-            scrutinee,
             left_var,
-            left_body,
             right_var,
-            right_body,
+            ..
         } => {
             rename(left_var, scope);
             rename(right_var, scope);
-            vec![scrutinee, left_body, right_body]
         }
-        ExprKind::Match { scrutinee, arms } => {
-            let mut children: Vec<&mut Expr> = vec![scrutinee];
+        ExprKind::Match { arms, .. } => {
             for arm in arms {
                 rename_pattern(&mut arm.pattern, scope);
-                children.extend(arm.guard.as_deref_mut());
-                children.push(&mut arm.body);
             }
-            children
         }
-        ExprKind::If {
-            cond,
-            then_branch,
-            else_branch,
-        } => vec![cond, then_branch, else_branch],
-        ExprKind::Block(exprs)
-        | ExprKind::ListLit(exprs)
-        | ExprKind::TupleLit(exprs)
-        | ExprKind::FFI { args: exprs, .. }
-        | ExprKind::Perform { args: exprs, .. } => exprs.iter_mut().collect(),
-        ExprKind::Handle { body, clauses } => {
-            let mut children: Vec<&mut Expr> = vec![body];
+        ExprKind::Handle { clauses, .. } => {
             for clause in clauses {
                 clause.params.iter_mut().for_each(|p| rename(p, scope));
-                children.push(&mut clause.body);
             }
-            children
         }
-    };
-    for child in children {
+        ExprKind::Lit(_)
+        | ExprKind::StringNew { .. }
+        | ExprKind::StringConcat { .. }
+        | ExprKind::StringLen(_)
+        | ExprKind::App { .. }
+        | ExprKind::Pair { .. }
+        | ExprKind::Fst(_)
+        | ExprKind::Snd(_)
+        | ExprKind::Inl { .. }
+        | ExprKind::Inr { .. }
+        | ExprKind::If { .. }
+        | ExprKind::Region { .. }
+        | ExprKind::Borrow { .. }
+        | ExprKind::Deref(_)
+        | ExprKind::Drop(_)
+        | ExprKind::Copy(_)
+        | ExprKind::Block(_)
+        | ExprKind::FFI { .. }
+        | ExprKind::Perform { .. }
+        | ExprKind::BinOp { .. }
+        | ExprKind::UnaryOp { .. }
+        | ExprKind::ListLit(_)
+        | ExprKind::ListIndex { .. }
+        | ExprKind::TupleLit(_)
+        | ExprKind::TupleIndex { .. } => {}
+    }
+    for child in expr.children_mut() {
         rename_expr(child, scope);
     }
 }

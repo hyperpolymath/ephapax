@@ -4907,6 +4907,28 @@ mod review_regressions {
     fn expr(kind: ExprKind) -> Expr {
         Expr::new(kind, Span::dummy())
     }
+    /// Region-exit accounting on its own: the conformance fixture is caught
+    /// earlier, at `let!` scope exit, so it cannot detect a regression here.
+    #[test]
+    fn region_exit_rejects_a_live_unconsumed_linear_binding() {
+        let mut tc = TypeChecker::new();
+        tc.ctx.enter_region("r".into());
+        tc.ctx
+            .extend("conn".into(), Ty::String("r".into()), BindingForm::LetBang);
+        tc.ctx.exit_region();
+        let err = tc
+            .check_region(
+                Span::dummy(),
+                &"r".into(),
+                &expr(ExprKind::Lit(Literal::I32(42))),
+            )
+            .unwrap_err();
+        assert!(matches!(
+            err.error,
+            TypeError::RegionLinearNotConsumed { ref var, .. } if var == "conn"
+        ));
+    }
+
     #[test]
     fn failed_let_restores_outer_binding() {
         let mut tc = TypeChecker::new();

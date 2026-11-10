@@ -384,23 +384,6 @@ impl Interpreter {
         Ok(())
     }
 
-    /// Look up an FFI symbol across all loaded libraries.
-    fn find_ffi_symbol<'a>(
-        &'a self,
-        name: &str,
-    ) -> Option<libloading::Symbol<'a, unsafe extern "C" fn(i64, i64, i64, i64, i64, i64) -> i64>>
-    {
-        for lib in &self.ffi_libraries {
-            // SAFETY: `lib` is a live, owned library handle borrowed from
-            // `self.ffi_libraries` for `'a`; the returned Symbol is tied to that
-            // borrow, so it cannot outlive the library it was resolved from.
-            if let Ok(sym) = unsafe { lib.get(name.as_bytes()) } {
-                return Some(sym);
-            }
-        }
-        None
-    }
-
     /// Load a module (register all function definitions and data decls).
     pub fn load_module(&mut self, module: &Module) {
         for decl in &module.decls {
@@ -1229,49 +1212,6 @@ impl Interpreter {
     }
 
     /// Call the main function (no arguments)
-    /// Temporary C string storage for FFI calls.
-    /// Kept alive for the duration of the FFI call to prevent dangling pointers.
-    /// Cleared after each FFI call returns.
-    fn value_to_i64_with_cstrings(
-        &self,
-        val: &Value,
-        cstrings: &mut Vec<std::ffi::CString>,
-    ) -> i64 {
-        match val {
-            Value::I32(n) => *n as i64,
-            Value::I64(n) => *n,
-            Value::Bool(b) => {
-                if *b {
-                    1
-                } else {
-                    0
-                }
-            }
-            Value::F32(f) => *f as i64,
-            Value::F64(f) => *f as i64,
-            Value::Unit => 0,
-            Value::String { data, .. } => {
-                // Convert to CString and return pointer as i64.
-                // The CString is stored in `cstrings` to keep it alive
-                // until the FFI call completes.
-                match std::ffi::CString::new(data.as_str()) {
-                    Ok(cstr) => {
-                        // SAFETY: the raw pointer stays valid because `cstr` is
-                        // immediately moved into `cstrings` (kept alive until the
-                        // FFI call completes) on the next line, so `ptr` never
-                        // dangles for the duration of its use.
-                        let ptr = cstr.as_ptr() as i64;
-                        cstrings.push(cstr);
-                        ptr
-                    }
-                    Err(_) => 0, // String contains null byte — return null
-                }
-            }
-            // Compound values: not directly passable to C ABI
-            _ => 0,
-        }
-    }
-
     pub fn call_main(&mut self) -> Result<Value, RuntimeError> {
         let name: SmolStr = "main".into();
 

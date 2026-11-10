@@ -9,7 +9,5 @@ license = "MPL-2.0"
 description = "Demand-driven incremental query engine for the ephapax compile pipeline"
 
 [dependencies]
-ephapax-syntax = { path = "../ephapax-syntax" }
-ephapax-parser = { path = "../ephapax-parser" }
-ephapax-typing = { path = "../ephapax-typing" }
+ephapax-driver = { path = "../ephapax-driver" }
 ephapax-wasm = { path = "../ephapax-wasm" }

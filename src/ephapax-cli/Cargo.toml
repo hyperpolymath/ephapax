@@ -20,14 +20,12 @@ ephapax-syntax.workspace = true
 ephapax-ir.workspace = true
 ephapax-lexer.workspace = true
 ephapax-parser.workspace = true
-ephapax-surface = { path = "../ephapax-surface" }
-ephapax-desugar = { path = "../ephapax-desugar" }
+ephapax-driver.workspace = true
 ephapax-typing.workspace = true
 ephapax-wasm.workspace = true
 ephapax-interp.workspace = true
 ephapax-repl.workspace = true
 ephapax-package.workspace = true
-ephapax-query.workspace = true
 # `typed-wasm-verify` is optional: it powers `ephapax compile
 # --verify-ownership`, which is a post-codegen L7+L10 verifier. With
 # the feature OFF the CLI builds + runs without any reference to the
@@ -44,6 +42,8 @@ serde_json.workspace = true
 # (the always-on floor; distinct from the optional --verify-ownership
 # semantic check). Same crate the wasm_e2e / validate-wasm gates use.
 wasmparser = "0.221"
+# `ephapax run` executes the compiled module in-process (v2 plan E4).
+wasmtime.workspace = true
 
 [features]
 default = ["typed-wasm-verify"]
@@ -55,7 +55,8 @@ default = ["typed-wasm-verify"]
 "typed-wasm-verify" = ["dep:typed-wasm-verify"]
 
 [dev-dependencies]
-wasmtime.workspace = true
+ephapax-desugar = { path = "../ephapax-desugar" }
+ephapax-query.workspace = true
 proptest = { workspace = true }
 tempfile = "3"
 # SHA-256 pin check of the vendored aLib vectors (tests/alib_conformance.rs).

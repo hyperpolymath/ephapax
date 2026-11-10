@@ -52,15 +52,15 @@ g5	compile	error:TypeError	error:*	E1: named raw-FFI error, not an invalid modul
 g5	wasm-run	no-module	no-module	E1
 gen_angle	check	error:TypeError	ok	E7 generics: id<a> instantiated at I32
 gen_angle	compile	error:TypeError	ok	E7
-gen_angle	run	ok:3	ok:3	E7 (interpreter already prints 3: check and run disagree, E3)
+gen_angle	run	error:TypeError	ok:3	E7 (since E3, run loads through ephapax-driver and rejects what check rejects; before E3 the interpreter path printed 3)
 gen_angle	wasm-run	no-module	ok:3	E7
 qa/app2	check	error:DesugarError	ok	E7: qualified M.Ctor(x) across modules
 qa/app2	compile	error:DesugarError	ok	E7
-qa/app2	run	error:TypeError	ok:9	E7 + E3 (run goes through ephapax-driver::load_program)
+qa/app2	run	error:DesugarError	ok:9	E7 + E3 (run goes through ephapax-driver::load_program)
 qa/app2	wasm-run	no-module	ok:9	E7
 p1	check	ok	ok	already accepted
 p1	compile	ok	ok	already compiles (959 B in the survey)
-p1	run	error:ParseError	ok:162	E3/E4: ephapax run executes the wasm and prints 162
+p1	run	ok:162	ok:162	E3/E4: ephapax run executes the wasm and prints 162
 p1	wasm-run	ok:162	ok:162	survey: main returns 162 under wasmtime CLI 36.0.2
 total_loop	check	error:ParseError	error:ParseError	E1: @total is ParseError::AnnotationNotEnforced until enforced
 total_loop	compile	error:ParseError	error:ParseError	E1: ParseError::AnnotationNotEnforced

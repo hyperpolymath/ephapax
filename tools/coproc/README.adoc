@@ -44,9 +44,11 @@ linear guarantee.
 == Build & use
 
 NOTE: Since v2 plan rung E1 (2026-11-09) the type checker rejects raw
-`__ffi`, so `ephapax run ... -L libephapax_coproc.so` no longer reaches the
+`__ffi`, so `ephapax run --interp ... -L libephapax_coproc.so` no longer reaches the
 shim: the interpreter's `-L` loader serves only raw `__ffi` calls and does
-not yet bind `extern` declarations. The 42-vs-0 proof below is historical.
+not yet bind `extern` declarations. Since rung E4 `ephapax run` executes the
+compiled wasm, and `-L` is accepted only with `--interp` (the legacy
+interpreter). The 42-vs-0 proof below is historical.
 Re-wiring the seam through `extern` is rung E10.
 
 [source,sh]
@@ -56,7 +58,7 @@ zig build-lib -dynamic -O ReleaseSafe \
     tools/coproc/ephapax_coproc.zig -femit-bin=libephapax_coproc.so
 
 # Run an ephapax program that uses Coproc, with the seam linked:
-ephapax run myprog.eph -L libephapax_coproc.so
+ephapax run --interp myprog.eph -L libephapax_coproc.so
 ----
 
 Verified end-to-end: a program calling `eph_coproc_dispatch(_, _, 20, 22)`

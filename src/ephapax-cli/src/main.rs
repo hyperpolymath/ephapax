@@ -7,17 +7,17 @@
 //!
 //! The main entry point for the Ephapax compiler and tools.
 
-mod import_resolver;
+mod runner;
 
 // Note: ariadne removed for now - using simple error output
 use clap::{Parser, Subcommand};
 use colored::Colorize;
-use ephapax_desugar::{desugar, DataRegistry, Desugarer};
+use ephapax_driver::DriverError;
 use ephapax_interp::Interpreter;
 use ephapax_lexer::Lexer;
-use ephapax_parser::{parse, parse_module, parse_surface_module};
+use ephapax_parser::{parse, parse_module};
 use ephapax_repl::Repl;
-use ephapax_typing::{type_check_module, type_check_module_with_registry, ModuleRegistry};
+use ephapax_syntax::{BaseTy, Decl, Ty};
 // AST dump support (sexpr + json output)
 #[allow(unused_imports)]
 use std::fs;
@@ -56,11 +56,19 @@ enum Commands {
         /// File to run
         file: PathBuf,
 
-        /// Native shared libraries to load for FFI (e.g. libgossamer.so)
+        /// Run with the legacy tree-walking interpreter instead of
+        /// compiling to WebAssembly. The interpreter is incomplete (no
+        /// `extern`, no program arguments): tests/interp-known-failures.txt
+        /// lists the programs on which it disagrees with the wasm path.
+        #[arg(long)]
+        interp: bool,
+
+        /// Native shared libraries to load for FFI (e.g. libgossamer.so).
+        /// Interpreter only: rejected without --interp.
         #[arg(long = "ffi-lib", short = 'L')]
         ffi_libs: Vec<String>,
 
-        /// Arguments to pass to the program
+        /// Arguments to pass to the program (read through `import Argv`)
         #[arg(trailing_var_arg = true)]
         args: Vec<String>,
     },
@@ -193,9 +201,10 @@ fn main() -> ExitCode {
         Some(Commands::Repl { preload }) => run_repl(preload, cli.verbose),
         Some(Commands::Run {
             file,
+            interp,
             ffi_libs,
-            args: _,
-        }) => run_file(&file, &ffi_libs, cli.verbose),
+            args,
+        }) => run_file(&file, interp, &ffi_libs, &args, cli.verbose),
         Some(Commands::Check { files, mode }) => check_files(&files, mode.as_deref(), cli.verbose),
         Some(Commands::Compile {
             file,
@@ -228,7 +237,7 @@ fn main() -> ExitCode {
         None => {
             // If a file is given without subcommand, run it
             if let Some(file) = cli.file {
-                run_file(&file, &[], cli.verbose)
+                run_file(&file, false, &[], &[], cli.verbose)
             } else {
                 // No file, start REPL
                 run_repl(None, cli.verbose)
@@ -256,53 +265,118 @@ fn run_repl(preload: Option<PathBuf>, verbose: bool) -> Result<(), String> {
 
     // Preload file if specified
     if let Some(path) = preload {
-        let content = fs::read_to_string(&path)
-            .map_err(|e| format!("Cannot read {}: {}", path.display(), e))?;
-        repl.load_module(&content, path.to_str().unwrap_or("preload"))
-            .map_err(|e| e.to_string())?;
+        repl.load_path(&path).map_err(|e| e.to_string())?;
         println!("{} {}", "Preloaded:".green(), path.display());
     }
 
     repl.run()
 }
 
-fn run_file(path: &PathBuf, ffi_libs: &[String], verbose: bool) -> Result<(), String> {
-    let content =
-        fs::read_to_string(path).map_err(|e| format!("Cannot read {}: {}", path.display(), e))?;
+/// Load a program through the one front end. On failure, print the
+/// details to stderr and return the one-line summary.
+fn load_program(path: &Path, stdlib: Option<PathBuf>) -> Result<ephapax_driver::Program, String> {
+    let stdlib_dir = ephapax_driver::stdlib_dir(stdlib);
+    ephapax_driver::load_program(path, stdlib_dir.as_deref()).map_err(|e| report_load_error(&e))
+}
 
-    let filename = path.to_str().unwrap_or("input");
-
-    // Drive parse + type-check through the demand-driven query engine.
-    // For a single-shot `ephapax run` this is just a thin pass-through (the
-    // db is discarded after one query), but it routes the real CLI path
-    // through `ephapax-query` and is exactly the surface a long-lived
-    // `QueryDb` in the LSP/REPL holds to skip re-work across edits.
-    let mut db = ephapax_query::QueryDb::new();
-    db.set_source_text(filename, content.clone());
-
-    // Parse as module
-    let module = db.parsed(filename).map_err(|errors| {
-        for error in &errors {
-            report_parse_error(filename, &content, error);
+/// Describe a load failure. A type error is also printed to stderr with
+/// its line and column; the returned one-line summary carries the error's
+/// debug form, which names the exact `TypeError` variant.
+fn report_load_error(e: &DriverError) -> String {
+    match e {
+        DriverError::Type {
+            module,
+            path,
+            source_text,
+            error,
+        } => {
+            report_type_error(&path.to_string_lossy(), source_text, error);
+            format!("Type error in module `{module}`: {error:?}")
         }
-        format!("{} parse error(s)", errors.len())
-    })?;
+        _ => e.to_string(),
+    }
+}
 
-    if verbose {
-        println!("{} Parsed {} declarations", "✓".green(), module.decls.len());
+/// `ephapax run`: load, then execute `main`. By default the program is
+/// compiled and the wasm runs under wasmtime, with `args` reachable
+/// through `import Argv` and the program path as `argv[0]`. `--interp`
+/// uses the legacy interpreter on the same loaded program.
+fn run_file(
+    path: &Path,
+    interp: bool,
+    ffi_libs: &[String],
+    args: &[String],
+    verbose: bool,
+) -> Result<(), String> {
+    if !interp && !ffi_libs.is_empty() {
+        return Err(
+            "-L/--ffi-lib only applies to the interpreter; add --interp to use it".to_string(),
+        );
     }
 
-    // Type check
-    db.typed(filename).map_err(|e| {
-        report_type_error(filename, &content, &e);
-        format!("Type error: {}", e)
-    })?;
-
+    let program = load_program(path, None)?;
     if verbose {
         println!("{} Type check passed", "✓".green());
     }
+    let module = program.into_merged();
 
-    // Run with interpreter
+    if interp {
+        return run_interp(&module, ffi_libs, verbose);
+    }
+
+    let main = module.decls.iter().find_map(|d| match d {
+        Decl::Fn {
+            name,
+            params,
+            ret_ty,
+            ..
+        } if name == "main" => Some((params.len(), ret_ty.clone())),
+        _ => None,
+    });
+    let Some((n_params, ret_ty)) = main else {
+        if verbose {
+            println!("{} Module loaded (no main function)", "✓".green());
+        }
+        return Ok(());
+    };
+    if n_params != 0 {
+        return Err(format!(
+            "`main` takes {n_params} parameter(s); `ephapax run` calls `main` with none"
+        ));
+    }
+
+    let wasm = ephapax_wasm::compile_module(&module).map_err(|e| format!("Codegen error: {e}"))?;
+    wasmparser::validate(&wasm)
+        .map_err(|e| format!("emitted wasm failed structural validation: {e}"))?;
+
+    let mut argv = vec![path.to_string_lossy().into_owned()];
+    argv.extend(args.iter().cloned());
+    let result = runner::run_main(&wasm, argv)?;
+
+    // Print scalars the way the interpreter prints them.
+    use wasmtime::Val;
+    match (&ret_ty, result) {
+        (Ty::Base(BaseTy::Unit), _) => println!("()"),
+        (Ty::Base(BaseTy::Bool), Val::I32(n)) => println!("{}", n != 0),
+        (Ty::Base(BaseTy::I32), Val::I32(n)) => println!("{n}"),
+        (Ty::Base(BaseTy::I64), Val::I64(n)) => println!("{n}i64"),
+        (Ty::Base(BaseTy::F32), Val::F32(bits)) => println!("{}f32", f32::from_bits(bits)),
+        (Ty::Base(BaseTy::F64), Val::F64(bits)) => println!("{}", f64::from_bits(bits)),
+        // A string, pair or sum comes back as an address in linear memory.
+        _ => eprintln!(
+            "{} `main` returned a non-scalar value ({:?}); it is not printed",
+            "note:".yellow().bold(),
+            ret_ty
+        ),
+    }
+    Ok(())
+}
+
+fn run_interp(
+    module: &ephapax_syntax::Module,
+    ffi_libs: &[String],
+    verbose: bool,
+) -> Result<(), String> {
     let mut interp = Interpreter::new();
 
     // Load FFI libraries (native shared objects for __ffi() calls)
@@ -318,7 +392,7 @@ fn run_file(path: &PathBuf, ffi_libs: &[String], verbose: bool) -> Result<(), St
         }
     }
 
-    interp.load_module(&module);
+    interp.load_module(module);
 
     // Look for main function and run it
     if interp.has_function("main") {
@@ -368,75 +442,29 @@ fn reject_opt_level(opt_level: u8) -> Result<(), String> {
 fn check_files(files: &[PathBuf], mode: Option<&str>, verbose: bool) -> Result<(), String> {
     reject_mode_flag(mode)?;
 
+    let stdlib_dir = ephapax_driver::stdlib_dir(None);
     let mut errors = 0;
     let mut checked = 0;
 
     for path in files {
-        let content = match fs::read_to_string(path) {
-            Ok(c) => c,
-            Err(e) => {
-                eprintln!("{} Cannot read {}: {}", "✗".red(), path.display(), e);
-                errors += 1;
-                continue;
-            }
-        };
-
-        let filename = path.to_str().unwrap_or("input");
-
-        // Parse → Desugar → Type check
-        // Try surface parser first (supports data/match/constructors).
-        // Falls back to core parser if surface parsing fails.
-        let module = match parse_surface_module(&content, filename) {
-            Ok(surface_module) => {
-                // Desugar surface → core
-                match desugar(&surface_module) {
-                    Ok(core) => core,
-                    Err(e) => {
-                        eprintln!("{} {} desugar error: {}", "✗".red(), path.display(), e);
-                        errors += 1;
-                        continue;
-                    }
-                }
-            }
-            Err(_) => {
-                // Fallback to core parser (for files without surface syntax)
-                match parse_module(&content, filename) {
-                    Ok(m) => m,
-                    Err(parse_errors) => {
-                        for error in &parse_errors {
-                            report_parse_error(filename, &content, error);
-                        }
-                        errors += 1;
-                        continue;
-                    }
-                }
-            }
-        };
-
-        // Type check, then the same unsupported-construct validation
-        // codegen runs (effects, raw FFI), so `check` never accepts a
-        // file that `compile` must reject (v2 plan E1).
-        let outcome = type_check_module(&module).map_err(|e| {
-            report_type_error(filename, &content, &e);
-        });
-        let outcome = outcome.and_then(|()| {
-            ephapax_wasm::validate_supported(&module).map_err(|e| {
-                eprintln!("{} {}: Codegen error: {}", "✗".red(), path.display(), e);
-            })
-        });
-        match outcome {
-            Ok(()) => {
+        match ephapax_driver::load_program(path, stdlib_dir.as_deref()) {
+            Ok(program) => {
                 if verbose {
                     println!(
                         "{} {} ({} declarations)",
                         "✓".green(),
                         path.display(),
-                        module.decls.len()
+                        program.root().core.decls.len()
                     );
                 }
                 checked += 1;
             }
-            Err(()) => {
+            Err(e) => {
+                let summary = report_load_error(&e);
+                // A type error was already printed with its position.
+                if !matches!(e, DriverError::Type { .. }) {
+                    eprintln!("{} {}", "✗".red(), summary);
+                }
                 errors += 1;
             }
         }
@@ -474,131 +502,24 @@ fn compile_file(
     reject_mode_flag(mode)?;
     reject_opt_level(opt_level)?;
 
-    let base_dir = path
-        .parent()
-        .map(|p| p.to_path_buf())
-        .unwrap_or_else(|| PathBuf::from("."));
-
-    // Stdlib search dir: --stdlib flag > $EPHAPAX_STDLIB > the source
-    // tree's stdlib/ (dev builds). None if none of those exist.
-    let stdlib_dir = stdlib
-        .or_else(|| std::env::var_os("EPHAPAX_STDLIB").map(PathBuf::from))
-        .or_else(|| {
-            let dev = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../stdlib");
-            dev.canonicalize().ok()
-        })
-        .filter(|p| p.is_dir());
-
-    // Try the multi-module pipeline first: load + parse the import graph
-    // (modules returned in topological order, dependencies first, root
-    // last). If the surface parser rejects the root file, fall back to
-    // the legacy single-file core-parser path.
-    let loaded = match import_resolver::load_program(path, &base_dir, stdlib_dir.as_deref()) {
-        Ok(l) => l,
-        Err(import_resolver::ResolveError::Parse { .. }) => {
-            // Surface parse failed on the root — legacy core-parser fallback.
-            let content = fs::read_to_string(path)
-                .map_err(|e| format!("Cannot read {}: {}", path.display(), e))?;
-            let module = parse_module(&content, &filename).map_err(|errors| {
-                for error in &errors {
-                    report_parse_error(&filename, &content, error);
-                }
-                format!("{} parse error(s)", errors.len())
-            })?;
-            if verbose {
-                println!("{} Parsed {} declarations", "✓".green(), module.decls.len());
-            }
-            type_check_module(&module).map_err(|e| {
-                report_type_error(&filename, &content, &e);
-                format!("Type error: {}", e)
-            })?;
-            if verbose {
-                println!("{} Type check passed", "✓".green());
-            }
-            return finish_compile(
-                module,
-                &filename,
-                path,
-                output,
-                opt_level,
-                debug,
-                verify_ownership,
-                verbose,
-            );
-        }
-        Err(e) => return Err(e.to_string()),
-    };
+    let program = load_program(path, stdlib)?;
 
     if verbose {
         println!(
             "{} Resolved {} module(s) in import graph",
             "✓".green(),
-            loaded.len()
+            program.modules.len()
         );
-    }
-
-    // Multi-module desugar: chain a single DataRegistry across all modules
-    // so imported `data` and `extern type` items are visible.
-    let mut desugarer = Desugarer::with_registry(DataRegistry::new());
-    let mut core_modules = Vec::with_capacity(loaded.len());
-    for lm in &loaded {
-        let core = desugarer
-            .desugar_module(&lm.surface)
-            .map_err(|e| format!("Desugar error in {}: {}", lm.file_path.display(), e))?;
-        core_modules.push(core);
-    }
-
-    // Multi-module typecheck: chain a single ModuleRegistry so imports
-    // resolve.
-    let mut module_registry = ModuleRegistry::new();
-    for core in &core_modules {
-        type_check_module_with_registry(core, &mut module_registry)
-            .map_err(|e| format!("Type error in module `{}`: {:?}", core.name, e))?;
-    }
-
-    // Merge all imported modules into the root for codegen. Wasm produces
-    // a single binary; each imported module's `Fn` declarations become
-    // part of the same wasm module. Duplicate fn/extern names across
-    // modules are dropped (first-seen wins).
-    let mut merged = core_modules
-        .pop()
-        .ok_or_else(|| "import graph produced no modules".to_string())?;
-    // Dedup keys: `fn:<name>` for functions, `extern:<abi>` for whole
-    // extern blocks (an extern block emits one wasm import per fn item;
-    // re-emitting the same ABI block from another module would produce
-    // duplicate imports). First-seen wins.
-    fn dedup_key(d: &ephapax_syntax::Decl) -> Option<String> {
-        match d {
-            ephapax_syntax::Decl::Fn { name, .. } => Some(format!("fn:{name}")),
-            ephapax_syntax::Decl::Extern { abi, .. } => Some(format!("extern:{abi}")),
-            _ => None,
-        }
-    }
-    let mut seen: std::collections::HashSet<String> =
-        merged.decls.iter().filter_map(dedup_key).collect();
-    for dep in core_modules.into_iter() {
-        for decl in dep.decls {
-            if let Some(key) = dedup_key(&decl) {
-                if !seen.insert(key) {
-                    continue; // Skip duplicate fn / extern block.
-                }
-            }
-            merged.decls.push(decl);
-        }
-    }
-    let module = merged;
-
-    if verbose {
         println!(
             "{} Parsed {} declarations in root module",
             "✓".green(),
-            module.decls.len()
+            program.root().core.decls.len()
         );
         println!("{} Type check passed", "✓".green());
     }
 
     finish_compile(
-        module,
+        program.into_merged(),
         &filename,
         path,
         output,
@@ -609,8 +530,7 @@ fn compile_file(
     )
 }
 
-/// Codegen + optional ownership verification + output write. Shared by
-/// the multi-module and legacy single-file compile paths.
+/// Codegen + optional ownership verification + output write.
 #[allow(clippy::too_many_arguments)] // CLI entry point: 8 options vs the 7 default threshold
 fn finish_compile(
     module: ephapax_syntax::Module,
@@ -992,17 +912,6 @@ fn handle_package_command(cmd: PackageCommands, verbose: bool) -> Result<(), Str
             Ok(())
         }
     }
-}
-
-fn report_parse_error(_filename: &str, _source: &str, error: &ephapax_parser::ParseError) {
-    let span = error.span();
-    eprintln!(
-        "{}: {} at {}..{}",
-        "Parse error".red().bold(),
-        error,
-        span.start,
-        span.end
-    );
 }
 
 fn report_type_error(filename: &str, source: &str, error: &ephapax_typing::SpannedTypeError) {

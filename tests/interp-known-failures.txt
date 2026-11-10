@@ -1,0 +1,14 @@
+# SPDX-License-Identifier: MPL-2.0
+# Owner: Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk>
+#
+# interp-known-failures.txt — compiling corpus files on which the legacy
+# interpreter (`ephapax run --interp`) disagrees with the wasm path
+# (`ephapax run`). Gate: src/ephapax-cli/tests/run_wasm.rs (v2 plan E4).
+#
+# The wasm path is the reference. The gate fails if a listed file starts
+# to agree (remove it here) or an unlisted file disagrees.
+#
+# Paths are repo-root-relative, one per line, '#' comments allowed.
+
+# The interpreter has no `extern` support: `Unbound variable: argv_count`.
+tests/v2-grammar/fixtures/stdlib-import/app.eph

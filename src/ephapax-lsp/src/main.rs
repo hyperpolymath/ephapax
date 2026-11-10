@@ -12,9 +12,8 @@
 //! - Document symbols
 //! - Keyword and declaration completions
 
-use ephapax_parser::parse_module;
+use ephapax_driver::DriverError;
 use ephapax_syntax::{Decl, Expr, ExprKind, ExternItem, Module, Span, Ty};
-use ephapax_typing::type_check_module;
 use std::collections::HashMap;
 use std::sync::Mutex;
 use tower_lsp::jsonrpc::Result;
@@ -83,57 +82,11 @@ impl Backend {
 
     /// Parse, type-check, and cache analysis for a document.
     async fn analyze_document(&self, uri: &Url, text: &str) -> Vec<Diagnostic> {
-        let mut diagnostics = Vec::new();
-        let mut declarations = Vec::new();
-        let mut module_opt = None;
-
-        // Parse the document
-        match parse_module(text, "document") {
-            Ok(module) => {
-                // Extract declarations
-                declarations = extract_declarations(&module, text);
-                module_opt = Some(module.clone());
-
-                // Type-check
-                if let Err(err) = type_check_module(&module) {
-                    diagnostics.push(Diagnostic {
-                        range: span_to_range(text, err.span),
-                        severity: Some(DiagnosticSeverity::ERROR),
-                        code: None,
-                        source: Some("ephapax-typing".to_string()),
-                        message: format!("Type error: {}", err),
-                        related_information: None,
-                        tags: None,
-                        code_description: None,
-                        data: None,
-                    });
-                }
-            }
-            Err(errors) => {
-                for err in errors {
-                    diagnostics.push(Diagnostic {
-                        range: Range {
-                            start: Position {
-                                line: 0,
-                                character: 0,
-                            },
-                            end: Position {
-                                line: 0,
-                                character: 0,
-                            },
-                        },
-                        severity: Some(DiagnosticSeverity::ERROR),
-                        code: None,
-                        source: Some("ephapax".to_string()),
-                        message: format!("Parse error: {:?}", err),
-                        related_information: None,
-                        tags: None,
-                        code_description: None,
-                        data: None,
-                    });
-                }
-            }
-        }
+        let (diagnostics, module_opt) = analyze(uri, text);
+        let declarations = module_opt
+            .as_ref()
+            .map(|m| extract_declarations(m, text))
+            .unwrap_or_default();
 
         // Cache the state
         if let Ok(mut docs) = self.documents.lock() {
@@ -731,6 +684,57 @@ fn format_ty(ty: &Ty) -> String {
 }
 
 /// Convert byte offset span to LSP range.
+/// Load a document through the one front end (`ephapax-driver`, the same
+/// pipeline `ephapax check` runs) and turn the outcome into diagnostics.
+/// Imports resolve next to the document's file, then in the stdlib.
+/// Returns the document's own core module when it parses.
+fn analyze(uri: &Url, text: &str) -> (Vec<Diagnostic>, Option<Module>) {
+    fn diagnostic(range: Range, source: &str, message: String) -> Diagnostic {
+        Diagnostic {
+            range,
+            severity: Some(DiagnosticSeverity::ERROR),
+            source: Some(source.to_string()),
+            message,
+            ..Diagnostic::default()
+        }
+    }
+
+    let base_dir = uri
+        .to_file_path()
+        .ok()
+        .and_then(|p| p.parent().map(|d| d.to_path_buf()));
+    let stdlib = ephapax_driver::stdlib_dir(None);
+    let program = match ephapax_driver::parse_source(
+        text,
+        "document",
+        base_dir.as_deref(),
+        stdlib.as_deref(),
+    ) {
+        Ok(program) => program,
+        Err(e) => {
+            return (
+                vec![diagnostic(Range::default(), "ephapax", e.to_string())],
+                None,
+            )
+        }
+    };
+    let diagnostics = match ephapax_driver::check_program(&program) {
+        Ok(()) => Vec::new(),
+        Err(e) => {
+            // A type error in this document has a position. Any other
+            // failure, or one in an imported module, goes at the top.
+            let range = match &e {
+                DriverError::Type { path, error, .. } if *path == program.root().file_path => {
+                    span_to_range(text, error.span)
+                }
+                _ => Range::default(),
+            };
+            vec![diagnostic(range, "ephapax-typing", e.to_string())]
+        }
+    };
+    (diagnostics, Some(program.root().core.clone()))
+}
+
 fn span_to_range(text: &str, span: Span) -> Range {
     let start = offset_to_position(text, span.start);
     let end = offset_to_position(text, span.end);
@@ -904,4 +908,53 @@ async fn main() {
 
     let (service, socket) = LspService::new(Backend::new);
     Server::new(stdin, stdout, socket).serve(service).await;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::{Path, PathBuf};
+
+    fn eph_files(dir: &Path, out: &mut Vec<PathBuf>) {
+        for entry in std::fs::read_dir(dir).into_iter().flatten().flatten() {
+            let path = entry.path();
+            let name = entry.file_name().to_string_lossy().into_owned();
+            if path.is_dir() {
+                if !matches!(
+                    name.as_str(),
+                    "target" | ".git" | ".claude" | "node_modules"
+                ) {
+                    eph_files(&path, out);
+                }
+            } else if name.ends_with(".eph") {
+                out.push(path);
+            }
+        }
+    }
+
+    /// v2 plan rung E3: the LSP reports no diagnostic exactly when
+    /// `ephapax-driver` loads the file, on every .eph file in the repo
+    /// (LSP twin of src/ephapax-cli/tests/driver_agreement.rs).
+    #[test]
+    fn diagnostics_agree_with_the_driver_on_every_corpus_file() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../..")
+            .canonicalize()
+            .expect("repo root");
+        let stdlib = ephapax_driver::stdlib_dir(None);
+        let mut files = Vec::new();
+        eph_files(&root, &mut files);
+        assert!(files.len() > 100, "corpus walk found too few files");
+
+        let mut clean = 0;
+        for path in &files {
+            let text = std::fs::read_to_string(path).expect("read corpus file");
+            let uri = Url::from_file_path(path).expect("file URL");
+            let lsp_ok = analyze(&uri, &text).0.is_empty();
+            let driver_ok = ephapax_driver::load_program(path, stdlib.as_deref()).is_ok();
+            assert_eq!(lsp_ok, driver_ok, "{}", path.display());
+            clean += usize::from(lsp_ok);
+        }
+        assert!(clean > 0, "no corpus file is clean: gate misconfigured");
+    }
 }

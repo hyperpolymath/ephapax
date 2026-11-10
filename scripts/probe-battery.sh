@@ -23,7 +23,8 @@
 #   check     ephapax check <probe>.eph
 #   compile   ephapax compile <probe>.eph -o <tmp>.wasm
 #             (compile always runs wasmparser validation before writing)
-#   run       ephapax run <probe>.eph   (today: the interpreter)
+#   run       ephapax run <probe>.eph   (compiles, then runs the wasm
+#             in-process; since v2 plan rung E4)
 #   wasm-run  compile, then `wasmtime run --preload env=env.wat --invoke main`
 #             with the wasmtime CLI; verdict `no-module` if compile fails
 #             with an ordinary error, `timeout` or `crash:<exit>` if the

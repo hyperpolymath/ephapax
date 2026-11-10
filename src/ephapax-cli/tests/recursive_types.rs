@@ -529,22 +529,24 @@ fn data_types_that_refer_to_each_other_run() {
         );
     }
     // A `Tree` is not a `Forest`, and a `Forest` is not a `Tree`: in a
-    // constructor of the folded type, and as an argument of a function.
+    // constructor of the folded type (`FCons`), and in a constructor of
+    // the type that is not folded (`Node`).
     let forest = "data Tree = Leaf | Node(I32, Forest)\n\n\
         data Forest = FNil | FCons(Tree, Forest)\n\n\
         fn size(t: Tree): I32 = match t of | Leaf => 0 | Node(v, kids) => v end\n\n";
-    for (name, main) in [
+    for (name, main, want) in [
         (
             "forest_as_tree",
             "match FCons(FNil, FNil) of | FNil => 0 | FCons(t, rest) => 1 end",
-        ),
-        ("tree_as_forest", "size(Node(1, Leaf))"),
-    ] {
-        check_refuses(
-            name,
-            &format!("{forest}fn main(): I32 = {main}\n"),
             "Type mismatch",
-        );
+        ),
+        (
+            "tree_as_forest",
+            "size(Node(1, Leaf))",
+            "constructor `Node`",
+        ),
+    ] {
+        check_refuses(name, &format!("{forest}fn main(): I32 = {main}\n"), want);
     }
 }
 

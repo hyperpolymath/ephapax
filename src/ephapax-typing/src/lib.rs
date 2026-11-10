@@ -80,6 +80,17 @@ pub enum TypeError {
     #[error("Type annotation mismatch: declared {declared:?}, but value has type {actual:?}")]
     AnnotationMismatch { declared: Ty, actual: Ty },
 
+    /// The arguments of a constructor do not give the type that the
+    /// declaration of its `data` type gives.
+    #[error(
+        "constructor `{ctor}`: the declaration gives {declared:?}, but the arguments give {actual:?}"
+    )]
+    ConstructorMismatch {
+        ctor: String,
+        declared: Ty,
+        actual: Ty,
+    },
+
     #[error("Not yet supported in the core type checker: {0}. Use the surface (parse_surface_module → desugar) path instead.")]
     NotYetSupportedInCore(&'static str),
 
@@ -1421,17 +1432,27 @@ impl TypeChecker {
         let value_ty = self.check(value)?;
 
         if let Some(declared) = ty_ann {
+            // The desugarer gives a constructor the binder `#<name>` and
+            // the declared type of its `data` type, which binds the type
+            // parameters. A written annotation binds none.
+            let declared = &self.instantiate(declared.clone()).0;
             self.unify(s, declared, &value_ty).map_err(|error| {
                 if matches!(error.error, TypeError::LinearPatternDiscard(_)) {
                     return error;
                 }
-                self.at(
-                    s,
-                    TypeError::AnnotationMismatch {
-                        declared: declared.clone(),
-                        actual: self.resolve(&value_ty),
+                let actual = self.resolve(&value_ty);
+                let error = match name.strip_prefix('#') {
+                    Some(ctor) => TypeError::ConstructorMismatch {
+                        ctor: ctor.into(),
+                        declared: self.resolve(declared),
+                        actual,
                     },
-                )
+                    None => TypeError::AnnotationMismatch {
+                        declared: declared.clone(),
+                        actual,
+                    },
+                };
+                self.at(s, error)
             })?;
         }
 

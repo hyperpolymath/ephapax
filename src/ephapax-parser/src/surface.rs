@@ -1356,21 +1356,16 @@ fn parse_postfix_expr(pair: pest::iterators::Pair<Rule>) -> Result<SurfaceExpr, 
                                     message: "Invalid tuple index".into(),
                                     span: span_from_pair(&member),
                                 })?;
-                            if idx == 0 {
-                                result =
-                                    SurfaceExpr::new(SurfaceExprKind::Fst(Box::new(result)), span);
-                            } else if idx == 1 {
-                                result =
-                                    SurfaceExpr::new(SurfaceExprKind::Snd(Box::new(result)), span);
-                            } else {
-                                result = SurfaceExpr::new(
-                                    SurfaceExprKind::TupleIndex {
-                                        tuple: Box::new(result),
-                                        index: idx,
-                                    },
-                                    span,
-                                );
-                            }
+                            // `.0` and `.1` are tuple indices like any
+                            // other: the checker resolves them on a pair
+                            // or on a longer tuple.
+                            result = SurfaceExpr::new(
+                                SurfaceExprKind::TupleIndex {
+                                    tuple: Box::new(result),
+                                    index: idx,
+                                },
+                                span,
+                            );
                         }
                         Rule::identifier | Rule::constructor_name => {
                             // Named member access `base.member` — qualified

@@ -17,6 +17,8 @@ categories.workspace = true
 [dependencies]
 ephapax-syntax = { workspace = true }
 ephapax-ir = { workspace = true }
+# The checker's expression-type table drives typed instruction selection.
+ephapax-typing = { workspace = true }
 smol_str = { workspace = true }
 wasm-encoder = { workspace = true }
 gimli = { version = "0.31", features = ["write"] }

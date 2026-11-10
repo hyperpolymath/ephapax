@@ -61,12 +61,13 @@ use ephapax_syntax::{
     BaseTy, BinOp, Decl, Expr, ExprKind, ExternItem, Linearity, Literal, MatchArm,
     Module as AstModule, Pattern, Ty, UnaryOp,
 };
+use ephapax_typing::ExprTypes;
 use smol_str::SmolStr;
 use std::collections::HashMap;
 use wasm_encoder::{
     CodeSection, ConstExpr, ElementSection, Elements, ExportKind, ExportSection, Function,
-    FunctionSection, ImportSection, Instruction, MemArg, MemorySection, MemoryType,
-    Module as WasmModule, RefType, TableSection, TableType, TypeSection, ValType,
+    FunctionSection, ImportSection, Instruction, MemorySection, MemoryType, Module as WasmModule,
+    RefType, TableSection, TableType, TypeSection, ValType,
 };
 
 // ---------------------------------------------------------------------------
@@ -75,6 +76,11 @@ use wasm_encoder::{
 
 /// WASM representation of a string: (pointer, length)
 pub const STRING_SIZE: u32 = 8; // 2 x i32
+
+/// Bytes per element of a tuple of three or more elements. One slot holds
+/// any scalar or handle, so an element's offset does not depend on the
+/// types of the other elements.
+const TUPLE_SLOT: i32 = 8;
 
 /// Region metadata size (bump_ptr + padding + region_sp + padding)
 pub const REGION_HEADER_SIZE: u32 = 16;
@@ -172,6 +178,11 @@ impl std::error::Error for CodegenError {}
 /// wasm lowering (v2 plan rung E1). Codegen fails before emitting any
 /// module instead of planting an `unreachable` trap.
 pub const UNSUPPORTED_PREFIX: &str = "unsupported in codegen";
+
+/// Message prefix of the [`CodegenError`] for a program the type checker
+/// rejects. Codegen reads the checker's type table (v2 plan rung E5), so
+/// it only lowers well-typed programs.
+pub const NOT_WELL_TYPED: &str = "not well-typed";
 
 /// Return the first construct in `expr` that codegen cannot lower:
 /// effect `perform` / `handle` (no lowering until E17) and raw variadic
@@ -400,15 +411,6 @@ impl LocalTracker {
         }
     }
 
-    /// Return a scratch local for temporary values, allocating one on first use.
-    fn scratch_local(&mut self) -> u32 {
-        if let Some(&idx) = self.name_to_idx.get("__scratch") {
-            idx
-        } else {
-            self.bind("__scratch", false)
-        }
-    }
-
     /// Total number of extra (non-parameter) locals needed.
     fn num_extra_locals(&self) -> u32 {
         self.extra_local_types.len() as u32
@@ -443,6 +445,10 @@ pub struct Codegen {
     // -- Per-function state (set up before each function compilation) --------
     /// Local variable tracker for the function currently being compiled
     locals: LocalTracker,
+
+    /// The checker's type for each expression (v2 plan rung E5). Typed
+    /// instruction selection and layouts read it through [`Self::ty_of`].
+    types: ExprTypes,
 
     // -- Module-level bookkeeping -------------------------------------------
     /// String literal data section entries: (offset, bytes)
@@ -564,6 +570,7 @@ impl Codegen {
         Self {
             module: WasmModule::new(),
             locals: LocalTracker::default(),
+            types: ExprTypes::new(),
             data_entries: Vec::new(),
             data_offset: 1024, // Start string data after metadata area
             user_fns: HashMap::new(),
@@ -657,10 +664,7 @@ impl Codegen {
     fn fn_list_get(&self) -> u32 {
         self.import_count() + OFFSET_LIST_GET
     }
-    /// Region allocation aliases bump-allocation today.
-    fn fn_region_alloc(&self) -> u32 {
-        self.fn_bump_alloc()
-    }
+
     /// First user-defined fn index, after imports and runtime helpers.
     fn first_user_fn(&self) -> u32 {
         self.import_count() + NUM_RUNTIME_FNS
@@ -722,6 +726,11 @@ impl Codegen {
         if let Some(err) = first_unsupported(main_expr) {
             return Err(err);
         }
+        let mut checker = ephapax_typing::TypeChecker::new();
+        checker
+            .check(main_expr)
+            .map_err(|e| CodegenError(format!("{NOT_WELL_TYPED}: {e}")))?;
+        self.types = checker.expr_types();
         self.emit_types();
         self.emit_imports();
 
@@ -794,6 +803,13 @@ impl Codegen {
         // ----- Phase 0: reject constructs with no wasm lowering ------------
         // (v2 plan E1: fail loudly, before any section is emitted.)
         validate_supported(ast)?;
+
+        // ----- Phase 0b: the checker's type for every expression -----------
+        // The module is the whole program (imports already merged in), so
+        // it is checked on its own, against an empty registry.
+        self.types =
+            ephapax_typing::module_expr_types(ast, &mut ephapax_typing::ModuleRegistry::new())
+                .map_err(|e| CodegenError(format!("{NOT_WELL_TYPED}: {e}")))?;
 
         // ----- Phase 1: collect function metadata --------------------------
         // Extern imports MUST be collected first so the import_count
@@ -1189,8 +1205,8 @@ impl Codegen {
         code_sec.function(&f);
         self.record_access_sites(self.fn_string_new(), &sites);
 
-        // 4: string_len  (i32, i32) -> i32
-        func_sec.function(TYPE_I32_I32_I32);
+        // 4: string_len  (i32) -> i32
+        func_sec.function(TYPE_I32_TO_I32);
         let (f, sites) = self.gen_string_len();
         code_sec.function(&f);
         self.record_access_sites(self.fn_string_len(), &sites);
@@ -1512,10 +1528,19 @@ impl Codegen {
     }
 
     fn emit_data_section(&mut self) {
-        if self.data_entries.is_empty() {
-            return;
-        }
         let mut data = wasm_encoder::DataSection::new();
+
+        // Allocator state. The bump pointer (address 0) starts above the
+        // string literals, and the region stack pointer (address 8) starts
+        // so that the first saved bump pointer lands at address 16. Both
+        // used to start at 0: the first allocation then returned address
+        // 0 and writing to it overwrote the bump pointer itself.
+        let heap_base = align_up(self.data_offset as u64, 8) as u32;
+        let mut header = [0u8; 12];
+        header[0..4].copy_from_slice(&heap_base.to_le_bytes());
+        header[8..12].copy_from_slice(&(REGION_HEADER_SIZE - 4).to_le_bytes());
+        data.active(0, &wasm_encoder::ConstExpr::i32_const(0), header);
+
         for (offset, bytes) in &self.data_entries {
             data.active(
                 0,
@@ -2151,10 +2176,22 @@ impl Codegen {
         func.instruction(&Instruction::Call(self.fn_string_len()));
     }
 
-    /// Recover the concrete WebAssembly value type needed by local lowering.
-    /// The typechecker has already accepted the AST, but inferred let types
-    /// are not written back into `ExprKind::Let`, so codegen reconstructs the
-    /// small amount of representation information it needs here.
+    /// The checker's type for `expr`, if it recorded one.
+    fn ty_of(&self, expr: &Expr) -> Option<&Ty> {
+        self.types.get(&expr.id)
+    }
+
+    /// The wasm value type of `expr`: from the checker's type table, else
+    /// (an expression the checker did not record) the syntactic guess.
+    fn valtype_of(&self, expr: &Expr) -> ValType {
+        match self.ty_of(expr) {
+            Some(ty) => ty_to_valtype(ty),
+            None => self.infer_expr_valtype(expr),
+        }
+    }
+
+    /// Syntactic guess at the wasm value type of an expression that has no
+    /// entry in the type table. [`Self::valtype_of`] is the entry point.
     fn infer_expr_valtype(&self, expr: &Expr) -> ValType {
         match &expr.kind {
             ExprKind::Lit(Literal::I64(_)) => ValType::I64,
@@ -2211,7 +2248,7 @@ impl Codegen {
     ) {
         let local_ty = ty
             .map(ty_to_valtype)
-            .unwrap_or_else(|| self.infer_expr_valtype(value));
+            .unwrap_or_else(|| self.valtype_of(value));
 
         // Compile the value expression
         self.compile_expr(func, value);
@@ -2688,7 +2725,7 @@ impl Codegen {
 
         // if tag != 0 (right branch) else (left branch)
         func.instruction(&Instruction::If(wasm_encoder::BlockType::Result(
-            ValType::I32,
+            self.valtype_of(left_body),
         )));
 
         // Right branch (tag == 1)
@@ -2785,8 +2822,11 @@ impl Codegen {
             func.instruction(&Instruction::LocalSet(payload_local));
         }
 
-        // Linear arm dispatch.
-        func.instruction(&Instruction::Block(BlockType::Result(ValType::I32)));
+        // Linear arm dispatch. Every arm has the type of the match.
+        let result = arms
+            .first()
+            .map_or(ValType::I32, |arm| self.valtype_of(&arm.body));
+        func.instruction(&Instruction::Block(BlockType::Result(result)));
 
         for arm in arms.iter() {
             // Open $arm_i_fail block. Inside, depth 0 = $arm_i_fail,
@@ -3059,7 +3099,7 @@ impl Codegen {
     ) {
         self.compile_expr(func, cond);
         func.instruction(&Instruction::If(wasm_encoder::BlockType::Result(
-            ValType::I32,
+            self.valtype_of(then_branch),
         )));
         self.compile_expr(func, then_branch);
         func.instruction(&Instruction::Else);
@@ -3115,34 +3155,35 @@ impl Codegen {
     }
 
     fn compile_binop(&mut self, func: &mut Function, op: BinOp, left: &Expr, right: &Expr) {
+        // The checker unifies the two operand types, so the left one
+        // selects the instruction.
+        let operand = self.valtype_of(left);
         self.compile_expr(func, left);
         self.compile_expr(func, right);
-
-        let instr = match op {
-            BinOp::Add => Instruction::I32Add,
-            BinOp::Sub => Instruction::I32Sub,
-            BinOp::Mul => Instruction::I32Mul,
-            BinOp::Div => Instruction::I32DivS,
-            BinOp::Mod => Instruction::I32RemS,
-            BinOp::Lt => Instruction::I32LtS,
-            BinOp::Le => Instruction::I32LeS,
-            BinOp::Gt => Instruction::I32GtS,
-            BinOp::Ge => Instruction::I32GeS,
-            BinOp::Eq => Instruction::I32Eq,
-            BinOp::Ne => Instruction::I32Ne,
-            BinOp::And => Instruction::I32And,
-            BinOp::Or => Instruction::I32Or,
-        };
-        func.instruction(&instr);
+        func.instruction(&binop_instruction(op, operand));
     }
 
     fn compile_unaryop(&mut self, func: &mut Function, op: UnaryOp, operand: &Expr) {
-        match op {
-            UnaryOp::Not => {
+        match (op, self.valtype_of(operand)) {
+            (UnaryOp::Not, _) => {
                 self.compile_expr(func, operand);
                 func.instruction(&Instruction::I32Eqz);
             }
-            UnaryOp::Neg => {
+            (UnaryOp::Neg, ValType::F32) => {
+                self.compile_expr(func, operand);
+                func.instruction(&Instruction::F32Neg);
+            }
+            (UnaryOp::Neg, ValType::F64) => {
+                self.compile_expr(func, operand);
+                func.instruction(&Instruction::F64Neg);
+            }
+            // Integer negation is `0 - x`, which wraps at the minimum.
+            (UnaryOp::Neg, ValType::I64) => {
+                func.instruction(&Instruction::I64Const(0));
+                self.compile_expr(func, operand);
+                func.instruction(&Instruction::I64Sub);
+            }
+            (UnaryOp::Neg, _) => {
                 func.instruction(&Instruction::I32Const(0));
                 self.compile_expr(func, operand);
                 func.instruction(&Instruction::I32Sub);
@@ -3186,77 +3227,46 @@ impl Codegen {
     }
 
     fn compile_tuple_lit(&mut self, func: &mut Function, elements: &[Expr]) {
-        if elements.is_empty() {
-            // Empty tuple = unit
-            func.instruction(&Instruction::I32Const(0));
-            return;
-        }
-
-        if elements.len() == 1 {
-            // Single element = just the element
-            self.compile_expr(func, &elements[0]);
-            return;
-        }
-
-        // Tuples are compiled by placing all elements on the WASM stack.
-        // For 2-element tuples (pairs), this maps directly to two stack values.
-        // For 3+ elements, we allocate a struct in linear memory:
-        //   [elem_count: i32, elem0: i64, elem1: i64, ...]
-        // and push the pointer as a single i64.
-        if elements.len() <= 2 {
-            // Small tuples: elements live on the stack
-            for elem in elements {
-                self.compile_expr(func, elem);
+        match elements {
+            // The checker types `()` as Unit, `(a)` as `a` and `(a, b)` as
+            // a pair; the layouts follow.
+            [] => {
+                func.instruction(&Instruction::I32Const(0));
             }
-        } else {
-            // Large tuples: allocate in memory (8 bytes per element + 4 header)
-            let size = 4 + (elements.len() as i32) * 8;
-            func.instruction(&Instruction::I32Const(size));
-            func.instruction(&Instruction::Call(self.fn_region_alloc()));
-            // Store count header
-            func.instruction(&Instruction::LocalTee(self.locals.scratch_local()));
-            func.instruction(&Instruction::I32Const(elements.len() as i32));
-            func.instruction(&Instruction::I32Store(MemArg {
-                offset: 0,
-                align: 2,
-                memory_index: 0,
-            }));
-            // Store each element at offset 4 + i*8
-            for (i, elem) in elements.iter().enumerate() {
-                func.instruction(&Instruction::LocalGet(self.locals.scratch_local()));
-                self.compile_expr(func, elem);
-                func.instruction(&Instruction::I64Store(MemArg {
-                    offset: 4 + (i as u64) * 8,
-                    align: 3,
-                    memory_index: 0,
-                }));
+            [only] => self.compile_expr(func, only),
+            [left, right] => self.compile_pair(func, left, right),
+            // Three or more: a pointer to one 8-byte slot per element.
+            // Element `i` is at offset `i * 8`, stored at its own type.
+            _ => {
+                func.instruction(&Instruction::I32Const(elements.len() as i32 * TUPLE_SLOT));
+                func.instruction(&Instruction::I32Const(0));
+                func.instruction(&Instruction::Call(self.fn_bump_alloc()));
+                let tuple_local = self.locals.temp();
+                func.instruction(&Instruction::LocalSet(tuple_local));
+                for (i, elem) in elements.iter().enumerate() {
+                    func.instruction(&Instruction::LocalGet(tuple_local));
+                    self.compile_expr(func, elem);
+                    emit_typed_store(func, self.valtype_of(elem), i as u64 * TUPLE_SLOT as u64);
+                }
+                func.instruction(&Instruction::LocalGet(tuple_local));
             }
-            // Push pointer as i64
-            func.instruction(&Instruction::LocalGet(self.locals.scratch_local()));
-            func.instruction(&Instruction::I64ExtendI32U);
         }
     }
 
     fn compile_tuple_index(&mut self, func: &mut Function, tuple: &Expr, index: usize) {
-        // Compile the tuple expression.
-        self.compile_expr(func, tuple);
-
-        // For 2-element tuples (pairs on stack): .0 and .1 are two stack values.
-        // For 3+ element tuples (memory-allocated): the pointer is on stack,
-        // and we load element at offset 4 + index*8.
-        //
-        // Heuristic: if the tuple type has <= 2 elements, it's on the stack.
-        // Otherwise, it's a pointer to a memory-allocated struct.
-        // For now, treat as memory-allocated (the general case) since
-        // stack-based pairs should use ExprKind::Fst/Snd instead.
-        //
-        // Stack has: [tuple_ptr as i64]
-        func.instruction(&Instruction::I32WrapI64); // ptr: i64 → i32
-        func.instruction(&Instruction::I64Load(MemArg {
-            offset: 4 + (index as u64) * 8,
-            align: 3,
-            memory_index: 0,
-        }));
+        match self.ty_of(tuple).cloned() {
+            Some(Ty::Tuple(elems)) if index < elems.len() => {
+                self.compile_expr(func, tuple);
+                emit_typed_load(
+                    func,
+                    ty_to_valtype(&elems[index]),
+                    index as u64 * TUPLE_SLOT as u64,
+                );
+            }
+            // A 2-tuple is a pair.
+            _ if index == 0 => self.compile_fst(func, tuple),
+            _ => self.compile_snd(func, tuple),
+        }
     }
 
     // -----------------------------------------------------------------------
@@ -3314,6 +3324,64 @@ fn collect_first_ctor(pat: &Pattern) -> Option<SmolStr> {
         Some(ctor.clone())
     } else {
         None
+    }
+}
+
+/// The instruction for `op` on two operands of wasm type `ty`.
+///
+/// Integer arithmetic wraps. Integer `/` and `%` are the signed forms:
+/// both trap on a zero divisor, `/` traps on `MIN / -1`, and `MIN % -1`
+/// is 0. `&&` and `||` take Bool operands, which are i32.
+fn binop_instruction(op: BinOp, ty: ValType) -> Instruction<'static> {
+    use Instruction as I;
+    use ValType as V;
+    match (op, ty) {
+        (BinOp::Add, V::I64) => I::I64Add,
+        (BinOp::Add, V::F32) => I::F32Add,
+        (BinOp::Add, V::F64) => I::F64Add,
+        (BinOp::Add, _) => I::I32Add,
+        (BinOp::Sub, V::I64) => I::I64Sub,
+        (BinOp::Sub, V::F32) => I::F32Sub,
+        (BinOp::Sub, V::F64) => I::F64Sub,
+        (BinOp::Sub, _) => I::I32Sub,
+        (BinOp::Mul, V::I64) => I::I64Mul,
+        (BinOp::Mul, V::F32) => I::F32Mul,
+        (BinOp::Mul, V::F64) => I::F64Mul,
+        (BinOp::Mul, _) => I::I32Mul,
+        (BinOp::Div, V::I64) => I::I64DivS,
+        (BinOp::Div, V::F32) => I::F32Div,
+        (BinOp::Div, V::F64) => I::F64Div,
+        (BinOp::Div, _) => I::I32DivS,
+        (BinOp::Mod, V::I64) => I::I64RemS,
+        // TODO(E5 fmod): float remainder
+        (BinOp::Mod, V::F32 | V::F64) => I::Unreachable,
+        (BinOp::Mod, _) => I::I32RemS,
+        (BinOp::Lt, V::I64) => I::I64LtS,
+        (BinOp::Lt, V::F32) => I::F32Lt,
+        (BinOp::Lt, V::F64) => I::F64Lt,
+        (BinOp::Lt, _) => I::I32LtS,
+        (BinOp::Le, V::I64) => I::I64LeS,
+        (BinOp::Le, V::F32) => I::F32Le,
+        (BinOp::Le, V::F64) => I::F64Le,
+        (BinOp::Le, _) => I::I32LeS,
+        (BinOp::Gt, V::I64) => I::I64GtS,
+        (BinOp::Gt, V::F32) => I::F32Gt,
+        (BinOp::Gt, V::F64) => I::F64Gt,
+        (BinOp::Gt, _) => I::I32GtS,
+        (BinOp::Ge, V::I64) => I::I64GeS,
+        (BinOp::Ge, V::F32) => I::F32Ge,
+        (BinOp::Ge, V::F64) => I::F64Ge,
+        (BinOp::Ge, _) => I::I32GeS,
+        (BinOp::Eq, V::I64) => I::I64Eq,
+        (BinOp::Eq, V::F32) => I::F32Eq,
+        (BinOp::Eq, V::F64) => I::F64Eq,
+        (BinOp::Eq, _) => I::I32Eq,
+        (BinOp::Ne, V::I64) => I::I64Ne,
+        (BinOp::Ne, V::F32) => I::F32Ne,
+        (BinOp::Ne, V::F64) => I::F64Ne,
+        (BinOp::Ne, _) => I::I32Ne,
+        (BinOp::And, _) => I::I32And,
+        (BinOp::Or, _) => I::I32Or,
     }
 }
 
@@ -3525,6 +3593,24 @@ mod tests {
     }
 
     /// Shorthand for creating a dummy expression.
+    /// `{ drop(s); 0 }`: the body of a well-typed function that takes a
+    /// linear `s` and returns an I32.
+    fn drop_s_then_zero() -> Expr {
+        e(ExprKind::Block(vec![
+            e(ExprKind::Drop(Box::new(e(ExprKind::Var("s".into()))))),
+            e(ExprKind::Lit(Literal::I32(0))),
+        ]))
+    }
+
+    /// `region r { drop(<string>) }`: a string expression in a well-typed
+    /// program (its region is active, and it does not escape).
+    fn in_region_dropped(string: Expr) -> Expr {
+        e(ExprKind::Region {
+            name: "r".into(),
+            body: Box::new(e(ExprKind::Drop(Box::new(string)))),
+        })
+    }
+
     fn e(kind: ExprKind) -> Expr {
         Expr::new(kind, Span::dummy())
     }
@@ -4312,13 +4398,12 @@ mod tests {
     #[test]
     fn compile_drop_expression() {
         let mut codegen = Codegen::new();
-        // let x = 42 in drop(x)  -- simplified: drop returns unit
-        let expr = e(ExprKind::Let {
-            name: "x".into(),
-            ty: None,
-            value: Box::new(e(ExprKind::Lit(Literal::I32(42)))),
-            body: Box::new(e(ExprKind::Drop(Box::new(e(ExprKind::Var("x".into())))))),
-        });
+        // region r { drop(String.new@r("x")) }: only a linear value can
+        // be dropped.
+        let expr = in_region_dropped(e(ExprKind::StringNew {
+            region: "r".into(),
+            value: "x".to_string(),
+        }));
         let wasm = codegen.compile_program(&expr).unwrap();
         assert_wasm_header(&wasm);
         validate_wasm(&wasm);
@@ -4421,10 +4506,10 @@ mod tests {
     #[test]
     fn compile_string_new() {
         let mut codegen = Codegen::new();
-        let expr = e(ExprKind::StringNew {
+        let expr = in_region_dropped(e(ExprKind::StringNew {
             region: "r".into(),
             value: "hello".to_string(),
-        });
+        }));
         let wasm = codegen.compile_program(&expr).unwrap();
         assert_wasm_header(&wasm);
         validate_wasm(&wasm);
@@ -4433,7 +4518,7 @@ mod tests {
     #[test]
     fn compile_string_concat() {
         let mut codegen = Codegen::new();
-        let expr = e(ExprKind::StringConcat {
+        let expr = in_region_dropped(e(ExprKind::StringConcat {
             left: Box::new(e(ExprKind::StringNew {
                 region: "r".into(),
                 value: "hello ".to_string(),
@@ -4442,7 +4527,7 @@ mod tests {
                 region: "r".into(),
                 value: "world".to_string(),
             })),
-        });
+        }));
         let wasm = codegen.compile_program(&expr).unwrap();
         assert_wasm_header(&wasm);
         validate_wasm(&wasm);
@@ -4451,12 +4536,17 @@ mod tests {
     #[test]
     fn compile_string_in_region() {
         let mut codegen = Codegen::new();
-        // region r { String.new@r("test") }
+        // region r { let! s = String.new@r("test") in drop(s) }
         let expr = e(ExprKind::Region {
             name: "r".into(),
-            body: Box::new(e(ExprKind::StringNew {
-                region: "r".into(),
-                value: "test".to_string(),
+            body: Box::new(e(ExprKind::LetLin {
+                name: "s".into(),
+                ty: None,
+                value: Box::new(e(ExprKind::StringNew {
+                    region: "r".into(),
+                    value: "test".to_string(),
+                })),
+                body: Box::new(e(ExprKind::Drop(Box::new(e(ExprKind::Var("s".into())))))),
             })),
         });
         let wasm = codegen.compile_program(&expr).unwrap();
@@ -4472,27 +4562,15 @@ mod tests {
     fn compile_simple_lambda() {
         // Test: (lambda (x : I32) (+ x 1))
         let mut codegen = Codegen::new();
-        let expr = Expr {
-            kind: ExprKind::Lambda {
-                param: "x".into(),
-                param_ty: Ty::Base(BaseTy::I32),
-                body: Box::new(Expr {
-                    kind: ExprKind::BinOp {
-                        op: BinOp::Add,
-                        left: Box::new(Expr {
-                            kind: ExprKind::Var("x".into()),
-                            span: Span::dummy(),
-                        }),
-                        right: Box::new(Expr {
-                            kind: ExprKind::Lit(Literal::I32(1)),
-                            span: Span::dummy(),
-                        }),
-                    },
-                    span: Span::dummy(),
-                }),
-            },
-            span: Span::dummy(),
-        };
+        let expr = Expr::dummy(ExprKind::Lambda {
+            param: "x".into(),
+            param_ty: Ty::Base(BaseTy::I32),
+            body: Box::new(Expr::dummy(ExprKind::BinOp {
+                op: BinOp::Add,
+                left: Box::new(Expr::dummy(ExprKind::Var("x".into()))),
+                right: Box::new(Expr::dummy(ExprKind::Lit(Literal::I32(1)))),
+            })),
+        });
         let wasm = codegen.compile_program(&expr).unwrap();
         assert_wasm_header(&wasm);
         validate_wasm(&wasm);
@@ -5348,7 +5426,7 @@ mod tests {
                 type_params: vec![],
                 params: vec![("s".into(), Ty::String("r".into()))],
                 ret_ty: Ty::Base(BaseTy::I32),
-                body: e(ExprKind::Lit(Literal::I32(0))),
+                body: drop_s_then_zero(),
             }],
         };
         let wasm = compile_module(&module).expect("compilation failed");
@@ -5412,7 +5490,7 @@ mod tests {
                     type_params: vec![],
                     params: vec![("s".into(), Ty::String("r".into()))],
                     ret_ty: Ty::Base(BaseTy::I32),
-                    body: e(ExprKind::Lit(Literal::I32(0))),
+                    body: drop_s_then_zero(),
                 },
                 Decl::Fn {
                     name: "second_consume".into(),
@@ -5420,7 +5498,7 @@ mod tests {
                     type_params: vec![],
                     params: vec![("s".into(), Ty::String("r".into()))],
                     ret_ty: Ty::Base(BaseTy::I32),
-                    body: e(ExprKind::Lit(Literal::I32(0))),
+                    body: drop_s_then_zero(),
                 },
             ],
         };
@@ -5457,7 +5535,7 @@ mod tests {
                     type_params: vec![],
                     params: vec![("s".into(), Ty::String("r".into()))],
                     ret_ty: Ty::Base(BaseTy::I32),
-                    body: e(ExprKind::Lit(Literal::I32(0))),
+                    body: drop_s_then_zero(),
                 },
             ],
         };

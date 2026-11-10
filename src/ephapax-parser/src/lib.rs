@@ -1687,19 +1687,16 @@ fn parse_postfix_expr(pair: pest::iterators::Pair<Rule>) -> Result<Expr, ParseEr
                                     span: span_from_pair(&member),
                                 }
                             })?;
-                            if index == 0 {
-                                result = Expr::new(ExprKind::Fst(Box::new(result)), span);
-                            } else if index == 1 {
-                                result = Expr::new(ExprKind::Snd(Box::new(result)), span);
-                            } else {
-                                result = Expr::new(
-                                    ExprKind::TupleIndex {
-                                        tuple: Box::new(result),
-                                        index,
-                                    },
-                                    span,
-                                );
-                            }
+                            // `.0` and `.1` are tuple indices like any
+                            // other: the checker resolves them on a pair
+                            // or on a longer tuple.
+                            result = Expr::new(
+                                ExprKind::TupleIndex {
+                                    tuple: Box::new(result),
+                                    index,
+                                },
+                                span,
+                            );
                         }
                         Rule::identifier => {
                             // Field access by name not currently supported
@@ -2261,11 +2258,13 @@ mod tests {
 
     #[test]
     fn test_parse_projection() {
+        // `.0` is a tuple index: the checker resolves it on a pair or on
+        // a longer tuple (it used to parse as `fst`, which only a pair has).
         let expr = parse_ok("p.0");
-        if let ExprKind::Fst(inner) = expr.kind {
-            assert!(matches!(inner.kind, ExprKind::Var(_)));
+        if let ExprKind::TupleIndex { tuple, index: 0 } = expr.kind {
+            assert!(matches!(tuple.kind, ExprKind::Var(_)));
         } else {
-            panic!("Expected fst projection");
+            panic!("Expected tuple index 0");
         }
     }
 

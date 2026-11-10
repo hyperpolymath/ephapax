@@ -20,7 +20,7 @@
 pub mod discipline;
 
 use ephapax_syntax::{
-    BaseTy, BinOp, Decl, Expr, ExprKind, ExternItem, Literal, MatchArm, Module, Pattern,
+    BaseTy, BinOp, Decl, Expr, ExprId, ExprKind, ExternItem, Literal, MatchArm, Module, Pattern,
     RegionName, Span, Ty, UnaryOp, Var, Visibility,
 };
 use smol_str::SmolStr;
@@ -856,8 +856,15 @@ fn is_useful(
 }
 
 /// Type checker state
+/// The type of every expression the checker visited, by [`ExprId`], with
+/// unification variables resolved. Codegen reads it to choose typed
+/// instructions and layouts (v2 plan rung E5).
+pub type ExprTypes = HashMap<ExprId, Ty>;
+
 pub struct TypeChecker {
     ctx: Context,
+    /// Type of each checked expression; see [`TypeChecker::expr_types`].
+    expr_types: ExprTypes,
     /// Next fresh unification variable ID.
     next_unif: u32,
     wildcard_obligations: Vec<(Span, Ty)>,
@@ -874,6 +881,7 @@ impl TypeChecker {
     pub fn new() -> Self {
         Self {
             ctx: Context::new(),
+            expr_types: ExprTypes::new(),
             next_unif: 0,
             wildcard_obligations: Vec::new(),
             unif_solutions: HashMap::new(),
@@ -1063,6 +1071,21 @@ impl TypeChecker {
     /// (most precise). Errors originating at THIS level carry this
     /// expression's span.
     pub fn check(&mut self, expr: &Expr) -> Result<Ty, SpannedTypeError> {
+        let ty = self.check_kind(expr)?;
+        self.expr_types.insert(expr.id, ty.clone());
+        Ok(ty)
+    }
+
+    /// The type of every expression checked so far, with unification
+    /// variables resolved.
+    pub fn expr_types(&self) -> ExprTypes {
+        self.expr_types
+            .iter()
+            .map(|(id, ty)| (*id, self.resolve(ty)))
+            .collect()
+    }
+
+    fn check_kind(&mut self, expr: &Expr) -> Result<Ty, SpannedTypeError> {
         let s = expr.span;
         match &expr.kind {
             ExprKind::Lit(lit) => self.check_lit(s, lit),
@@ -2488,6 +2511,15 @@ pub fn type_check_module_with_registry(
     module: &Module,
     registry: &mut ModuleRegistry,
 ) -> Result<(), SpannedTypeError> {
+    module_expr_types(module, registry).map(|_| ())
+}
+
+/// [`type_check_module_with_registry`], also returning the type of every
+/// expression in the module.
+pub fn module_expr_types(
+    module: &Module,
+    registry: &mut ModuleRegistry,
+) -> Result<ExprTypes, SpannedTypeError> {
     let mut tc = TypeChecker::new();
 
     // Resolve imports: bring imported names into scope
@@ -2522,7 +2554,7 @@ pub fn type_check_module_with_registry(
     // Register this module's declarations for dependents
     registry.register(module);
 
-    Ok(())
+    Ok(tc.expr_types())
 }
 
 /// Internal module checking logic shared by single-module and registry paths.

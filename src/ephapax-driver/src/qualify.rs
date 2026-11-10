@@ -182,6 +182,8 @@ fn rename_expr(expr: &mut Expr, scope: &Renames) {
         | ExprKind::Snd(_)
         | ExprKind::Inl { .. }
         | ExprKind::Inr { .. }
+        | ExprKind::Fold { .. }
+        | ExprKind::Unfold(_)
         | ExprKind::If { .. }
         | ExprKind::Region { .. }
         | ExprKind::Borrow { .. }

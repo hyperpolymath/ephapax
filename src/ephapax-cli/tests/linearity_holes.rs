@@ -419,19 +419,61 @@ fn list_index_from_linear_list_rejected() {
     assert_cli_rejects("listidx", LISTIDX);
 }
 
+/// `rec1` has a `data` type that refers to itself. It aborted the compiler
+/// with a stack overflow, and then it was a named desugar error. Since
+/// rung E9 the core has recursive types: the probe desugars and checks,
+/// and the command line refuses it by name without `--unstable-core`.
 #[test]
-fn rec1_is_a_named_desugar_error_not_a_crash() {
-    match pipeline(REC1) {
-        Err(PipelineError::Desugar(DesugarError::RecursiveType { name, .. })) => {
-            assert_eq!(name, "L");
-        }
-        other => panic!("expected DesugarError::RecursiveType, got {other:?}"),
-    }
+fn rec1_is_behind_the_flag_not_a_crash() {
+    assert!(pipeline(REC1).is_ok(), "{:?}", pipeline(REC1));
     let stderr = assert_cli_rejects("rec1", REC1);
     assert!(
-        stderr.contains("recursive type `L`"),
-        "stderr should name the recursive type:\n{stderr}"
+        stderr.contains("behind the flag `--unstable-core`: the recursive type `L`"),
+        "stderr should name the flag and the recursive type:\n{stderr}"
     );
+
+    let dir = tempfile::tempdir().expect("tempdir");
+    let path = write_probe(dir.path(), "rec1", REC1);
+    let out = Command::new(ephapax_bin())
+        .args(["check", "--unstable-core"])
+        .arg(&path)
+        .output()
+        .expect("run ephapax check");
+    assert!(
+        out.status.success(),
+        "with the flag:\n{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+}
+
+/// Each recursive form that has no lowering is a named desugar error.
+#[test]
+fn a_recursive_form_with_no_lowering_is_a_named_desugar_error() {
+    let refused = |src: &str| match pipeline(src) {
+        Err(PipelineError::Desugar(error)) => error,
+        other => panic!("expected a desugar error, got {other:?}"),
+    };
+    // 2 `data` types that refer to each other.
+    assert!(matches!(
+        refused(
+            "data Tree = Leaf | Node(Forest)\ndata Forest = FNil | FCons(Tree, Forest)\n\
+             fn f(t: Tree): I32 = 0\nfn main(): I32 = 0\n"
+        ),
+        DesugarError::MutualRecursion { cycle } if cycle == "Tree -> Forest -> Tree"
+    ));
+    // A `data` type that refers to itself with other type arguments.
+    assert!(matches!(
+        refused(
+            "data Grow(a) = Stop | More(Grow((a, a)))\nfn f(t: Grow(I32)): I32 = 0\n\
+             fn main(): I32 = 0\n"
+        ),
+        DesugarError::NonRegularRecursion { name, .. } if name == "Grow"
+    ));
+    // A `type` alias that refers to itself with no `data` type between.
+    assert!(matches!(
+        refused("type A = (I32, B)\ntype B = (I32, A)\nfn f(t: A): I32 = 0\nfn main(): I32 = 0\n"),
+        DesugarError::RecursiveAlias { .. }
+    ));
 }
 
 #[test]

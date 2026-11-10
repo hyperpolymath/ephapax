@@ -430,6 +430,9 @@ impl Interpreter {
             ExprKind::Snd(inner) => self.eval_snd(inner),
             ExprKind::Inl { value, .. } => self.eval_inl(value),
             ExprKind::Inr { value, .. } => self.eval_inr(value),
+            // A value of a recursive type is the value of its unfolding:
+            // `fold` and `unfold` change the type only.
+            ExprKind::Fold { value, .. } | ExprKind::Unfold(value) => self.eval(value),
             ExprKind::Case {
                 scrutinee,
                 left_var,

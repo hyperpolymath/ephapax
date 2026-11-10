@@ -210,7 +210,10 @@ impl LinearChecker {
             }
 
             // --- Sum injections ---
-            ExprKind::Inl { value, .. } | ExprKind::Inr { value, .. } => {
+            ExprKind::Inl { value, .. }
+            | ExprKind::Inr { value, .. }
+            | ExprKind::Fold { value, .. }
+            | ExprKind::Unfold(value) => {
                 self.walk_expr(value);
             }
 

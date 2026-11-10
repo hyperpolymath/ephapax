@@ -139,7 +139,10 @@ impl FreeVarAnalysis {
                 Self::collect(right, free, bound);
             }
 
-            ExprKind::Inl { value, .. } | ExprKind::Inr { value, .. } => {
+            ExprKind::Inl { value, .. }
+            | ExprKind::Inr { value, .. }
+            | ExprKind::Fold { value, .. }
+            | ExprKind::Unfold(value) => {
                 Self::collect(value, free, bound);
             }
 

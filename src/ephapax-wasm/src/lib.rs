@@ -257,6 +257,22 @@ fn first_unsupported_in(
                 expr.span.start, expr.span.end
             )))
         }
+        // A value of a recursive `data` type is made by `fold` and read
+        // by `unfold` (v2 plan rung E9). Both are behind the flag.
+        ExprKind::Fold { .. } | ExprKind::Unfold(_) if !unstable_core => {
+            let ty = match &expr.kind {
+                ExprKind::Fold { ty, .. } => Some(ty),
+                ExprKind::Unfold(inner) => types.and_then(|t| t.get(&inner.id)),
+                _ => None,
+            };
+            Some(CodegenError(format!(
+                "{UNSTABLE_CORE_PREFIX}: a value of {} (at byte {}..{})",
+                ty.and_then(recursive_name)
+                    .unwrap_or_else(|| "a recursive `data` type".to_string()),
+                expr.span.start,
+                expr.span.end
+            )))
+        }
         ExprKind::Match { scrutinee, arms } => types
             .and_then(|t| t.get(&scrutinee.id))
             .filter(|ty| arms.iter().any(|arm| pattern_not_lowered(&arm.pattern, ty)))
@@ -289,13 +305,18 @@ fn first_unsupported_in(
         | ExprKind::Snd(e)
         | ExprKind::Deref(e)
         | ExprKind::Drop(e)
-        | ExprKind::Copy(e) => vec![e],
+        | ExprKind::Copy(e)
+        | ExprKind::Unfold(e) => vec![e],
         ExprKind::Let { value, body, .. } | ExprKind::LetLin { value, body, .. } => {
             vec![value, body]
         }
         ExprKind::Lambda { body, .. } | ExprKind::Region { body, .. } => vec![body],
         ExprKind::App { func, arg } => vec![func, arg],
-        ExprKind::Inl { value, .. } | ExprKind::Inr { value, .. } => vec![value],
+        ExprKind::Inl { value, .. }
+        | ExprKind::Inr { value, .. }
+        | ExprKind::Fold { value, .. } => {
+            vec![value]
+        }
         ExprKind::Case {
             scrutinee,
             left_body,
@@ -372,11 +393,46 @@ fn validate_supported_in(
             Decl::Const { name, value, .. } => (name, value, "constant"),
             _ => continue,
         };
+        // A function can pass a value of a recursive type on with no
+        // `fold` and no `unfold`: its signature shows the type.
+        if let (false, Decl::Fn { params, ret_ty, .. }) = (unstable_core, decl) {
+            let tys = params.iter().map(|(_, ty)| ty).chain([ret_ty]);
+            if let Some(ty) = tys.filter_map(recursive_name).next() {
+                return Err(CodegenError(format!(
+                    "{UNSTABLE_CORE_PREFIX}: {ty} in the signature of function `{name}`"
+                )));
+            }
+        }
         if let Some(CodegenError(msg)) = first_unsupported_in(expr, types, unstable_core) {
             return Err(CodegenError(format!("{msg} in {kind} `{name}`")));
         }
     }
     Ok(())
+}
+
+/// "the recursive type `IntList`" for the first recursive type in `ty`,
+/// by the name of its `data` type. `None` if `ty` has no recursive type.
+fn recursive_name(ty: &Ty) -> Option<String> {
+    match ty {
+        // The variable of the recursive type of `data IntList` is `#IntList`.
+        Ty::Mu { var, .. } => Some(format!(
+            "the recursive type `{}`",
+            var.trim_start_matches('#')
+        )),
+        Ty::Base(_) | Ty::String(_) | Ty::Var(_) | Ty::Unif(_) => None,
+        Ty::Ref { inner, .. }
+        | Ty::Region { inner, .. }
+        | Ty::Borrow { inner, .. }
+        | Ty::ForAll { body: inner, .. }
+        | Ty::List(inner) => recursive_name(inner),
+        Ty::Fun { param, ret } | Ty::Effectful { param, ret, .. } => {
+            recursive_name(param).or_else(|| recursive_name(ret))
+        }
+        Ty::Prod { left, right } | Ty::Sum { left, right } => {
+            recursive_name(left).or_else(|| recursive_name(right))
+        }
+        Ty::Tuple(elems) => elems.iter().find_map(recursive_name),
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -2206,6 +2262,12 @@ impl Codegen {
                 // Borrow/deref are identity at the WASM level
                 self.compile_expr(func, inner);
             }
+            // A value of a recursive type is the value of its unfolding,
+            // which is a pointer to a heap cell (a sum, a pair): `fold`
+            // and `unfold` change the type only (v2 plan rung E9).
+            ExprKind::Fold { value, .. } | ExprKind::Unfold(value) => {
+                self.compile_expr(func, value);
+            }
             ExprKind::Drop(inner) => {
                 self.compile_expr(func, inner);
                 // Mark the local as consumed if it's a variable
@@ -2516,8 +2578,10 @@ impl Codegen {
                 }
                 ExprKind::Fst(inner)
                 | ExprKind::Snd(inner)
+                | ExprKind::Unfold(inner)
                 | ExprKind::Inl { value: inner, .. }
-                | ExprKind::Inr { value: inner, .. } => {
+                | ExprKind::Inr { value: inner, .. }
+                | ExprKind::Fold { value: inner, .. } => {
                     collect(inner, bound, free, seen);
                 }
                 ExprKind::Case {

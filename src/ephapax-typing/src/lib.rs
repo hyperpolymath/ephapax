@@ -151,6 +151,11 @@ pub enum TypeError {
     #[error("`{0}` is not a generic function and cannot take type arguments")]
     NotGeneric(Var),
 
+    /// `fold` to a type, or `unfold` of a value of a type, that is not a
+    /// recursive type (v2 plan rung E9).
+    #[error("`fold` and `unfold` need a recursive type, found {0:?}")]
+    NotRecursive(Ty),
+
     /// The number of explicit type arguments is not the number of type
     /// parameters.
     #[error("The generic function `{callee}` has {expected} type parameter(s), but the call gives {got} type argument(s)")]
@@ -588,6 +593,12 @@ fn subst_tys(ty: &Ty, subst: &HashMap<SmolStr, Ty>) -> Ty {
                 }
             }
         }
+        // The variable of a recursive type is not a name of the program,
+        // so no substitution has it.
+        Ty::Mu { var, body } => Ty::Mu {
+            var: var.clone(),
+            body: Box::new(subst_tys(body, subst)),
+        },
         Ty::Effectful {
             param,
             ret,
@@ -1135,6 +1146,13 @@ impl TypeChecker {
                 self.unify(s, i1, i2)
             }
             (Ty::List(i1), Ty::List(i2)) => self.unify(s, i1, i2),
+            // 2 recursive types are equal when their bodies are, with one
+            // name for the 2 bound variables. A recursive type is not
+            // equal to its unfolding (iso-recursive, decision D7).
+            (Ty::Mu { var: v1, body: b1 }, Ty::Mu { var: v2, body: b2 }) => {
+                let b2 = b2.subst_var(v2, &Ty::Var(v1.clone()));
+                self.unify(s, b1, &b2)
+            }
             (Ty::Tuple(e1), Ty::Tuple(e2)) if e1.len() == e2.len() => {
                 for (t1, t2) in e1.iter().zip(e2.iter()) {
                     self.unify(s, t1, t2)?;
@@ -1236,7 +1254,33 @@ impl TypeChecker {
             ExprKind::Perform { op, args } => self.check_perform(s, op, args),
             ExprKind::Handle { body, clauses } => self.check_handle(s, body, clauses),
             ExprKind::Match { scrutinee, arms } => self.check_match(s, scrutinee, arms),
+            ExprKind::Fold { ty, value } => self.check_fold(s, ty, value),
+            ExprKind::Unfold(inner) => self.check_unfold(s, inner),
         }
+    }
+
+    /// `fold[ty](value)`: `ty` is a recursive type `mu X. T`, `value` has
+    /// the type `T[X := ty]`, and the result has the type `ty`. A type
+    /// parameter that the annotation binds (`forall a. mu X. T`) gets the
+    /// type that `value` gives it.
+    fn check_fold(&mut self, s: Span, ty: &Ty, value: &Expr) -> Result<Ty, SpannedTypeError> {
+        let (ty, _) = self.instantiate(ty.clone());
+        let Some(unfolded) = ty.unfolded() else {
+            return Err(self.at(s, TypeError::NotRecursive(ty)));
+        };
+        let value_ty = self.check(value)?;
+        self.unify(value.span, &unfolded, &value_ty)?;
+        Ok(self.resolve(&ty))
+    }
+
+    /// `unfold(inner)`: `inner` has a recursive type `mu X. T`, and the
+    /// result has the type `T[X := mu X. T]`.
+    fn check_unfold(&mut self, s: Span, inner: &Expr) -> Result<Ty, SpannedTypeError> {
+        let inner_ty = self.check(inner)?;
+        let inner_ty = self.resolve(&inner_ty);
+        inner_ty
+            .unfolded()
+            .ok_or_else(|| self.at(s, TypeError::NotRecursive(inner_ty)))
     }
 
     fn check_lit(&self, s: Span, lit: &Literal) -> Result<Ty, SpannedTypeError> {
@@ -1719,20 +1763,27 @@ impl TypeChecker {
         }
     }
 
+    /// `inl[ty](value)`: `ty` is the type of the other side of the sum. A
+    /// type parameter that the annotation binds (`forall a. T`, from a
+    /// constructor of a recursive `data` type) gets a type from the use
+    /// of the value: the `fold` around the injection.
     fn check_inl(&mut self, _s: Span, ty: &Ty, value: &Expr) -> Result<Ty, SpannedTypeError> {
         let value_ty = self.check(value)?;
+        let (ty, _) = self.instantiate(ty.clone());
 
         Ok(Ty::Sum {
             left: Box::new(value_ty),
-            right: Box::new(ty.clone()),
+            right: Box::new(ty),
         })
     }
 
+    /// `inr[ty](value)`: as [`Self::check_inl`], for the other side.
     fn check_inr(&mut self, _s: Span, ty: &Ty, value: &Expr) -> Result<Ty, SpannedTypeError> {
         let value_ty = self.check(value)?;
+        let (ty, _) = self.instantiate(ty.clone());
 
         Ok(Ty::Sum {
-            left: Box::new(ty.clone()),
+            left: Box::new(ty),
             right: Box::new(value_ty),
         })
     }
@@ -2946,6 +2997,7 @@ fn has_unif(ty: &Ty) -> bool {
         | Ty::Region { inner, .. }
         | Ty::Borrow { inner, .. }
         | Ty::ForAll { body: inner, .. }
+        | Ty::Mu { body: inner, .. }
         | Ty::List(inner) => has_unif(inner),
         Ty::Fun { param, ret } | Ty::Effectful { param, ret, .. } => {
             has_unif(param) || has_unif(ret)

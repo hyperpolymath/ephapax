@@ -55,7 +55,8 @@ fn substitute_node(expr: &mut Expr, subst: &Subst) {
         | ExprKind::LetLin { ty: Some(ty), .. }
         | ExprKind::Lambda { param_ty: ty, .. }
         | ExprKind::Inl { ty, .. }
-        | ExprKind::Inr { ty, .. } => *ty = subst_tys(ty, subst),
+        | ExprKind::Inr { ty, .. }
+        | ExprKind::Fold { ty, .. } => *ty = subst_tys(ty, subst),
         ExprKind::TypeApp { type_args, .. } => {
             for ty in type_args {
                 *ty = subst_tys(ty, subst);
@@ -197,6 +198,7 @@ fn ty_name(ty: &Ty) -> String {
         Ty::Sum { left, right } => format!("({} + {})", ty_name(left), ty_name(right)),
         Ty::Tuple(elems) => format!("({})", list(elems)),
         Ty::List(elem) => format!("[{}]", ty_name(elem)),
+        Ty::Mu { var, body } => format!("(mu {var}. {})", ty_name(body)),
         other => format!("{other:?}"),
     }
 }

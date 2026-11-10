@@ -134,7 +134,10 @@ impl EscapeAnalysis {
                 Self::analyze_expr(inner, escaping, in_escaping_context);
             }
 
-            ExprKind::Inl { value, .. } | ExprKind::Inr { value, .. } => {
+            ExprKind::Inl { value, .. }
+            | ExprKind::Inr { value, .. }
+            | ExprKind::Fold { value, .. }
+            | ExprKind::Unfold(value) => {
                 Self::analyze_expr(value, escaping, in_escaping_context);
             }
 

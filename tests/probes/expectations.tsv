@@ -29,9 +29,9 @@ pairdup	wasm-run	no-module	no-module	E0: no module for a rejected program
 lamcap	check	error:TypeError	error:TypeError	E0 tests/linearity_holes.rs: reuse of a linear value is a named TypeError
 lamcap	compile	error:TypeError	error:TypeError	E0: compile runs the same checker
 lamcap	wasm-run	no-module	no-module	E0: no module for a rejected program
-rec1	check	error:DesugarError	error:DesugarError	E0: recursive data is a named DesugarError, never a crash
-rec1	compile	error:DesugarError	error:DesugarError	E0
-rec1	wasm-run	no-module	no-module	E0
+rec1	check	error:UnstableCore	error:UnstableCore	E9: recursive data is behind the flag --unstable-core; without it, a named error, never a crash (E0)
+rec1	compile	error:UnstableCore	error:UnstableCore	E9
+rec1	wasm-run	no-module	no-module	E9: no module for a program that needs the flag
 i64	check	ok	ok	E5 (already accepted)
 i64	compile	ok	ok	E5 typed side table: I64 binops lower to i64
 i64	wasm-run	ok:0	ok:0	E5 (baseline recorded from `ephapax run`, which uses the same engine: the wasmtime CLI was not installed)

@@ -144,7 +144,10 @@ impl LivenessAnalysis {
                 Self::compute(right, live);
             }
 
-            ExprKind::Inl { value, .. } | ExprKind::Inr { value, .. } => {
+            ExprKind::Inl { value, .. }
+            | ExprKind::Inr { value, .. }
+            | ExprKind::Fold { value, .. }
+            | ExprKind::Unfold(value) => {
                 Self::compute(value, live);
             }
 

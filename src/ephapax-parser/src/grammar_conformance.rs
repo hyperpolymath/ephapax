@@ -1,6 +1,9 @@
 // SPDX-License-Identifier: MPL-2.0
 // Owner: Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk>
 //
+// hypatia: allow code_safety/panic_macro -- test-only module (`#[cfg(test)] mod grammar_conformance` in lib.rs): a panic with a message is how a test fails.
+// hypatia: allow code_safety/expect_in_hot_path -- test-only module, no hot path: `expect` reports a grammar file or a fixture that the test cannot read.
+//
 //! One normative grammar (v2 plan rung E7).
 //!
 //! `spec/ephapax-v2-grammar.ebnf` has 2 parts:
@@ -226,17 +229,31 @@ fn defined(text: &str) -> Vec<&str> {
         .collect()
 }
 
+/// The text of the specification file. With `UPDATE_GRAMMAR` set, the
+/// first call writes part 1 again. The tests run on more than one
+/// thread: each one gets the text from here, so no test reads the file
+/// while another one writes it.
+fn specification() -> &'static str {
+    static TEXT: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    TEXT.get_or_init(|| {
+        let path = ebnf_path();
+        let text = std::fs::read_to_string(&path).expect("read the specification grammar");
+        if std::env::var_os("UPDATE_GRAMMAR").is_none() {
+            return text;
+        }
+        let (head, _, tail) = split(&text);
+        let updated = format!("{head}{BEGIN}\n\n{}\n{END}{tail}", generated());
+        if updated != text {
+            std::fs::write(&path, &updated).expect("write the specification grammar");
+        }
+        updated
+    })
+}
+
 #[test]
 fn the_specification_grammar_says_what_the_parser_accepts() {
-    let path = ebnf_path();
-    let text = std::fs::read_to_string(&path).expect("read the specification grammar");
-    let (head, part, tail) = split(&text);
+    let (_, part, _) = split(specification());
     let want = format!("\n\n{}\n", generated());
-    if std::env::var_os("UPDATE_GRAMMAR").is_some() && part != want {
-        std::fs::write(&path, format!("{head}{BEGIN}{want}{END}{tail}"))
-            .expect("write the specification grammar");
-        return;
-    }
     assert!(
         part == want,
         "spec/ephapax-v2-grammar.ebnf is not the grammar of ephapax.pest. Run:\n  \
@@ -314,8 +331,7 @@ fn each_parser_rule_is_in_a_fixture() {
 /// fixture of an `[UNIMPLEMENTED]` production.
 #[test]
 fn each_design_production_is_an_alias_or_is_refused() {
-    let text = std::fs::read_to_string(ebnf_path()).expect("read the specification grammar");
-    let (head, part, tail) = split(&text);
+    let (head, part, tail) = split(specification());
     assert!(defined(head).is_empty(), "a production before part 1");
 
     let rules = pest_rules();

@@ -156,8 +156,9 @@ fn every_entry_point_agrees_on_every_corpus_file() {
     );
 }
 
-/// An integer literal above `i64::MAX` used to become 0 without a
-/// diagnostic. It is now `ParseError::IntegerOutOfRange` on every command.
+/// An integer literal outside the I64 range used to become 0 without a
+/// diagnostic. It is now `ParseError::IntegerOutOfRange` on every command,
+/// and `-9223372036854775808` is one literal, `i64::MIN`.
 #[test]
 fn out_of_range_integer_literal_is_a_parse_error() {
     let tmp = tempfile::tempdir().expect("tempdir");
@@ -180,23 +181,36 @@ fn out_of_range_integer_literal_is_a_parse_error() {
         &["run", "--interp", "lit.eph"],
     ];
 
-    for body in ["9223372036854775808", "-(9223372036854775808)"] {
+    // (program text, the literal the error names)
+    for (body, literal) in [
+        ("9223372036854775808", "9223372036854775808"),
+        ("-9223372036854775809", "-9223372036854775809"),
+        ("-(9223372036854775808)", "9223372036854775808"),
+    ] {
         for args in commands {
             let out = run(body, args);
             let stderr = String::from_utf8_lossy(&out.stderr);
             assert!(
                 !out.status.success()
-                    && stderr.contains("Integer literal `9223372036854775808` is out of range"),
+                    && stderr.contains(&format!("Integer literal `{literal}` is out of range")),
                 "`{body}` under {args:?}: exit {:?}, stderr:\n{stderr}",
                 out.status.code()
             );
         }
     }
 
-    // The largest literal still works.
-    let out = run("9223372036854775807", &["run", "lit.eph"]);
-    assert_eq!(
-        String::from_utf8_lossy(&out.stdout).trim(),
-        "9223372036854775807i64"
-    );
+    // Both ends of the range are literals, on both execution paths.
+    for (body, want) in [
+        ("9223372036854775807", "9223372036854775807i64"),
+        ("-9223372036854775808", "-9223372036854775808i64"),
+    ] {
+        for args in [&commands[2], &commands[3]] {
+            let out = run(body, args);
+            assert_eq!(
+                String::from_utf8_lossy(&out.stdout).trim(),
+                want,
+                "`{body}` under {args:?}"
+            );
+        }
+    }
 }

@@ -102,19 +102,34 @@ pub fn parse_module(source: &str, name: &str) -> Result<Module, Vec<ParseError>>
 // Helper Functions
 // ============================================================================
 
-/// An integer literal: `I32` when it fits, else `I64`. A literal above
-/// `i64::MAX` is a [`ParseError::IntegerOutOfRange`]; it used to become 0.
-fn integer_literal(pair: &pest::iterators::Pair<Rule>) -> Result<Literal, ParseError> {
+/// An integer literal: `I32` when it fits, else `I64`. `negative` is set
+/// for a `-` written directly on the digits, so `-9223372036854775808` is
+/// one literal, `i64::MIN`. A literal outside the I64 range is a
+/// [`ParseError::IntegerOutOfRange`]; it used to become 0.
+pub(crate) fn integer_literal(
+    digits: &str,
+    negative: bool,
+    span: Span,
+) -> Result<Literal, ParseError> {
+    let out_of_range = || ParseError::IntegerOutOfRange {
+        literal: format!("{}{digits}", if negative { "-" } else { "" }),
+        span,
+    };
     // Grammar `integer = ASCII_DIGIT+` (ephapax.pest): parse() can only
     // fail on overflow.
-    let n: i64 = pair
-        .as_str()
-        .parse()
-        .map_err(|_| ParseError::IntegerOutOfRange {
-            literal: pair.as_str().to_string(),
-            span: span_from_pair(pair),
-        })?;
+    let magnitude: i128 = digits.parse().map_err(|_| out_of_range())?;
+    let n =
+        i64::try_from(if negative { -magnitude } else { magnitude }).map_err(|_| out_of_range())?;
     Ok(i32::try_from(n).map_or(Literal::I64(n), Literal::I32))
+}
+
+/// The operand of a unary `-` when it is an integer literal with nothing
+/// else around it (`-5`, not `-(5)` or `-x`): its digits.
+pub(crate) fn negated_integer_digits<'a>(
+    operand: &pest::iterators::Pair<'a, Rule>,
+) -> Option<&'a str> {
+    let text = operand.as_str().trim();
+    (!text.is_empty() && text.bytes().all(|b| b.is_ascii_digit())).then_some(text)
 }
 
 fn span_from_pair(pair: &pest::iterators::Pair<Rule>) -> Span {
@@ -989,7 +1004,7 @@ fn parse_literal_value_core(pair: pest::iterators::Pair<Rule>) -> Result<Literal
         Rule::unit_literal => Literal::Unit,
         Rule::boolean => Literal::Bool(pair.as_str() == "true"),
         Rule::float => Literal::F64(pair.as_str().parse().unwrap_or(0.0)),
-        Rule::integer => integer_literal(&pair)?,
+        Rule::integer => integer_literal(pair.as_str(), false, span_from_pair(&pair))?,
         Rule::string => {
             let s = pair.as_str();
             let content = &s[1..s.len() - 1];
@@ -1568,11 +1583,17 @@ fn parse_unary_expr(pair: pest::iterators::Pair<Rule>) -> Result<Expr, ParseErro
             },
             span,
         ))
-    } else if text.starts_with('-') && !text.chars().nth(1).is_some_and(|c| c.is_ascii_digit()) {
+    } else if text.starts_with('-') {
         let inner = pair
             .into_inner()
             .next()
             .ok_or_else(|| ParseError::missing("unary negation operand"))?;
+        if let Some(digits) = negated_integer_digits(&inner) {
+            return Ok(Expr::new(
+                ExprKind::Lit(integer_literal(digits, true, span)?),
+                span,
+            ));
+        }
         let operand = parse_unary_expr(inner)?;
         Ok(Expr::new(
             ExprKind::UnaryOp {
@@ -2016,7 +2037,7 @@ fn parse_literal(pair: pest::iterators::Pair<Rule>) -> Result<Expr, ParseError> 
             let n: f64 = inner.as_str().parse().unwrap_or(0.0);
             Literal::F64(n)
         }
-        Rule::integer => integer_literal(&inner)?,
+        Rule::integer => integer_literal(inner.as_str(), false, span_from_pair(&inner))?,
         Rule::string => {
             let s = inner.as_str();
             // Remove quotes and process escapes

@@ -1243,44 +1243,37 @@ fn parse_mul_expr(pair: pest::iterators::Pair<Rule>) -> Result<SurfaceExpr, Pars
 
 fn parse_unary_expr(pair: pest::iterators::Pair<Rule>) -> Result<SurfaceExpr, ParseError> {
     let span = span_from_pair(&pair);
-    let mut inner = pair.into_inner().peekable();
-
-    // Check for prefix operators
-    if let Some(first) = inner.peek() {
-        match first.as_str() {
-            "!" => {
-                inner.next();
-                let operand =
-                    parse_unary_expr(inner.next().ok_or_else(|| ParseError::missing("operand"))?)?;
-                return Ok(SurfaceExpr::new(
-                    SurfaceExprKind::UnaryOp {
-                        op: UnaryOp::Not,
-                        operand: Box::new(operand),
-                    },
-                    span,
-                ));
-            }
-            "-" => {
-                inner.next();
-                let operand =
-                    parse_unary_expr(inner.next().ok_or_else(|| ParseError::missing("operand"))?)?;
-                return Ok(SurfaceExpr::new(
-                    SurfaceExprKind::UnaryOp {
-                        op: UnaryOp::Neg,
-                        operand: Box::new(operand),
-                    },
-                    span,
-                ));
-            }
-            _ => {}
-        }
-    }
-
-    // Must be postfix_expr
-    let next = inner
+    // `!` and `-` are anonymous tokens of `unary_expr`: pest gives them no
+    // pair, so the operator is read from the start of the text. No atom
+    // starts with either character.
+    let op = match pair.as_str().as_bytes().first() {
+        Some(b'!') => Some(UnaryOp::Not),
+        Some(b'-') => Some(UnaryOp::Neg),
+        _ => None,
+    };
+    let inner = pair
+        .into_inner()
         .next()
         .ok_or_else(|| ParseError::unexpected_end("unary"))?;
-    parse_postfix_expr(next)
+    let Some(op) = op else {
+        return parse_postfix_expr(inner);
+    };
+    if op == UnaryOp::Neg {
+        if let Some(digits) = crate::negated_integer_digits(&inner) {
+            return Ok(SurfaceExpr::new(
+                SurfaceExprKind::Lit(crate::integer_literal(digits, true, span)?),
+                span,
+            ));
+        }
+    }
+    let operand = parse_unary_expr(inner)?;
+    Ok(SurfaceExpr::new(
+        SurfaceExprKind::UnaryOp {
+            op,
+            operand: Box::new(operand),
+        },
+        span,
+    ))
 }
 
 fn parse_postfix_expr(pair: pest::iterators::Pair<Rule>) -> Result<SurfaceExpr, ParseError> {
@@ -1736,13 +1729,7 @@ fn parse_literal_value(pair: pest::iterators::Pair<Rule>) -> Result<Literal, Par
                 span: span_from_pair(&pair),
             }),
         },
-        Rule::integer => {
-            let n: i32 = pair.as_str().parse().map_err(|_| ParseError::Syntax {
-                message: format!("Invalid integer: {}", pair.as_str()),
-                span: span_from_pair(&pair),
-            })?;
-            Ok(Literal::I32(n))
-        }
+        Rule::integer => crate::integer_literal(pair.as_str(), false, span_from_pair(&pair)),
         Rule::float => {
             let f: f64 = pair.as_str().parse().map_err(|_| ParseError::Syntax {
                 message: format!("Invalid float: {}", pair.as_str()),
@@ -1966,6 +1953,53 @@ fn parse_base_ty(pair: pest::iterators::Pair<Rule>) -> Result<SurfaceTy, ParseEr
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The surface parser used to reject every unary operator, so a
+    /// program using one fell back to the core parser.
+    #[test]
+    fn unary_operators_and_negative_literals() {
+        let kind = |src: &str| parse_surface_expr(src).expect(src).kind;
+        assert!(matches!(
+            kind("-x"),
+            SurfaceExprKind::UnaryOp {
+                op: UnaryOp::Neg,
+                ..
+            }
+        ));
+        assert!(matches!(
+            kind("!x"),
+            SurfaceExprKind::UnaryOp {
+                op: UnaryOp::Not,
+                ..
+            }
+        ));
+        // `-` directly on digits is one literal, so i64::MIN can be written.
+        assert!(matches!(kind("-5"), SurfaceExprKind::Lit(Literal::I32(-5))));
+        assert!(matches!(
+            kind("-9223372036854775808"),
+            SurfaceExprKind::Lit(Literal::I64(i64::MIN))
+        ));
+        assert!(matches!(
+            kind("-(5)"),
+            SurfaceExprKind::UnaryOp {
+                op: UnaryOp::Neg,
+                ..
+            }
+        ));
+        for src in [
+            "9223372036854775808",
+            "-9223372036854775809",
+            "-(9223372036854775808)",
+        ] {
+            assert!(
+                matches!(
+                    parse_surface_expr(src).unwrap_err()[..],
+                    [ParseError::IntegerOutOfRange { .. }]
+                ),
+                "{src}"
+            );
+        }
+    }
 
     #[test]
     fn parse_data_declaration() {

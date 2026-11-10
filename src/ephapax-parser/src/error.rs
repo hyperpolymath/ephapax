@@ -36,9 +36,9 @@ pub enum ParseError {
     #[error("Annotation `@{name}` is not enforced: the compiler does not check it, so it is rejected rather than silently ignored")]
     AnnotationNotEnforced { name: String, span: Span },
 
-    /// An integer literal above `i64::MAX`. It used to become 0 without
-    /// a diagnostic (v2 plan rung E3).
-    #[error("Integer literal `{literal}` is out of range: the largest integer is 9223372036854775807 (I64)")]
+    /// An integer literal outside the I64 range. It used to become 0
+    /// without a diagnostic (v2 plan rung E3).
+    #[error("Integer literal `{literal}` is out of range for I64 (-9223372036854775808 to 9223372036854775807)")]
     IntegerOutOfRange { literal: String, span: Span },
 }
 
@@ -202,7 +202,9 @@ impl Report {
                     .with_message(format!("Integer literal `{}` is out of range", literal))
                     .with_label(
                         Label::new(location)
-                            .with_message("larger than 9223372036854775807 (I64)")
+                            .with_message(
+                                "outside -9223372036854775808 to 9223372036854775807 (I64)",
+                            )
                             .with_color(Color::Red),
                     )
                     .finish()

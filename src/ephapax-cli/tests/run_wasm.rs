@@ -508,6 +508,105 @@ fn a_module_names_a_data_type_only_through_a_pub_import() {
     }
 }
 
+/// A `type` alias and an extern type follow the rule of data types (owner
+/// decision 2026-11-10): a module names one when it declares it, or when
+/// it imports the module that declares it. An alias must also be `pub`;
+/// an extern type is public, as an extern function is. Each module used
+/// to see each alias and each extern type of the program.
+#[test]
+fn a_module_names_an_alias_or_an_extern_type_only_through_an_import() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let write =
+        |name: &str, text: &str| std::fs::write(tmp.path().join(name), text).expect("write module");
+    write(
+        "lib.eph",
+        "module lib\n\npub type Meters = I32\n\ntype Feet = I32\n\n\
+         pub fn double(m: Meters): Meters = m + m\n\n\
+         pub fn feet(n: I32): Feet = n\n",
+    );
+    write(
+        "host.eph",
+        "module host\n\nextern \"c\" {\n    type Handle\n    fn open(n: I32): Handle\n    \
+         fn close(h: Handle): I32\n}\n",
+    );
+    write(
+        "mid.eph",
+        "module mid\n\nimport host\n\npub fn via(n: I32): I32 = close(open(n))\n",
+    );
+    let keep = "fn keep(m: Meters): Meters = m\n";
+    let pass = "fn pass(h: Handle): Handle = h\n";
+
+    // (imports and declarations, `main` body, output)
+    for (head, main, want) in [
+        (format!("import lib\n\n{keep}"), "double(keep(4))", "8"),
+        // An import list names the alias.
+        (
+            format!("import lib(Meters, double)\n\n{keep}"),
+            "double(keep(4))",
+            "8",
+        ),
+        // A function of `lib` has the private alias in its signature.
+        ("import lib\n".to_string(), "feet(3)", "3"),
+        // A declaration of the module shadows an imported alias.
+        (
+            "import lib\n\ndata Meters = M(I32)\n".to_string(),
+            "match M(5) of | M(n) => n end",
+            "5",
+        ),
+    ] {
+        write(
+            "app.eph",
+            &format!("module app\n\n{head}\nfn main(): I32 = {main}\n"),
+        );
+        for args in [&["run", "app.eph"][..], &["run", "--interp", "app.eph"]] {
+            assert_eq!(stdout_of(tmp.path(), args), want, "{main} under {args:?}");
+        }
+    }
+
+    // (imports and declarations, text of the load error; `None`: it compiles).
+    // The host of `run` does not have `open`, so these programs do not run.
+    let main = "close(pass(open(1)))";
+    for (head, error) in [
+        (format!("import host\n\n{pass}"), None),
+        (format!("import host(Handle, open, close)\n\n{pass}"), None),
+        // The import list does not name the type.
+        (
+            format!("import host(open, close)\n\n{pass}"),
+            Some("unknown type `Handle`"),
+        ),
+        // An extern type of a module that this module does not import.
+        (
+            format!("import mid\n\n{pass}"),
+            Some("unknown type `Handle`"),
+        ),
+        // A private alias, and an alias that the import list does not name.
+        (
+            "import lib\n\nfn keep(f: Feet): Feet = f\n".to_string(),
+            Some("unknown type `Feet`"),
+        ),
+        (
+            format!("import lib(double)\n\n{keep}"),
+            Some("unknown type `Meters`"),
+        ),
+    ] {
+        let body = if head.contains("Handle") { main } else { "0" };
+        write(
+            "app.eph",
+            &format!("module app\n\n{head}\nfn main(): I32 = {body}\n"),
+        );
+        let out = ephapax(tmp.path(), &["compile", "app.eph"]);
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        match error {
+            None => assert!(out.status.success(), "{head}: stderr:\n{stderr}"),
+            Some(error) => assert!(
+                !out.status.success() && stderr.contains(error),
+                "{head}: exit {:?}, stderr:\n{stderr}",
+                out.status.code()
+            ),
+        }
+    }
+}
+
 /// v2 plan rung E7: an arm with a false guard gives the value to the next
 /// arm, as wasm and in the interpreter. The desugarer used to take a
 /// guarded constructor arm without a look at its guard.

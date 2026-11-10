@@ -224,8 +224,8 @@ pub fn parse_source(
     )?;
 
     // One DataRegistry for all modules: it gives each module its own
-    // scope, with the `pub data` types of the modules that it imports.
-    // An `extern type` is visible in each module.
+    // scope, with the public types of the modules that it imports
+    // (`pub data`, `pub type`, and each extern type).
     let mut desugarer = Desugarer::with_registry(DataRegistry::new());
     let mut modules = Vec::with_capacity(resolved.len());
     for m in resolved {

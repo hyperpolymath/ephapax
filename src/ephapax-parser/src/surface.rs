@@ -315,6 +315,7 @@ fn parse_fn_decl(pair: pest::iterators::Pair<Rule>) -> Result<SurfaceDecl, Parse
 
     let mut visibility = SurfaceVisibility::Private;
     let mut name: Option<ephapax_surface::Var> = None;
+    let mut type_params = Vec::new();
     let mut params = Vec::new();
     let mut ret_ty = None;
     let mut body = None;
@@ -326,6 +327,13 @@ fn parse_fn_decl(pair: pest::iterators::Pair<Rule>) -> Result<SurfaceDecl, Parse
             }
             Rule::identifier if name.is_none() => {
                 name = Some(parse_identifier(item));
+            }
+            Rule::fn_type_params => {
+                type_params.extend(
+                    item.into_inner()
+                        .filter(|p| p.as_rule() == Rule::identifier)
+                        .map(parse_identifier),
+                );
             }
             Rule::param_list => {
                 for param in item.into_inner() {
@@ -360,6 +368,7 @@ fn parse_fn_decl(pair: pest::iterators::Pair<Rule>) -> Result<SurfaceDecl, Parse
     Ok(SurfaceDecl::Fn {
         name: name.ok_or_else(|| ParseError::missing("function name"))?,
         visibility,
+        type_params,
         params,
         ret_ty: ret_ty.unwrap_or(SurfaceTy::Base(BaseTy::Unit)),
         body: body.unwrap_or_else(|| SurfaceExpr::dummy(SurfaceExprKind::Lit(Literal::Unit))),

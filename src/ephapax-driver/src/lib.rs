@@ -55,14 +55,35 @@ impl Program {
             .expect("a program has at least its root module")
     }
 
-    /// Merge every imported module into the root, for codegen and the
-    /// interpreter. Wasm produces a single binary; each imported module's
-    /// `Fn` declarations become part of the same wasm module. When two
-    /// modules declare a function of the same name, one of them gets a
-    /// module-qualified name (`deep::helper`) and its callers follow it;
-    /// the root keeps its names. An extern item that an earlier module
-    /// already declared is dropped (first-seen wins, the root first).
-    pub fn into_merged(self) -> Module {
+    /// The whole program as one monomorphic module, for codegen and the
+    /// interpreter: [`Self::merge`], then one copy of each generic
+    /// function for each set of type arguments it is used with (v2 plan
+    /// E7). The error is a type error of the merged program; a program
+    /// that passed [`check_program`] has none.
+    pub fn into_merged(self) -> Result<Module, DriverError> {
+        let root = self.root();
+        let (module, path, source_text) = (
+            root.core.name.to_string(),
+            root.file_path.clone(),
+            root.source.clone(),
+        );
+        ephapax_typing::monomorphise(&self.merge()).map_err(|error| DriverError::Type {
+            module,
+            path,
+            source_text,
+            error: Box::new(error),
+        })
+    }
+
+    /// Merge every imported module into the root. Wasm produces a single
+    /// binary; each imported module's `Fn` declarations become part of
+    /// the same wasm module. When two modules declare a function of the
+    /// same name, one of them gets a module-qualified name
+    /// (`deep::helper`) and its callers follow it; the root keeps its
+    /// names. An extern item that an earlier module already declared is
+    /// dropped (first-seen wins, the root first). A generic function is
+    /// still generic: [`Self::into_merged`] is the form for a back end.
+    pub fn merge(self) -> Module {
         // Dedup keys: `fn:<name>` for a function, `extern:<abi>:<name>` for
         // an extern item (each extern fn is one wasm import, so the same
         // item from two modules must be emitted once). Extern blocks are
@@ -295,6 +316,33 @@ pub fn check_program(program: &Program) -> Result<(), DriverError> {
             }
         })?;
     }
+    // A generic function is compiled as its monomorphic copies, so the
+    // copies get the same check: a copy at a wide type can meet a limit
+    // that the generic body does not show.
+    let generic =
+        |decl: &Decl| matches!(decl, Decl::Fn { type_params, .. } if !type_params.is_empty());
+    if program
+        .modules
+        .iter()
+        .any(|m| m.core.decls.iter().any(generic))
+    {
+        let root = program.root();
+        let merged = program.clone().into_merged()?;
+        let types = module_expr_types(&merged, &mut ModuleRegistry::new()).map_err(|error| {
+            DriverError::Type {
+                module: root.core.name.to_string(),
+                path: root.file_path.clone(),
+                source_text: root.source.clone(),
+                error: Box::new(error),
+            }
+        })?;
+        ephapax_wasm::validate_supported_typed(&merged, &types).map_err(|error| {
+            DriverError::Unsupported {
+                path: root.file_path.clone(),
+                error,
+            }
+        })?;
+    }
     Ok(())
 }
 
@@ -354,7 +402,7 @@ mod tests {
              fn main(): I32 = only_app() + lib.only_lib() + shared()\n",
         );
         let program = load_program(&dir.path().join("app.eph"), None).expect("loads");
-        let merged = program.into_merged();
+        let merged = program.into_merged().expect("merges");
         // `shared` once (the root's), and each module's own item.
         assert_eq!(extern_fn_names(&merged), ["only_app", "only_lib", "shared"]);
         ephapax_wasm::compile_module(&merged).expect("the merged module compiles");
@@ -400,7 +448,7 @@ mod tests {
 
         write("deep.eph", &deep(deep_fn));
         write("app.eph", &app("fn helper(n: I32): I32 = n + 7"));
-        let merged = load().expect("loads").into_merged();
+        let merged = load().expect("loads").into_merged().expect("merges");
         let names: Vec<&str> = merged
             .decls
             .iter()

@@ -659,6 +659,71 @@ impl Expr {
     pub fn dummy(kind: ExprKind) -> Self {
         Self::new(kind, Span::dummy())
     }
+
+    /// Give this node a new id. A copy of a tree that will get its own
+    /// entries in a table keyed by [`ExprId`] needs this on every node.
+    pub fn renew_id(&mut self) {
+        self.id = ExprId::fresh();
+    }
+
+    /// The direct sub-expressions, for a pass that rewrites a tree.
+    pub fn children_mut(&mut self) -> Vec<&mut Expr> {
+        // No `_` arm: a new expression form must list its children.
+        let children: Vec<&mut Expr> = match &mut self.kind {
+            ExprKind::Lit(_) | ExprKind::Var(_) | ExprKind::StringNew { .. } => vec![],
+            ExprKind::StringConcat { left, right }
+            | ExprKind::Pair { left, right }
+            | ExprKind::BinOp { left, right, .. } => vec![left, right],
+            ExprKind::App { func, arg } => vec![func, arg],
+            ExprKind::ListIndex { list, index } => vec![list, index],
+            ExprKind::StringLen(e)
+            | ExprKind::Fst(e)
+            | ExprKind::Snd(e)
+            | ExprKind::Deref(e)
+            | ExprKind::Drop(e)
+            | ExprKind::Copy(e) => vec![e],
+            ExprKind::Inl { value: e, .. }
+            | ExprKind::Inr { value: e, .. }
+            | ExprKind::Lambda { body: e, .. }
+            | ExprKind::Region { body: e, .. }
+            | ExprKind::Borrow { inner: e, .. }
+            | ExprKind::UnaryOp { operand: e, .. }
+            | ExprKind::TupleIndex { tuple: e, .. } => vec![e],
+            ExprKind::Let { value, body, .. } | ExprKind::LetLin { value, body, .. } => {
+                vec![value, body]
+            }
+            ExprKind::Case {
+                scrutinee,
+                left_body,
+                right_body,
+                ..
+            } => vec![scrutinee, left_body, right_body],
+            ExprKind::Match { scrutinee, arms } => {
+                let mut children: Vec<&mut Expr> = vec![scrutinee];
+                for arm in arms {
+                    children.extend(arm.guard.as_deref_mut());
+                    children.push(&mut arm.body);
+                }
+                children
+            }
+            ExprKind::If {
+                cond,
+                then_branch,
+                else_branch,
+            } => vec![cond, then_branch, else_branch],
+            ExprKind::Block(exprs)
+            | ExprKind::ListLit(exprs)
+            | ExprKind::TupleLit(exprs)
+            | ExprKind::FFI { args: exprs, .. }
+            | ExprKind::Perform { args: exprs, .. } => exprs.iter_mut().collect(),
+            ExprKind::Handle { body, clauses } => {
+                let mut children: Vec<&mut Expr> = vec![body];
+                children.extend(clauses.iter_mut().map(|c| &mut c.body));
+                children
+            }
+        };
+        children
+    }
 }
 
 /// A single arm in an `ExprKind::Match` expression (added ephapax#61).

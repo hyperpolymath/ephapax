@@ -359,7 +359,9 @@ impl Repl {
     fn load_declarations(&mut self, source: &str) -> Result<(), DriverError> {
         let stdlib = ephapax_driver::stdlib_dir(None);
         let program = ephapax_driver::parse_source(source, "repl", None, stdlib.as_deref())?;
-        self.interpreter.load_module(&program.into_merged());
+        // Not monomorphised (that needs a type check): the interpreter
+        // runs a generic function as it is.
+        self.interpreter.load_module(&program.merge());
         Ok(())
     }
 
@@ -367,7 +369,9 @@ impl Repl {
         &mut self,
         program: Result<ephapax_driver::Program, DriverError>,
     ) -> Result<usize, ReplError> {
-        let module = program.map_err(ReplError::Load)?.into_merged();
+        let module = program
+            .and_then(ephapax_driver::Program::into_merged)
+            .map_err(ReplError::Load)?;
         self.interpreter.load_module(&module);
         Ok(module.decls.len())
     }

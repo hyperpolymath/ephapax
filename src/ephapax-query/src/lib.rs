@@ -264,9 +264,11 @@ impl QueryDb {
             }
         }
         let new: WasmResult = match (&parsed, &typed) {
-            (Ok(program), Ok(())) => {
-                compile_module(&program.clone().into_merged()).map_err(|e| e.0)
-            }
+            (Ok(program), Ok(())) => program
+                .clone()
+                .into_merged()
+                .map_err(|e| format!("cannot compile: {e}"))
+                .and_then(|module| compile_module(&module).map_err(|e| e.0)),
             (Err(e), _) | (_, Err(e)) => Err(format!("cannot compile: {e}")),
         };
         self.recomputes += 1;

@@ -332,7 +332,7 @@ fn run_file(
         } if name == "main" => Some((params.len(), ret_ty.clone())),
         _ => None,
     });
-    let module = program.into_merged();
+    let module = program.into_merged().map_err(|e| report_load_error(&e))?;
     let Some((n_params, ret_ty)) = main else {
         if verbose {
             println!("{} Module loaded (no main function)", "✓".green());
@@ -516,7 +516,7 @@ fn compile_file(
     }
 
     finish_compile(
-        program.into_merged(),
+        program.into_merged().map_err(|e| report_load_error(&e))?,
         &filename,
         path,
         output,

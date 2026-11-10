@@ -320,6 +320,7 @@ impl Desugarer {
                 SurfaceDecl::Fn {
                     name,
                     visibility,
+                    type_params,
                     params,
                     ret_ty,
                     body,
@@ -333,7 +334,7 @@ impl Desugarer {
                     core_decls.push(Decl::Fn {
                         name: name.clone(),
                         visibility: lower_visibility(*visibility),
-                        type_params: vec![],
+                        type_params: type_params.clone(),
                         params: core_params,
                         ret_ty: core_ret,
                         body: core_body,
@@ -1795,6 +1796,7 @@ mod tests {
                 SurfaceDecl::Fn {
                     name: "unwrap_or".into(),
                     visibility: SurfaceVisibility::Private,
+                    type_params: vec![],
                     params: vec![
                         (
                             "opt".into(),
@@ -1879,6 +1881,7 @@ mod tests {
                 SurfaceDecl::Fn {
                     name: "test".into(),
                     visibility: SurfaceVisibility::Private,
+                    type_params: vec![],
                     params: vec![(
                         "opt".into(),
                         SurfaceTy::Named {
@@ -1944,6 +1947,7 @@ mod tests {
                 SurfaceDecl::Fn {
                     name: "test".into(),
                     visibility: SurfaceVisibility::Private,
+                    type_params: vec![],
                     params: vec![(
                         "opt".into(),
                         SurfaceTy::Named {

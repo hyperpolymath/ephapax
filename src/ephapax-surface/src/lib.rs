@@ -414,6 +414,9 @@ pub enum SurfaceDecl {
         name: Var,
         #[serde(default, skip_serializing_if = "SurfaceVisibility::is_private")]
         visibility: SurfaceVisibility,
+        /// `fn id<a>(...)`: the type parameters, in order.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        type_params: Vec<SmolStr>,
         params: Vec<(Var, SurfaceTy)>,
         ret_ty: SurfaceTy,
         body: SurfaceExpr,

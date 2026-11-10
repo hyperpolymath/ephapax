@@ -201,14 +201,61 @@ fn each_module_calls_its_own_function_of_a_shared_name() {
 
     // `shadow` in `deep` has a parameter with the name of the function
     // that the merge renames; the parameter still shadows the function.
-    // Wasm only: the interpreter reads a parameter that has the name of a
-    // function as that function, also in a program of one module.
     write(
         "param.eph",
         "module param\n\nimport deep\n\nfn helper(n: I32): I32 = n\n\n\
          fn main(): I32 = shadow(0)\n",
     );
-    assert_eq!(stdout_of(tmp.path(), &["run", "param.eph"]), "1000");
+    for args in [&["run", "param.eph"][..], &["run", "--interp", "param.eph"]] {
+        assert_eq!(stdout_of(tmp.path(), args), "1000", "{args:?}");
+    }
+}
+
+/// The interpreter calls a function with 0, 2 or 3 parameters by its
+/// name, a parameter shadows a function of the same name, and a borrow of
+/// a string is not a use. It used to stop on each of these programs
+/// ("Not a function", "Unbound variable", "Linear value used after
+/// consumption"); wasm ran them.
+#[test]
+fn the_interpreter_calls_and_borrows_as_wasm_does() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    // (declarations, `main` body, output)
+    for (decls, main, want) in [
+        ("fn seven(): I32 = 7\n", "seven() + seven()", "14"),
+        ("fn add(a: I32, b: I32): I32 = a + b\n", "add(3, 4)", "7"),
+        (
+            "fn add(a: I32, b: I32): I32 = a + b\n",
+            "add(add(1, 2), 30)",
+            "33",
+        ),
+        (
+            "fn add3(a: I32, b: I32, c: I32): I32 = a + b * c\n",
+            "add3(1, 2, 3)",
+            "7",
+        ),
+        // The order of the parameters: 10 - 3, not 3 - 10.
+        ("fn sub(a: I32, b: I32): I32 = a - b\n", "sub(10, 3)", "7"),
+        (
+            "fn helper(n: I32): I32 = n + 100\n\nfn use_it(helper: I32): I32 = helper + 1\n",
+            "use_it(5) + helper(0)",
+            "106",
+        ),
+        (
+            "",
+            "region r {\n    let! s = String.new@r(\"hello\")\n    \
+             let n = String.len(&s)\n    n + String.len(s)\n  }",
+            "10",
+        ),
+    ] {
+        std::fs::write(
+            tmp.path().join("calls.eph"),
+            format!("module calls\n\n{decls}\nfn main(): I32 =\n  {main}\n"),
+        )
+        .expect("write program");
+        for args in [&["run", "calls.eph"][..], &["run", "--interp", "calls.eph"]] {
+            assert_eq!(stdout_of(tmp.path(), args), want, "{main} under {args:?}");
+        }
+    }
 }
 
 /// `M.Ctor(args)` builds a value of a data type of the imported module

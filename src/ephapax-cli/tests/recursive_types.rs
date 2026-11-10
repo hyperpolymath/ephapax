@@ -550,6 +550,37 @@ fn data_types_that_refer_to_each_other_run() {
     }
 }
 
+/// The interpreter builds and reads a list of 100000 elements. A value
+/// shares its parts, so the read of a variable does not copy the list,
+/// and no step uses native recursion. (With boxed parts, a list of 2000
+/// elements needed 3 GB, and one of 20000 aborted the process.)
+#[test]
+fn the_interpreter_runs_a_long_list() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    std::fs::write(
+        tmp.path().join("long.eph"),
+        "data List = Nil | Cons(I32, List)\n\n\
+         fn build(n: I32): List = if n == 0 then Nil else Cons(n, build(n - 1))\n\n\
+         fn length(l: List): I32 =\n  match l of\n  | Nil => 0\n  \
+         | Cons(x, rest) => 1 + length(rest)\n  end\n\n\
+         fn main(): I32 = length(build(100000))\n",
+    )
+    .expect("write program");
+    let out = ephapax(
+        tmp.path(),
+        &["run", "--interp", "--unstable-core", "long.eph"],
+    );
+    assert_eq!(
+        (
+            out.status.code(),
+            String::from_utf8_lossy(&out.stdout).trim()
+        ),
+        (Some(0), "100000"),
+        "stderr:\n{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+}
+
 /// The recursive forms that have no lowering yet are refused by name.
 #[test]
 fn a_recursive_form_with_no_lowering_is_refused_by_name() {

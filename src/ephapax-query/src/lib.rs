@@ -91,11 +91,18 @@ pub struct QueryDb {
 }
 
 /// Two parse results are equivalent for backdating iff both are `Ok` with
-/// equal core modules. `DriverError` is not `PartialEq`, and a differing
-/// error is a real change anyway, so any `Err` is treated as changed.
+/// equal core modules, or both are the same error. `DriverError` is not
+/// `PartialEq`; its `Debug` form holds every field.
 fn parsed_equiv(a: &ParsedResult, b: &ParsedResult) -> bool {
-    matches!((a, b), (Ok(x), Ok(y))
-        if x.modules.iter().map(|m| &m.core).eq(y.modules.iter().map(|m| &m.core)))
+    match (a, b) {
+        (Ok(x), Ok(y)) => x
+            .modules
+            .iter()
+            .map(|m| &m.core)
+            .eq(y.modules.iter().map(|m| &m.core)),
+        (Err(x), Err(y)) => format!("{x:?}") == format!("{y:?}"),
+        _ => false,
+    }
 }
 
 impl QueryDb {
@@ -310,6 +317,20 @@ mod tests {
             n,
             "identical set_source_text must not invalidate"
         );
+    }
+
+    /// A program that fails to load is loaded again on each demand (its
+    /// imports are not inputs). The same failure is not a change: the
+    /// queries after the parse do not run again.
+    #[test]
+    fn same_failure_does_not_recompute_downstream() {
+        let mut db = QueryDb::new();
+        db.set_source_text("m", "fn add(a: I32): I32 = a +\n");
+        assert!(db.parsed("m").is_err());
+        let _ = db.typed("m");
+        let n = db.recompute_count();
+        let _ = db.typed("m");
+        assert_eq!(db.recompute_count(), n + 1, "only the parse runs again");
     }
 
     #[test]

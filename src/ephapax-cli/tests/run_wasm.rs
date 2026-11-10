@@ -733,6 +733,19 @@ fn the_interpreter_runs_deep_calls_and_names_its_limit() {
         "100000"
     );
 
+    // A tail call adds no frame: 1200000 calls are more than the limit
+    // of the frames.
+    write(
+        "tail.eph",
+        "module tail\n\nfn go(n: I32, acc: I32): I32 =\n  \
+         if n == 0 then acc else go(n - 1, acc + 1)\n\n\
+         fn main(): I32 = go(1200000, 0)\n",
+    );
+    assert_eq!(
+        stdout_of(tmp.path(), &["run", "--interp", "tail.eph"]),
+        "1200000"
+    );
+
     write(
         "no_end.eph",
         "module no_end\n\nfn f(n: I32): I32 = 1 + f(n)\n\nfn main(): I32 = f(0)\n",

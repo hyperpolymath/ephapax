@@ -1112,7 +1112,12 @@ impl Interpreter {
                     let mut callee = env;
                     callee.extend(param, right);
                     let caller = std::mem::replace(&mut self.env, callee);
-                    stack.push(Frame::Env(caller));
+                    // A tail call: the frame on top gives the environment
+                    // back already, so this call adds no frame, and a
+                    // loop written as a tail call has no depth limit.
+                    if !matches!(stack.last(), Some(Frame::Env(_))) {
+                        stack.push(Frame::Env(caller));
+                    }
                     return Ok(State::Eval(body.0));
                 }
                 _ => return Err(RuntimeError::NotAFunction),

@@ -160,26 +160,46 @@ struct ConstructorInfo {
     home: SmolStr,
 }
 
-/// A data type as its module declares it.
+/// A named type as its module declares it.
 #[derive(Debug, Clone)]
-struct DataInfo {
-    params: Vec<SmolStr>,
-    ctors: Vec<ConstructorDef>,
-    /// Key of the module that declares the type. The names in the
-    /// fields of `ctors` are names in the scope of that module.
+struct TypeInfo {
+    def: TypeDef,
+    /// Key of the module that declares the type. The names in `def` are
+    /// names in the scope of that module.
     home: SmolStr,
-    /// `pub data`: a module that imports `home` can name the type.
+    /// A module that imports `home` can name the type: `pub data`,
+    /// `pub type`, and each extern type (as each extern function).
     public: bool,
 }
 
-/// The data types and the constructors that one module can name: its
+/// What a type name stands for.
+#[derive(Debug, Clone)]
+enum TypeDef {
+    /// `data Foo(a) = A | B(a)`.
+    Data {
+        params: Vec<SmolStr>,
+        ctors: Vec<ConstructorDef>,
+    },
+    /// `type Foo = T`, with `T` in surface form: `desugar_named_type`
+    /// expands it on demand. Record and sum declarations are already
+    /// lowered to `Prod`/`Sum`/`Tuple` by `parse_type_decl`.
+    Alias(SurfaceTy),
+    /// `extern "abi" { type Foo }`: nominal and opaque. It resolves to
+    /// `Ty::Var("Foo")`, a rigid type variable that unifies only with
+    /// itself, so a `Window` is never an `IpcChannel`.
+    Extern,
+}
+
+/// The named types and the constructors that one module can name: its
 /// own, and the public ones of the modules that it imports.
 #[derive(Debug, Clone, Default)]
 struct Scope {
     /// Constructor name → info
     constructors: HashMap<SmolStr, ConstructorInfo>,
-    /// Data type name → declaration
-    types: HashMap<SmolStr, DataInfo>,
+    /// Type name → declaration. A data type, an alias and an extern
+    /// type share the one table: a later declaration of a name shadows
+    /// an earlier one of each kind.
+    types: HashMap<SmolStr, TypeInfo>,
 }
 
 /// The key of a module in the registry. `Foo.Bar` and `Foo/Bar` name the
@@ -193,31 +213,13 @@ fn module_key(name: &str) -> SmolStr {
 /// Maps constructor names to their encoding information. This is built
 /// from `DataDecl` nodes and used to desugar `Construct` and `Match`.
 /// Each module has its own [`Scope`], as it has for functions: a module
-/// names a data type of another module only when it imports that module
-/// and the type is `pub`.
+/// names a data type, a `type` alias or an extern type of another module
+/// only when it imports that module and the type is public.
 #[derive(Debug, Clone, Default)]
 pub struct DataRegistry {
     /// Module key → what the module can name. The key is the empty
     /// string for declarations registered with no module.
     scopes: HashMap<SmolStr, Scope>,
-    /// Names declared via `extern "abi" { type Foo }` blocks.
-    ///
-    /// Extern types are nominal and opaque: the desugar pass resolves
-    /// `SurfaceTy::Named { name: "Foo", args: [] }` to `Ty::Var("Foo")`
-    /// rather than emitting an `UnknownType` error. The type checker
-    /// then treats them as rigid type variables that only unify with
-    /// themselves (so values of type `Window` cannot be confused with
-    /// `IpcChannel`, etc.).
-    extern_types: std::collections::HashSet<SmolStr>,
-    /// `type Foo = T` aliases — captured in their pre-desugar surface
-    /// form so `desugar_named_type` can recursively expand them on
-    /// demand. The stored value is whatever the parser produced for the
-    /// alias body (record/sum decls already pre-lowered to `Prod`/`Sum`/
-    /// `Tuple` by `parse_type_decl`). An alias is visible in each module.
-    /// Each entry has the key of the module that declares the alias: the
-    /// body expands in the scope of that module, and a module that
-    /// declares an alias of the same name gets its own.
-    type_aliases: HashMap<SmolStr, Vec<(SmolStr, SurfaceTy)>>,
 }
 
 impl DataRegistry {
@@ -240,31 +242,44 @@ impl DataRegistry {
                 },
             );
         }
-        scope.types.insert(
-            decl.name.clone(),
-            DataInfo {
-                params: decl.params.clone(),
-                ctors: decl.constructors.clone(),
-                home: home.into(),
-                public: decl.visibility == SurfaceVisibility::Public,
-            },
-        );
+        let def = TypeDef::Data {
+            params: decl.params.clone(),
+            ctors: decl.constructors.clone(),
+        };
+        let public = decl.visibility == SurfaceVisibility::Public;
+        self.register_type(home, &decl.name, def, public);
     }
 
-    /// Bring the public data types that the module `from` declares, with
-    /// their constructors, into the scope of the module `into`. A list of
-    /// `names` that is not empty limits the import to the types in it.
-    /// Returns the names of the imported types.
+    /// Give the type name `name` its meaning in the module `home`.
+    fn register_type(&mut self, home: &str, name: &SmolStr, def: TypeDef, public: bool) {
+        let home: SmolStr = home.into();
+        let info = TypeInfo {
+            def,
+            home: home.clone(),
+            public,
+        };
+        let scope = self.scopes.entry(home).or_default();
+        scope.types.insert(name.clone(), info);
+    }
+
+    /// Bring the public types that the module `from` declares, and the
+    /// constructors of its data types, into the scope of the module
+    /// `into`. A list of `names` that is not empty limits the import to
+    /// the types in it. Returns the names of the imported types.
     fn import(&mut self, into: &str, from: &str, names: &[SmolStr]) -> HashSet<SmolStr> {
         let Some(source) = self.scopes.get(from) else {
             return HashSet::new();
         };
         let mut imported = Scope::default();
-        for (name, data) in &source.types {
-            if !data.public || data.home != from || !(names.is_empty() || names.contains(name)) {
+        for (name, info) in &source.types {
+            if !info.public || info.home != from || !(names.is_empty() || names.contains(name)) {
                 continue;
             }
-            for ctor in &data.ctors {
+            let TypeDef::Data { ctors, .. } = &info.def else {
+                imported.types.insert(name.clone(), info.clone());
+                continue;
+            };
+            for ctor in ctors {
                 // A later data type of `from` can have a constructor of
                 // the same name: the constructor is then not of `name`.
                 let info = source.constructors.get(&ctor.name);
@@ -274,7 +289,7 @@ impl DataRegistry {
                         .insert(ctor.name.clone(), info.clone());
                 }
             }
-            imported.types.insert(name.clone(), data.clone());
+            imported.types.insert(name.clone(), info.clone());
         }
         let types = imported.types.keys().cloned().collect();
         let scope = self.scopes.entry(into.into()).or_default();
@@ -283,30 +298,16 @@ impl DataRegistry {
         types
     }
 
-    /// Register an opaque extern type name (from
-    /// `extern "abi" { type Foo }`).
-    pub fn register_extern_type(&mut self, name: &SmolStr) {
-        self.extern_types.insert(name.clone());
+    /// Register the opaque type `name` of an extern block of the module
+    /// `home`.
+    pub fn register_extern_type(&mut self, home: &str, name: &SmolStr) {
+        self.register_type(home, name, TypeDef::Extern, true);
     }
 
-    /// Register a `type Foo = T` alias of the module `home` in surface
-    /// form. Lookups in `desugar_named_type` find the entry and
-    /// recursively desugar it.
-    pub fn register_type_alias(&mut self, home: &str, name: SmolStr, ty: SurfaceTy) {
-        let entries = self.type_aliases.entry(name).or_default();
-        entries.retain(|(module, _)| module != home);
-        entries.push((home.into(), ty));
-    }
-
-    /// The alias `name` as the module `scope` sees it, with the key of
-    /// the module that declares it: the alias of `scope`, or else the
-    /// alias that was registered last.
-    fn lookup_type_alias(&self, scope: &str, name: &str) -> Option<&(SmolStr, SurfaceTy)> {
-        let entries = self.type_aliases.get(name)?;
-        entries
-            .iter()
-            .find(|(module, _)| module == scope)
-            .or(entries.last())
+    /// Register the alias `type name = ty` of the module `home`. `public`
+    /// is `pub type`: a module that imports `home` can name the alias.
+    pub fn register_type_alias(&mut self, home: &str, name: SmolStr, ty: SurfaceTy, public: bool) {
+        self.register_type(home, &name, TypeDef::Alias(ty), public);
     }
 
     /// Look up a constructor by its name in the module `scope`.
@@ -314,14 +315,9 @@ impl DataRegistry {
         self.scopes.get(scope)?.constructors.get(name)
     }
 
-    /// Look up a data type by its name in the module `scope`.
-    fn get_type_ctors(&self, scope: &str, name: &str) -> Option<&DataInfo> {
+    /// Look up a type by its name in the module `scope`.
+    fn get_type(&self, scope: &str, name: &str) -> Option<&TypeInfo> {
         self.scopes.get(scope)?.types.get(name)
-    }
-
-    /// Is this name a registered extern (opaque) type?
-    fn is_extern_type(&self, name: &str) -> bool {
-        self.extern_types.contains(name)
     }
 }
 
@@ -402,12 +398,15 @@ impl Desugarer {
 
     /// The constructors of the data type of the constructor `info`.
     fn ctors_of(&self, info: &ConstructorInfo) -> Result<Vec<ConstructorDef>, DesugarError> {
-        self.registry
-            .get_type_ctors(&info.home, &info.data_name)
-            .map(|data| data.ctors.clone())
-            .ok_or_else(|| DesugarError::UnknownType {
+        match self.registry.get_type(&info.home, &info.data_name) {
+            Some(TypeInfo {
+                def: TypeDef::Data { ctors, .. },
+                ..
+            }) => Ok(ctors.clone()),
+            _ => Err(DesugarError::UnknownType {
                 name: info.data_name.to_string(),
-            })
+            }),
+        }
     }
 
     /// Run `f` with the names of the module `home` in scope: the names
@@ -433,14 +432,14 @@ impl Desugarer {
             .map(|i| last_segment(i.module.as_str()))
             .collect();
 
-        // The public data types of each imported module, in the order of
-        // the imports: a later one shadows an earlier one, and a
-        // declaration of this module shadows both.
+        // The public types of each imported module, in the order of the
+        // imports: a later one shadows an earlier one, and a declaration
+        // of this module shadows both.
         let key = module_key(&module.name);
         // The imports of the core module: the type checker reads each
         // name in an import list as a function, so the list keeps only
-        // the names that are not data types. An import that names only
-        // data types imports no function.
+        // the names that are not types. An import that names only types
+        // imports no function.
         let mut imports = Vec::with_capacity(module.imports.len());
         for import in &module.imports {
             let types = self
@@ -465,13 +464,18 @@ impl Desugarer {
                 SurfaceDecl::Extern { items, .. } => {
                     for item in items {
                         if let SurfaceExternItem::Type { name } = item {
-                            self.registry.register_extern_type(name);
+                            self.registry.register_extern_type(&key, name);
                         }
                     }
                 }
-                SurfaceDecl::Type { name, ty, .. } => {
+                SurfaceDecl::Type {
+                    name,
+                    visibility,
+                    ty,
+                } => {
+                    let public = *visibility == SurfaceVisibility::Public;
                     self.registry
-                        .register_type_alias(&key, name.clone(), ty.clone());
+                        .register_type_alias(&key, name.clone(), ty.clone(), public);
                 }
                 _ => {}
             }
@@ -955,39 +959,29 @@ impl Desugarer {
             return Ok(Ty::Base(BaseTy::I32));
         }
 
-        if self.registry.is_extern_type(name.as_str()) {
-            return Ok(Ty::Var(name.clone()));
-        }
-
-        // `type Foo = T` aliases — recursively desugar the stored surface
-        // form. Aliases are monomorphic here (parameterised aliases would
-        // carry their args via the body).
-        let alias = self
+        let info = self
             .registry
-            .lookup_type_alias(&self.scope.borrow(), name.as_str())
-            .cloned();
-        if let Some((home, aliased)) = alias {
-            if !args.is_empty() {
-                return Err(DesugarError::TypeArityMismatch {
-                    name: name.to_string(),
-                    expected: 0,
-                    got: args.len(),
-                });
-            }
-            return self.with_expansion(name, &home, |this| this.desugar_ty(&aliased));
-        }
-
-        let DataInfo {
-            params,
-            ctors,
-            home,
-            ..
-        } = self
-            .registry
-            .get_type_ctors(&self.scope.borrow(), name.as_str())
+            .get_type(&self.scope.borrow(), name.as_str())
             .ok_or_else(|| DesugarError::UnknownType {
                 name: name.to_string(),
             })?;
+        let home = &info.home;
+        let (params, ctors) = match &info.def {
+            TypeDef::Extern => return Ok(Ty::Var(name.clone())),
+            // Aliases are monomorphic here (parameterised aliases would
+            // carry their args via the body).
+            TypeDef::Alias(aliased) => {
+                if !args.is_empty() {
+                    return Err(DesugarError::TypeArityMismatch {
+                        name: name.to_string(),
+                        expected: 0,
+                        got: args.len(),
+                    });
+                }
+                return self.with_expansion(name, home, |this| this.desugar_ty(aliased));
+            }
+            TypeDef::Data { params, ctors } => (params, ctors),
+        };
 
         if params.len() != args.len() {
             return Err(DesugarError::TypeArityMismatch {
@@ -2536,6 +2530,7 @@ mod expansion_regressions {
                 } else {
                     named(&format!("A{}", i + 1))
                 },
+                false,
             );
         }
         let desugarer = Desugarer::with_registry(registry.clone());
@@ -2543,7 +2538,7 @@ mod expansion_regressions {
             desugarer.desugar_ty(&named("A0")).unwrap(),
             Ty::Base(BaseTy::I32)
         );
-        registry.register_type_alias("", "A64".into(), named("A0"));
+        registry.register_type_alias("", "A64".into(), named("A0"), false);
         assert!(matches!(
             Desugarer::with_registry(registry).desugar_ty(&named("A0")),
             Err(DesugarError::RecursiveType { .. })

@@ -356,7 +356,10 @@ pattern = constructor_pattern
         | var_pattern
         ;
 
-constructor_pattern = constructor_name , [ "(" , [ pattern_list ] , ")" ] ;
+(* `Some(x)`, `None`, and with the module that declares the type: *)
+(* `shapes.Rect(w, h)`. The module must be an import of this module. *)
+constructor_pattern = [ pattern_qualifier , "." ] , constructor_name , [ "(" , [ pattern_list ] , ")" ] ;
+pattern_qualifier = identifier ;
 pair_pattern = "(" , pattern , "," , pattern , ")" ;
 wildcard_pattern = "_" ;
 literal_pattern = literal ;

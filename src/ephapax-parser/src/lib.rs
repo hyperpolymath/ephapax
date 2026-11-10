@@ -1040,7 +1040,12 @@ fn parse_pattern_core(pair: pest::iterators::Pair<Rule>) -> Result<Pattern, Pars
 fn parse_constructor_pattern_core(
     pair: pest::iterators::Pair<Rule>,
 ) -> Result<Pattern, ParseError> {
-    let mut inner = pair.into_inner();
+    // snip: this parser has no list of imports, so it does not check the
+    // module of `M.Ctor`; the constructor resolves as `Ctor`, as `M.f`
+    // does. The surface parser path checks the module.
+    let mut inner = pair
+        .into_inner()
+        .filter(|p| p.as_rule() != Rule::pattern_qualifier);
 
     let ctor = SmolStr::new(
         inner

@@ -1041,13 +1041,22 @@ fn parse_pattern(pair: pest::iterators::Pair<Rule>) -> Result<Pattern, ParseErro
 }
 
 fn parse_constructor_pattern(pair: pest::iterators::Pair<Rule>) -> Result<Pattern, ParseError> {
-    let mut inner = pair.into_inner();
+    let mut inner = pair.into_inner().peekable();
 
+    // `M.Ctor`: the name keeps the qualifier, as `M.Ctor`. The desugarer
+    // knows the imports: it checks `M` and finds `Ctor`.
+    let qualifier = inner
+        .next_if(|p| p.as_rule() == Rule::pattern_qualifier)
+        .map(|p| p.as_str().to_string());
     let ctor = parse_constructor_name(
         inner
             .next()
             .ok_or_else(|| ParseError::missing("constructor name"))?,
     );
+    let ctor = match qualifier {
+        Some(qualifier) => format!("{qualifier}.{ctor}").into(),
+        None => ctor,
+    };
 
     let mut args = Vec::new();
     for item in inner {

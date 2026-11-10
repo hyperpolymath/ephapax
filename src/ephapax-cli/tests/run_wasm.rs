@@ -663,6 +663,68 @@ fn a_false_guard_gives_the_value_to_the_next_arm() {
     }
 }
 
+/// A pattern can name a constructor with its module: `shapes.Rect(w, h)`,
+/// as an expression can since `a_qualified_constructor_takes_its_arguments`.
+/// The module must be an import, and the type must be `pub`.
+#[test]
+fn a_pattern_can_name_a_constructor_with_its_module() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let write =
+        |name: &str, text: &str| std::fs::write(tmp.path().join(name), text).expect("write module");
+    write(
+        "shapes.eph",
+        "module shapes\n\npub data Shape = Dot | Seg(I32) | Rect(I32, I32)\n\n\
+         data Hidden = H(I32)\n",
+    );
+    // (function body, `main` body, output)
+    for (body, main, want) in [
+        (
+            "match s of | shapes.Dot => 1 | shapes.Seg(n) => n | shapes.Rect(w, h) => w * h end",
+            "area(shapes.Rect(3, 4)) * 100 + area(Seg(5)) * 10 + area(shapes.Dot)",
+            "1251",
+        ),
+        // With a guard, and next to a pattern with no module.
+        (
+            "match s of | shapes.Seg(n) if n > 3 => 1 | Seg(n) => 2 | _ => 0 end",
+            "area(Seg(5)) * 100 + area(Seg(1)) * 10 + area(Dot)",
+            "120",
+        ),
+    ] {
+        write(
+            "app.eph",
+            &format!(
+                "module app\n\nimport shapes\n\nfn area(s: Shape): I32 =\n  {body}\n\n\
+                 fn main(): I32 = {main}\n"
+            ),
+        );
+        for args in [&["run", "app.eph"][..], &["run", "--interp", "app.eph"]] {
+            assert_eq!(stdout_of(tmp.path(), args), want, "{body} under {args:?}");
+        }
+    }
+
+    // (pattern, text of the load error)
+    for (pattern, error) in [
+        ("other.Dot", "`other` is not an imported module"),
+        ("shapes.H(v)", "unknown constructor `H`"),
+    ] {
+        write(
+            "bad.eph",
+            &format!(
+                "module bad\n\nimport shapes\n\n\
+                 fn f(s: Shape): I32 = match s of | {pattern} => 1 | _ => 0 end\n\n\
+                 fn main(): I32 = f(Dot)\n"
+            ),
+        );
+        let out = ephapax(tmp.path(), &["compile", "bad.eph"]);
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        assert!(
+            !out.status.success() && stderr.contains(error),
+            "{pattern}: exit {:?}, stderr:\n{stderr}",
+            out.status.code()
+        );
+    }
+}
+
 /// A pair pattern binds each component at its own type: a destructuring
 /// `let`, and a constructor with several fields (a right-nested pair).
 /// Patterns used to read every component as an i32.

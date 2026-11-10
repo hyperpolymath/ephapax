@@ -379,8 +379,21 @@ impl Desugarer {
         }
     }
 
-    /// The constructor `name` in the current scope.
+    /// The constructor `name` in the current scope. A pattern can name
+    /// it as `M.Ctor`: `M` must be an imported module, and the
+    /// constructor then resolves as `Ctor` (as `M.Ctor(x)` does in an
+    /// expression).
     fn ctor(&self, name: &str) -> Result<&ConstructorInfo, DesugarError> {
+        let name = match name.split_once('.') {
+            Some((qualifier, member)) if self.module_qualifiers.contains(qualifier) => member,
+            Some((qualifier, member)) => {
+                return Err(DesugarError::QualifiedAccessUnknownModule {
+                    qualifier: qualifier.to_string(),
+                    member: member.to_string(),
+                })
+            }
+            None => name,
+        };
         self.registry
             .get_ctor(&self.scope.borrow(), name)
             .ok_or_else(|| DesugarError::UnknownConstructor {

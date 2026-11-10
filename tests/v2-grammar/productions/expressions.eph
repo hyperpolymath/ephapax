@@ -33,6 +33,7 @@ fn control(o: Option(I32), s: I32 + I32): I32 =
     | None => 0
     | Some(0) => 1
     | Some(n) if n > 5 => n
+    | lib.Some(n) => n
     | _ => 2
     end in
   let i = match (g, h) of | (a, b) => a + b end in

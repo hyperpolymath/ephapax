@@ -31,6 +31,9 @@ fn callables(module: &Module) -> Vec<(&Var, bool, bool)> {
             Decl::Fn {
                 name, visibility, ..
             } => out.push((name, *visibility == Visibility::Public, true)),
+            // A constant is in the namespace of the functions, and no
+            // other module can import it.
+            Decl::Const { name, .. } => out.push((name, false, true)),
             Decl::Extern { items, .. } => out.extend(items.iter().filter_map(|item| match item {
                 ExternItem::Fn { name, .. } => Some((name, true, false)),
                 ExternItem::Type { .. } => None,
@@ -130,7 +133,10 @@ fn rename_decl(decl: &mut Decl, scope: &Renames) {
             params.iter_mut().for_each(|(p, _)| rename(p, scope));
             rename_expr(body, scope);
         }
-        Decl::Const { value, .. } => rename_expr(value, scope),
+        Decl::Const { name, value, .. } => {
+            rename(name, scope);
+            rename_expr(value, scope);
+        }
         Decl::Type { .. } | Decl::Extern { .. } | Decl::Data { .. } => {}
     }
 }

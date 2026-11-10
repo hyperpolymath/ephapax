@@ -648,6 +648,9 @@ pub struct Codegen {
     /// The table index of the closure function that stands for a named
     /// function used as a value, by the name of that function.
     fn_value_slots: HashMap<String, u32>,
+    /// The names of the top-level constants. A constant is a function
+    /// with no parameter, and a use of its name is a call of it.
+    constants: std::collections::HashSet<String>,
 
     /// Optional debug information (enabled with --debug flag)
     debug_info: Option<DebugInfo>,
@@ -758,6 +761,7 @@ impl Codegen {
             lambda_fns: Vec::new(),
             callable_params: HashMap::new(),
             fn_value_slots: HashMap::new(),
+            constants: std::collections::HashSet::new(),
             debug_info: None,
             optimize_closures: false,
             extern_imports: Vec::new(),
@@ -1152,7 +1156,32 @@ impl Codegen {
                     idx += 1;
                 }
                 Decl::Type { .. } => { /* type aliases are erased at runtime */ }
-                Decl::Const { .. } => { /* constants inlined at compile time */ }
+                // A constant is a function with no parameter: a use of its
+                // name is a call, so its value is computed at each use.
+                // (No code was made for a constant, and a use of its
+                // name was a trap.)
+                // snip: a call at each use; upgrade to a wasm global that
+                // a start function sets if the value of a constant is
+                // costly or has an effect that must happen 1 time.
+                Decl::Const { name, ty, value } => {
+                    let result_type = ty
+                        .as_ref()
+                        .or_else(|| self.types.get(&value.id))
+                        .map_or(ValType::I32, ty_to_valtype);
+                    let wasm_type_idx = self.register_type(vec![], vec![result_type]);
+                    self.constants.insert(name.to_string());
+                    self.user_fns.insert(
+                        name.to_string(),
+                        UserFnInfo {
+                            wasm_fn_idx: idx,
+                            wasm_type_idx,
+                            result_type,
+                            param_names: Vec::new(),
+                            param_kinds: Vec::new(),
+                        },
+                    );
+                    idx += 1;
+                }
                 // Extern fn imports are emitted via `collect_extern_imports`
                 // earlier in `compile_ast_module`; extern types are opaque
                 // (lowered as i32). Nothing to do here in user-fn collection.
@@ -1477,9 +1506,14 @@ impl Codegen {
     ) -> Result<(), CodegenError> {
         for decl in &ast.decls {
             match decl {
-                Decl::Fn {
-                    name, params, body, ..
+                Decl::Fn { name, body, .. }
+                | Decl::Const {
+                    name, value: body, ..
                 } => {
+                    let params: &[(ephapax_syntax::Var, Ty)] = match decl {
+                        Decl::Fn { params, .. } => params,
+                        _ => &[],
+                    };
                     let info = self.user_fns.get(name.as_str()).cloned().ok_or_else(|| {
                         CodegenError(format!("BUG: function `{}` not collected", name))
                     })?;
@@ -1503,7 +1537,6 @@ impl Codegen {
                     code_sec.function(&self.with_locals(scratch));
                 }
                 Decl::Type { .. } => {}
-                Decl::Const { .. } => {} // constants inlined
                 // Extern fns have no code-section body — they're
                 // imported via `(import ...)` directives emitted from
                 // `collect_extern_imports`, so the code-section pass
@@ -2339,6 +2372,12 @@ impl Codegen {
             func.instruction(&Instruction::LocalGet(idx));
             // Mark linear local as consumed
             self.locals.mark_consumed(idx);
+        } else if let Some(info) = self
+            .user_fns
+            .get(name)
+            .filter(|_| self.constants.contains(name))
+        {
+            func.instruction(&Instruction::Call(info.wasm_fn_idx));
         } else if self.callable_params.contains_key(name) {
             self.compile_fn_value(func, name);
         } else {
@@ -2824,8 +2863,9 @@ impl Codegen {
         // A local hides a function of the same name (`fn apply(f: ...) =
         // f(x)` with a top-level `f`): the call is then a closure call.
         // (The call went to the top-level function.)
-        let head =
-            flatten_app_chain(fn_expr, arg).filter(|(head, _)| self.locals.get(head).is_none());
+        // A constant is a value, not a function to call with arguments.
+        let head = flatten_app_chain(fn_expr, arg)
+            .filter(|(head, _)| self.locals.get(head).is_none() && !self.constants.contains(*head));
         if let Some((head, args)) = head {
             if let Some(info) = self.user_fns.get(head).cloned() {
                 let arity = info.param_names.len();

@@ -444,6 +444,14 @@ pub enum SurfaceDecl {
     /// Data type declaration (surface-only)
     Data(DataDecl),
 
+    /// Module-level constant: `let NAME = expr`, or `let NAME: T = expr`.
+    Const {
+        name: Var,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        ty: Option<SurfaceTy>,
+        value: SurfaceExpr,
+    },
+
     /// Foreign function and type declarations: `extern "abi" { ... }`.
     ///
     /// Surface mirror of the core `Decl::Extern`. The desugar pass

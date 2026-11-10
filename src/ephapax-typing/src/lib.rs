@@ -151,6 +151,20 @@ pub enum TypeError {
     #[error("`{0}` is not a generic function and cannot take type arguments")]
     NotGeneric(Var),
 
+    /// A constant is used each time its name is used, so its value
+    /// cannot have a type that is used 1 time.
+    #[error("The constant `{0}` has the linear type {1:?}: a constant can be used many times")]
+    LinearConstant(Var, Ty),
+
+    /// 2 declarations of a module give the same name to a function or to
+    /// a constant. Each backend finds such a declaration by its name.
+    #[error("`{0}` is declared 2 times in the module, as a function or as a constant")]
+    DuplicateDefinition(Var),
+
+    /// The value of a constant does not fix its type (`let K = None`).
+    #[error("The type of the constant `{0}` is not known from its value: give it a type, as in `let {0}: T = ...`")]
+    ConstantTypeUnknown(Var),
+
     /// `fold` to a type, or `unfold` of a value of a type, that is not a
     /// recursive type (v2 plan rung E9).
     #[error("`fold` and `unfold` need a recursive type, found {0:?}")]
@@ -954,6 +968,9 @@ pub struct TypeChecker {
     ctx: Context,
     /// Type of each checked expression; see [`TypeChecker::expr_types`].
     expr_types: ExprTypes,
+    /// The expressions of the function body being checked. Their types
+    /// are resolved when the body is checked ([`check_fn`]).
+    checked_in_body: Vec<ExprId>,
     /// Uses of generic functions in the body being checked.
     instantiations: Vec<Instantiation>,
     /// The resolved type arguments of every use; see [`TypeArgs`].
@@ -978,6 +995,7 @@ impl TypeChecker {
         Self {
             ctx: Context::new(),
             expr_types: ExprTypes::new(),
+            checked_in_body: Vec::new(),
             instantiations: Vec::new(),
             type_args: TypeArgs::new(),
             generic_calls: Vec::new(),
@@ -1185,6 +1203,7 @@ impl TypeChecker {
     pub fn check(&mut self, expr: &Expr) -> Result<Ty, SpannedTypeError> {
         let ty = self.check_kind(expr)?;
         self.expr_types.insert(expr.id, ty.clone());
+        self.checked_in_body.push(expr.id);
         Ok(ty)
     }
 
@@ -2805,6 +2824,24 @@ fn type_check_module_inner(tc: &mut TypeChecker, module: &Module) -> Result<(), 
             span: Span::dummy(),
         })?;
 
+    // A function and a constant are found by their name: a module has
+    // each name 1 time. (2 functions of one name gave a wasm module that
+    // was not valid.)
+    let mut declared: HashSet<&Var> = HashSet::new();
+    for decl in &module.decls {
+        if let Decl::Fn { name, body, .. }
+        | Decl::Const {
+            name, value: body, ..
+        } = decl
+        {
+            if !declared.insert(name) {
+                let error = TypeError::DuplicateDefinition(name.clone());
+                let span = body.span;
+                return Err(SpannedTypeError { error, span });
+            }
+        }
+    }
+
     // First pass: collect all function signatures (regular + extern)
     for decl in &module.decls {
         match decl {
@@ -2878,6 +2915,16 @@ fn type_check_module_inner(tc: &mut TypeChecker, module: &Module) -> Result<(), 
         }
     }
 
+    // The constants, in the order of their declarations: the value of a
+    // constant sees the functions and the constants before it, and each
+    // function body sees each constant. (The value was not checked, and
+    // no function body had the constant in scope.)
+    for decl in &module.decls {
+        if let Decl::Const { name, ty, value } = decl {
+            check_const(tc, name, ty.as_ref(), value)?;
+        }
+    }
+
     // Second pass: type check each function body
     for decl in &module.decls {
         let Decl::Fn {
@@ -2889,10 +2936,10 @@ fn type_check_module_inner(tc: &mut TypeChecker, module: &Module) -> Result<(), 
             ..
         } = decl
         else {
-            // A constant is handled in module registration. An extern
-            // signature is registered in the first pass, and an extern
-            // type is opaque. Data constructors go through
-            // `DataCtorRegistry`. None of them has a body to check here.
+            // A constant is checked above. An extern signature is
+            // registered in the first pass, and an extern type is opaque.
+            // Data constructors go through `DataCtorRegistry`. None of
+            // them has a body to check here.
             continue;
         };
         check_fn(tc, name, type_params, params, ret_ty, body)?;
@@ -2926,7 +2973,37 @@ fn type_check_module_inner(tc: &mut TypeChecker, module: &Module) -> Result<(), 
     check_polymorphic_recursion(tc, module)
 }
 
-/// Check the body of one function against its signature.
+/// Check the value of the constant `name`, as the body of a function
+/// with no parameter, and give the constant its type in the context: the
+/// type `ty` that its declaration gives, or else the type of its value.
+/// A constant is used each time its name is used, so its type cannot be
+/// linear.
+fn check_const(
+    tc: &mut TypeChecker,
+    name: &Var,
+    ty: Option<&Ty>,
+    value: &Expr,
+) -> Result<(), SpannedTypeError> {
+    let declared = ty.cloned().unwrap_or_else(|| tc.fresh_unif());
+    let ty = check_fn(tc, name, &[], &[], &declared, value)?;
+    let refused = if has_unif(&ty) {
+        Some(TypeError::ConstantTypeUnknown(name.clone()))
+    } else if ty.is_linear() {
+        Some(TypeError::LinearConstant(name.clone(), ty.clone()))
+    } else {
+        None
+    };
+    if let Some(error) = refused {
+        let span = value.span;
+        return Err(SpannedTypeError { error, span });
+    }
+    tc.ctx.extend(name.clone(), ty, BindingForm::Let);
+    Ok(())
+}
+
+/// Check the body of one function against its signature. Returns the
+/// result type, which the body can fix (the value of a constant with no
+/// type in its declaration).
 fn check_fn(
     tc: &mut TypeChecker,
     name: &Var,
@@ -2934,7 +3011,7 @@ fn check_fn(
     params: &[(Var, Ty)],
     ret_ty: &Ty,
     body: &Expr,
-) -> Result<(), SpannedTypeError> {
+) -> Result<Ty, SpannedTypeError> {
     let saved_ctx = tc.ctx.clone();
     let saved_unif = tc.next_unif;
 
@@ -2989,11 +3066,23 @@ fn check_fn(
         tc.type_args.insert(use_.id, args);
     }
 
+    // The solutions of this body end here, and the next body uses the
+    // same numbers for its variables: resolve the types of this body now.
+    // (A type that the body fixed after the expression was checked stayed
+    // a variable in the table: `let o = None in match o of ... Some(n) =>
+    // n` with an I64 result gave a module that was not valid.)
+    for id in std::mem::take(&mut tc.checked_in_body) {
+        if let Some(ty) = tc.expr_types.get_mut(&id) {
+            *ty = ty.resolve(&tc.unif_solutions);
+        }
+    }
+
+    let ret_ty = tc.resolve(ret_ty);
     tc.ctx = saved_ctx;
     tc.next_unif = saved_unif;
     tc.unif_solutions.clear();
     tc.wildcard_obligations.clear();
-    Ok(())
+    Ok(ret_ty)
 }
 
 /// True when `ty` has a unification variable with no solution.

@@ -21,9 +21,9 @@ compliance, 16 tests)
 performance, correctness, 13 tests)
 * Benchmarks: `+src/ephapax-parser/benches/parse_bench.rs+`,
 `+src/ephapax-vram-cache/benches/cache_bench.rs+`
-* Total: *635 tests* (`+cargo test --workspace --all-targets+`);
+* Total: *639 tests* (`+cargo test --workspace --all-targets+`);
 pass/fail enforced by `+rust-ci.yml+`
-* Documented all-target tests: 635
+* Documented all-target tests: 639
 
 === CRG Testing Taxonomy — Status
 
@@ -83,7 +83,7 @@ eliminator-fork invariant + its gated capstone, per PROOF-NEEDS.adoc §4)
 ==== Build & Execution
 
 * [x] cargo build — compiles
-* [x] cargo test –workspace –all-targets — 635 pass, 0 fail
+* [x] cargo test –workspace –all-targets — 639 pass, 0 fail
 * [x] idris2/ephapax-parse-tests.ipkg — compiles AND runs green
 (2026-07-07, idris2 0.8.0 + zig-built libephapax_tokbuf.so); CI-gated
 compile-only by abi-verify.yml `+idris2-parse-front+` (runtime run stays

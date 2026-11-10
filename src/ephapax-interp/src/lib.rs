@@ -325,6 +325,8 @@ pub struct Interpreter {
     regions: Vec<RegionName>,
     /// Function definitions
     functions: HashMap<Var, FnDef>,
+    /// The value expression of each top-level constant.
+    constants: HashMap<Var, Expr>,
     /// Data declarations from loaded modules, used by `eval_match` to
     /// resolve `Pattern::Constructor` against the runtime binary-sum
     /// encoding.
@@ -357,6 +359,7 @@ impl Interpreter {
             env: Environment::new(),
             regions: Vec::new(),
             functions: HashMap::new(),
+            constants: HashMap::new(),
             data_registry: InterpDataRegistry::default(),
             ffi_libraries: Vec::new(),
         }
@@ -398,6 +401,9 @@ impl Interpreter {
             {
                 self.functions
                     .insert(name.clone(), (params.clone(), ret_ty.clone(), body.clone()));
+            }
+            if let Decl::Const { name, value, .. } = decl {
+                self.constants.insert(name.clone(), value.clone());
             }
         }
         self.data_registry.populate_from_module(module);
@@ -751,6 +757,14 @@ impl Interpreter {
         if !local {
             if let Some((params, _ret_ty, body)) = self.functions.get(name).cloned() {
                 return Ok(self.function_value(params, body));
+            }
+            // A constant: its value, from an empty environment, at each
+            // use of the name (as wasm, which calls a function).
+            if let Some(value) = self.constants.get(name).cloned() {
+                let caller = std::mem::replace(&mut self.env, Environment::new());
+                let result = self.eval(&value);
+                self.env = caller;
+                return result;
             }
         }
 

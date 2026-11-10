@@ -395,6 +395,11 @@ pub struct Desugarer {
     /// module reference at desugar time. Reset per-module by
     /// [`Desugarer::desugar_module`].
     module_qualifiers: HashSet<SmolStr>,
+    /// The names of the top-level constants of the module being
+    /// desugared. A constant with an upper-case first letter (`let K =
+    /// 40`) is read by the parser as a constructor: see `Construct` in
+    /// [`Desugarer::desugar_expr`].
+    constants: HashSet<SmolStr>,
     /// Named types currently being expanded by `desugar_named_type`,
     /// innermost last. A `data` type that is entered again is a recursive
     /// type (v2 plan rung E9).
@@ -418,6 +423,7 @@ impl Desugarer {
         Self {
             registry: DataRegistry::new(),
             module_qualifiers: HashSet::new(),
+            constants: HashSet::new(),
             expanding: RefCell::new(Vec::new()),
             expansions: std::cell::Cell::new(0),
             scope: RefCell::default(),
@@ -430,6 +436,7 @@ impl Desugarer {
         Self {
             registry,
             module_qualifiers: HashSet::new(),
+            constants: HashSet::new(),
             expanding: RefCell::new(Vec::new()),
             expansions: std::cell::Cell::new(0),
             scope: RefCell::default(),
@@ -493,6 +500,14 @@ impl Desugarer {
             .imports
             .iter()
             .map(|i| last_segment(i.module.as_str()))
+            .collect();
+        self.constants = module
+            .decls
+            .iter()
+            .filter_map(|decl| match decl {
+                SurfaceDecl::Const { name, .. } => Some(name.clone()),
+                _ => None,
+            })
             .collect();
 
         // The public types of each imported module, in the order of the
@@ -582,6 +597,15 @@ impl Desugarer {
                         name: name.clone(),
                         visibility: lower_visibility(*visibility),
                         ty: self.desugar_ty(ty)?,
+                    });
+                }
+                // A constant keeps its form: the type checker finds its
+                // type, and each backend finds its value by its name.
+                SurfaceDecl::Const { name, ty, value } => {
+                    core_decls.push(Decl::Const {
+                        name: name.clone(),
+                        ty: ty.as_ref().map(|t| self.desugar_ty(t)).transpose()?,
+                        value: self.desugar_expr(value)?,
                     });
                 }
                 // Data declarations are consumed by the registry, not emitted
@@ -834,6 +858,21 @@ impl Desugarer {
 
             // === Surface-only nodes (real desugaring) ===
             SurfaceExprKind::Construct { ctor, args } => {
+                // The parser reads each name with an upper-case first
+                // letter as a constructor. A name that is no constructor
+                // in scope, and that is a constant of the module, is that
+                // constant, applied to the arguments.
+                let scope = self.scope.borrow().clone();
+                if self.constants.contains(ctor) && self.registry.get_ctor(&scope, ctor).is_none() {
+                    let constant = Expr::new(ExprKind::Var(ctor.clone()), span);
+                    return args.iter().try_fold(constant, |func, arg| {
+                        let app = ExprKind::App {
+                            func: Box::new(func),
+                            arg: Box::new(self.desugar_expr(arg)?),
+                        };
+                        Ok(Expr::new(app, span))
+                    });
+                }
                 return self.desugar_construct(ctor, args, span);
             }
 

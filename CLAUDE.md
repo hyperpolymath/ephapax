@@ -70,7 +70,7 @@ Proof and design history is in `formal/PRESERVATION-DESIGN.adoc`; current status
 - Formal-proof work spans Coq, Idris2, and the applicable estate policy. Checker output is evidence only for the exact proposition and assumptions run; a green build does not establish general language soundness.
 - The legacy preservation closure plan is obsolete. `formal/PRESERVATION-DESIGN.adoc` is design/history, not a proof result; `formal/PRESERVATION-HANDOFF.adoc` is historical diagnosis only.
 - Modality and `linear_to_affine` artifacts are mechanised, but no unconditional L1/L2 preservation theorem is established. The modality-polymorphic L1 statement is refuted as stated; see `PROOF-NEEDS.adoc` and the EXPLAINME ledger.
-- All commits GPG-signed (key `4A03639C1EB1F86C7F0C97A91835A14A2867091E`), email `6759885+hyperpolymath@users.noreply.github.com`. Auto-merge ON for every PR.
+- Commit signing (owner ruling 2026-11-10). Each commit on `main` is a squash merge made on github.com: GitHub signs it with its own key, and it shows as Verified. The owner key `4A03639C1EB1F86C7F0C97A91835A14A2867091E` (email `6759885+hyperpolymath@users.noreply.github.com`) signs the commits that the owner makes on a local computer. A cloud agent session signs its branch commits with its own session key; never put a private key of the owner into such a session. Auto-merge ON for every PR.
 
 ---
 

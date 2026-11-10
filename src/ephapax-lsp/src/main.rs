@@ -367,6 +367,13 @@ impl LanguageServer for Backend {
     }
 
     async fn did_close(&self, params: DidCloseTextDocumentParams) {
+        // An analysis still in flight is now stale: it must not cache
+        // state or publish diagnostics for a closed document.
+        if let Ok(mut generations) = self.generations.lock() {
+            *generations
+                .entry(params.text_document.uri.clone())
+                .or_insert(0) += 1;
+        }
         // Clear diagnostics and cached state
         if let Ok(mut docs) = self.documents.lock() {
             docs.remove(&params.text_document.uri);

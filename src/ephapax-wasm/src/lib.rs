@@ -233,6 +233,20 @@ fn first_unsupported_in(expr: &Expr, types: Option<&ExprTypes>) -> Option<Codege
             ),
             expr.span,
         )),
+        // Every closure has the wasm signature (env: i32, arg: i32) -> i32
+        // until the closure ABI is typed (v2 plan rung E9).
+        ExprKind::Lambda { param_ty, body, .. }
+            if ty_to_valtype(param_ty) != ValType::I32
+                || types
+                    .and_then(|t| t.get(&body.id))
+                    .is_some_and(|ty| ty_to_valtype(ty) != ValType::I32) =>
+        {
+            Some(unsupported(
+                "a lambda with an I64, F32 or F64 parameter or result (a closure \
+                 passes 32-bit values only); use a named function",
+                expr.span,
+            ))
+        }
         ExprKind::Match { scrutinee, .. } => types
             .and_then(|t| t.get(&scrutinee.id))
             .filter(|ty| has_non_i32_component(ty))

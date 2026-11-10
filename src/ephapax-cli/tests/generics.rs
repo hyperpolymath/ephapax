@@ -304,8 +304,9 @@ fn a_generic_main_of_an_imported_module_is_not_an_entry_point() {
     );
 }
 
-/// A limit of the typed lowering that only a copy at a wide type shows
-/// (here a lambda with an F64 parameter) is a load error on `check` too.
+/// A form that only a copy at a wide type shows (here a lambda with an
+/// F64 parameter, which is behind the flag `--unstable-core`) is a load
+/// error on `check` too. With the flag, the copy runs.
 #[test]
 fn check_sees_the_limits_of_the_monomorphic_copies() {
     let tmp = tempfile::tempdir().expect("tempdir");
@@ -323,9 +324,21 @@ fn check_sees_the_limits_of_the_monomorphic_copies() {
         let out = ephapax(tmp.path(), args);
         let stderr = String::from_utf8_lossy(&out.stderr);
         assert!(
-            !out.status.success() && stderr.contains("Codegen error") && stderr.contains("lambda"),
+            !out.status.success() && stderr.contains("behind the flag `--unstable-core`: a lambda"),
             "{args:?}: exit {:?}, stderr:\n{stderr}",
             out.status.code()
+        );
+    }
+    for args in [
+        &["run", "--unstable-core", "lam.eph"][..],
+        &["run", "--interp", "--unstable-core", "lam.eph"],
+    ] {
+        let out = ephapax(tmp.path(), args);
+        assert_eq!(
+            String::from_utf8_lossy(&out.stdout).trim(),
+            "2.5",
+            "{args:?}:\n{}",
+            String::from_utf8_lossy(&out.stderr)
         );
     }
 }

@@ -211,6 +211,10 @@ pub struct ConstructorDef {
 pub struct DataDecl {
     /// The type name (e.g. "Option", "Result", "Color")
     pub name: SmolStr,
+    /// `pub data`: a module that imports this one can name the type and
+    /// its constructors.
+    #[serde(default, skip_serializing_if = "SurfaceVisibility::is_private")]
+    pub visibility: SurfaceVisibility,
     /// Type parameters (e.g. ["a"] for Option, ["a", "e"] for Result)
     pub params: Vec<TyVar>,
     /// The constructors
@@ -587,6 +591,7 @@ mod tests {
     fn data_decl_option() {
         let decl = DataDecl {
             name: "Option".into(),
+            visibility: Default::default(),
             params: vec!["a".into()],
             constructors: vec![
                 ConstructorDef {
@@ -609,6 +614,7 @@ mod tests {
         // data Color = Red | Green | Blue
         let decl = DataDecl {
             name: "Color".into(),
+            visibility: Default::default(),
             params: vec![],
             constructors: vec![
                 ConstructorDef {

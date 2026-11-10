@@ -264,6 +264,125 @@ fn a_qualified_constructor_takes_its_arguments() {
     }
 }
 
+/// A module names a data type and its constructors when it declares
+/// them, or when it imports the module that declares them and the type is
+/// `pub` (owner decision 2026-11-10: the rule of functions). Each module
+/// used to see each data type of each module loaded before it.
+#[test]
+fn a_module_names_a_data_type_only_through_a_pub_import() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let write =
+        |name: &str, text: &str| std::fs::write(tmp.path().join(name), text).expect("write module");
+    // `Inner` and `Secret` are private. `Outer` is public and has a
+    // private type in its field.
+    write(
+        "lib.eph",
+        "module lib\n\ndata Inner = I(I32)\n\npub data Outer = O(Inner)\n\n\
+         pub data Box = MkBox(I32)\n\ndata Secret = Hidden(I32)\n\n\
+         pub fn mk(n: I32): Outer = O(I(n))\n\n\
+         pub fn get(o: Outer): I32 = match o of | O(i) => match i of | I(n) => n end end\n\n\
+         pub fn unbox(b: Box): I32 = match b of | MkBox(v) => v end\n\n\
+         pub fn secret(n: I32): Secret = Hidden(n)\n",
+    );
+    write(
+        "deep.eph",
+        "module deep\n\npub data Far = MkFar(I32)\n\npub fn far(n: I32): Far = MkFar(n)\n",
+    );
+    write(
+        "mid.eph",
+        "module mid\n\nimport deep\n\npub fn through(n: I32): Far = far(n)\n",
+    );
+
+    // (imports and declarations, `main` body, output)
+    for (head, main, want) in [
+        (
+            "import lib\n",
+            "unbox(MkBox(9)) + unbox(lib.MkBox(1))",
+            "10",
+        ),
+        // An import list names the type; the constructors come with it.
+        ("import lib(Box, unbox)\n", "unbox(MkBox(9))", "9"),
+        (
+            "import lib(Box)\n",
+            "match MkBox(4) of | MkBox(v) => v end",
+            "4",
+        ),
+        // `Outer` has the `Inner` of `lib` in its field, also in a module
+        // that has its own `Inner`.
+        (
+            "import lib\n\ndata Inner = Mine(I64)\n\nfn pass(o: Outer): Outer = o\n",
+            "get(pass(mk(5)))",
+            "5",
+        ),
+        // Not a recursive type: this `Inner` is not the `Inner` in `Outer`.
+        (
+            "import lib\n\ndata Inner = Wrap(Outer)\n",
+            "match Wrap(mk(6)) of | Wrap(o) => get(o) end",
+            "6",
+        ),
+        // A declaration of the module shadows an imported one.
+        (
+            "import lib\n\ndata Box = MkBox(I32, I32)\n",
+            "match MkBox(3, 4) of | MkBox(a, b) => a + b end",
+            "7",
+        ),
+    ] {
+        write(
+            "app.eph",
+            &format!("module app\n\n{head}\nfn main(): I32 = {main}\n"),
+        );
+        for args in [&["run", "app.eph"][..], &["run", "--interp", "app.eph"]] {
+            assert_eq!(stdout_of(tmp.path(), args), want, "{main} under {args:?}");
+        }
+    }
+
+    // (imports and declarations, `main` body, text of the load error)
+    for (head, main, error) in [
+        // A private data type: its constructor and its name.
+        (
+            "import lib\n",
+            "match secret(3) of | Hidden(n) => n end",
+            "unknown constructor `Hidden`",
+        ),
+        (
+            "import lib\n",
+            "lib.Hidden(3)",
+            "unknown constructor `Hidden`",
+        ),
+        (
+            "import lib\n\nfn keep(s: Secret): Secret = s\n",
+            "0",
+            "unknown type `Secret`",
+        ),
+        // The import list does not name the type.
+        (
+            "import lib(unbox)\n",
+            "unbox(MkBox(9))",
+            "unknown constructor `MkBox`",
+        ),
+        // The list names only the type: no function comes with it.
+        ("import lib(Box)\n", "unbox(MkBox(9))", "unbox"),
+        // A data type of a module that this module does not import.
+        (
+            "import mid\n",
+            "match through(3) of | MkFar(n) => n end",
+            "unknown constructor `MkFar`",
+        ),
+    ] {
+        write(
+            "bad.eph",
+            &format!("module bad\n\n{head}\nfn main(): I32 = {main}\n"),
+        );
+        let out = ephapax(tmp.path(), &["compile", "bad.eph"]);
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        assert!(
+            !out.status.success() && stderr.contains(error),
+            "{head}{main}: exit {:?}, stderr:\n{stderr}",
+            out.status.code()
+        );
+    }
+}
+
 /// v2 plan rung E7: an arm with a false guard gives the value to the next
 /// arm, as wasm and in the interpreter. The desugarer used to take a
 /// guarded constructor arm without a look at its guard.

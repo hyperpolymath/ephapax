@@ -393,6 +393,7 @@ pub fn load_source(
 mod tests {
     use super::*;
 
+    /// The names of the extern functions of `module`, in order.
     fn extern_fn_names(module: &Module) -> Vec<String> {
         let mut names = Vec::new();
         for decl in &module.decls {

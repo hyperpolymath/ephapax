@@ -611,6 +611,8 @@ impl Interpreter {
         }
     }
 
+    /// Apply a numeric operator to 2 values of one numeric type, with the
+    /// function for that type.
     fn numeric_binop(
         &self,
         left: Value,

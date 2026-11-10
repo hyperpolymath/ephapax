@@ -377,6 +377,8 @@ fn run_file(
     Ok(())
 }
 
+/// `run --interp`: run `main` of `module` in the interpreter and print
+/// its value.
 fn run_interp(
     module: &ephapax_syntax::Module,
     ffi_libs: &[String],

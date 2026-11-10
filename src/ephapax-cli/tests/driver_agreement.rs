@@ -15,6 +15,7 @@ use std::process::Command;
 
 use ephapax_driver::DriverError;
 
+/// The root of the repository.
 fn repo_root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../..")
@@ -61,6 +62,7 @@ const LOAD_ERRORS: [&str; 6] = [
     "Codegen error",
 ];
 
+/// The text that the CLI prints for each kind of load error.
 fn load_error_text(e: &DriverError) -> &'static str {
     match e {
         DriverError::Io { .. } => LOAD_ERRORS[0],

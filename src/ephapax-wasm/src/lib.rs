@@ -211,6 +211,8 @@ pub fn first_unsupported_typed(expr: &Expr, types: &ExprTypes) -> Option<Codegen
     first_unsupported_in(expr, Some(types))
 }
 
+/// The first construct in `expr` that code generation cannot lower, as an
+/// error. With `types`, it also finds the limits of the typed lowering.
 fn first_unsupported_in(expr: &Expr, types: Option<&ExprTypes>) -> Option<CodegenError> {
     fn unsupported(what: &str, span: ephapax_syntax::Span) -> CodegenError {
         CodegenError(format!(
@@ -339,6 +341,7 @@ pub fn validate_supported_typed(module: &AstModule, types: &ExprTypes) -> Result
     validate_supported_in(module, Some(types))
 }
 
+/// Check each function body of `module` with [`first_unsupported_in`].
 fn validate_supported_in(
     module: &AstModule,
     types: Option<&ExprTypes>,
@@ -761,9 +764,11 @@ impl Codegen {
     fn fn_list_get(&self) -> u32 {
         self.import_count() + OFFSET_LIST_GET
     }
+    /// Index of the runtime helper that compares 2 strings.
     fn fn_string_eq(&self) -> u32 {
         self.import_count() + OFFSET_STRING_EQ
     }
+    /// Index of the runtime helper for the float remainder.
     fn fn_fmod(&self) -> u32 {
         self.import_count() + OFFSET_FMOD
     }
@@ -2916,10 +2921,12 @@ impl Codegen {
         func.instruction(&Instruction::LocalGet(sum_local));
     }
 
+    /// `inl(value)`: the injection with tag 0.
     fn compile_inl(&mut self, func: &mut Function, value: &Expr) {
         self.compile_injection(func, 0, value);
     }
 
+    /// `inr(value)`: the injection with tag 1.
     fn compile_inr(&mut self, func: &mut Function, value: &Expr) {
         self.compile_injection(func, 1, value);
     }
@@ -3990,6 +3997,7 @@ fn pattern_not_lowered(pattern: &Pattern, ty: &Ty) -> bool {
     }
 }
 
+/// If `pattern` is a tuple pattern or has one in it.
 fn has_tuple_pattern(pattern: &Pattern) -> bool {
     match pattern {
         Pattern::Tuple(_) => true,

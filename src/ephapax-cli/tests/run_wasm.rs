@@ -13,6 +13,7 @@ use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 
+/// The root of the repository.
 fn repo_root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../..")
@@ -20,6 +21,7 @@ fn repo_root() -> PathBuf {
         .expect("repo root")
 }
 
+/// Run the `ephapax` binary with `args`, in the directory `dir`.
 fn ephapax(dir: &Path, args: &[&str]) -> Output {
     Command::new(env!("CARGO_BIN_EXE_ephapax"))
         .current_dir(dir)

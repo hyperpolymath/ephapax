@@ -23,6 +23,7 @@ struct Case {
     expr: String,
 }
 
+/// One case from its result type and its expression.
 fn case(ty: &'static str, expr: impl Into<String>) -> Case {
     Case {
         ty,
@@ -82,9 +83,13 @@ fn samples(ty: &str) -> Vec<String> {
         .collect()
 }
 
+/// The numeric types.
 const NUMERIC: [&str; 4] = ["I32", "I64", "F32", "F64"];
+/// The types that a wasm value can have.
 const VALUE_TYPES: [&str; 5] = ["I32", "I64", "F32", "F64", "Bool"];
 
+/// Each case of the matrix: the operators, the conversions and the
+/// value forms, at each type.
 fn cases_matrix() -> Vec<Case> {
     let mut out = Vec::new();
 
@@ -270,6 +275,7 @@ fn show(ty: &str, val: Val) -> String {
     }
 }
 
+/// Load a program through the driver, as one merged module.
 fn load(src: &str) -> ephapax_syntax::Module {
     let stdlib = ephapax_driver::stdlib_dir(None);
     ephapax_driver::load_source(src, "matrix", None, stdlib.as_deref())
@@ -278,6 +284,7 @@ fn load(src: &str) -> ephapax_syntax::Module {
         .expect("the matrix module merges")
 }
 
+/// A linker with the print functions of `env`, which do nothing here.
 fn linker(engine: &Engine) -> Linker<()> {
     let mut linker = Linker::new(engine);
     linker.func_wrap("env", "print_i32", |_: i32| {}).unwrap();

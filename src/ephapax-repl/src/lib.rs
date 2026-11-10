@@ -365,6 +365,8 @@ impl Repl {
         Ok(())
     }
 
+    /// Load a program that the driver read and checked. Gives the number of
+    /// declarations that it loaded.
     fn load(
         &mut self,
         program: Result<ephapax_driver::Program, DriverError>,

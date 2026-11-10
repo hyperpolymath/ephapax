@@ -1173,6 +1173,7 @@ impl TypeChecker {
             .collect()
     }
 
+    /// The type of `expr`, by the form of the expression.
     fn check_kind(&mut self, expr: &Expr) -> Result<Ty, SpannedTypeError> {
         let s = expr.span;
         match &expr.kind {
@@ -1252,6 +1253,8 @@ impl TypeChecker {
         })
     }
 
+    /// The type of the variable `name`, which this marks as used. A generic
+    /// function gets fresh type arguments, recorded for the node `id`.
     fn check_var(&mut self, s: Span, id: ExprId, name: &Var) -> Result<Ty, SpannedTypeError> {
         let ty = self
             .ctx

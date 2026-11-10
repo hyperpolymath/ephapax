@@ -32,8 +32,11 @@ use pest_meta::ast::{Expr, RuleType};
 
 use crate::{parse_module, parse_surface_module, EphapaxParser, ParseError, Rule};
 
+/// The text of the parser grammar.
 const PEST: &str = include_str!("ephapax.pest");
+/// The line before part 1 in the specification file.
 const BEGIN: &str = "(* BEGIN GENERATED: the parser grammar, from ephapax.pest. Do not edit. *)";
+/// The line after part 1 in the specification file.
 const END: &str = "(* END GENERATED *)";
 
 /// Rules that are not silent, and still never in a parse tree, with the
@@ -46,14 +49,18 @@ const NO_PAIR: &[(&str, &str)] = &[
     ("keyword_boundary", "only in the lookahead of `identifier`"),
 ];
 
+/// The root of the repository.
 fn repo() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../..")
 }
 
+/// The specification grammar file.
 fn ebnf_path() -> PathBuf {
     repo().join("spec/ephapax-v2-grammar.ebnf")
 }
 
+/// Each rule of `ephapax.pest`: its type (normal, silent, atomic) and
+/// its expression, by name.
 fn pest_rules() -> BTreeMap<String, (RuleType, Expr)> {
     let pairs = pest_meta::parser::parse(pest_meta::parser::Rule::grammar_rules, PEST)
         .expect("ephapax.pest parses");

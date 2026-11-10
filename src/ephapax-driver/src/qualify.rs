@@ -119,6 +119,8 @@ fn scopes(modules: &[LoadedModule], qualified: &[Renames]) -> Vec<Renames> {
         .collect()
 }
 
+/// Rename the names of `scope` in one declaration: a function with its
+/// parameters and its body, or the value of a constant.
 fn rename_decl(decl: &mut Decl, scope: &Renames) {
     match decl {
         Decl::Fn {
@@ -133,6 +135,7 @@ fn rename_decl(decl: &mut Decl, scope: &Renames) {
     }
 }
 
+/// Give `name` its new name, if `scope` has one for it.
 fn rename(name: &mut Var, scope: &Renames) {
     if let Some(new) = scope.get(name) {
         *name = new.clone();
@@ -200,6 +203,7 @@ fn rename_expr(expr: &mut Expr, scope: &Renames) {
     }
 }
 
+/// Rename the variables that `pattern` binds.
 fn rename_pattern(pattern: &mut Pattern, scope: &Renames) {
     match pattern {
         Pattern::Wildcard | Pattern::Literal(_) | Pattern::Unit => {}

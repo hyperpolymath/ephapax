@@ -1395,7 +1395,7 @@ Ephapax's soundness statements are *theory* under PROOF-POLICY §1: the typing j
 
 === D7 — Recursive types
 
-*Ratified 2026-11-10 (owner):* the recommended option, iso-recursive `TMu` with fold/unfold inserted by desugar. Its first use is rung E9 in the Rust implementation (gate `src/ephapax-cli/tests/recursive_types.rs`), behind `--unstable-core`. In that step a `data` type can refer only to itself: a cycle through another `data` type, and a reference with other type arguments, are named errors.
+*Ratified 2026-11-10 (owner):* the recommended option, iso-recursive `TMu` with fold/unfold inserted by desugar. Its first use is rung E9 in the Rust implementation (gate `src/ephapax-cli/tests/recursive_types.rs`), behind `--unstable-core`. `data` types that refer to each other become nested `TMu` types (Bekic's construction, in the order of their names), so the core has no new former. A dense cycle makes these types grow fast (4 types that each refer to each of the 4 need 3613 bodies, 5 need 8 million), so a type of more than 10000 bodies, or of more than 256 nested named types, is a named error. A recursive type of n variables (as the `rec` groups of WasmGC) removes that limit and is a change of the core. A reference with other type arguments is a named error.
 
 [cols="3,1,1,4",options="header"]
 |===

@@ -272,7 +272,13 @@ fn a_recursive_data_type_crosses_a_module() {
         "module lib\n\npub data IntList = Nil | Cons(I32, IntList)\n\n\
          pub data List(a) = LNil | LCons(a, List(a))\n\n\
          pub fn sum(l: IntList): I32 = match l of | Nil => 0 | Cons(h, t) => h + sum(t) end\n\n\
-         pub fn one(n: I32): IntList = Cons(n, Nil)\n",
+         pub fn one(n: I32): IntList = Cons(n, Nil)\n\n\
+         pub data Tree = Leaf | Node(I32, Forest)\n\n\
+         pub data Forest = FNil | FCons(Tree, Forest)\n\n\
+         pub fn size(t: Tree): I32 =\n  \
+         match t of | Leaf => 0 | Node(v, kids) => v + sizes(kids) end\n\n\
+         pub fn sizes(f: Forest): I32 =\n  \
+         match f of | FNil => 0 | FCons(t, rest) => size(t) + sizes(rest) end\n",
     )
     .expect("write module");
     let app = |name: &str, head: &str, main: &str| {
@@ -314,6 +320,18 @@ fn a_recursive_data_type_crosses_a_module() {
                     "count(LCons(true, LCons(false, LCons(true, LNil))))",
                 ),
                 "2",
+            ),
+            // 2 types that refer to each other, in a type of this module.
+            (
+                "each_other",
+                app(
+                    "each_other",
+                    "import lib\n\ndata Wrap = W(Tree, Forest) | Stop\n\n\
+                     fn total(w: Wrap): I32 =\n  \
+                     match w of | Stop => 0 | W(t, f) => size(t) + sizes(f) end\n",
+                    "total(W(Node(40, FNil), FCons(Node(2, FNil), FNil)))",
+                ),
+                "42",
             ),
             // A declaration of the module hides the imported type.
             (
@@ -390,15 +408,166 @@ fn a_recursive_type_keeps_the_linear_rules() {
     );
 }
 
+/// `data` types that refer to each other. They become nested recursive
+/// types, in the order of their names, and the unfolding of each one has
+/// the types of the others in it as they are. So a field of a
+/// constructor has the type that its declaration names: each program
+/// here passes the type checker, and then runs.
+#[test]
+fn data_types_that_refer_to_each_other_run() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let forest = "fn size(t: Tree): I32 =\n  \
+        match t of | Leaf => 0 | Node(v, kids) => v + sizes(kids) end\n\n\
+        fn sizes(f: Forest): I32 =\n  \
+        match f of | FNil => 0 | FCons(t, rest) => size(t) + sizes(rest) end\n\n";
+    let mut programs = vec![
+        // The first type by name (`Forest`) is the one that is folded.
+        (
+            "forest".to_string(),
+            format!(
+                "data Tree = Leaf | Node(I32, Forest)\n\n\
+                 data Forest = FNil | FCons(Tree, Forest)\n\n{forest}\
+                 fn grow(n: I32): Tree =\n  if n == 0 then Leaf\n  \
+                 else Node(n, FCons(grow(n - 1), FCons(grow(n - 1), FNil)))\n\n\
+                 fn main(): I32 = size(grow(4))\n"
+            ),
+            "26",
+        ),
+        // A type with 1 constructor in the cycle.
+        (
+            "even_odd".to_string(),
+            "data Even = Zero | SuccE(Odd)\n\ndata Odd = SuccO(Even)\n\n\
+             fn even(e: Even): I32 = match e of | Zero => 0 | SuccE(o) => 1 + odd(o) end\n\n\
+             fn odd(o: Odd): I32 = match o of | SuccO(e) => 1 + even(e) end\n\n\
+             fn main(): I32 = even(SuccE(SuccO(SuccE(SuccO(Zero)))))\n"
+                .to_string(),
+            "4",
+        ),
+        // No type of the cycle refers to itself.
+        (
+            "no_self".to_string(),
+            "data A = MkA(B) | EndA\n\ndata B = MkB(I32, A)\n\n\
+             fn sa(a: A): I32 = match a of | EndA => 0 | MkA(b) => sb(b) end\n\n\
+             fn sb(b: B): I32 = match b of | MkB(n, a) => n + sa(a) end\n\n\
+             fn main(): I32 = sa(MkA(MkB(40, MkA(MkB(2, EndA)))))\n"
+                .to_string(),
+            "42",
+        ),
+        // Type parameters, and an element that is not 32 bits wide.
+        (
+            "parameters".to_string(),
+            "data Tree(a) = Leaf | Node(a, Forest(a))\n\n\
+             data Forest(a) = FNil | FCons(Tree(a), Forest(a))\n\n\
+             fn size(t: Tree(I64)): I64 =\n  match t of\n  \
+             | Leaf => 5000000000 - 5000000000\n  | Node(v, kids) => v + sizes(kids)\n  end\n\n\
+             fn sizes(f: Forest(I64)): I64 =\n  match f of\n  \
+             | FNil => 5000000000 - 5000000000\n  | FCons(t, rest) => size(t) + sizes(rest)\n  \
+             end\n\n\
+             fn main(): I64 = size(Node(5000000000, FCons(Node(5000000000, FNil), FNil)))\n"
+                .to_string(),
+            "10000000000i64",
+        ),
+        // A linear component: each string is consumed 1 time.
+        (
+            "linear".to_string(),
+            "data STree = SLeaf | SNode(String@r, SForest)\n\n\
+             data SForest = SNil | SCons(STree, SForest)\n\n\
+             fn len(t: STree): I32 =\n  match t of\n  | SLeaf => 0\n  \
+             | SNode(s, kids) => String.len(&s) + (let _ = drop(s) in lens(kids))\n  end\n\n\
+             fn lens(f: SForest): I32 =\n  \
+             match f of | SNil => 0 | SCons(t, rest) => len(t) + lens(rest) end\n\n\
+             fn main(): I32 =\n  region r {\n    \
+             len(SNode(String.new@r(\"ab\"), SCons(SNode(String.new@r(\"abc\"), SNil), SNil)))\n  \
+             }\n"
+            .to_string(),
+            "5",
+        ),
+    ];
+    // 3 types, where each one refers to the 2 others. Each order of the 3
+    // names is another nesting of the 3 recursive types.
+    for [a, b, c] in [
+        ["X", "Y", "Z"],
+        ["X", "Z", "Y"],
+        ["Y", "X", "Z"],
+        ["Y", "Z", "X"],
+        ["Z", "X", "Y"],
+        ["Z", "Y", "X"],
+    ] {
+        programs.push((
+            format!("cycle_{a}{b}{c}"),
+            format!(
+                "data {a} = L{a} | N{a}(I32, {b}, {c})\n\n\
+                 data {b} = L{b} | N{b}({c}, {a}, I32)\n\n\
+                 data {c} = L{c} | N{c}({a}, {b}, {c})\n\n\
+                 fn s{a}(x: {a}): I32 =\n  \
+                 match x of | L{a} => 1 | N{a}(n, p, q) => n + s{b}(p) + s{c}(q) end\n\n\
+                 fn s{b}(x: {b}): I32 =\n  \
+                 match x of | L{b} => 2 | N{b}(p, q, n) => n + s{c}(p) + s{a}(q) end\n\n\
+                 fn s{c}(x: {c}): I32 =\n  \
+                 match x of | L{c} => 3 | N{c}(p, q, r) => s{a}(p) + s{b}(q) + s{c}(r) end\n\n\
+                 fn main(): I32 =\n  \
+                 s{a}(N{a}(10, N{b}(L{c}, N{a}(5, L{b}, L{c}), 20),\n    \
+                 N{c}(L{a}, L{b}, N{c}(L{a}, N{b}(L{c}, L{a}, 1), L{c}))))\n"
+            ),
+            "55",
+        ));
+    }
+    let programs: Vec<(&str, String, &str)> = programs
+        .iter()
+        .map(|(name, text, want)| (name.as_str(), text.clone(), *want))
+        .collect();
+    each_runs(tmp.path(), &programs);
+
+    // The linear rules hold for each type of a cycle.
+    let strings = "data STree = SLeaf | SNode(String@r, SForest)\n\n\
+        data SForest = SNil | SCons(STree, SForest)\n\n";
+    for (name, ty) in [("forest_2_times", "SForest"), ("tree_2_times", "STree")] {
+        check_refuses(
+            name,
+            &format!("{strings}fn two(x: {ty}): ({ty}, {ty}) = (x, x)\n\nfn main(): I32 = 0\n"),
+            "Linear variable `x` used more than once",
+        );
+    }
+    // A `Tree` is not a `Forest`, and a `Forest` is not a `Tree`: in a
+    // constructor of the folded type, and as an argument of a function.
+    let forest = "data Tree = Leaf | Node(I32, Forest)\n\n\
+        data Forest = FNil | FCons(Tree, Forest)\n\n\
+        fn size(t: Tree): I32 = match t of | Leaf => 0 | Node(v, kids) => v end\n\n";
+    for (name, main) in [
+        (
+            "forest_as_tree",
+            "match FCons(FNil, FNil) of | FNil => 0 | FCons(t, rest) => 1 end",
+        ),
+        ("tree_as_forest", "size(Node(1, Leaf))"),
+    ] {
+        check_refuses(
+            name,
+            &format!("{forest}fn main(): I32 = {main}\n"),
+            "Type mismatch",
+        );
+    }
+}
+
 /// The recursive forms that have no lowering yet are refused by name.
 #[test]
 fn a_recursive_form_with_no_lowering_is_refused_by_name() {
-    check_refuses(
-        "each_other",
-        "data Tree = Leaf | Node(Forest)\n\ndata Forest = FNil | FCons(Tree, Forest)\n\n\
-         fn f(t: Tree): I32 = 0\n\nfn main(): I32 = 0\n",
-        "the `data` types Tree -> Forest -> Tree refer to each other",
-    );
+    // 5 `data` types that each refer to each of the 5: the nested
+    // recursive type of the last one by name needs 8 million bodies. And
+    // 300 `data` types in a ring: the types nest too deep. Without the
+    // limit, the first does not end and the second overflows the stack.
+    let dense: String = (0..5)
+        .map(|i| format!("data T{i} = L{i} | N{i}(T0, T1, T2, T3, T4)\n\n"))
+        .collect();
+    let ring: String = (0..300)
+        .map(|i| format!("data T{i} = L{i} | N{i}(T{})\n\n", (i + 1) % 300))
+        .collect();
+    for (name, types, ty) in [("dense_cycle", dense, "T4"), ("deep_ring", ring, "T0")] {
+        check_refuses(
+            name,
+            &format!("{types}fn f(t: {ty}): I32 = 0\n\nfn main(): I32 = 0\n"),
+            &format!("the type `{ty}` is too large"),
+        );
+    }
     check_refuses(
         "other_arguments",
         "data Grow(a) = Stop | More(Grow((a, a)))\n\n\

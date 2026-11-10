@@ -37,6 +37,7 @@ pub fn parse_surface_module(source: &str, name: &str) -> Result<SurfaceModule, V
             span: Span::dummy(),
         }]
     })?;
+    crate::refuse_unimplemented(pairs.clone())?;
 
     let pair = pairs
         .into_iter()

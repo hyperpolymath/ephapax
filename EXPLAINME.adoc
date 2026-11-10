@@ -581,6 +581,8 @@ the per-crate breakdown). Key test categories:
   parser does not have (traits, effect declarations, comptime,
   contracts), each with the mark `[ALIAS rule]` or `[UNIMPLEMENTED]`;
   the parser refuses the fixture of each `[UNIMPLEMENTED]` production
+  with an error that names the production
+  (`ParseError::Unimplemented`)
 * `docs/specs/DESIGN-DECISIONS.adoc` — 17 ADRs with rationale
 * `docs/specs/LANGUAGE-COMPARISON.adoc` — comparison against 10 languages
 * `docs/vision/EPHAPAX-VISION.adoc` — design rationale, why dyadic +

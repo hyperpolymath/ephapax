@@ -27,6 +27,11 @@
  *   Each rule is in the parse tree of a fixture in
  *   tests/v2-grammar/productions.
  *
+ *   A rule with the name `unimplemented_<production>` is in part 1 for
+ *   one purpose: the parser finds that syntax and refuses the program
+ *   with an error that names `<production>`. The parser accepts no
+ *   program that has such a rule in its parse tree.
+ *
  * PART 2: THE V2 DESIGN, NOT IN THE PARSER BY THAT NAME. These are the
  *   productions of the v2 design grammar that are not rules of the
  *   parser: traits, effect and handler declarations, the comptime meta
@@ -36,7 +41,11 @@
  *     [ALIAS rule]      The parser has the construct as `rule` of part 1.
  *                       Part 1 is the current form.
  *     [UNIMPLEMENTED]   The parser does not have it. The parser refuses
- *                       the fixture that the mark names.
+ *                       the fixture that the mark names, with an error
+ *                       that names the production after `as`
+ *                       (ParseError::Unimplemented). A production that is
+ *                       only inside another one has the name of the outer
+ *                       production there.
  *
  *   A "DESIGN FORM" comment keeps the design form of a production that
  *   part 1 has in a smaller form.
@@ -83,12 +92,12 @@
 (* Ephapax Grammar - PEG Parser *)
 
 (* Top-level rules *)
-module = SOI , [ module_decl ] , { import_decl | declaration } , EOI ;
+module = SOI , [ module_decl ] , { unimplemented_reexport | unimplemented_import | import_decl | declaration } , EOI ;
 expression_only = SOI , expression , EOI ;
 
 (* Module Declaration *)
 
-module_decl = "module" , qualified_name ;
+module_decl = "module" , qualified_name , [ unimplemented_capability_decl ] ;
 
 (* Only the header, for `declared_module_name`. *)
 module_header = SOI , module_decl ;
@@ -104,9 +113,87 @@ qualified_name = ( ASCII_ALPHA | "_" ) , { ASCII_ALPHANUMERIC | "_" | "." | "/" 
 
 import_decl = "import" , qualified_name , [ "(" , identifier , { "," , identifier } , ")" ] ;
 
+(* Syntax of the v2 design that is not implemented *)
+(* A rule with the name `unimplemented_<production>` is in this grammar *)
+(* for one purpose: the parser finds the syntax and refuses the program *)
+(* with an error that names `<production>` (`ParseError::Unimplemented`). *)
+(* The production is in part 2 of spec/ephapax-v2-grammar.ebnf with the *)
+(* mark [UNIMPLEMENTED]. Each rule stands only where no valid program can *)
+(* have its first token, so it changes no program that parsed before. *)
+
+(* The body of `( ... )` when its contents have no grammar yet. *)
+paren_body = { string | "(" , paren_body , ")" | !( "(" | ")" ) , ANY } ; (* silent: no node in the parse tree *)
+
+(* A word of the v2 design, as a full word (`where`, not the start of *)
+(* `wherever`). Atomic: white space cannot stand before the check. *)
+design_word = ( "where" | "requires" | "ensures" | "invariant" | "trait" | "impl" | "effect" | "handler" | "with" ) , !( ASCII_ALPHANUMERIC | "_" ) ; (* atomic: no white space between the parts *)
+
+(* import Foo from "foo" / import { a, b } from "foo" / import * as Foo from "foo" *)
+unimplemented_import = "import" , ( identifier | "{" , identifier , { "," , identifier } , "}" | "*" , "as" , identifier ) , "from" , string ;
+
+(* pub import ... *)
+unimplemented_reexport = visibility , ( unimplemented_import | import_decl ) ;
+
+(* module m capabilities: [io, network] *)
+unimplemented_capability_decl = "capabilities" , ":" , "[" , identifier , { "," , identifier } , "]" ;
+
+(* @capabilities(io) *)
+unimplemented_capability_annotation = "@capabilities" , "(" , paren_body , ")" ;
+
+(* @name(args) *)
+unimplemented_annotation_args = "(" , paren_body , ")" ;
+
+(* @comptime { ... }, and the 4 declarations with an `end`: the rule takes *)
+(* the rest of the file, because the bodies have no grammar yet. *)
+unimplemented_comptime_decl = "@comptime" , "{" , { ANY } ;
+unimplemented_trait_decl = [ visibility ] , &( "trait" ) , design_word , { ANY } ;
+unimplemented_impl_decl = [ visibility ] , &( "impl" ) , design_word , { ANY } ;
+unimplemented_effect_decl = [ visibility ] , &( "effect" ) , design_word , { ANY } ;
+unimplemented_handler_decl = [ visibility ] , &( "handler" ) , design_word , { ANY } ;
+
+(* fn show<a: Show + Eq>(...) *)
+unimplemented_type_param = ":" , constructor_name , { "+" , constructor_name } ;
+
+(* fn f(...): T where a: Show, b: Eq = ... *)
+unimplemented_where_clause = &( "where" ) , design_word , identifier , unimplemented_type_param , { "," , identifier , unimplemented_type_param } ;
+
+(* fn f(...): T requires e ensures e invariant e = ... *)
+unimplemented_contract_clause = &( "requires" | "ensures" | "invariant" ) , design_word , expression ;
+
+(* T with IO + State(I32) *)
+unimplemented_effect_ty = &( "with" ) , design_word , ( constructor_name , [ "(" , ty_list , ")" ] | identifier ) , { "+" , ( constructor_name , [ "(" , ty_list , ")" ] | identifier ) } ;
+
+(* A * B *)
+unimplemented_prod_ty = "*" ;
+
+(* (a, b, c) as a pattern, and &p *)
+unimplemented_tuple_pattern = "(" , pattern , "," , pattern , { "," , pattern }- , ")" ;
+unimplemented_borrow_pattern = "&" , pattern ;
+
+(* handle shallow e with ...: `shallow`, white space, then the start of a *)
+(* name, a number or a string. `handle shallow(x) with` is a call. *)
+unimplemented_handle_mode = "shallow" , { " " | ? TAB ? | ? LF ? | ? CR ? }- , &( ASCII_ALPHANUMERIC | "_" | '"' ) ; (* atomic: no white space between the parts *)
+
+(* handle e with h end *)
+unimplemented_handler_ref = identifier , &( "end" ) ;
+
+(* | finally => e *)
+unimplemented_finally_clause = "finally" , "=>" , expression ;
+
+(* | op(x), resume => e *)
+unimplemented_inline_op_clause = "," , resume_param ;
+
+(* a ++ b, *e, @splice(...), @type_desc_of(T) *)
+unimplemented_concat_expr = "++" ;
+unimplemented_deref_expr = "*" , unary_expr ;
+unimplemented_comptime_splice = "@splice" , "(" , paren_body , ")" ;
+unimplemented_type_desc_expr = "@type_desc_of" , "(" , ty , ")" ;
+
 (* Declarations *)
 
-declaration = { annotation } , ( extern_block | data_decl | fn_decl | type_decl | const_decl ) ;
+declaration = unimplemented_comptime_decl
+            | { annotation } , ( extern_block | data_decl | fn_decl | type_decl | const_decl | unimplemented_trait_decl | unimplemented_impl_decl | unimplemented_effect_decl | unimplemented_handler_decl )
+            ;
 
 (* `@identifier` decorators attached to top-level declarations. Currently *)
 (* parser-only - annotations are parsed and stored on the surface AST so *)
@@ -114,7 +201,9 @@ declaration = { annotation } , ( extern_block | data_decl | fn_decl | type_decl 
 (* them. They exist so that downstream tools (hypatia's `@tail_recursive`, *)
 (* future `@inline`, `@no_mangle`, etc.) can hang metadata off a decl *)
 (* without breaking the parser today. *)
-annotation = "@" , identifier ;
+annotation = unimplemented_capability_annotation
+           | "@" , identifier , [ unimplemented_annotation_args ]
+           ;
 
 (* Extern Blocks *)
 (* `extern "abi" { items... }` declares foreign types and function *)
@@ -138,9 +227,9 @@ const_decl = "let" , identifier , [ ":" , ty ] , "=" , expression ;
 visibility = "pub" ;
 
 (* Optional generic type parameters: <T>, <T, U> *)
-fn_type_params = "<" , identifier , { "," , identifier } , ">" ;
+fn_type_params = "<" , identifier , [ unimplemented_type_param ] , { "," , identifier , [ unimplemented_type_param ] } , ">" ;
 
-fn_decl = [ visibility ] , "fn" , identifier , [ fn_type_params ] , "(" , [ param_list ] , ")" , ( ":" | "->" ) , ty , "=" , expression ;
+fn_decl = [ visibility ] , "fn" , identifier , [ fn_type_params ] , "(" , [ param_list ] , ")" , ( ":" | "->" ) , ty , { unimplemented_where_clause | unimplemented_contract_clause } , "=" , expression ;
 
 param_list = param , { "," , param } ;
 
@@ -173,9 +262,9 @@ record_field = identifier , ":" , ty ;
 
 (* Types *)
 
-ty = sum_ty , [ "->" , ty ] ;
+ty = sum_ty , [ "->" , ty ] , [ unimplemented_effect_ty ] ;
 
-sum_ty = type_atom , { "+" , type_atom } ;
+sum_ty = type_atom , { ( "+" | unimplemented_prod_ty ) , type_atom } ;
 
 type_atom = base_ty
           | string_ty
@@ -260,8 +349,10 @@ match_arm = pattern , [ "if" , expression ] , "=>" , expression ;
 
 pattern = constructor_pattern
         | pair_pattern
+        | unimplemented_tuple_pattern
         | wildcard_pattern
         | literal_pattern
+        | unimplemented_borrow_pattern
         | var_pattern
         ;
 
@@ -295,16 +386,16 @@ region_expr = "region" , identifier , ( ":" | "{" ) , expression , [ "}" ] ;
 case_expr = "case" , expression , "of" , "inl" , "(" , identifier , ")" , "->" , expression , "inr" , "(" , identifier , ")" , "->" , expression , "end" ;
 
 (* Effect handling: handle expr with { return(x) => e | Op(args, resume) => e } end *)
-handle_expr = "handle" , expression , "with" , [ "|" ] , handler_clause , { "|" , handler_clause } , "end" ;
+handle_expr = "handle" , ( unimplemented_handle_mode , expression | expression ) , "with" , ( unimplemented_handler_ref | [ "|" ] , handler_clause , { "|" , handler_clause } ) , "end" ;
 
-handler_clause = handler_return_clause | handler_op_clause ;
+handler_clause = handler_return_clause | unimplemented_finally_clause | handler_op_clause ;
 
 (* return(x) => expr *)
 handler_return_clause = "return" , "(" , identifier , ")" , "=>" , expression ;
 
 (* Op(param1, param2, resume) => expr *)
 (* resume may optionally have a mode: resume(once) or resume(multi) *)
-handler_op_clause = identifier , "(" , [ handler_param_list ] , ")" , "=>" , expression ;
+handler_op_clause = identifier , "(" , [ handler_param_list ] , ")" , [ unimplemented_inline_op_clause ] , "=>" , expression ;
 
 handler_param_list = handler_param , { "," , handler_param } ;
 handler_param = resume_param | identifier ;
@@ -324,7 +415,7 @@ eq_op = "==" | "!=" ;
 cmp_expr = add_expr , { cmp_op , add_expr } ;
 cmp_op = "<=" | ">=" | "<" | ">" ;
 
-add_expr = mul_expr , { add_op , mul_expr } ;
+add_expr = mul_expr , { ( unimplemented_concat_expr | add_op ) , mul_expr } ;
 add_op = "+" | "-" ;
 
 mul_expr = unary_expr , { mul_op , unary_expr } ;
@@ -332,7 +423,7 @@ mul_op = "*" | "/" | "%" ;
 
 (* Unary and Postfix Expressions *)
 
-unary_expr = "!" , unary_expr | "-" , unary_expr | postfix_expr ;
+unary_expr = "!" , unary_expr | "-" , unary_expr | unimplemented_deref_expr | postfix_expr ;
 
 postfix_expr = atom_expr , { postfix_op } ;
 
@@ -350,7 +441,9 @@ member_op = "." , ( integer | identifier | constructor_name ) ;
 
 (* Atomic Expressions *)
 
-atom_expr = perform_expr
+atom_expr = unimplemented_comptime_splice
+          | unimplemented_type_desc_expr
+          | perform_expr
           | ffi_expr
           | string_method
           | inl_expr
@@ -513,17 +606,17 @@ module_path  = IDENT , { "." , IDENT } ;
 (* 2. MODULES AND IMPORTS                                           *)
 (* ================================================================ *)
 
-(* [UNIMPLEMENTED] refused: tests/v2-grammar/unimplemented/import_from.eph (the parser has import_decl: `import a/b` and `import a/b(x, y)`) *)
+(* [UNIMPLEMENTED] refused: tests/v2-grammar/unimplemented/import_from.eph as import (the parser has import_decl: `import a/b` and `import a/b(x, y)`) *)
 import       = "import" , import_spec , "from" , STRING ;
 
-(* [UNIMPLEMENTED] refused: tests/v2-grammar/unimplemented/import_from.eph *)
+(* [UNIMPLEMENTED] refused: tests/v2-grammar/unimplemented/import_from.eph as import *)
 import_spec  = IDENT                                 (* import Foo from "foo" *)
              | "{" , IDENT , { "," , IDENT } , "}"   (* import { a, b } from "foo" *)
              | "*" , "as" , IDENT                     (* import * as Foo from "foo" *)
              ;
 
 (* Re-export: make imported names visible to importers of this module *)
-(* [UNIMPLEMENTED] refused: tests/v2-grammar/unimplemented/reexport.eph *)
+(* [UNIMPLEMENTED] refused: tests/v2-grammar/unimplemented/reexport.eph as reexport *)
 reexport     = "pub" , import ;
 
 
@@ -537,10 +630,10 @@ reexport     = "pub" , import ;
  * annotation   = "@" , IDENT , [ "(" , annotation_args , ")" ] ;
  *)
 
-(* [UNIMPLEMENTED] refused: tests/v2-grammar/unimplemented/annotation_args.eph *)
+(* [UNIMPLEMENTED] refused: tests/v2-grammar/unimplemented/annotation_args.eph as annotation_args *)
 annotation_args = annotation_arg , { "," , annotation_arg } ;
 
-(* [UNIMPLEMENTED] refused: tests/v2-grammar/unimplemented/annotation_args.eph *)
+(* [UNIMPLEMENTED] refused: tests/v2-grammar/unimplemented/annotation_args.eph as annotation_args *)
 annotation_arg  = IDENT | STRING | INTEGER | annotation ;
 
 
@@ -579,49 +672,49 @@ decl_body    = fn_decl
  * type_params  = "[" , type_param , { "," , type_param } , "]" ;
  *)
 
-(* [UNIMPLEMENTED] refused: tests/v2-grammar/unimplemented/type_param_bound.eph (the parser has type parameters with no bound: fn_type_params, type_params) *)
+(* [UNIMPLEMENTED] refused: tests/v2-grammar/unimplemented/type_param_bound.eph as type_param (the parser has type parameters with no bound: fn_type_params, type_params) *)
 type_param   = IDENT , [ ":" , trait_bound ] ;
 
-(* [UNIMPLEMENTED] refused: tests/v2-grammar/unimplemented/type_param_bound.eph *)
+(* [UNIMPLEMENTED] refused: tests/v2-grammar/unimplemented/type_param_bound.eph as type_param *)
 trait_bound  = CTOR_IDENT , { "+" , CTOR_IDENT } ;
 
-(* [UNIMPLEMENTED] refused: tests/v2-grammar/unimplemented/where.eph *)
+(* [UNIMPLEMENTED] refused: tests/v2-grammar/unimplemented/where.eph as where_clause *)
 where_clause = "where" , constraint , { "," , constraint } ;
 
-(* [UNIMPLEMENTED] refused: tests/v2-grammar/unimplemented/where.eph *)
+(* [UNIMPLEMENTED] refused: tests/v2-grammar/unimplemented/where.eph as where_clause *)
 constraint   = IDENT , ":" , trait_bound ;
 
-(* [UNIMPLEMENTED] refused: tests/v2-grammar/unimplemented/trait.eph *)
+(* [UNIMPLEMENTED] refused: tests/v2-grammar/unimplemented/trait.eph as trait_decl *)
 trait_decl   = "trait" , CTOR_IDENT , "(" , type_param , ")" ,
                [ ":" , trait_bound ] ,  (* supertrait bounds *)
                "=" , { trait_item } , "end" ;
 
-(* [UNIMPLEMENTED] refused: tests/v2-grammar/unimplemented/trait.eph *)
+(* [UNIMPLEMENTED] refused: tests/v2-grammar/unimplemented/trait.eph as trait_decl *)
 trait_item   = { annotation } , trait_fn_sig ;
 
-(* [UNIMPLEMENTED] refused: tests/v2-grammar/unimplemented/trait.eph *)
+(* [UNIMPLEMENTED] refused: tests/v2-grammar/unimplemented/trait.eph as trait_decl *)
 trait_fn_sig = "fn" , IDENT , [ type_params ] ,
                "(" , [ param_list ] , ")" , ":" , ty ,
                [ "=" , expr ]  (* default implementation *)
                ;
 
-(* [UNIMPLEMENTED] refused: tests/v2-grammar/unimplemented/impl.eph *)
+(* [UNIMPLEMENTED] refused: tests/v2-grammar/unimplemented/impl.eph as impl_decl *)
 impl_decl    = "impl" , CTOR_IDENT , "(" , ty , ")" ,
                [ where_clause ] ,
                "=" , { impl_item } , "end" ;
 
-(* [UNIMPLEMENTED] refused: tests/v2-grammar/unimplemented/impl.eph *)
+(* [UNIMPLEMENTED] refused: tests/v2-grammar/unimplemented/impl.eph as impl_decl *)
 impl_item    = { annotation } , fn_decl ;
 
-(* [UNIMPLEMENTED] refused: tests/v2-grammar/unimplemented/effect.eph *)
+(* [UNIMPLEMENTED] refused: tests/v2-grammar/unimplemented/effect.eph as effect_decl *)
 effect_decl  = "effect" , CTOR_IDENT , [ type_params ] , "=" ,
                { effect_op } , "end" ;
 
-(* [UNIMPLEMENTED] refused: tests/v2-grammar/unimplemented/effect.eph *)
+(* [UNIMPLEMENTED] refused: tests/v2-grammar/unimplemented/effect.eph as effect_decl *)
 effect_op    = "fn" , IDENT , [ type_params ] ,
                "(" , [ param_list ] , ")" , ":" , ty ;
 
-(* [UNIMPLEMENTED] refused: tests/v2-grammar/unimplemented/handler_decl.eph *)
+(* [UNIMPLEMENTED] refused: tests/v2-grammar/unimplemented/handler_decl.eph as handler_decl *)
 handler_decl = "handler" , IDENT , [ type_params ] ,
                "for" , CTOR_IDENT , [ type_params ] ,
                [ "with" , "(" , param_list , ")" ] ,  (* handler-local state *)
@@ -641,7 +734,7 @@ handler_decl = "handler" , IDENT , [ type_params ] ,
 return_clause = "return" , "(" , IDENT , ")" , "=>" , expr ;
 
 (* Handler for an effect operation *)
-(* [UNIMPLEMENTED] refused: tests/v2-grammar/unimplemented/handler_decl.eph (the parser has handler_op_clause, with `resume` in the parameter list) *)
+(* [UNIMPLEMENTED] refused: tests/v2-grammar/unimplemented/handler_decl.eph as handler_decl (the parser has handler_op_clause, with `resume` in the parameter list) *)
 op_clause     = "|" , IDENT , "(" , [ param_list ] , ")" ,
                 [ "," , resume_binding ] ,
                 "=>" , expr ;
@@ -659,27 +752,27 @@ resume_binding = "resume" , [ "(" , resume_mode , ")" ] ;
  * CRITICAL for linear safety: if a handler doesn't call resume,
  * any linear values captured by the continuation must be consumed.
  * The finally clause handles this. *)
-(* [UNIMPLEMENTED] refused: tests/v2-grammar/unimplemented/finally.eph *)
+(* [UNIMPLEMENTED] refused: tests/v2-grammar/unimplemented/finally.eph as finally_clause *)
 finally_clause = "finally" , "=>" , expr ;
 
-(* [UNIMPLEMENTED] refused: tests/v2-grammar/unimplemented/comptime.eph *)
+(* [UNIMPLEMENTED] refused: tests/v2-grammar/unimplemented/comptime.eph as comptime_decl *)
 comptime_decl = "@comptime" , "{" , { comptime_item } , "}" ;
 
-(* [UNIMPLEMENTED] refused: tests/v2-grammar/unimplemented/comptime.eph *)
+(* [UNIMPLEMENTED] refused: tests/v2-grammar/unimplemented/comptime.eph as comptime_decl *)
 comptime_item = comptime_fn | comptime_let ;
 
-(* [UNIMPLEMENTED] refused: tests/v2-grammar/unimplemented/comptime.eph *)
+(* [UNIMPLEMENTED] refused: tests/v2-grammar/unimplemented/comptime.eph as comptime_decl *)
 comptime_fn  = "fn" , IDENT ,
                "(" , [ comptime_param_list ] , ")" , ":" , comptime_ty ,
                "=" , comptime_expr ;
 
-(* [UNIMPLEMENTED] refused: tests/v2-grammar/unimplemented/comptime.eph *)
+(* [UNIMPLEMENTED] refused: tests/v2-grammar/unimplemented/comptime.eph as comptime_decl *)
 comptime_param_list = comptime_param , { "," , comptime_param } ;
 
-(* [UNIMPLEMENTED] refused: tests/v2-grammar/unimplemented/comptime.eph *)
+(* [UNIMPLEMENTED] refused: tests/v2-grammar/unimplemented/comptime.eph as comptime_decl *)
 comptime_param      = IDENT , ":" , comptime_ty ;
 
-(* [UNIMPLEMENTED] refused: tests/v2-grammar/unimplemented/comptime.eph *)
+(* [UNIMPLEMENTED] refused: tests/v2-grammar/unimplemented/comptime.eph as comptime_decl *)
 comptime_let = "let" , IDENT , "=" , comptime_expr ;
 
 
@@ -687,10 +780,10 @@ comptime_let = "let" , IDENT , "=" , comptime_expr ;
 (* 6. CONTRACTS                                                     *)
 (* ================================================================ *)
 
-(* [UNIMPLEMENTED] refused: tests/v2-grammar/unimplemented/contract.eph *)
+(* [UNIMPLEMENTED] refused: tests/v2-grammar/unimplemented/contract.eph as contract_clause *)
 contract_block = { contract_clause } ;
 
-(* [UNIMPLEMENTED] refused: tests/v2-grammar/unimplemented/contract.eph *)
+(* [UNIMPLEMENTED] refused: tests/v2-grammar/unimplemented/contract.eph as contract_clause *)
 contract_clause = "requires" , expr           (* precondition *)
                 | "ensures" , result_expr     (* postcondition *)
                 | "invariant" , expr          (* maintained through body *)
@@ -701,10 +794,10 @@ contract_clause = "requires" , expr           (* precondition *)
  * the result as an unrestricted snapshot. This is needed because
  * linear values are consumed by the body and cannot be referenced
  * in ensures directly. old() implicitly borrows. *)
-(* [UNIMPLEMENTED] refused: tests/v2-grammar/unimplemented/contract.eph *)
+(* [UNIMPLEMENTED] refused: tests/v2-grammar/unimplemented/contract.eph as contract_clause *)
 result_expr  = expr ;
 
-(* [UNIMPLEMENTED] refused: tests/v2-grammar/unimplemented/contract.eph *)
+(* [UNIMPLEMENTED] refused: tests/v2-grammar/unimplemented/contract.eph as contract_clause *)
 old_expr     = "old" , "(" , expr , ")" ;
 
 
@@ -712,11 +805,11 @@ old_expr     = "old" , "(" , expr , ")" ;
 (* 7. FFI CAPABILITIES                                              *)
 (* ================================================================ *)
 
-(* [UNIMPLEMENTED] refused: tests/v2-grammar/unimplemented/capability.eph *)
+(* [UNIMPLEMENTED] refused: tests/v2-grammar/unimplemented/capability.eph as capability_decl *)
 capability_decl = "capabilities" , ":" ,
                   "[" , capability , { "," , capability } , "]" ;
 
-(* [UNIMPLEMENTED] refused: tests/v2-grammar/unimplemented/capability.eph *)
+(* [UNIMPLEMENTED] refused: tests/v2-grammar/unimplemented/capability.eph as capability_decl *)
 capability   = "memory_read"       (* can read from raw memory *)
              | "memory_write"      (* can write to raw memory *)
              | "io"                (* can perform I/O *)
@@ -734,7 +827,7 @@ capability   = "memory_read"       (* can read from raw memory *)
  *                "(" , STRING , { "," , expr } , ")" ;
  *)
 
-(* [UNIMPLEMENTED] refused: tests/v2-grammar/unimplemented/capability_annotation.eph *)
+(* [UNIMPLEMENTED] refused: tests/v2-grammar/unimplemented/capability_annotation.eph as capability_annotation *)
 capability_annotation = "@capabilities" ,
                         "(" , capability , { "," , capability } , ")" ;
 
@@ -750,7 +843,7 @@ capability_annotation = "@capabilities" ,
  *)
 
 (* Effect annotation on function types: a -> b with IO + State(s) *)
-(* [UNIMPLEMENTED] refused: tests/v2-grammar/unimplemented/effect_ty.eph *)
+(* [UNIMPLEMENTED] refused: tests/v2-grammar/unimplemented/effect_ty.eph as effect_ty *)
 effect_ty    = fun_ty , [ "with" , effect_row ] ;
 
 (* Effect rows support both concrete effects and effect variables.
@@ -758,13 +851,13 @@ effect_ty    = fun_ty , [ "with" , effect_row ] ;
  * polymorphism over effects:
  *   fn map[a, b, E: Effect](f: a -> b with E, xs: List(a)): List(b) with E
  * No `with` clause = pure (no effects). *)
-(* [UNIMPLEMENTED] refused: tests/v2-grammar/unimplemented/effect_row.eph *)
+(* [UNIMPLEMENTED] refused: tests/v2-grammar/unimplemented/effect_row.eph as effect_ty *)
 effect_row   = effect_ref , { "+" , effect_ref }
              | IDENT                                  (* effect variable *)
              | effect_ref , { "+" , effect_ref } , "+" , IDENT  (* concrete + variable *)
              ;
 
-(* [UNIMPLEMENTED] refused: tests/v2-grammar/unimplemented/effect_row.eph *)
+(* [UNIMPLEMENTED] refused: tests/v2-grammar/unimplemented/effect_row.eph as effect_ty *)
 effect_ref   = CTOR_IDENT , [ "(" , ty_list , ")" ] ;
 
 (* [ALIAS ty] the parser rule is the current form *)
@@ -776,7 +869,7 @@ fun_ty       = sum_ty , [ "->" , ty ] ;
  * sum_ty       = prod_ty , { "+" , prod_ty } ;
  *)
 
-(* [UNIMPLEMENTED] refused: tests/v2-grammar/unimplemented/prod_ty.eph *)
+(* [UNIMPLEMENTED] refused: tests/v2-grammar/unimplemented/prod_ty.eph as prod_ty *)
 prod_ty      = type_atom , { "*" , type_atom } ;
 
 (* [ALIAS product_ty] the parser rule is the current form *)
@@ -810,7 +903,7 @@ expr         = let_expr
  *                "->" , expr ;
  *)
 
-(* [UNIMPLEMENTED] refused: tests/v2-grammar/unimplemented/effect_row.eph *)
+(* [UNIMPLEMENTED] refused: tests/v2-grammar/unimplemented/effect_row.eph as effect_ty *)
 effect_annotation = "with" , effect_row ;
 
 (* DESIGN FORM of handle_expr. The parser rule handle_expr in part 1 is the current form.
@@ -820,10 +913,10 @@ effect_annotation = "with" , effect_row ;
  *                handler_ref , "end" ;
  *)
 
-(* [UNIMPLEMENTED] refused: tests/v2-grammar/unimplemented/handle_mode.eph *)
+(* [UNIMPLEMENTED] refused: tests/v2-grammar/unimplemented/handle_mode.eph as handle_mode *)
 handle_mode  = "shallow" ;
 
-(* [UNIMPLEMENTED] refused: tests/v2-grammar/unimplemented/handler_ref.eph *)
+(* [UNIMPLEMENTED] refused: tests/v2-grammar/unimplemented/handler_ref.eph as handler_ref *)
 handler_ref  = IDENT                         (* named handler *)
              | [ "(" , param_list , ")" ] ,  (* handler-local state *)
                { inline_handler_clause }     (* inline handler *)
@@ -832,7 +925,7 @@ handler_ref  = IDENT                         (* named handler *)
 (* [ALIAS handler_clause] the parser has no finally clause *)
 inline_handler_clause = return_clause | inline_op_clause | finally_clause ;
 
-(* [UNIMPLEMENTED] refused: tests/v2-grammar/unimplemented/resume_after_params.eph (the parser has handler_op_clause, with `resume` in the parameter list) *)
+(* [UNIMPLEMENTED] refused: tests/v2-grammar/unimplemented/resume_after_params.eph as inline_op_clause (the parser has handler_op_clause, with `resume` in the parameter list) *)
 inline_op_clause = "|" , IDENT , "(" , [ param_list ] , ")" ,
                    [ "," , resume_binding ] ,
                    "=>" , expr ;
@@ -856,10 +949,10 @@ inline_op_clause = "|" , IDENT , "(" , [ param_list ] , ")" ,
  *              ;
  *)
 
-(* [UNIMPLEMENTED] refused: tests/v2-grammar/unimplemented/tuple_pattern.eph (the parser has the pattern of 2 parts as pair_pattern) *)
+(* [UNIMPLEMENTED] refused: tests/v2-grammar/unimplemented/tuple_pattern.eph as tuple_pattern (the parser has the pattern of 2 parts as pair_pattern) *)
 tuple_pattern   = "(" , pattern , "," , pattern , { "," , pattern } , ")" ;
 
-(* [UNIMPLEMENTED] refused: tests/v2-grammar/unimplemented/borrow_pattern.eph *)
+(* [UNIMPLEMENTED] refused: tests/v2-grammar/unimplemented/borrow_pattern.eph as borrow_pattern *)
 borrow_pattern   = "&" , pattern ;
 
 
@@ -873,7 +966,7 @@ borrow_pattern   = "&" , pattern ;
  * mul_expr     = concat_expr , { ( "*" | "/" | "%" ) , concat_expr } ;
  *)
 
-(* [UNIMPLEMENTED] refused: tests/v2-grammar/unimplemented/concat.eph *)
+(* [UNIMPLEMENTED] refused: tests/v2-grammar/unimplemented/concat.eph as concat_expr *)
 concat_expr  = unary_expr , { "++" , unary_expr } ;
 
 
@@ -903,15 +996,15 @@ concat_expr  = unary_expr , { "++" , unary_expr } ;
  *              ;
  *)
 
-(* [UNIMPLEMENTED] refused: tests/v2-grammar/unimplemented/deref.eph *)
+(* [UNIMPLEMENTED] refused: tests/v2-grammar/unimplemented/deref.eph as deref_expr *)
 deref_expr   = "*" , unary_expr ;
 
 (* Splice comptime result into runtime code *)
-(* [UNIMPLEMENTED] refused: tests/v2-grammar/unimplemented/splice.eph *)
+(* [UNIMPLEMENTED] refused: tests/v2-grammar/unimplemented/splice.eph as comptime_splice *)
 comptime_splice = "@splice" , "(" , comptime_expr , ")" ;
 
 (* Runtime type descriptor (unrestricted value, Harvard-safe) *)
-(* [UNIMPLEMENTED] refused: tests/v2-grammar/unimplemented/type_desc.eph *)
+(* [UNIMPLEMENTED] refused: tests/v2-grammar/unimplemented/type_desc.eph as type_desc_expr *)
 type_desc_expr = "@type_desc_of" , "(" , ty , ")" ;
 
 
@@ -919,7 +1012,7 @@ type_desc_expr = "@type_desc_of" , "(" , ty , ")" ;
 (* 13. COMPTIME EXPRESSIONS (META PLANE)                            *)
 (* ================================================================ *)
 
-(* [UNIMPLEMENTED] refused: tests/v2-grammar/unimplemented/comptime.eph *)
+(* [UNIMPLEMENTED] refused: tests/v2-grammar/unimplemented/comptime.eph as comptime_decl *)
 comptime_ty   = "Type"           (* reified type *)
               | "TypeDesc"       (* runtime type descriptor *)
               | "SurfaceDecl"    (* surface AST declaration *)
@@ -931,7 +1024,7 @@ comptime_ty   = "Type"           (* reified type *)
               | IDENT
               ;
 
-(* [UNIMPLEMENTED] refused: tests/v2-grammar/unimplemented/comptime.eph *)
+(* [UNIMPLEMENTED] refused: tests/v2-grammar/unimplemented/comptime.eph as comptime_decl *)
 comptime_expr = comptime_intrinsic
               | comptime_match
               | comptime_if
@@ -942,7 +1035,7 @@ comptime_expr = comptime_intrinsic
               | IDENT
               ;
 
-(* [UNIMPLEMENTED] refused: tests/v2-grammar/unimplemented/comptime.eph *)
+(* [UNIMPLEMENTED] refused: tests/v2-grammar/unimplemented/comptime.eph as comptime_decl *)
 comptime_intrinsic = "@type_desc_of" , "(" , ty , ")"
                    | "@fields_of" , "(" , ty , ")"
                    | "@constructors_of" , "(" , ty , ")"
@@ -958,35 +1051,35 @@ comptime_intrinsic = "@type_desc_of" , "(" , ty , ")"
                    | "@warning" , "(" , STRING , ")" (* compile warning *)
                    ;
 
-(* [UNIMPLEMENTED] refused: tests/v2-grammar/unimplemented/comptime.eph *)
+(* [UNIMPLEMENTED] refused: tests/v2-grammar/unimplemented/comptime.eph as comptime_decl *)
 comptime_match = "match" , comptime_expr , "of" ,
                  { "|" , comptime_pattern , "=>" , comptime_expr } ,
                  "end" ;
 
-(* [UNIMPLEMENTED] refused: tests/v2-grammar/unimplemented/comptime.eph *)
+(* [UNIMPLEMENTED] refused: tests/v2-grammar/unimplemented/comptime.eph as comptime_decl *)
 comptime_pattern = CTOR_IDENT , [ "(" , comptime_pattern_list , ")" ]
                  | "_"
                  | IDENT
                  | comptime_literal
                  ;
 
-(* [UNIMPLEMENTED] refused: tests/v2-grammar/unimplemented/comptime.eph *)
+(* [UNIMPLEMENTED] refused: tests/v2-grammar/unimplemented/comptime.eph as comptime_decl *)
 comptime_pattern_list = comptime_pattern , { "," , comptime_pattern } ;
 
-(* [UNIMPLEMENTED] refused: tests/v2-grammar/unimplemented/comptime.eph *)
+(* [UNIMPLEMENTED] refused: tests/v2-grammar/unimplemented/comptime.eph as comptime_decl *)
 comptime_if  = "if" , comptime_expr , "then" , comptime_expr ,
                "else" , comptime_expr ;
 
-(* [UNIMPLEMENTED] refused: tests/v2-grammar/unimplemented/comptime.eph *)
+(* [UNIMPLEMENTED] refused: tests/v2-grammar/unimplemented/comptime.eph as comptime_decl *)
 comptime_let_in = "let" , IDENT , "=" , comptime_expr , "in" , comptime_expr ;
 
-(* [UNIMPLEMENTED] refused: tests/v2-grammar/unimplemented/comptime.eph *)
+(* [UNIMPLEMENTED] refused: tests/v2-grammar/unimplemented/comptime.eph as comptime_decl *)
 comptime_call = IDENT , "(" , [ comptime_expr , { "," , comptime_expr } ] , ")" ;
 
-(* [UNIMPLEMENTED] refused: tests/v2-grammar/unimplemented/comptime.eph *)
+(* [UNIMPLEMENTED] refused: tests/v2-grammar/unimplemented/comptime.eph as comptime_decl *)
 comptime_list = "[" , [ comptime_expr , { "," , comptime_expr } ] , "]" ;
 
-(* [UNIMPLEMENTED] refused: tests/v2-grammar/unimplemented/comptime.eph *)
+(* [UNIMPLEMENTED] refused: tests/v2-grammar/unimplemented/comptime.eph as comptime_decl *)
 comptime_literal = INTEGER | STRING | BOOLEAN | "()" ;
 
 

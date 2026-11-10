@@ -36,6 +36,15 @@ pub enum ParseError {
     #[error("Annotation `@{name}` is not enforced: the compiler does not check it, so it is rejected rather than silently ignored")]
     AnnotationNotEnforced { name: String, span: Span },
 
+    /// Syntax of the v2 design that the parser does not have: `production`
+    /// is in part 2 of spec/ephapax-v2-grammar.ebnf with the mark
+    /// [UNIMPLEMENTED] (v2 plan rung E7).
+    #[error("`{production}` is syntax of the v2 design that is not implemented (see the mark [UNIMPLEMENTED] in spec/ephapax-v2-grammar.ebnf, part 2)")]
+    Unimplemented {
+        production: &'static str,
+        span: Span,
+    },
+
     /// An integer literal outside the I64 range. It used to become 0
     /// without a diagnostic (v2 plan rung E3).
     #[error("Integer literal `{literal}` is out of range for I64 (-9223372036854775808 to 9223372036854775807)")]
@@ -51,6 +60,7 @@ impl ParseError {
             ParseError::Expected { span, .. } => *span,
             ParseError::AnnotationNotEnforced { span, .. } => *span,
             ParseError::IntegerOutOfRange { span, .. } => *span,
+            ParseError::Unimplemented { span, .. } => *span,
         }
     }
 
@@ -192,6 +202,19 @@ impl Report {
                     .with_label(
                         Label::new(location)
                             .with_message("remove it: the compiler does not check this property")
+                            .with_color(Color::Red),
+                    )
+                    .finish()
+            }
+
+            ParseError::Unimplemented { production, .. } => {
+                AriadneReport::build(ReportKind::Error, self.source_name.clone(), range.start)
+                    .with_message(format!("`{}` is not implemented", production))
+                    .with_label(
+                        Label::new(location)
+                            .with_message(
+                                "syntax of the v2 design: spec/ephapax-v2-grammar.ebnf, part 2",
+                            )
                             .with_color(Color::Red),
                     )
                     .finish()

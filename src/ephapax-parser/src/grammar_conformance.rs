@@ -13,8 +13,9 @@
 //!    is in the parse tree of a fixture.
 //! 2. The productions of the v2 design that the parser does not have by
 //!    that name. Each one has a mark: `[ALIAS rule]` (the parser has the
-//!    construct as `rule`) or `[UNIMPLEMENTED]` with a fixture that the
-//!    parser refuses.
+//!    construct as `rule`) or `[UNIMPLEMENTED]` with a fixture and the
+//!    production that the parser names when it refuses the fixture
+//!    (`ParseError::Unimplemented`).
 //!
 //! So no production is unaccounted for. To write part 1 again after a
 //! change of `ephapax.pest`:
@@ -29,17 +30,16 @@ use std::path::{Path, PathBuf};
 use pest::Parser as _;
 use pest_meta::ast::{Expr, RuleType};
 
-use crate::{parse_module, parse_surface_module, EphapaxParser, Rule};
+use crate::{parse_module, parse_surface_module, EphapaxParser, ParseError, Rule};
 
 const PEST: &str = include_str!("ephapax.pest");
 const BEGIN: &str = "(* BEGIN GENERATED: the parser grammar, from ephapax.pest. Do not edit. *)";
 const END: &str = "(* END GENERATED *)";
 
-/// Rules that are in the grammar and never in a parse tree, with the
-/// reason. Each other rule must be in the parse tree of a fixture.
+/// Rules that are not silent, and still never in a parse tree, with the
+/// reason. Each other rule that is not silent must be in the parse tree
+/// of a fixture.
 const NO_PAIR: &[(&str, &str)] = &[
-    ("WHITESPACE", "silent"),
-    ("COMMENT", "silent"),
     ("string_inner", "inside the atomic rule `string`"),
     ("escape", "inside the atomic rule `string`"),
     ("keyword", "only in the lookahead of `identifier`"),
@@ -304,6 +304,10 @@ fn each_parser_rule_is_in_a_fixture() {
         !files.is_empty(),
         "no fixture in tests/v2-grammar/productions"
     );
+    // The grammar has the rules `unimplemented_<production>` to find
+    // syntax that the parser then refuses by name: the fixtures of that
+    // syntax have these rules in their parse trees.
+    eph_files(&fixtures.join("unimplemented"), &mut files);
     for file in &files {
         let source = std::fs::read_to_string(file).expect("read fixture");
         let rules = rules_in(Rule::module, &source)
@@ -316,7 +320,9 @@ fn each_parser_rule_is_in_a_fixture() {
 
     let no_pair: BTreeSet<&str> = NO_PAIR.iter().map(|(name, _)| *name).collect();
     let wrong: Vec<String> = pest_rules()
-        .into_keys()
+        .into_iter()
+        .filter(|(_, (ty, _))| *ty != RuleType::Silent)
+        .map(|(name, _)| name)
         .filter(|name| seen.contains(name) == no_pair.contains(name.as_str()))
         .collect();
     assert!(
@@ -326,9 +332,79 @@ fn each_parser_rule_is_in_a_fixture() {
     );
 }
 
+/// A rule `unimplemented_<production>` stands only where no valid
+/// program has its first token. These programs are valid, and each one
+/// is near such a rule: the parsers must take them as before. The
+/// surface parser has no `handle` expression; the core parser takes
+/// those programs.
+#[test]
+fn valid_syntax_near_an_unimplemented_form_still_parses() {
+    // (program, the surface parser accepts it)
+    for (body, surface_accepts) in [
+        // `shallow` as a function and as a variable, not as a handle mode.
+        (
+            "fn f(): I32 = handle shallow(1) with | return(x) => x end",
+            false,
+        ),
+        (
+            "fn f(shallow: I32): I32 = handle shallow with | return(x) => x end",
+            false,
+        ),
+        // An operation with the name `finally`, and `resume` as a parameter.
+        (
+            "fn f(): I32 = handle g() with | finally(x, resume) => x | return(x) => x end",
+            false,
+        ),
+        // `*`, `+` and `&` as operators; a pair pattern; a sum type.
+        ("fn f(a: I32, b: I32): I32 = a * b + -a", true),
+        (
+            "fn f(p: (I32, I32)): I32 = match p of | (a, b) => a end",
+            true,
+        ),
+        (
+            "fn f(s: I32 + Bool, r: &I32): I32 -> I32 = fn(x: I32) -> x",
+            true,
+        ),
+        // Annotations with no argument, type parameters with no bound,
+        // and the import forms of the parser.
+        (
+            "@inline\n@tail_recursive\nfn f<a, b>(x: a, y: b): a = x",
+            true,
+        ),
+        (
+            "import lib/math\nimport lib.shapes(area, Shape)\nfn f(): I32 = 0",
+            true,
+        ),
+        // Words of the design as names where a name can stand.
+        (
+            "fn f(effect: I32, handler: I32, trait_id: I32): I32 = effect + handler + trait_id",
+            true,
+        ),
+    ] {
+        let source = format!("module m\n{body}\n");
+        let surface = parse_surface_module(&source, "m").err();
+        let core = parse_module(&source, "m").err();
+        assert!(
+            surface.is_none() == surface_accepts && core.is_none(),
+            "this valid program does not parse as before:\n{source}\n\
+             surface: {surface:?}\ncore: {core:?}"
+        );
+    }
+}
+
+/// The production that a parser names when it refuses a program for
+/// syntax that is not implemented.
+fn refused_as<T>(result: Result<T, Vec<ParseError>>) -> Option<&'static str> {
+    match result.err()?.first()? {
+        ParseError::Unimplemented { production, .. } => Some(production),
+        _ => None,
+    }
+}
+
 /// Part 2: each production that is not a rule of the parser has a mark.
-/// An `[ALIAS rule]` names a rule of the parser. The parser refuses the
-/// fixture of an `[UNIMPLEMENTED]` production.
+/// An `[ALIAS rule]` names a rule of the parser. For an `[UNIMPLEMENTED]`
+/// production, the 2 parsers refuse the fixture with an error that names
+/// the production of the mark (`as <production>`).
 #[test]
 fn each_design_production_is_an_alias_or_is_refused() {
     let (head, part, tail) = split(specification());
@@ -343,6 +419,8 @@ fn each_design_production_is_an_alias_or_is_refused() {
     let mut names: BTreeSet<&str> = defined(part).into_iter().collect();
     let mut mark: Option<&str> = None;
     let (mut aliases, mut refused) = (0, 0);
+    // The productions that the parser refuses under their own name.
+    let mut own_name = BTreeSet::new();
     for line in tail.lines() {
         if let Some(rest) = line.strip_prefix("(* [") {
             mark = Some(rest);
@@ -363,21 +441,43 @@ fn each_design_production_is_an_alias_or_is_refused() {
             );
             aliases += 1;
         } else {
-            let fixture = mark
+            // `UNIMPLEMENTED] refused: <fixture> as <production> ...`
+            let mut words = mark
                 .strip_prefix("UNIMPLEMENTED] refused: ")
-                .and_then(|rest| rest.split(' ').next())
-                .unwrap_or_else(|| panic!("`{name}`: the mark `{mark}` is not a known mark"));
+                .unwrap_or_else(|| panic!("`{name}`: the mark `{mark}` is not a known mark"))
+                .split(' ');
+            let (Some(fixture), Some("as"), Some(production)) =
+                (words.next(), words.next(), words.next())
+            else {
+                panic!("`{name}`: the mark must say `refused: <fixture> as <production>`");
+            };
             let source = std::fs::read_to_string(repo().join(fixture))
                 .unwrap_or_else(|_| panic!("`{name}`: no fixture {fixture}"));
+            let surface = refused_as(parse_surface_module(&source, "fixture"));
+            let core = refused_as(parse_module(&source, "fixture"));
             assert!(
-                parse_surface_module(&source, "fixture").is_err()
-                    && parse_module(&source, "fixture").is_err(),
-                "`{name}` has the mark UNIMPLEMENTED, but the parser accepts {fixture}"
+                surface == Some(production) && core == Some(production),
+                "`{name}`: the mark says that the parser refuses {fixture} as `{production}`; \
+                 the surface parser says {surface:?}, the core parser says {core:?}"
             );
+            if production == name {
+                own_name.insert(name);
+            }
             refused += 1;
         }
     }
     assert!(mark.is_none(), "a mark with no production after it");
+    // Each rule `unimplemented_<production>` of the parser has its
+    // production here, refused under its own name.
+    for rule in rules.keys() {
+        if let Some(production) = rule.strip_prefix("unimplemented_") {
+            assert!(
+                own_name.contains(production),
+                "the rule `{rule}` has no production `{production}` in part 2 \
+                 with the mark `[UNIMPLEMENTED] refused: <fixture> as {production}`"
+            );
+        }
+    }
     // 0 productions unaccounted for: a rule of the parser, an alias, or
     // a production that the parser refuses.
     assert_eq!(names.len(), rules.len() + aliases + refused);

@@ -216,28 +216,40 @@ fn out_of_range_integer_literal_is_a_parse_error() {
 }
 
 /// A limit of the typed lowering is a load error too: `check` must not
-/// accept a program that `compile` refuses. (A pair or tuple pattern on a
-/// value with a 64-bit component is not lowered yet.)
+/// accept a program that `compile` refuses. Not lowered yet: a pair or
+/// tuple pattern on a value with a 64-bit component, and a lambda with a
+/// parameter or result that is not 32 bits wide.
 #[test]
 fn check_rejects_what_typed_codegen_cannot_lower() {
     let tmp = tempfile::tempdir().expect("tempdir");
-    std::fs::write(
-        tmp.path().join("wide.eph"),
-        "module wide\n\nfn main(): I64 =\n  let (a, b) = (1, 5000000000)\n  b\n",
-    )
-    .expect("write program");
-    for args in [&["check", "wide.eph"][..], &["compile", "wide.eph"]] {
-        let out = Command::new(env!("CARGO_BIN_EXE_ephapax"))
-            .current_dir(tmp.path())
-            .args(args)
-            .output()
-            .expect("spawn ephapax");
-        let stderr = String::from_utf8_lossy(&out.stderr);
-        assert!(
-            !out.status.success() && stderr.contains("Codegen error") && stderr.contains("`match`"),
-            "{args:?}: exit {:?}, stderr:\n{stderr}",
-            out.status.code()
-        );
+    // (result type, body, text the error names)
+    for (ty, body, what) in [
+        ("I64", "let (a, b) = (1, 5000000000)\n  b", "`match`"),
+        (
+            "F32",
+            "let f = fn(x: F32) -> x + 1.0f32\n  f(2.0f32)",
+            "lambda",
+        ),
+        ("F64", "let f = fn(x: I32) -> 1.5\n  f(1)", "lambda"),
+    ] {
+        std::fs::write(
+            tmp.path().join("wide.eph"),
+            format!("module wide\n\nfn main(): {ty} =\n  {body}\n"),
+        )
+        .expect("write program");
+        for args in [&["check", "wide.eph"][..], &["compile", "wide.eph"]] {
+            let out = Command::new(env!("CARGO_BIN_EXE_ephapax"))
+                .current_dir(tmp.path())
+                .args(args)
+                .output()
+                .expect("spawn ephapax");
+            let stderr = String::from_utf8_lossy(&out.stderr);
+            assert!(
+                !out.status.success() && stderr.contains("Codegen error") && stderr.contains(what),
+                "`{body}` under {args:?}: exit {:?}, stderr:\n{stderr}",
+                out.status.code()
+            );
+        }
     }
 }
 

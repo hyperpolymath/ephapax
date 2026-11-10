@@ -241,30 +241,46 @@ pub fn check_program(program: &Program) -> Result<(), DriverError> {
             }
         })?);
     }
-    // A program is one wasm module with one flat function namespace
-    // (`Program::into_merged`). If two modules declared a function of the
-    // same name, the merge would keep one, and the callers of the other
-    // would run the wrong code.
+    // A program is one wasm module, and codegen finds a callee by its
+    // bare name (`Program::into_merged`). If two modules declared a
+    // function or an extern function of the same name, the callers in one
+    // of them would run the declaration of the other.
     // snip: an error; lift it with module-qualified names in the merge.
-    let mut declared_in = std::collections::HashMap::new();
+    // `None` is a function; an extern function has its ABI and item.
+    let mut declared = std::collections::HashMap::new();
     for m in &program.modules {
+        let mut callables = Vec::new();
         for decl in &m.core.decls {
-            let Decl::Fn { name, .. } = decl else {
+            match decl {
+                Decl::Fn { name, .. } => callables.push((name, None)),
+                Decl::Extern { abi, items } => {
+                    callables.extend(items.iter().filter_map(|item| match item {
+                        ExternItem::Fn { name, .. } => Some((name, Some((abi, item)))),
+                        ExternItem::Type { .. } => None,
+                    }))
+                }
+                _ => {}
+            }
+        }
+        for (name, ext) in callables {
+            let Some((first, first_ext)) = declared.insert(name, (&m.logical_path, ext)) else {
                 continue;
             };
-            let first = declared_in.insert(name, &m.logical_path);
-            if let Some(first) = first.filter(|first| *first != &m.logical_path) {
-                return Err(DriverError::Unsupported {
-                    path: m.file_path.clone(),
-                    error: CodegenError(format!(
-                        "{}: function `{name}` is declared in module `{first}` and in \
-                         module `{}` (a program compiles to one wasm module, which \
-                         holds one function of each name)",
-                        ephapax_wasm::UNSUPPORTED_PREFIX,
-                        m.logical_path
-                    )),
-                });
+            // Two modules may declare the same host import: it is one
+            // wasm import (`into_merged` keeps one).
+            if first == &m.logical_path || (ext.is_some() && first_ext == ext) {
+                continue;
             }
+            return Err(DriverError::Unsupported {
+                path: m.file_path.clone(),
+                error: CodegenError(format!(
+                    "{}: function `{name}` is declared in module `{first}` and in \
+                     module `{}` (a program compiles to one wasm module, which \
+                     holds one function of each name)",
+                    ephapax_wasm::UNSUPPORTED_PREFIX,
+                    m.logical_path
+                )),
+            });
         }
     }
     // With the types, so a limit of the typed lowering (a `match` on a
@@ -380,11 +396,29 @@ mod tests {
             "module app\n\nimport deep\n\nfn helper(n: I32): I32 = n + 7\n\n\
              fn main(): I32 = helper(1) + deep_val(0)\n",
         );
-        let err = load_program(&dir.path().join("app.eph"), None).expect_err("refused");
-        assert!(
-            matches!(&err, DriverError::Unsupported { error, .. } if error.0.contains("`helper`")),
-            "{err}"
-        );
+        let refused = || {
+            let err = load_program(&dir.path().join("app.eph"), None).expect_err("refused");
+            assert!(
+                matches!(&err, DriverError::Unsupported { error, .. } if error.0.contains("`helper`")),
+                "{err}"
+            );
+        };
+        refused();
+        // An extern function is in the same namespace: under another name
+        // kind, and under another ABI.
+        let app_calls_deep = "module app\n\nimport deep\n\nfn main(): I32 = deep_val(0)\n";
+        for helper in [
+            "fn helper(n: I32): I32 = n + 7",
+            "extern \"other\" {\n  fn helper(n: I32): I32\n}",
+        ] {
+            write(
+                "deep.eph",
+                "module deep\n\nextern \"env\" {\n  fn helper(n: I32): I32\n}\n\n\
+                 pub fn deep_val(n: I32): I32 = helper(n)\n",
+            );
+            write("app.eph", &format!("{app_calls_deep}\n{helper}\n"));
+            refused();
+        }
     }
 
     /// `foo.bar` and `foo/bar` name the same module: an import may use

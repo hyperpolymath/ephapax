@@ -155,3 +155,58 @@ fn run_does_not_execute_the_main_of_an_imported_module() {
         assert_eq!(stdout_of(tmp.path(), args), "", "{args:?}");
     }
 }
+
+/// Each module calls its own function when two modules use one name. The
+/// merge used to keep one `helper` for both modules.
+#[test]
+fn each_module_calls_its_own_function_of_a_shared_name() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let write =
+        |name: &str, text: &str| std::fs::write(tmp.path().join(name), text).expect("write module");
+    // `helper` is private in each module.
+    write(
+        "deep.eph",
+        "module deep\n\nfn helper(n: I32): I32 = n + 100\n\n\
+         pub fn deep_val(n: I32): I32 = helper(n)\n\n\
+         pub fn shadow(helper: I32): I32 = helper + 1000\n\n\
+         pub fn pick(n: I32): I32 = n + 1\n",
+    );
+    write(
+        "mid.eph",
+        "module mid\n\nimport deep\n\nfn helper(n: I32): I32 = n + 1\n\n\
+         pub fn mid_val(n: I32): I32 = helper(n) + deep_val(0)\n\n\
+         pub fn pick(n: I32): I32 = n + 2\n",
+    );
+    // 2 + 100.
+    write(
+        "app.eph",
+        "module app\n\nimport mid\n\nfn main(): I32 = mid_val(1)\n",
+    );
+    // The root has its own `helper` too: 8 + 100.
+    write(
+        "own.eph",
+        "module own\n\nimport deep\n\nfn helper(n: I32): I32 = n + 7\n\n\
+         fn main(): I32 = helper(1) + deep_val(0)\n",
+    );
+    // Two imports export `pick`: the later import is the one in scope.
+    write(
+        "later.eph",
+        "module later\n\nimport deep\nimport mid\n\nfn main(): I32 = pick(0)\n",
+    );
+    for (file, want) in [("app.eph", "102"), ("own.eph", "108"), ("later.eph", "2")] {
+        for args in [&["run", file][..], &["run", "--interp", file]] {
+            assert_eq!(stdout_of(tmp.path(), args), want, "{args:?}");
+        }
+    }
+
+    // `shadow` in `deep` has a parameter with the name of the function
+    // that the merge renames; the parameter still shadows the function.
+    // Wasm only: the interpreter reads a parameter that has the name of a
+    // function as that function, also in a program of one module.
+    write(
+        "param.eph",
+        "module param\n\nimport deep\n\nfn helper(n: I32): I32 = n\n\n\
+         fn main(): I32 = shadow(0)\n",
+    );
+    assert_eq!(stdout_of(tmp.path(), &["run", "param.eph"]), "1000");
+}

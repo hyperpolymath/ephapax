@@ -17,6 +17,7 @@
 //! [`check_program`] the last two; [`load_program`] / [`load_source`] run
 //! all five.
 
+mod qualify;
 mod resolver;
 
 use std::path::{Path, PathBuf};
@@ -56,10 +57,11 @@ impl Program {
 
     /// Merge every imported module into the root, for codegen and the
     /// interpreter. Wasm produces a single binary; each imported module's
-    /// `Fn` declarations become part of the same wasm module. A function,
-    /// or an extern item, that an earlier module already declared is
-    /// dropped (first-seen wins, the root first). [`check_program`]
-    /// refuses a program in which that would drop a function.
+    /// `Fn` declarations become part of the same wasm module. When two
+    /// modules declare a function of the same name, one of them gets a
+    /// module-qualified name (`deep::helper`) and its callers follow it;
+    /// the root keeps its names. An extern item that an earlier module
+    /// already declared is dropped (first-seen wins, the root first).
     pub fn into_merged(self) -> Module {
         // Dedup keys: `fn:<name>` for a function, `extern:<abi>:<name>` for
         // an extern item (each extern fn is one wasm import, so the same
@@ -73,6 +75,7 @@ impl Program {
             }
         }
         let mut modules = self.modules;
+        qualify::qualify_functions(&mut modules);
         let mut merged = modules
             .pop()
             .expect("a program has at least its root module")
@@ -242,10 +245,11 @@ pub fn check_program(program: &Program) -> Result<(), DriverError> {
         })?);
     }
     // A program is one wasm module, and codegen finds a callee by its
-    // bare name (`Program::into_merged`). If two modules declared a
-    // function or an extern function of the same name, the callers in one
-    // of them would run the declaration of the other.
-    // snip: an error; lift it with module-qualified names in the merge.
+    // bare name. Two functions of the same name get module-qualified names
+    // in the merge (`qualify`). An extern function cannot: its name is the
+    // name of the host import. So a name that two modules declare, where
+    // at least one declares it as an extern function, is an error, unless
+    // both declare the same host import (same ABI, same signature).
     // `None` is a function; an extern function has its ABI and item.
     let mut declared = std::collections::HashMap::new();
     for m in &program.modules {
@@ -266,17 +270,15 @@ pub fn check_program(program: &Program) -> Result<(), DriverError> {
             let Some((first, first_ext)) = declared.insert(name, (&m.logical_path, ext)) else {
                 continue;
             };
-            // Two modules may declare the same host import: it is one
-            // wasm import (`into_merged` keeps one).
-            if first == &m.logical_path || (ext.is_some() && first_ext == ext) {
+            if first == &m.logical_path || first_ext == ext {
                 continue;
             }
             return Err(DriverError::Unsupported {
                 path: m.file_path.clone(),
                 error: CodegenError(format!(
-                    "{}: function `{name}` is declared in module `{first}` and in \
-                     module `{}` (a program compiles to one wasm module, which \
-                     holds one function of each name)",
+                    "{}: `{name}` is declared in module `{first}` and in module `{}`, \
+                     and at least one of the two is an extern function (an extern \
+                     function keeps its name, which is the name of the host import)",
                     ephapax_wasm::UNSUPPORTED_PREFIX,
                     m.logical_path
                 )),
@@ -377,47 +379,55 @@ mod tests {
         );
     }
 
-    /// Two modules that each declare `helper` cannot share one wasm
-    /// module. The merge used to keep one `helper` for both, without a
-    /// diagnostic.
+    /// Two modules that each declare a function `helper`: the root keeps
+    /// the name, the other one becomes `deep::helper`. An extern function
+    /// cannot be renamed, so a collision with one is refused.
     #[test]
-    fn same_function_name_in_two_modules_is_refused() {
+    fn same_function_name_in_two_modules() {
         let dir = tempfile::tempdir().expect("tempdir");
         let write = |name: &str, text: &str| {
             std::fs::write(dir.path().join(name), text).expect("write module")
         };
-        write(
-            "deep.eph",
-            "module deep\n\nfn helper(n: I32): I32 = n + 100\n\n\
-             pub fn deep_val(n: I32): I32 = helper(n)\n",
-        );
-        write(
-            "app.eph",
-            "module app\n\nimport deep\n\nfn helper(n: I32): I32 = n + 7\n\n\
-             fn main(): I32 = helper(1) + deep_val(0)\n",
-        );
-        let refused = || {
-            let err = load_program(&dir.path().join("app.eph"), None).expect_err("refused");
+        let load = || load_program(&dir.path().join("app.eph"), None);
+        let deep_fn = "fn helper(n: I32): I32 = n + 100";
+        let deep_extern = "extern \"env\" {\n  fn helper(n: I32): I32\n}";
+        let deep = |helper: &str| {
+            format!("module deep\n\n{helper}\n\npub fn deep_val(n: I32): I32 = helper(n)\n")
+        };
+        let app = |helper: &str| {
+            format!("module app\n\nimport deep\n\n{helper}\n\nfn main(): I32 = deep_val(0)\n")
+        };
+
+        write("deep.eph", &deep(deep_fn));
+        write("app.eph", &app("fn helper(n: I32): I32 = n + 7"));
+        let merged = load().expect("loads").into_merged();
+        let names: Vec<&str> = merged
+            .decls
+            .iter()
+            .filter_map(|d| match d {
+                Decl::Fn { name, .. } => Some(name.as_str()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(names, ["helper", "main", "deep::helper", "deep_val"]);
+        ephapax_wasm::compile_module(&merged).expect("the merged module compiles");
+
+        // (deep, app): at least one `helper` is an extern function.
+        for (deep_helper, app_helper) in [
+            (deep_extern, "fn helper(n: I32): I32 = n + 7"),
+            (deep_fn, deep_extern),
+            (
+                deep_extern,
+                "extern \"other\" {\n  fn helper(n: I32): I32\n}",
+            ),
+        ] {
+            write("deep.eph", &deep(deep_helper));
+            write("app.eph", &app(app_helper));
+            let err = load().expect_err("refused");
             assert!(
                 matches!(&err, DriverError::Unsupported { error, .. } if error.0.contains("`helper`")),
                 "{err}"
             );
-        };
-        refused();
-        // An extern function is in the same namespace: under another name
-        // kind, and under another ABI.
-        let app_calls_deep = "module app\n\nimport deep\n\nfn main(): I32 = deep_val(0)\n";
-        for helper in [
-            "fn helper(n: I32): I32 = n + 7",
-            "extern \"other\" {\n  fn helper(n: I32): I32\n}",
-        ] {
-            write(
-                "deep.eph",
-                "module deep\n\nextern \"env\" {\n  fn helper(n: I32): I32\n}\n\n\
-                 pub fn deep_val(n: I32): I32 = helper(n)\n",
-            );
-            write("app.eph", &format!("{app_calls_deep}\n{helper}\n"));
-            refused();
         }
     }
 

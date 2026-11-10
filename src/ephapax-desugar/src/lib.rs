@@ -120,6 +120,16 @@ pub enum DesugarError {
     #[error("empty match expression")]
     EmptyMatch,
 
+    #[error("type arguments need the name of a generic function before them, as in `id[I32](3)`")]
+    TypeArgumentsOnExpression,
+
+    /// A `match` with a guard goes to the core `match`, which has no
+    /// form for a constructor inside another pattern.
+    #[error(
+        "a match with a guard cannot have the constructor pattern `{ctor}` inside another pattern"
+    )]
+    GuardWithNestedConstructor { ctor: String },
+
     #[error("qualified access `{qualifier}.{member}`: `{qualifier}` is not an imported module (record field access is not yet supported)")]
     QualifiedAccessUnknownModule { qualifier: String, member: String },
 
@@ -143,26 +153,54 @@ pub enum DesugarError {
 struct ConstructorInfo {
     /// Index of this constructor in the data declaration (0-based).
     index: usize,
-    /// Total number of constructors in the data type.
-    _total: usize,
     /// Payload types (empty for nullary constructors).
     fields: Vec<SurfaceTy>,
-    /// The data type this constructor belongs to.
+    /// The data type this constructor belongs to, by its name in `home`.
     data_name: SmolStr,
-    /// Type parameters of the data type.
-    _data_params: Vec<SmolStr>,
+    /// Key of the module that declares the data type.
+    home: SmolStr,
+}
+
+/// A data type as its module declares it.
+#[derive(Debug, Clone)]
+struct DataInfo {
+    params: Vec<SmolStr>,
+    ctors: Vec<ConstructorDef>,
+    /// Key of the module that declares the type. The names in the
+    /// fields of `ctors` are names in the scope of that module.
+    home: SmolStr,
+    /// `pub data`: a module that imports `home` can name the type.
+    public: bool,
+}
+
+/// The data types and the constructors that one module can name: its
+/// own, and the public ones of the modules that it imports.
+#[derive(Debug, Clone, Default)]
+struct Scope {
+    /// Constructor name → info
+    constructors: HashMap<SmolStr, ConstructorInfo>,
+    /// Data type name → declaration
+    types: HashMap<SmolStr, DataInfo>,
+}
+
+/// The key of a module in the registry. `Foo.Bar` and `Foo/Bar` name the
+/// same module, so an import can spell it either way.
+fn module_key(name: &str) -> SmolStr {
+    name.replace('.', "/").into()
 }
 
 /// Registry of all data declarations encountered during desugaring.
 ///
 /// Maps constructor names to their encoding information. This is built
 /// from `DataDecl` nodes and used to desugar `Construct` and `Match`.
+/// Each module has its own [`Scope`], as it has for functions: a module
+/// names a data type of another module only when it imports that module
+/// and the type is `pub`.
 #[derive(Debug, Clone, Default)]
 pub struct DataRegistry {
-    /// Constructor name → info
-    constructors: HashMap<SmolStr, ConstructorInfo>,
-    /// Data type name → (params, constructors)
-    types: HashMap<SmolStr, (Vec<SmolStr>, Vec<ConstructorDef>)>,
+    /// Module key → what the module can name. The key is the empty
+    /// string for declarations registered with no module.
+    scopes: HashMap<SmolStr, Scope>,
     /// Names declared via `extern "abi" { type Foo }` blocks.
     ///
     /// Extern types are nominal and opaque: the desugar pass resolves
@@ -176,8 +214,9 @@ pub struct DataRegistry {
     /// form so `desugar_named_type` can recursively expand them on
     /// demand. The stored value is whatever the parser produced for the
     /// alias body (record/sum decls already pre-lowered to `Prod`/`Sum`/
-    /// `Tuple` by `parse_type_decl`).
-    type_aliases: HashMap<SmolStr, SurfaceTy>,
+    /// `Tuple` by `parse_type_decl`), and the key of the module that
+    /// declares the alias: the body expands in the scope of that module.
+    type_aliases: HashMap<SmolStr, (SurfaceTy, SmolStr)>,
 }
 
 impl DataRegistry {
@@ -186,25 +225,61 @@ impl DataRegistry {
         Self::default()
     }
 
-    /// Register a data declaration.
-    pub fn register(&mut self, decl: &DataDecl) {
-        let total = decl.constructors.len();
+    /// Register a data declaration of the module `home`.
+    pub fn register(&mut self, home: &str, decl: &DataDecl) {
+        let scope = self.scopes.entry(home.into()).or_default();
         for (index, ctor) in decl.constructors.iter().enumerate() {
-            self.constructors.insert(
+            scope.constructors.insert(
                 ctor.name.clone(),
                 ConstructorInfo {
                     index,
-                    _total: total,
                     fields: ctor.fields.clone(),
                     data_name: decl.name.clone(),
-                    _data_params: decl.params.clone(),
+                    home: home.into(),
                 },
             );
         }
-        self.types.insert(
+        scope.types.insert(
             decl.name.clone(),
-            (decl.params.clone(), decl.constructors.clone()),
+            DataInfo {
+                params: decl.params.clone(),
+                ctors: decl.constructors.clone(),
+                home: home.into(),
+                public: decl.visibility == SurfaceVisibility::Public,
+            },
         );
+    }
+
+    /// Bring the public data types that the module `from` declares, with
+    /// their constructors, into the scope of the module `into`. A list of
+    /// `names` that is not empty limits the import to the types in it.
+    /// Returns the names of the imported types.
+    fn import(&mut self, into: &str, from: &str, names: &[SmolStr]) -> HashSet<SmolStr> {
+        let Some(source) = self.scopes.get(from) else {
+            return HashSet::new();
+        };
+        let mut imported = Scope::default();
+        for (name, data) in &source.types {
+            if !data.public || data.home != from || !(names.is_empty() || names.contains(name)) {
+                continue;
+            }
+            for ctor in &data.ctors {
+                // A later data type of `from` can have a constructor of
+                // the same name: the constructor is then not of `name`.
+                let info = source.constructors.get(&ctor.name);
+                if let Some(info) = info.filter(|i| i.home == from && i.data_name == *name) {
+                    imported
+                        .constructors
+                        .insert(ctor.name.clone(), info.clone());
+                }
+            }
+            imported.types.insert(name.clone(), data.clone());
+        }
+        let types = imported.types.keys().cloned().collect();
+        let scope = self.scopes.entry(into.into()).or_default();
+        scope.constructors.extend(imported.constructors);
+        scope.types.extend(imported.types);
+        types
     }
 
     /// Register an opaque extern type name (from
@@ -213,24 +288,25 @@ impl DataRegistry {
         self.extern_types.insert(name.clone());
     }
 
-    /// Register a `type Foo = T` alias in surface form. Lookups in
-    /// `desugar_named_type` find the entry and recursively desugar it.
-    pub fn register_type_alias(&mut self, name: SmolStr, ty: SurfaceTy) {
-        self.type_aliases.insert(name, ty);
+    /// Register a `type Foo = T` alias of the module `home` in surface
+    /// form. Lookups in `desugar_named_type` find the entry and
+    /// recursively desugar it.
+    pub fn register_type_alias(&mut self, home: &str, name: SmolStr, ty: SurfaceTy) {
+        self.type_aliases.insert(name, (ty, home.into()));
     }
 
-    fn lookup_type_alias(&self, name: &str) -> Option<&SurfaceTy> {
+    fn lookup_type_alias(&self, name: &str) -> Option<&(SurfaceTy, SmolStr)> {
         self.type_aliases.get(name)
     }
 
-    /// Look up a constructor by name.
-    fn get_ctor(&self, name: &str) -> Option<&ConstructorInfo> {
-        self.constructors.get(name)
+    /// Look up a constructor by its name in the module `scope`.
+    fn get_ctor(&self, scope: &str, name: &str) -> Option<&ConstructorInfo> {
+        self.scopes.get(scope)?.constructors.get(name)
     }
 
-    /// Get the constructors for a data type (in order).
-    fn get_type_ctors(&self, name: &str) -> Option<&(Vec<SmolStr>, Vec<ConstructorDef>)> {
-        self.types.get(name)
+    /// Look up a data type by its name in the module `scope`.
+    fn get_type_ctors(&self, scope: &str, name: &str) -> Option<&DataInfo> {
+        self.scopes.get(scope)?.types.get(name)
     }
 
     /// Is this name a registered extern (opaque) type?
@@ -256,8 +332,13 @@ pub struct Desugarer {
     /// [`Desugarer::desugar_module`].
     module_qualifiers: HashSet<SmolStr>,
     /// Named types currently being expanded by `desugar_named_type`,
-    /// innermost last. Re-entering one is a recursive type.
-    expanding: RefCell<Vec<SmolStr>>,
+    /// innermost last, each with the key of the module that declares it.
+    /// Re-entering one is a recursive type.
+    expanding: RefCell<Vec<(SmolStr, SmolStr)>>,
+    /// Key of the module whose scope gives a name its meaning: the module
+    /// being desugared, or, while the body of a named type expands, the
+    /// module that declares that type.
+    scope: RefCell<SmolStr>,
     /// The type parameters of the function being desugared. In its
     /// signature and body such a name is a type variable, also when it
     /// starts with an upper-case letter (`fn id<T>(x: T): T`).
@@ -271,6 +352,7 @@ impl Desugarer {
             registry: DataRegistry::new(),
             module_qualifiers: HashSet::new(),
             expanding: RefCell::new(Vec::new()),
+            scope: RefCell::default(),
             fn_type_params: Vec::new(),
         }
     }
@@ -281,8 +363,37 @@ impl Desugarer {
             registry,
             module_qualifiers: HashSet::new(),
             expanding: RefCell::new(Vec::new()),
+            scope: RefCell::default(),
             fn_type_params: Vec::new(),
         }
+    }
+
+    /// The constructor `name` in the current scope.
+    fn ctor(&self, name: &str) -> Result<&ConstructorInfo, DesugarError> {
+        self.registry
+            .get_ctor(&self.scope.borrow(), name)
+            .ok_or_else(|| DesugarError::UnknownConstructor {
+                ctor: name.to_string(),
+            })
+    }
+
+    /// The constructors of the data type of the constructor `info`.
+    fn ctors_of(&self, info: &ConstructorInfo) -> Result<Vec<ConstructorDef>, DesugarError> {
+        self.registry
+            .get_type_ctors(&info.home, &info.data_name)
+            .map(|data| data.ctors.clone())
+            .ok_or_else(|| DesugarError::UnknownType {
+                name: info.data_name.to_string(),
+            })
+    }
+
+    /// Run `f` with the names of the module `home` in scope: the names
+    /// in the body of a type are names of the module that declares it.
+    fn in_scope<T>(&self, home: &SmolStr, f: impl FnOnce(&Self) -> T) -> T {
+        let outer = self.scope.replace(home.clone());
+        let result = f(self);
+        self.scope.replace(outer);
+        result
     }
 
     /// Desugar a complete surface module to a core module.
@@ -299,11 +410,34 @@ impl Desugarer {
             .map(|i| last_segment(i.module.as_str()))
             .collect();
 
+        // The public data types of each imported module, in the order of
+        // the imports: a later one shadows an earlier one, and a
+        // declaration of this module shadows both.
+        let key = module_key(&module.name);
+        // The imports of the core module: the type checker reads each
+        // name in an import list as a function, so the list keeps only
+        // the names that are not data types. An import that names only
+        // data types imports no function.
+        let mut imports = Vec::with_capacity(module.imports.len());
+        for import in &module.imports {
+            let types = self
+                .registry
+                .import(&key, &module_key(&import.module), &import.names);
+            let mut import = import.clone();
+            let listed = !import.names.is_empty();
+            import.names.retain(|name| !types.contains(name));
+            // An empty list is each public name of the module.
+            if !(listed && import.names.is_empty()) {
+                imports.push(import);
+            }
+        }
+        self.scope.replace(key.clone());
+
         // First pass: register all data types and extern types
         for decl in &module.decls {
             match decl {
                 SurfaceDecl::Data(data) => {
-                    self.registry.register(data);
+                    self.registry.register(&key, data);
                 }
                 SurfaceDecl::Extern { items, .. } => {
                     for item in items {
@@ -313,7 +447,8 @@ impl Desugarer {
                     }
                 }
                 SurfaceDecl::Type { name, ty, .. } => {
-                    self.registry.register_type_alias(name.clone(), ty.clone());
+                    self.registry
+                        .register_type_alias(&key, name.clone(), ty.clone());
                 }
                 _ => {}
             }
@@ -401,7 +536,7 @@ impl Desugarer {
 
         Ok(Module {
             name: module.name.clone(),
-            imports: module.imports.clone(),
+            imports,
             decls: core_decls,
         })
     }
@@ -573,6 +708,28 @@ impl Desugarer {
                 list: Box::new(self.desugar_expr(list)?),
                 index: Box::new(self.desugar_expr(index)?),
             },
+            SurfaceExprKind::TypeApp { func, type_args } => {
+                let func = self.desugar_expr(func)?;
+                match (&type_args[..], func.kind) {
+                    // `xs[i](3)`: a lower-case name is a type only as a
+                    // type parameter of this function. Any other name
+                    // is a variable, and the brackets are an index.
+                    ([SurfaceTy::Var(v)], list) if !self.fn_type_params.contains(v) => {
+                        ExprKind::ListIndex {
+                            list: Box::new(Expr::new(list, func.span)),
+                            index: Box::new(Expr::new(ExprKind::Var(v.clone()), span)),
+                        }
+                    }
+                    (_, ExprKind::Var(name)) => ExprKind::TypeApp {
+                        name,
+                        type_args: type_args
+                            .iter()
+                            .map(|ty| self.desugar_ty(ty))
+                            .collect::<Result<_, _>>()?,
+                    },
+                    _ => return Err(DesugarError::TypeArgumentsOnExpression),
+                }
+            }
             SurfaceExprKind::TupleLit(elements) => {
                 let desugared: Vec<_> = elements
                     .iter()
@@ -624,10 +781,7 @@ impl Desugarer {
             return None;
         }
         args.reverse();
-        let nullary = self
-            .registry
-            .get_ctor(field.as_str())
-            .is_some_and(|info| info.fields.is_empty());
+        let nullary = self.ctor(field).is_ok_and(|info| info.fields.is_empty());
         if nullary
             && matches!(
                 args[..],
@@ -785,7 +939,7 @@ impl Desugarer {
         // `type Foo = T` aliases — recursively desugar the stored surface
         // form. Aliases are monomorphic here (parameterised aliases would
         // carry their args via the body).
-        if let Some(aliased) = self.registry.lookup_type_alias(name.as_str()).cloned() {
+        if let Some((aliased, home)) = self.registry.lookup_type_alias(name.as_str()).cloned() {
             if !args.is_empty() {
                 return Err(DesugarError::TypeArityMismatch {
                     name: name.to_string(),
@@ -793,14 +947,20 @@ impl Desugarer {
                     got: args.len(),
                 });
             }
-            return self.with_expansion(name, args, |this| this.desugar_ty(&aliased));
+            return self.with_expansion(name, &home, |this| this.desugar_ty(&aliased));
         }
 
-        let (params, ctors) = self.registry.get_type_ctors(name.as_str()).ok_or_else(|| {
-            DesugarError::UnknownType {
+        let DataInfo {
+            params,
+            ctors,
+            home,
+            ..
+        } = self
+            .registry
+            .get_type_ctors(&self.scope.borrow(), name.as_str())
+            .ok_or_else(|| DesugarError::UnknownType {
                 name: name.to_string(),
-            }
-        })?;
+            })?;
 
         if params.len() != args.len() {
             return Err(DesugarError::TypeArityMismatch {
@@ -818,28 +978,28 @@ impl Desugarer {
         let subst: HashMap<&SmolStr, &Ty> = params.iter().zip(core_args.iter()).collect();
 
         // Build right-nested sum from constructor field types
-        let ctors = ctors.clone();
-        self.with_expansion(name, args, |this| this.build_sum_type(&ctors, &subst))
+        self.with_expansion(name, home, |this| this.build_sum_type(ctors, &subst))
     }
 
-    /// Run `f` with the named type application `name(args)` pushed on the
-    /// expansion stack. Fails with [`DesugarError::RecursiveType`] if the
-    /// same declaration is already being expanded, including non-regular
-    /// recursion with changing arguments. Arguments are elaborated before
-    /// entering the declaration, so finite nested applications remain valid.
-    /// Errors propagate after removing this expansion from the stack.
+    /// Run `f` with the named type `name` of the module `home` pushed on
+    /// the expansion stack, and with the names of `home` in scope. Fails
+    /// with [`DesugarError::RecursiveType`] if the same declaration is
+    /// already being expanded, including non-regular recursion with
+    /// changing arguments. Arguments are elaborated before entering the
+    /// declaration, so finite nested applications remain valid. Errors
+    /// propagate after removing this expansion from the stack.
     fn with_expansion<T>(
         &self,
         name: &SmolStr,
-        _args: &[SurfaceTy],
+        home: &SmolStr,
         f: impl FnOnce(&Self) -> Result<T, DesugarError>,
     ) -> Result<T, DesugarError> {
-        let key = name.clone();
+        let key = (home.clone(), name.clone());
         {
             let stack = self.expanding.borrow();
             if stack.contains(&key) {
-                let mut cycle: Vec<String> = stack.iter().map(|k| k.to_string()).collect();
-                cycle.push(key.to_string());
+                let mut cycle: Vec<String> = stack.iter().map(|(_, n)| n.to_string()).collect();
+                cycle.push(name.to_string());
                 return Err(DesugarError::RecursiveType {
                     name: name.to_string(),
                     cycle: cycle.join(" -> "),
@@ -847,7 +1007,7 @@ impl Desugarer {
             }
         }
         self.expanding.borrow_mut().push(key);
-        let result = f(self);
+        let result = self.in_scope(home, f);
         self.expanding.borrow_mut().pop();
         result
     }
@@ -942,13 +1102,7 @@ impl Desugarer {
         args: &[SurfaceExpr],
         span: Span,
     ) -> Result<Expr, DesugarError> {
-        let info = self
-            .registry
-            .get_ctor(ctor.as_str())
-            .ok_or_else(|| DesugarError::UnknownConstructor {
-                ctor: ctor.to_string(),
-            })?
-            .clone();
+        let info = self.ctor(ctor)?.clone();
 
         if info.fields.len() != args.len() {
             return Err(DesugarError::ConstructorArityMismatch {
@@ -963,16 +1117,13 @@ impl Desugarer {
 
         // Get the full sum type for the "other side" annotations
         let empty_subst: HashMap<&SmolStr, &Ty> = HashMap::new();
-        let (_, ctor_defs) = self
-            .registry
-            .get_type_ctors(info.data_name.as_str())
-            .ok_or_else(|| DesugarError::UnknownType {
-                name: info.data_name.to_string(),
-            })?;
-        let ctors = ctor_defs.clone();
+        let ctors = self.ctors_of(&info)?;
 
-        // Wrap in inl/inr chain based on index
-        self.wrap_injection(payload, info.index, &ctors, &empty_subst, span)
+        // Wrap in inl/inr chain based on index. The types of the other
+        // constructors are names of the module that declares the type.
+        self.in_scope(&info.home, |this| {
+            this.wrap_injection(payload, info.index, &ctors, &empty_subst, span)
+        })
     }
 
     /// Build the payload expression for a constructor application.
@@ -1085,6 +1236,18 @@ impl Desugarer {
             return self.bind_single_pattern(&core_scrutinee, &arms[0].pattern, body, span);
         }
 
+        // A guard, and no constructor pattern at the top of an arm: the
+        // core `match` tries the arms in order and honours each guard.
+        let guarded = arms.iter().any(|a| a.guard.is_some());
+        if guarded
+            && !arms
+                .iter()
+                .any(|a| matches!(a.pattern, Pattern::Constructor { .. }))
+        {
+            let patterns = arms.iter().map(|a| a.pattern.clone()).collect();
+            return self.guarded_match(core_scrutinee, arms.iter(), patterns, span);
+        }
+
         // Match on a literal-typed scrutinee (`match n of | 0 => a | 1 =>
         // b | _ => c end`). All arms are Literal / Wildcard / Var, no
         // constructor — desugar to nested `if scrutinee == lit then arm
@@ -1130,63 +1293,54 @@ impl Desugarer {
             return Ok(acc);
         }
 
-        // Find the data type from constructor patterns
-        let data_name = self.find_data_type_from_arms(arms)?;
+        // The data type, from the first constructor pattern.
+        let first_ctor = arms
+            .iter()
+            .find_map(|arm| match &arm.pattern {
+                Pattern::Constructor { ctor, .. } => Some(ctor),
+                _ => None,
+            })
+            .ok_or(DesugarError::EmptyMatch)?;
+        let ctors = self.ctors_of(self.ctor(first_ctor)?)?;
 
-        let (_, ctor_defs) = self
-            .registry
-            .get_type_ctors(data_name.as_str())
-            .ok_or_else(|| DesugarError::UnknownType {
-                name: data_name.to_string(),
-            })?;
-        let ctors = ctor_defs.clone();
-
-        // Build an ordered map: constructor index → (pattern bindings, body)
-        let mut arm_map: HashMap<usize, &MatchArm> = HashMap::new();
-        let mut wildcard_arm: Option<&MatchArm> = None;
-
+        // The constructor index of each arm; `None` for an arm that takes
+        // every constructor. A literal or a tuple pattern at the top of
+        // a match on a data type is taken as a wildcard.
+        let mut indexed: Vec<(Option<usize>, &MatchArm)> = Vec::with_capacity(arms.len());
         for arm in arms {
-            match &arm.pattern {
-                Pattern::Constructor { ctor, .. } => {
-                    let info = self.registry.get_ctor(ctor.as_str()).ok_or_else(|| {
-                        DesugarError::UnknownConstructor {
-                            ctor: ctor.to_string(),
-                        }
-                    })?;
-                    arm_map.insert(info.index, arm);
-                }
-                Pattern::Wildcard | Pattern::Var(_) => {
-                    wildcard_arm = Some(arm);
-                }
-                _ => {
-                    // Literal or tuple patterns at top level of match on ADT —
-                    // treat as wildcard for now
-                    wildcard_arm = Some(arm);
-                }
-            }
+            let index = match &arm.pattern {
+                Pattern::Constructor { ctor, .. } => Some(self.ctor(ctor)?.index),
+                _ => None,
+            };
+            indexed.push((index, arm));
         }
+
+        // The arms that can take constructor `i`, in the order to try.
+        // With a guard in the match: each arm for `i`, in source order.
+        // With no guard, one arm: the last arm for `i`, or else the last
+        // arm for every constructor.
+        let chains: Vec<Vec<&MatchArm>> = (0..ctors.len())
+            .map(|i| {
+                if guarded {
+                    return indexed
+                        .iter()
+                        .filter(|(index, _)| index.is_none_or(|n| n == i))
+                        .map(|(_, arm)| *arm)
+                        .collect();
+                }
+                let last = |want: Option<usize>| {
+                    indexed
+                        .iter()
+                        .rev()
+                        .find(|(index, _)| *index == want)
+                        .map(|(_, arm)| *arm)
+                };
+                last(Some(i)).or_else(|| last(None)).into_iter().collect()
+            })
+            .collect();
 
         // Generate the nested case tree
-        self.build_case_tree(&core_scrutinee, &ctors, &arm_map, wildcard_arm, 0, span)
-    }
-
-    /// Find which data type is being matched by examining constructor patterns.
-    fn find_data_type_from_arms(&self, arms: &[MatchArm]) -> Result<SmolStr, DesugarError> {
-        for arm in arms {
-            if let Pattern::Constructor { ctor, .. } = &arm.pattern {
-                if let Some(info) = self.registry.get_ctor(ctor.as_str()) {
-                    return Ok(info.data_name.clone());
-                } else {
-                    return Err(DesugarError::UnknownConstructor {
-                        ctor: ctor.to_string(),
-                    });
-                }
-            }
-        }
-        // No constructor patterns found — all wildcards/vars
-        // This is valid but we can't determine the type. Return a placeholder.
-        // In practice, the type checker will resolve this.
-        Err(DesugarError::EmptyMatch)
+        self.build_case_tree(&core_scrutinee, &ctors, &chains, 0, span)
     }
 
     /// Build the nested case tree for a match expression.
@@ -1203,41 +1357,32 @@ impl Desugarer {
         &self,
         scrutinee: &Expr,
         ctors: &[ConstructorDef],
-        arm_map: &HashMap<usize, &MatchArm>,
-        wildcard: Option<&MatchArm>,
+        chains: &[Vec<&MatchArm>],
         base_index: usize,
         span: Span,
     ) -> Result<Expr, DesugarError> {
+        let chain = &chains[base_index];
         match ctors.len() {
             0 => unreachable!("empty constructor list"),
 
-            // Last (or only) constructor — no case needed, just bind
-            1 => {
-                let arm = arm_map
-                    .get(&base_index)
-                    .or(wildcard.as_ref())
-                    .ok_or_else(|| DesugarError::NonExhaustive {
-                        ctor: ctors[0].name.to_string(),
-                    })?;
-
-                self.build_arm_body(scrutinee, &ctors[0], arm, span)
-            }
+            // Last (or only) constructor: no case needed, the scrutinee
+            // is the payload (no inl/inr wrapper).
+            1 => self.build_arm_chain(scrutinee, &ctors[0], chain, span),
 
             // Two or more constructors — generate case
             _ => {
-                let left_arm = arm_map
-                    .get(&base_index)
-                    .or(wildcard.as_ref())
-                    .ok_or_else(|| DesugarError::NonExhaustive {
-                        ctor: ctors[0].name.to_string(),
-                    })?;
-
-                // Variable name for the left (inl) payload
-                let left_var = self.fresh_var_for_arm(left_arm, &ctors[0]);
-                let left_body = self.build_arm_body_inner(
+                // Variable name for the left (inl) payload. More than one
+                // arm can read it, so it does not take the name of a
+                // variable of one arm: that name would hide an outer
+                // variable in the other arms.
+                let left_var = match chain[..] {
+                    [arm] => self.fresh_var_for_arm(arm, &ctors[0]),
+                    _ => format!("__{}", ctors[0].name.to_lowercase()).into(),
+                };
+                let left_body = self.build_arm_chain(
                     &Expr::new(ExprKind::Var(left_var.clone()), span),
                     &ctors[0],
-                    left_arm,
+                    chain,
                     span,
                 )?;
 
@@ -1247,8 +1392,7 @@ impl Desugarer {
                 let right_body = self.build_case_tree(
                     &rest_scrutinee,
                     &ctors[1..],
-                    arm_map,
-                    wildcard,
+                    chains,
                     base_index + 1,
                     span,
                 )?;
@@ -1267,16 +1411,95 @@ impl Desugarer {
         }
     }
 
-    /// Build the body for a match arm (single constructor, no more case needed).
-    fn build_arm_body(
+    /// The code for one constructor: `chain` has the arms to try on its
+    /// payload, in order. A chain where each arm has a guard does not
+    /// cover the constructor. For a longer chain, the type checker finds
+    /// if the patterns cover the payload.
+    fn build_arm_chain(
         &self,
-        scrutinee: &Expr,
+        payload: &Expr,
         ctor: &ConstructorDef,
-        arm: &MatchArm,
+        chain: &[&MatchArm],
         span: Span,
     ) -> Result<Expr, DesugarError> {
-        // For the last constructor, scrutinee IS the payload (no inl/inr wrapper)
-        self.build_arm_body_inner(scrutinee, ctor, arm, span)
+        match chain {
+            [arm] if arm.guard.is_none() => self.build_arm_body_inner(payload, ctor, arm, span),
+            _ if chain.iter().any(|arm| arm.guard.is_none()) => {
+                // A pattern on the constructor is a pattern on its
+                // payload: `()`, the one field, or a right-nested pair.
+                let patterns = chain
+                    .iter()
+                    .map(|arm| match &arm.pattern {
+                        Pattern::Constructor { args, .. } => args
+                            .iter()
+                            .rev()
+                            .cloned()
+                            .reduce(|rest, p| Pattern::Pair(Box::new(p), Box::new(rest)))
+                            .unwrap_or(Pattern::Unit),
+                        Pattern::Var(v) => Pattern::Var(v.clone()),
+                        _ => Pattern::Wildcard,
+                    })
+                    .collect();
+                self.guarded_match(payload.clone(), chain.iter().copied(), patterns, span)
+            }
+            _ => Err(DesugarError::NonExhaustive {
+                ctor: ctor.name.to_string(),
+            }),
+        }
+    }
+
+    /// A core `match` with one arm for each of `arms`, on `patterns`
+    /// (one for each arm). The core `match` tries the arms in order, and
+    /// an arm with a false guard gives the value to the next arm.
+    fn guarded_match<'a>(
+        &self,
+        scrutinee: Expr,
+        arms: impl Iterator<Item = &'a MatchArm>,
+        patterns: Vec<Pattern>,
+        span: Span,
+    ) -> Result<Expr, DesugarError> {
+        let arms = arms
+            .zip(&patterns)
+            .map(|(arm, pattern)| {
+                Ok(ephapax_syntax::MatchArm {
+                    pattern: Self::core_pattern(pattern)?,
+                    guard: match &arm.guard {
+                        Some(guard) => Some(Box::new(self.desugar_expr(guard)?)),
+                        None => None,
+                    },
+                    body: self.desugar_expr(&arm.body)?,
+                })
+            })
+            .collect::<Result<_, DesugarError>>()?;
+        Ok(Expr::new(
+            ExprKind::Match {
+                scrutinee: Box::new(scrutinee),
+                arms,
+            },
+            span,
+        ))
+    }
+
+    /// The core form of a pattern that has no constructor pattern in it.
+    fn core_pattern(pattern: &Pattern) -> Result<ephapax_syntax::Pattern, DesugarError> {
+        use ephapax_syntax::Pattern as CorePattern;
+        let all = |ps: &[Pattern]| ps.iter().map(Self::core_pattern).collect::<Result<_, _>>();
+        Ok(match pattern {
+            Pattern::Wildcard => CorePattern::Wildcard,
+            Pattern::Var(v) => CorePattern::Var(v.clone()),
+            Pattern::Unit => CorePattern::Unit,
+            Pattern::Literal(lit) => CorePattern::Literal(lit.clone()),
+            Pattern::Pair(l, r) => CorePattern::Pair(
+                Box::new(Self::core_pattern(l)?),
+                Box::new(Self::core_pattern(r)?),
+            ),
+            Pattern::Tuple(elements) => CorePattern::Tuple(all(elements)?),
+            Pattern::Constructor { ctor, .. } => {
+                return Err(DesugarError::GuardWithNestedConstructor {
+                    ctor: ctor.to_string(),
+                })
+            }
+        })
     }
 
     /// Build the arm body, binding pattern variables to the payload.
@@ -1410,7 +1633,7 @@ impl Desugarer {
                 ExprKind::Match {
                     scrutinee: Box::new(value.clone()),
                     arms: vec![ephapax_syntax::MatchArm {
-                        pattern: Self::core_pair_pattern(pattern),
+                        pattern: Self::core_pattern(pattern)?,
                         guard: None,
                         body,
                     }],
@@ -1450,22 +1673,6 @@ impl Desugarer {
                 Self::is_irrefutable_pair_pattern(l) && Self::is_irrefutable_pair_pattern(r)
             }
             Pattern::Tuple(_) | Pattern::Constructor { .. } | Pattern::Literal(_) => false,
-        }
-    }
-
-    /// Convert a pattern accepted by [`Self::is_irrefutable_pair_pattern`]
-    /// to the core pattern type.
-    fn core_pair_pattern(pattern: &Pattern) -> ephapax_syntax::Pattern {
-        use ephapax_syntax::Pattern as CorePattern;
-        match pattern {
-            Pattern::Var(v) => CorePattern::Var(v.clone()),
-            Pattern::Unit => CorePattern::Unit,
-            Pattern::Pair(l, r) => CorePattern::Pair(
-                Box::new(Self::core_pair_pattern(l)),
-                Box::new(Self::core_pair_pattern(r)),
-            ),
-            // Only reachable for `Wildcard` (the guard excludes the rest).
-            _ => CorePattern::Wildcard,
         }
     }
 
@@ -1520,6 +1727,7 @@ mod tests {
     fn option_decl() -> DataDecl {
         DataDecl {
             name: "Option".into(),
+            visibility: Default::default(),
             params: vec!["a".into()],
             constructors: vec![
                 ConstructorDef {
@@ -1538,6 +1746,7 @@ mod tests {
     fn color_decl() -> DataDecl {
         DataDecl {
             name: "Color".into(),
+            visibility: Default::default(),
             params: vec![],
             constructors: vec![
                 ConstructorDef {
@@ -1562,7 +1771,7 @@ mod tests {
     #[test]
     fn desugar_option_i32() {
         let mut ds = Desugarer::new();
-        ds.registry.register(&option_decl());
+        ds.registry.register("", &option_decl());
 
         let ty = SurfaceTy::Named {
             name: "Option".into(),
@@ -1583,7 +1792,7 @@ mod tests {
     #[test]
     fn desugar_color_type() {
         let mut ds = Desugarer::new();
-        ds.registry.register(&color_decl());
+        ds.registry.register("", &color_decl());
 
         let ty = SurfaceTy::Named {
             name: "Color".into(),
@@ -1607,7 +1816,7 @@ mod tests {
     #[test]
     fn desugar_type_arity_mismatch() {
         let mut ds = Desugarer::new();
-        ds.registry.register(&option_decl());
+        ds.registry.register("", &option_decl());
 
         let ty = SurfaceTy::Named {
             name: "Option".into(),
@@ -1622,7 +1831,7 @@ mod tests {
     #[test]
     fn desugar_none_constructor() {
         let mut ds = Desugarer::new();
-        ds.registry.register(&option_decl());
+        ds.registry.register("", &option_decl());
 
         let expr = se(SurfaceExprKind::Construct {
             ctor: "None".into(),
@@ -1637,7 +1846,7 @@ mod tests {
     #[test]
     fn desugar_some_constructor() {
         let mut ds = Desugarer::new();
-        ds.registry.register(&option_decl());
+        ds.registry.register("", &option_decl());
 
         let expr = se(SurfaceExprKind::Construct {
             ctor: "Some".into(),
@@ -1652,7 +1861,7 @@ mod tests {
     #[test]
     fn desugar_color_green() {
         let mut ds = Desugarer::new();
-        ds.registry.register(&color_decl());
+        ds.registry.register("", &color_decl());
 
         let expr = se(SurfaceExprKind::Construct {
             ctor: "Green".into(),
@@ -1671,7 +1880,7 @@ mod tests {
     #[test]
     fn desugar_color_blue() {
         let mut ds = Desugarer::new();
-        ds.registry.register(&color_decl());
+        ds.registry.register("", &color_decl());
 
         let expr = se(SurfaceExprKind::Construct {
             ctor: "Blue".into(),
@@ -1704,7 +1913,7 @@ mod tests {
     #[test]
     fn desugar_constructor_arity_mismatch() {
         let mut ds = Desugarer::new();
-        ds.registry.register(&option_decl());
+        ds.registry.register("", &option_decl());
 
         let expr = se(SurfaceExprKind::Construct {
             ctor: "None".into(),
@@ -1718,7 +1927,7 @@ mod tests {
     #[test]
     fn desugar_match_option() {
         let mut ds = Desugarer::new();
-        ds.registry.register(&option_decl());
+        ds.registry.register("", &option_decl());
 
         let expr = se(SurfaceExprKind::Match {
             scrutinee: Box::new(se(SurfaceExprKind::Var("x".into()))),
@@ -1750,7 +1959,7 @@ mod tests {
     #[test]
     fn desugar_match_color() {
         let mut ds = Desugarer::new();
-        ds.registry.register(&color_decl());
+        ds.registry.register("", &color_decl());
 
         let expr = se(SurfaceExprKind::Match {
             scrutinee: Box::new(se(SurfaceExprKind::Var("c".into()))),
@@ -1797,7 +2006,7 @@ mod tests {
     #[test]
     fn desugar_match_with_wildcard() {
         let mut ds = Desugarer::new();
-        ds.registry.register(&color_decl());
+        ds.registry.register("", &color_decl());
 
         let expr = se(SurfaceExprKind::Match {
             scrutinee: Box::new(se(SurfaceExprKind::Var("c".into()))),
@@ -1826,7 +2035,7 @@ mod tests {
     #[test]
     fn desugar_non_exhaustive_match() {
         let mut ds = Desugarer::new();
-        ds.registry.register(&color_decl());
+        ds.registry.register("", &color_decl());
 
         let expr = se(SurfaceExprKind::Match {
             scrutinee: Box::new(se(SurfaceExprKind::Var("c".into()))),
@@ -1930,6 +2139,7 @@ mod tests {
             decls: vec![
                 SurfaceDecl::Data(DataDecl {
                     name: "Option".into(),
+                    visibility: Default::default(),
                     params: vec!["a".into()],
                     constructors: vec![
                         ConstructorDef {
@@ -1996,6 +2206,7 @@ mod tests {
             decls: vec![
                 SurfaceDecl::Data(DataDecl {
                     name: "Option".into(),
+                    visibility: Default::default(),
                     params: vec!["a".into()],
                     constructors: vec![
                         ConstructorDef {
@@ -2210,16 +2421,17 @@ mod expansion_regressions {
     #[test]
     fn nested_finite_application_and_nonregular_recursion() {
         let mut registry = DataRegistry::new();
-        registry.types.insert(
-            "Id".into(),
-            (
-                vec!["a".into()],
-                vec![ConstructorDef {
-                    name: "IdValue".into(),
-                    fields: vec![SurfaceTy::Var("a".into())],
-                }],
-            ),
-        );
+        let data = |name: &str, ctor: &str, field: SurfaceTy| DataDecl {
+            name: name.into(),
+            visibility: Default::default(),
+            params: vec!["a".into()],
+            constructors: vec![ConstructorDef {
+                name: ctor.into(),
+                fields: vec![field],
+            }],
+            span: Span::dummy(),
+        };
+        registry.register("", &data("Id", "IdValue", SurfaceTy::Var("a".into())));
         let inner = SurfaceTy::Named {
             name: "Id".into(),
             args: vec![SurfaceTy::Base(BaseTy::I32)],
@@ -2234,19 +2446,11 @@ mod expansion_regressions {
                 .unwrap(),
             Ty::Base(BaseTy::I32)
         );
-        registry.types.insert(
-            "Grow".into(),
-            (
-                vec!["a".into()],
-                vec![ConstructorDef {
-                    name: "More".into(),
-                    fields: vec![SurfaceTy::Named {
-                        name: "Grow".into(),
-                        args: vec![SurfaceTy::List(Box::new(SurfaceTy::Var("a".into())))],
-                    }],
-                }],
-            ),
-        );
+        let grow = SurfaceTy::Named {
+            name: "Grow".into(),
+            args: vec![SurfaceTy::List(Box::new(SurfaceTy::Var("a".into())))],
+        };
+        registry.register("", &data("Grow", "More", grow));
         let recursive = SurfaceTy::Named {
             name: "Grow".into(),
             args: vec![SurfaceTy::Base(BaseTy::I32)],
@@ -2261,6 +2465,7 @@ mod expansion_regressions {
         let mut registry = DataRegistry::new();
         for i in 0..65 {
             registry.register_type_alias(
+                "",
                 format!("A{i}").into(),
                 if i == 64 {
                     SurfaceTy::Base(BaseTy::I32)
@@ -2274,7 +2479,7 @@ mod expansion_regressions {
             desugarer.desugar_ty(&named("A0")).unwrap(),
             Ty::Base(BaseTy::I32)
         );
-        registry.register_type_alias("A64".into(), named("A0"));
+        registry.register_type_alias("", "A64".into(), named("A0"));
         assert!(matches!(
             Desugarer::with_registry(registry).desugar_ty(&named("A0")),
             Err(DesugarError::RecursiveType { .. })

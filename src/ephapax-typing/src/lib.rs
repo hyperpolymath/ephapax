@@ -141,6 +141,19 @@ pub enum TypeError {
     )]
     PolymorphicRecursion(Var),
 
+    /// Type arguments on a name that is not a generic function.
+    #[error("`{0}` is not a generic function and cannot take type arguments")]
+    NotGeneric(Var),
+
+    /// The number of explicit type arguments is not the number of type
+    /// parameters.
+    #[error("The generic function `{callee}` has {expected} type parameter(s), but the call gives {got} type argument(s)")]
+    TypeArgumentCount {
+        callee: Var,
+        expected: usize,
+        got: usize,
+    },
+
     /// `main` is the entry point: no call gives it type arguments, so no
     /// monomorphic copy of it would exist.
     #[error("`main` is the entry point of a program and cannot have type parameters")]
@@ -1141,6 +1154,9 @@ impl TypeChecker {
         match &expr.kind {
             ExprKind::Lit(lit) => self.check_lit(s, lit),
             ExprKind::Var(name) => self.check_var(s, expr.id, name),
+            ExprKind::TypeApp { name, type_args } => {
+                self.check_type_app(s, expr.id, name, type_args)
+            }
             ExprKind::StringNew { region, .. } => self.check_string_new(s, region),
             ExprKind::StringConcat { left, right } => self.check_string_concat(s, left, right),
             ExprKind::Let {
@@ -1231,6 +1247,37 @@ impl TypeChecker {
                 callee: name.clone(),
                 args,
             });
+        }
+        Ok(ty)
+    }
+
+    /// `name[type_args]`: the generic function `name` at the type
+    /// arguments that the program gives.
+    fn check_type_app(
+        &mut self,
+        s: Span,
+        id: ExprId,
+        name: &Var,
+        type_args: &[Ty],
+    ) -> Result<Ty, SpannedTypeError> {
+        let ty = self.check_var(s, id, name)?;
+        // `check_var` recorded the use if `name` is a generic function.
+        let params = match self.instantiations.last() {
+            Some(use_) if use_.id == id => use_.args.clone(),
+            _ => return Err(self.at(s, TypeError::NotGeneric(name.clone()))),
+        };
+        if params.len() != type_args.len() {
+            return Err(self.at(
+                s,
+                TypeError::TypeArgumentCount {
+                    callee: name.clone(),
+                    expected: params.len(),
+                    got: type_args.len(),
+                },
+            ));
+        }
+        for (param, arg) in params.iter().zip(type_args) {
+            self.unify(s, arg, param)?;
         }
         Ok(ty)
     }

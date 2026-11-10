@@ -933,7 +933,10 @@ fn find_let_binding_span(expr: &Expr, target: &str) -> Option<Span> {
                 })
             })
         }
-        ExprKind::Var(_) | ExprKind::Lit(_) | ExprKind::StringNew { .. } => None,
+        ExprKind::Var(_)
+        | ExprKind::TypeApp { .. }
+        | ExprKind::Lit(_)
+        | ExprKind::StringNew { .. } => None,
     }
 }
 

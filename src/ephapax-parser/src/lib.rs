@@ -1679,6 +1679,32 @@ fn parse_postfix_expr(pair: pest::iterators::Pair<Rule>) -> Result<Expr, ParseEr
                         }
                     }
                 }
+                Rule::type_app_op => {
+                    let type_args: Vec<Ty> = op_inner
+                        .into_inner()
+                        .flat_map(|list| list.into_inner())
+                        .filter(|p| p.as_rule() == Rule::ty)
+                        .map(parse_type)
+                        .collect::<Result<_, _>>()?;
+                    // snip: this parser does not know the type parameters
+                    // in scope, so one name is an index, as it was before
+                    // `type_app_op`. The surface parser path knows them.
+                    let kind = match (&type_args[..], result.kind) {
+                        ([Ty::Var(v)], list) => ExprKind::ListIndex {
+                            list: Box::new(Expr::new(list, span)),
+                            index: Box::new(Expr::new(ExprKind::Var(v.clone()), span)),
+                        },
+                        (_, ExprKind::Var(name)) => ExprKind::TypeApp { name, type_args },
+                        _ => {
+                            return Err(ParseError::Syntax {
+                                message: "type arguments need the name of a generic function"
+                                    .into(),
+                                span,
+                            })
+                        }
+                    };
+                    result = Expr::new(kind, span);
+                }
                 Rule::index_op => {
                     let index = parse_expression(
                         op_inner

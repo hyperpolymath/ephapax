@@ -107,7 +107,7 @@ impl LinearChecker {
             ExprKind::Lit(_) => {}
 
             // --- Variable reference: consume the binding ---
-            ExprKind::Var(name) => {
+            ExprKind::Var(name) | ExprKind::TypeApp { name, .. } => {
                 self.consume_var(name);
             }
 

@@ -264,6 +264,260 @@ fn a_qualified_constructor_takes_its_arguments() {
     }
 }
 
+/// A module names a data type and its constructors when it declares
+/// them, or when it imports the module that declares them and the type is
+/// `pub` (owner decision 2026-11-10: the rule of functions). Each module
+/// used to see each data type of each module loaded before it.
+#[test]
+fn a_module_names_a_data_type_only_through_a_pub_import() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let write =
+        |name: &str, text: &str| std::fs::write(tmp.path().join(name), text).expect("write module");
+    // `Inner` and `Secret` are private. `Outer` is public and has a
+    // private type in its field.
+    write(
+        "lib.eph",
+        "module lib\n\ndata Inner = I(I32)\n\npub data Outer = O(Inner)\n\n\
+         pub data Box = MkBox(I32)\n\ndata Secret = Hidden(I32)\n\n\
+         pub fn mk(n: I32): Outer = O(I(n))\n\n\
+         pub fn get(o: Outer): I32 = match o of | O(i) => match i of | I(n) => n end end\n\n\
+         pub fn unbox(b: Box): I32 = match b of | MkBox(v) => v end\n\n\
+         pub fn secret(n: I32): Secret = Hidden(n)\n",
+    );
+    write(
+        "deep.eph",
+        "module deep\n\npub data Far = MkFar(I32)\n\npub fn far(n: I32): Far = MkFar(n)\n",
+    );
+    write(
+        "mid.eph",
+        "module mid\n\nimport deep\n\npub fn through(n: I32): Far = far(n)\n",
+    );
+
+    // (imports and declarations, `main` body, output)
+    for (head, main, want) in [
+        (
+            "import lib\n",
+            "unbox(MkBox(9)) + unbox(lib.MkBox(1))",
+            "10",
+        ),
+        // An import list names the type; the constructors come with it.
+        ("import lib(Box, unbox)\n", "unbox(MkBox(9))", "9"),
+        (
+            "import lib(Box)\n",
+            "match MkBox(4) of | MkBox(v) => v end",
+            "4",
+        ),
+        // `Outer` has the `Inner` of `lib` in its field, also in a module
+        // that has its own `Inner`.
+        (
+            "import lib\n\ndata Inner = Mine(I64)\n\nfn pass(o: Outer): Outer = o\n",
+            "get(pass(mk(5)))",
+            "5",
+        ),
+        // Not a recursive type: this `Inner` is not the `Inner` in `Outer`.
+        (
+            "import lib\n\ndata Inner = Wrap(Outer)\n",
+            "match Wrap(mk(6)) of | Wrap(o) => get(o) end",
+            "6",
+        ),
+        // A declaration of the module shadows an imported one.
+        (
+            "import lib\n\ndata Box = MkBox(I32, I32)\n",
+            "match MkBox(3, 4) of | MkBox(a, b) => a + b end",
+            "7",
+        ),
+    ] {
+        write(
+            "app.eph",
+            &format!("module app\n\n{head}\nfn main(): I32 = {main}\n"),
+        );
+        for args in [&["run", "app.eph"][..], &["run", "--interp", "app.eph"]] {
+            assert_eq!(stdout_of(tmp.path(), args), want, "{main} under {args:?}");
+        }
+    }
+
+    // (imports and declarations, `main` body, text of the load error)
+    for (head, main, error) in [
+        // A private data type: its constructor and its name.
+        (
+            "import lib\n",
+            "match secret(3) of | Hidden(n) => n end",
+            "unknown constructor `Hidden`",
+        ),
+        (
+            "import lib\n",
+            "lib.Hidden(3)",
+            "unknown constructor `Hidden`",
+        ),
+        (
+            "import lib\n\nfn keep(s: Secret): Secret = s\n",
+            "0",
+            "unknown type `Secret`",
+        ),
+        // The import list does not name the type.
+        (
+            "import lib(unbox)\n",
+            "unbox(MkBox(9))",
+            "unknown constructor `MkBox`",
+        ),
+        // The list names only the type: no function comes with it.
+        ("import lib(Box)\n", "unbox(MkBox(9))", "unbox"),
+        // A data type of a module that this module does not import.
+        (
+            "import mid\n",
+            "match through(3) of | MkFar(n) => n end",
+            "unknown constructor `MkFar`",
+        ),
+    ] {
+        write(
+            "bad.eph",
+            &format!("module bad\n\n{head}\nfn main(): I32 = {main}\n"),
+        );
+        let out = ephapax(tmp.path(), &["compile", "bad.eph"]);
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        assert!(
+            !out.status.success() && stderr.contains(error),
+            "{head}{main}: exit {:?}, stderr:\n{stderr}",
+            out.status.code()
+        );
+    }
+}
+
+/// v2 plan rung E7: an arm with a false guard gives the value to the next
+/// arm, as wasm and in the interpreter. The desugarer used to take a
+/// guarded constructor arm without a look at its guard.
+#[test]
+fn a_false_guard_gives_the_value_to_the_next_arm() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let write = |name: &str, text: &str| {
+        std::fs::write(tmp.path().join(name), text).expect("write program")
+    };
+    let opt = "data Opt = None | Some(I32)\n\n";
+    // (declarations, `main` body, output)
+    for (decls, main, want) in [
+        // The guard selects between two arms of one constructor.
+        (
+            format!(
+                "{opt}fn pick(o: Opt): I32 =\n  \
+                 match o of | Some(x) if x > 5 => 1 | Some(x) => 2 | None => 0 end\n"
+            ),
+            "pick(Some(9)) * 100 + pick(Some(3)) * 10 + pick(None)",
+            "120",
+        ),
+        // A guard that is always false: the wildcard arm takes the value.
+        (
+            format!("{opt}fn pick(o: Opt): I32 = match o of | Some(x) if false => 1 | _ => 7 end\n"),
+            "pick(Some(9)) * 10 + pick(None)",
+            "77",
+        ),
+        // The wildcard arm reads the outer `x`, not the `x` of the arm
+        // before it.
+        (
+            format!(
+                "{opt}fn pick(o: Opt): I32 =\n  let x = 40 in\n  \
+                 match o of | Some(x) if x > 5 => x | _ => x end\n"
+            ),
+            "pick(Some(9)) * 100 + pick(Some(3))",
+            "940",
+        ),
+        // Three constructors, two guards on one of them, a wildcard field.
+        (
+            "data Shape = Dot | Seg(I32) | Rect(I32, I32)\n\n\
+             fn f(s: Shape): I32 =\n  match s of\n  \
+             | Rect(w, h) if w > h => 1\n  | Rect(w, h) if w == h => 2\n  | Rect(_, _) => 3\n  \
+             | Seg(n) if n > 0 => 4\n  | Dot => 5\n  | _ => 6\n  end\n"
+                .to_string(),
+            "f(Rect(3, 2)) * 100000 + f(Rect(2, 2)) * 10000 + f(Rect(1, 2)) * 1000 \
+             + f(Seg(1)) * 100 + f(Seg(0)) * 10 + f(Dot)",
+            "123465",
+        ),
+        // A literal in a constructor pattern can refuse the value too.
+        (
+            format!(
+                "{opt}fn f(o: Opt): I32 =\n  match o of\n  \
+                 | Some(0) if true => 1\n  | Some(7) => 2\n  | Some(n) if n > 100 => 3\n  \
+                 | Some(_) => 4\n  | None => 5\n  end\n"
+            ),
+            "f(Some(0)) * 10000 + f(Some(7)) * 1000 + f(Some(200)) * 100 + f(Some(8)) * 10 + f(None)",
+            "12345",
+        ),
+        // A data type with one constructor.
+        (
+            "data Box = MkBox(I32)\n\n\
+             fn f(b: Box): I32 = match b of | MkBox(v) if v > 0 => 1 | MkBox(v) => 0 end\n"
+                .to_string(),
+            "f(MkBox(4)) * 10 + f(MkBox(0))",
+            "10",
+        ),
+        // No constructor: literal, variable and pair patterns.
+        (
+            "fn f(n: I32): I32 =\n  \
+             match n of | 0 => 10 | x if x > 5 => 20 | 3 if false => 30 | _ => 40 end\n\n\
+             fn g(p: (I32, I32)): I32 = match p of | (a, b) if a > b => a | (a, b) => b end\n"
+                .to_string(),
+            "f(0) * 100000 + f(9) * 10000 + f(3) * 1000 + g((3, 9)) * 10 + g((7, 2))",
+            "1240097",
+        ),
+    ] {
+        write(
+            "guard.eph",
+            &format!("module guard\n\n{decls}\nfn main(): I32 = {main}\n"),
+        );
+        for args in [&["run", "guard.eph"][..], &["run", "--interp", "guard.eph"]] {
+            assert_eq!(stdout_of(tmp.path(), args), want, "{main} under {args:?}");
+        }
+    }
+
+    // A linear payload: the arm after a false guard binds it again, and
+    // each arm consumes it one time.
+    for (k, want) in [("7", "105"), ("3", "5")] {
+        write(
+            "linear.eph",
+            &format!(
+                "module linear\n\ndata Entry = Empty | Named(String@r, I32)\n\n\
+                 fn main(): I32 =\n  region r {{\n    let! s = String.new@r(\"hello\")\n    \
+                 let e = Named(s, {k})\n    match e of\n    \
+                 | Named(n, k) if k > 5 => String.len(n) + 100\n    \
+                 | Named(n, k) => String.len(n)\n    | Empty => 0\n    end\n  }}\n"
+            ),
+        );
+        for args in [
+            &["run", "linear.eph"][..],
+            &["run", "--interp", "linear.eph"],
+        ] {
+            assert_eq!(stdout_of(tmp.path(), args), want, "k = {k} under {args:?}");
+        }
+    }
+
+    // (match, text of the load error)
+    for (matched, error) in [
+        // A guarded arm does not cover its constructor.
+        (
+            "match o of | Some(x) if x > 5 => 1 | None => 0 end",
+            "non-exhaustive match: missing constructor `Some`",
+        ),
+        (
+            "match W(o) of | W(Some(x)) if x > 5 => 1 | _ => 0 end",
+            "cannot have the constructor pattern `Some` inside another pattern",
+        ),
+    ] {
+        write(
+            "bad.eph",
+            &format!(
+                "module bad\n\n{opt}data Wrap = W(Opt)\n\n\
+                 fn f(o: Opt): I32 = {matched}\n\nfn main(): I32 = f(None)\n"
+            ),
+        );
+        let out = ephapax(tmp.path(), &["compile", "bad.eph"]);
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        assert!(
+            !out.status.success() && stderr.contains(error),
+            "{matched}: exit {:?}, stderr:\n{stderr}",
+            out.status.code()
+        );
+    }
+}
+
 /// A pair pattern binds each component at its own type: a destructuring
 /// `let`, and a constructor with several fields (a right-nested pair).
 /// Patterns used to read every component as an i32.

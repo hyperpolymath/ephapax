@@ -95,7 +95,7 @@ impl AffineChecker {
         match &expr.kind {
             ExprKind::Lit(_) => {}
 
-            ExprKind::Var(name) => {
+            ExprKind::Var(name) | ExprKind::TypeApp { name, .. } => {
                 self.consume_var(name);
             }
 

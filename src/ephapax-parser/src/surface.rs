@@ -243,15 +243,15 @@ fn parse_data_decl(pair: pest::iterators::Pair<Rule>) -> Result<SurfaceDecl, Par
     let inner = pair.into_inner();
 
     // `visibility?` may precede the constructor name (e.g. `pub data
-    // Department = ...`). Surface AST doesn't track data-decl visibility
-    // explicitly today — but we still skip past the pair to find the
-    // name. Data exports remain implicitly public for now.
+    // Department = ...`).
+    let mut visibility = SurfaceVisibility::Private;
     let mut name: Option<smol_str::SmolStr> = None;
     let mut params = Vec::new();
     let mut constructors = Vec::new();
 
     for item in inner {
         if name.is_none() && item.as_rule() == Rule::visibility {
+            visibility = SurfaceVisibility::Public;
             continue;
         }
         if name.is_none() && item.as_rule() == Rule::constructor_name {
@@ -275,6 +275,7 @@ fn parse_data_decl(pair: pest::iterators::Pair<Rule>) -> Result<SurfaceDecl, Par
 
     Ok(SurfaceDecl::Data(DataDecl {
         name: name.ok_or_else(|| ParseError::missing("data type name"))?,
+        visibility,
         params,
         constructors,
         span,
@@ -1338,6 +1339,21 @@ fn parse_postfix_expr(pair: pest::iterators::Pair<Rule>) -> Result<SurfaceExpr, 
                             );
                         }
                     }
+                }
+                Rule::type_app_op => {
+                    let type_args = op_inner
+                        .into_inner()
+                        .flat_map(|list| list.into_inner())
+                        .filter(|p| p.as_rule() == Rule::ty)
+                        .map(parse_type)
+                        .collect::<Result<_, _>>()?;
+                    result = SurfaceExpr::new(
+                        SurfaceExprKind::TypeApp {
+                            func: Box::new(result),
+                            type_args,
+                        },
+                        span,
+                    );
                 }
                 Rule::index_op => {
                     let idx_pair = op_inner

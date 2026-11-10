@@ -147,6 +147,7 @@ fn rename_expr(expr: &mut Expr, scope: &Renames) {
     // expression form must say if it has a name.
     match &mut expr.kind {
         ExprKind::Var(name)
+        | ExprKind::TypeApp { name, .. }
         | ExprKind::Let { name, .. }
         | ExprKind::LetLin { name, .. }
         | ExprKind::Lambda { param: name, .. } => rename(name, scope),

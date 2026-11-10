@@ -341,12 +341,18 @@ postfix_expr = { atom_expr ~ postfix_op* }
 
 postfix_op = {
     call_op
+    | type_app_op
     | index_op
     | member_op
 }
 
 call_op = { "(" ~ call_args? ~ ")" }
 call_args = { expression ~ ("," ~ expression)* }
+// Explicit type arguments of a generic function: `id[I32](3)`. Only
+// before a call, and before `index_op`: `xs[i](3)` has the two readings
+// when `i` is one name. The desugarer reads that case as an index, unless
+// the name is a type parameter of the function it is in.
+type_app_op = { "[" ~ ty_list ~ "]" ~ &"(" }
 index_op = { "[" ~ expression ~ "]" }
 member_op = { "." ~ (integer | identifier | constructor_name) }
 

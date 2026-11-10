@@ -709,6 +709,56 @@ fn a_constructor_checks_its_arguments_against_the_declaration() {
     }
 }
 
+/// The interpreter keeps its work on the heap, so a call uses no native
+/// stack. Calls 100000 deep give a value, through the frames of a `match`,
+/// of a `let` and of a call. Calls with no end give a named error and the
+/// exit code 1. (The recursive evaluator aborted the process at a depth
+/// of about 160 in a debug build.)
+#[test]
+fn the_interpreter_runs_deep_calls_and_names_its_limit() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let write =
+        |name: &str, text: &str| std::fs::write(tmp.path().join(name), text).expect("write module");
+
+    write(
+        "deep.eph",
+        "module deep\n\ndata Step = Stop | Go(I32)\n\n\
+         fn next(n: I32): Step = if n == 0 then Stop else Go(n - 1)\n\n\
+         fn depth(n: I32): I32 =\n  match next(n) of\n  | Stop => 0\n  \
+         | Go(m) => let d = depth(m) in d + 1\n  end\n\n\
+         fn main(): I32 = depth(100000)\n",
+    );
+    assert_eq!(
+        stdout_of(tmp.path(), &["run", "--interp", "deep.eph"]),
+        "100000"
+    );
+
+    // A tail call adds no frame: 1200000 calls are more than the limit
+    // of the frames.
+    write(
+        "tail.eph",
+        "module tail\n\nfn go(n: I32, acc: I32): I32 =\n  \
+         if n == 0 then acc else go(n - 1, acc + 1)\n\n\
+         fn main(): I32 = go(1200000, 0)\n",
+    );
+    assert_eq!(
+        stdout_of(tmp.path(), &["run", "--interp", "tail.eph"]),
+        "1200000"
+    );
+
+    write(
+        "no_end.eph",
+        "module no_end\n\nfn f(n: I32): I32 = 1 + f(n)\n\nfn main(): I32 = f(0)\n",
+    );
+    let out = ephapax(tmp.path(), &["run", "--interp", "no_end.eph"]);
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        out.status.code() == Some(1) && stderr.contains("Runtime error: call stack exhausted"),
+        "exit {:?}, stderr:\n{stderr}",
+        out.status.code()
+    );
+}
+
 /// A `type` alias and an extern type follow the rule of data types (owner
 /// decision 2026-11-10): a module names one when it declares it, or when
 /// it imports the module that declares it. An alias must also be `pub`;

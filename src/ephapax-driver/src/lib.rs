@@ -471,11 +471,17 @@ mod tests {
         load_program(&dir.path().join("app.eph"), None).expect("loads");
     }
 
-    /// `module_size(x)` is not a `module` header.
+    /// A line that starts with `module_size(x)` is not a `module` header.
+    /// (The old line scanner read it as a header named `_size`.)
     #[test]
     fn module_keyword_needs_a_word_boundary() {
-        let program = parse_source("fn module_size(x: I32): I32 = x\n", "app.eph", None, None)
-            .expect("parses");
+        let program = parse_source(
+            "fn module_size(x: I32): I32 = x\nfn f(x: I32): I32 =\n  module_size(x)\n",
+            "app.eph",
+            None,
+            None,
+        )
+        .expect("parses");
         assert_eq!(program.root().logical_path, "app");
     }
 }

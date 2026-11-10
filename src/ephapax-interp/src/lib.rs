@@ -10,9 +10,9 @@
 //! The evaluator is a loop with its own stack of frames on the heap
 //! ([`Interpreter::eval`]). A call in the program uses no native stack,
 //! so deep calls end with a value or with the runtime error
-//! [`RuntimeError::StackOverflow`]. A [`Value`] still copies, prints and
-//! frees its parts with native recursion, so a value with a long chain
-//! of parts (a long list) can exhaust the native stack.
+//! [`RuntimeError::StackOverflow`]. A [`Value`] shares its parts, and
+//! its copy, its print and its free use a loop, so a long list does not
+//! exhaust the native stack.
 
 use ephapax_syntax::{
     BaseTy, BinOp, Decl, Expr, ExprKind, Literal, Module, Pattern, RegionName, Ty, UnaryOp, Var,

@@ -82,7 +82,22 @@ impl Backend {
 
     /// Parse, type-check, and cache analysis for a document.
     async fn analyze_document(&self, uri: &Url, text: &str) -> Vec<Diagnostic> {
-        let (diagnostics, module_opt) = analyze(uri, text);
+        // The analysis reads imported files from disk, so it runs on the
+        // blocking pool, not on the async worker that serves requests.
+        let (owned_uri, owned_text) = (uri.clone(), text.to_string());
+        let (diagnostics, module_opt) =
+            match tokio::task::spawn_blocking(move || analyze(&owned_uri, &owned_text)).await {
+                Ok(result) => result,
+                Err(e) => (
+                    vec![Diagnostic {
+                        severity: Some(DiagnosticSeverity::ERROR),
+                        source: Some("ephapax".to_string()),
+                        message: format!("analysis failed: {e}"),
+                        ..Diagnostic::default()
+                    }],
+                    None,
+                ),
+            };
         let declarations = module_opt
             .as_ref()
             .map(|m| extract_declarations(m, text))

@@ -23,7 +23,7 @@ use std::path::{Path, PathBuf};
 
 use ephapax_desugar::{DataRegistry, DesugarError, Desugarer};
 use ephapax_parser::ParseError;
-use ephapax_syntax::{Decl, Module};
+use ephapax_syntax::{Decl, ExternItem, Module};
 use ephapax_typing::{type_check_module_with_registry, ModuleRegistry, SpannedTypeError};
 use ephapax_wasm::CodegenError;
 
@@ -56,19 +56,19 @@ impl Program {
 
     /// Merge every imported module into the root, for codegen and the
     /// interpreter. Wasm produces a single binary; each imported module's
-    /// `Fn` declarations become part of the same wasm module. Duplicate
-    /// fn / extern-block names across modules are dropped (first-seen
-    /// wins, the root first).
+    /// `Fn` declarations become part of the same wasm module. A function,
+    /// or an extern item, that an earlier module already declared is
+    /// dropped (first-seen wins, the root first).
     pub fn into_merged(self) -> Module {
-        // Dedup keys: `fn:<name>` for functions, `extern:<abi>` for whole
-        // extern blocks (an extern block emits one wasm import per fn item;
-        // re-emitting the same ABI block from another module would produce
-        // duplicate imports).
-        fn dedup_key(d: &Decl) -> Option<String> {
-            match d {
-                Decl::Fn { name, .. } => Some(format!("fn:{name}")),
-                Decl::Extern { abi, .. } => Some(format!("extern:{abi}")),
-                _ => None,
+        // Dedup keys: `fn:<name>` for a function, `extern:<abi>:<name>` for
+        // an extern item (each extern fn is one wasm import, so the same
+        // item from two modules must be emitted once). Extern blocks are
+        // deduplicated item by item: two modules may each declare
+        // different functions under one ABI, and both sets are needed.
+        fn extern_key(abi: &str, item: &ExternItem) -> String {
+            match item {
+                ExternItem::Fn { name, .. } => format!("extern:{abi}:fn:{name}"),
+                ExternItem::Type { name } => format!("extern:{abi}:type:{name}"),
             }
         }
         let mut modules = self.modules;
@@ -76,16 +76,34 @@ impl Program {
             .pop()
             .expect("a program has at least its root module")
             .core;
-        let mut seen: std::collections::HashSet<String> =
-            merged.decls.iter().filter_map(dedup_key).collect();
+        let mut seen = std::collections::HashSet::new();
+        for decl in &merged.decls {
+            match decl {
+                Decl::Fn { name, .. } => {
+                    seen.insert(format!("fn:{name}"));
+                }
+                Decl::Extern { abi, items } => {
+                    seen.extend(items.iter().map(|i| extern_key(abi, i)));
+                }
+                _ => {}
+            }
+        }
         for dep in modules {
             for decl in dep.core.decls {
-                if let Some(key) = dedup_key(&decl) {
-                    if !seen.insert(key) {
-                        continue;
+                match decl {
+                    Decl::Fn { ref name, .. } => {
+                        if seen.insert(format!("fn:{name}")) {
+                            merged.decls.push(decl);
+                        }
                     }
+                    Decl::Extern { abi, mut items } => {
+                        items.retain(|i| seen.insert(extern_key(&abi, i)));
+                        if !items.is_empty() {
+                            merged.decls.push(Decl::Extern { abi, items });
+                        }
+                    }
+                    other => merged.decls.push(other),
                 }
-                merged.decls.push(decl);
             }
         }
         merged
@@ -156,18 +174,13 @@ pub fn parse_program(root: &Path, stdlib_dir: Option<&Path>) -> Result<Program, 
         path: root.to_path_buf(),
         message: e.to_string(),
     })?;
-    // A bare file name has the empty path as its parent: use the current
-    // directory, so the module index of that directory is still scanned.
-    let base_dir = root
-        .parent()
-        .filter(|p| !p.as_os_str().is_empty())
-        .unwrap_or(Path::new("."));
-    parse_source(&source, &root.to_string_lossy(), Some(base_dir), stdlib_dir)
+    parse_source(&source, &root.to_string_lossy(), root.parent(), stdlib_dir)
 }
 
 /// [`parse_program`] for a root module held in memory (an editor buffer,
 /// a REPL line). `name` stands in for its file name; `base_dir` is where
-/// its imports are searched (`None`: only `stdlib_dir`).
+/// its imports are searched (`None`: only `stdlib_dir`; the empty path,
+/// which is the parent of a bare file name: the current directory).
 pub fn parse_source(
     source: &str,
     name: &str,
@@ -248,4 +261,75 @@ pub fn load_source(
     let program = parse_source(source, name, base_dir, stdlib_dir)?;
     check_program(&program)?;
     Ok(program)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn extern_fn_names(module: &Module) -> Vec<String> {
+        let mut names = Vec::new();
+        for decl in &module.decls {
+            if let Decl::Extern { items, .. } = decl {
+                for item in items {
+                    if let ExternItem::Fn { name, .. } = item {
+                        names.push(name.to_string());
+                    }
+                }
+            }
+        }
+        names.sort();
+        names
+    }
+
+    /// Two modules may declare different functions under one ABI. The
+    /// merge used to keep the first block and drop the other whole.
+    #[test]
+    fn merge_keeps_extern_items_of_every_module() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let write = |name: &str, text: &str| {
+            std::fs::write(dir.path().join(name), text).expect("write module")
+        };
+        write(
+            "lib.eph",
+            "module lib\n\nextern \"env\" {\n  fn shared(): I32\n  fn only_lib(): I32\n}\n",
+        );
+        write(
+            "app.eph",
+            "module app\n\nimport lib\n\nextern \"env\" {\n  fn shared(): I32\n  fn only_app(): I32\n}\n\n\
+             fn main(): I32 = only_app() + lib.only_lib() + shared()\n",
+        );
+        let program = load_program(&dir.path().join("app.eph"), None).expect("loads");
+        let merged = program.into_merged();
+        // `shared` once (the root's), and each module's own item.
+        assert_eq!(extern_fn_names(&merged), ["only_app", "only_lib", "shared"]);
+        ephapax_wasm::compile_module(&merged).expect("the merged module compiles");
+    }
+
+    /// A source with no directory resolves imports in the stdlib only: a
+    /// miss is an error, not a read relative to the working directory.
+    #[test]
+    fn fileless_source_does_not_read_the_working_directory() {
+        // The test runs in the crate directory, which has a `Cargo.toml`;
+        // `import Cargo` must not turn into a read of `./Cargo.eph`.
+        let err = parse_source(
+            "module m\n\nimport Cargo\n\nfn main(): I32 = 0\n",
+            "m",
+            None,
+            None,
+        )
+        .expect_err("no such module");
+        assert!(
+            matches!(&err, DriverError::Io { message, .. } if message.contains("module not found")),
+            "{err}"
+        );
+    }
+
+    /// `module_size(x)` is not a `module` header.
+    #[test]
+    fn module_keyword_needs_a_word_boundary() {
+        let program = parse_source("fn module_size(x: I32): I32 = x\n", "app.eph", None, None)
+            .expect("parses");
+        assert_eq!(program.root().logical_path, "app");
+    }
 }

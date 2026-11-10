@@ -63,6 +63,15 @@ pub(crate) fn resolve(
     base_dir: Option<&Path>,
     stdlib_dir: Option<&Path>,
 ) -> Result<Vec<ResolvedModule>, DriverError> {
+    // A bare file name has the empty path as its parent: that is the
+    // current directory.
+    let base_dir = base_dir.map(|d| {
+        if d.as_os_str().is_empty() {
+            Path::new(".")
+        } else {
+            d
+        }
+    });
     let mut r = Resolver {
         base_dir,
         stdlib_dir,
@@ -116,11 +125,13 @@ impl Resolver<'_> {
     ///    name.
     ///
     /// On a miss, the literal path is returned so the IO error names a
-    /// useful location.
-    fn locate(&mut self, logical: &str) -> PathBuf {
-        let direct = logical_to_file_path(logical, self.base_dir.unwrap_or(Path::new("")));
-        if self.base_dir.is_some() && direct.exists() {
-            return direct;
+    /// useful location. A root with no directory (`base_dir` is `None`)
+    /// has no literal path: a miss is an error here, never a read
+    /// relative to the process's working directory.
+    fn locate(&mut self, logical: &str) -> Result<PathBuf, DriverError> {
+        let direct = self.base_dir.map(|dir| logical_to_file_path(logical, dir));
+        if let Some(direct) = direct.as_ref().filter(|p| p.exists()) {
+            return Ok(direct.clone());
         }
         let (base_dir, stdlib_dir) = (self.base_dir, self.stdlib_dir);
         let index = self.mod_index.get_or_insert_with(|| {
@@ -132,7 +143,16 @@ impl Resolver<'_> {
             }
             idx
         });
-        index.get(logical).cloned().unwrap_or(direct)
+        index
+            .get(logical)
+            .cloned()
+            .or(direct)
+            .ok_or_else(|| DriverError::Io {
+                path: logical_to_file_path(logical, Path::new("")),
+                message: "module not found: the importing source has no directory, \
+                          and the stdlib does not declare this module"
+                    .to_string(),
+            })
     }
 
     /// `root` is the root module's `(file, source)`; imports pass `None`
@@ -152,7 +172,7 @@ impl Resolver<'_> {
         let (file_path, source) = match root {
             Some(r) => r,
             None => {
-                let file_path = self.locate(logical);
+                let file_path = self.locate(logical)?;
                 let source = std::fs::read_to_string(&file_path).map_err(|e| DriverError::Io {
                     path: file_path.clone(),
                     message: e.to_string(),
@@ -212,7 +232,13 @@ impl Resolver<'_> {
 fn scan_module_index(base_dir: &Path) -> HashMap<String, PathBuf> {
     let mut idx = HashMap::new();
     let mut stack = vec![base_dir.to_path_buf()];
+    // Directories already walked, by canonical path: a symlink cycle
+    // would otherwise be walked until the path gets too long.
+    let mut walked = HashSet::new();
     while let Some(dir) = stack.pop() {
+        if !dir.canonicalize().is_ok_and(|real| walked.insert(real)) {
+            continue;
+        }
         let entries = match std::fs::read_dir(&dir) {
             Ok(e) => e,
             Err(_) => continue,
@@ -240,7 +266,11 @@ fn scan_module_index(base_dir: &Path) -> HashMap<String, PathBuf> {
 fn first_module_declaration(source: &str) -> Option<String> {
     for line in source.lines() {
         let line = line.trim_start();
-        if let Some(rest) = line.strip_prefix("module") {
+        // The keyword, then whitespace: not `module_size(x)` or `modules`.
+        if let Some(rest) = line
+            .strip_prefix("module")
+            .filter(|r| r.starts_with(char::is_whitespace))
+        {
             let rest = rest.trim();
             // Take everything up to a whitespace, comma, or comment marker.
             let end = rest

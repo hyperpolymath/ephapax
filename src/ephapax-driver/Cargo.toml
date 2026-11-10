@@ -19,3 +19,6 @@ ephapax-desugar = { path = "../ephapax-desugar" }
 ephapax-typing.workspace = true
 ephapax-wasm.workspace = true
 thiserror.workspace = true
+
+[dev-dependencies]
+tempfile = "3"

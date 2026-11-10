@@ -275,6 +275,9 @@ fn run_repl(preload: Option<PathBuf>, verbose: bool) -> Result<(), String> {
 /// Load a program through the one front end. On failure, print the
 /// details to stderr and return the one-line summary.
 fn load_program(path: &Path, stdlib: Option<PathBuf>) -> Result<ephapax_driver::Program, String> {
+    if let Some(dir) = stdlib.as_ref().filter(|d| !d.is_dir()) {
+        return Err(format!("--stdlib {}: not a directory", dir.display()));
+    }
     let stdlib_dir = ephapax_driver::stdlib_dir(stdlib);
     ephapax_driver::load_program(path, stdlib_dir.as_deref()).map_err(|e| report_load_error(&e))
 }

@@ -279,8 +279,13 @@ impl Repl {
             Err(errors) => {
                 // Try parsing as declaration/module
                 let module_src = format!("{}\n", line);
-                match self.load_module(&module_src, "repl") {
+                match self.load_declarations(&module_src) {
                     Ok(()) => println!("{}", "Loaded.".green()),
+                    // The line parses as declarations but does not load:
+                    // that is the error to show, not the expression's.
+                    Err(e) if !matches!(e, DriverError::Parse { .. }) => {
+                        eprintln!("{} {}", "Error:".red().bold(), e);
+                    }
                     Err(_) => {
                         // Show parse errors
                         for error in errors {
@@ -345,6 +350,17 @@ impl Repl {
             stdlib.as_deref(),
         ))
         .map(|_| ())
+    }
+
+    /// Load declarations typed at the prompt. They go through the driver's
+    /// front end (imports, parse, desugar) but are not type-checked: a
+    /// line may use a function an earlier line defined, which only the
+    /// interpreter knows. (The REPL never checked prompt declarations.)
+    fn load_declarations(&mut self, source: &str) -> Result<(), DriverError> {
+        let stdlib = ephapax_driver::stdlib_dir(None);
+        let program = ephapax_driver::parse_source(source, "repl", None, stdlib.as_deref())?;
+        self.interpreter.load_module(&program.into_merged());
+        Ok(())
     }
 
     fn load(
@@ -460,6 +476,23 @@ mod tests {
             .eval_expr("let x = 1 in x")
             .expect("eval should succeed");
         assert!(matches!(result, Value::I32(1)));
+    }
+
+    /// A declaration typed at the prompt may use one from an earlier line.
+    /// (One parameter each: the interpreter cannot yet call a function
+    /// of zero or several parameters by name.)
+    #[test]
+    fn prompt_declarations_see_earlier_ones() {
+        let mut repl = Repl::new().expect("REPL should initialize");
+        repl.load_declarations("fn f(x: I32): I32 = x + 41\n")
+            .expect("f loads");
+        repl.load_declarations("fn g(y: I32): I32 = f(y) + 1\n")
+            .expect("g loads although only the interpreter knows f");
+        let result = repl
+            .interpreter
+            .call("g", vec![Value::I32(0)])
+            .expect("g runs");
+        assert!(matches!(result, Value::I32(42)));
     }
 
     #[test]

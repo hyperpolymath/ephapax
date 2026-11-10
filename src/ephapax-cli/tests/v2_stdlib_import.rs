@@ -4,7 +4,7 @@
 // Stdlib import resolution — `import Argv` from a program that is NOT a
 // sibling of stdlib/Argv.eph.
 //
-// Resolution order (import_resolver::load_program):
+// Resolution order (ephapax-driver, src/ephapax-driver/src/resolver.rs):
 //   1. literal path / module-declaration index under the program's dir,
 //   2. module-declaration index under the stdlib dir
 //      (--stdlib flag > $EPHAPAX_STDLIB > repo stdlib/ for dev builds).

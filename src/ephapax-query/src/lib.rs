@@ -35,17 +35,19 @@
 //! pipeline `source -> parsed -> typed -> wasm`, so dependencies are
 //! threaded by hand rather than tracked through a general query trait. A
 //! production engine would: (a) track an arbitrary dependency DAG (needed
-//! for the multi-module `import` case — see `import_resolver`), (b) return
+//! for the multi-module `import` case: `parsed` resolves imports through
+//! `ephapax-driver`, but an imported file is not an input here, so a
+//! program with imports is re-read from disk on every demand and never
+//! served from the parse memo), (b) return
 //! `Arc<T>`/references instead of cloning memoised values, and (c)
 //! optionally persist memos through a `QueryStore` backing (the disabled
 //! `ephapax-vram-cache` is a natural candidate once `ephapax-proven`
 //! returns). Those are documented extension points, not built here.
 
-use ephapax_parser::{parse_module, ParseError};
-use ephapax_syntax::Module;
-use ephapax_typing::{type_check_module, SpannedTypeError};
+use ephapax_driver::{check_program, parse_source, DriverError, Program};
 use ephapax_wasm::compile_module;
 use std::collections::HashMap;
+use std::path::Path;
 
 /// A logical source unit, identified by name/path.
 pub type SourceId = String;
@@ -54,10 +56,10 @@ pub type SourceId = String;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Default)]
 pub struct Revision(pub u64);
 
-/// `parse_module`'s result type.
-pub type ParsedResult = Result<Module, Vec<ParseError>>;
-/// `type_check_module`'s result type.
-pub type TypedResult = Result<(), SpannedTypeError>;
+/// Result of the front end up to desugaring (`ephapax_driver::parse_source`).
+pub type ParsedResult = Result<Program, DriverError>;
+/// Result of `ephapax_driver::check_program`.
+pub type TypedResult = Result<(), DriverError>;
 /// `compile_module`'s result, with the error flattened to a `String` so the
 /// memo type is self-contained.
 pub type WasmResult = Result<Vec<u8>, String>;
@@ -89,10 +91,18 @@ pub struct QueryDb {
 }
 
 /// Two parse results are equivalent for backdating iff both are `Ok` with
-/// equal modules. `ParseError` is not `PartialEq`, and a differing parse
-/// error is a real change anyway, so any `Err` is treated as changed.
+/// equal core modules, or both are the same error. `DriverError` is not
+/// `PartialEq`; its `Debug` form holds every field.
 fn parsed_equiv(a: &ParsedResult, b: &ParsedResult) -> bool {
-    matches!((a, b), (Ok(x), Ok(y)) if x == y)
+    match (a, b) {
+        (Ok(x), Ok(y)) => x
+            .modules
+            .iter()
+            .map(|m| &m.core)
+            .eq(y.modules.iter().map(|m| &m.core)),
+        (Err(x), Err(y)) => format!("{x:?}") == format!("{y:?}"),
+        _ => false,
+    }
 }
 
 impl QueryDb {
@@ -135,13 +145,20 @@ impl QueryDb {
             .unwrap_or_default()
     }
 
-    /// Parse query. Memoises `parse_module`; depends only on the source
-    /// text.
+    /// Parse query. Memoises the driver's resolve + parse + desugar;
+    /// depends only on the source text. Imports resolve next to `id` when
+    /// `id` is a file on disk, then in the stdlib.
     pub fn parsed(&mut self, id: &str) -> ParsedResult {
         let dep = self.input_changed_at(id);
         let rev = self.revision;
         if let Some(m) = self.parsed.get_mut(id) {
-            if dep <= m.verified_at {
+            // A program with imports also depends on files that are not
+            // inputs of this database, and a failed load may be due to
+            // one of them. Only a successful, import-free result is
+            // served from the memo; anything else is loaded again.
+            // (Downstream memos still skip when the result is unchanged.)
+            let self_contained = matches!(&m.value, Ok(p) if p.modules.len() == 1);
+            if dep <= m.verified_at && self_contained {
                 let value = m.value.clone();
                 m.verified_at = rev;
                 return value;
@@ -152,8 +169,18 @@ impl QueryDb {
             .get(id)
             .map(|i| i.text.clone())
             .unwrap_or_default();
-        let new = parse_module(&text, id);
+        let base_dir = Path::new(id).parent().filter(|_| Path::new(id).is_file());
+        let stdlib = ephapax_driver::stdlib_dir(None);
+        let new = parse_source(&text, id, base_dir, stdlib.as_deref());
         self.recomputes += 1;
+        // The result changed although the input did not: an imported file
+        // changed on disk. That is a new revision, so that the queries
+        // that depend on this one recompute.
+        if matches!(self.parsed.get(id), Some(old)
+            if dep <= old.verified_at && !parsed_equiv(&old.value, &new))
+        {
+            self.revision.0 += 1;
+        }
         let rev = self.revision;
         let changed_at = match self.parsed.get(id) {
             Some(old) if parsed_equiv(&old.value, &new) => old.changed_at,
@@ -170,7 +197,7 @@ impl QueryDb {
         new
     }
 
-    /// Type-check query. Memoises `type_check_module`; depends on `parsed`.
+    /// Type-check query. Memoises `check_program`; depends on `parsed`.
     pub fn typed(&mut self, id: &str) -> TypedResult {
         let parsed = self.parsed(id);
         let dep = self
@@ -187,7 +214,7 @@ impl QueryDb {
             }
         }
         let new: TypedResult = match &parsed {
-            Ok(module) => type_check_module(module),
+            Ok(program) => check_program(program),
             // Unparseable input has no typecheck result of its own; the
             // parse error is surfaced by `parsed`. Treat as no type error.
             Err(_) => Ok(()),
@@ -195,7 +222,7 @@ impl QueryDb {
         self.recomputes += 1;
         let rev = self.revision;
         let changed_at = match self.typed.get(id) {
-            Some(old) if old.value == new => old.changed_at,
+            Some(old) if old.value.is_ok() && new.is_ok() => old.changed_at,
             _ => rev,
         };
         self.typed.insert(
@@ -212,8 +239,15 @@ impl QueryDb {
     /// Codegen query. Memoises `compile_module`, gated on a clean
     /// typecheck; depends on `parsed` and `typed`.
     pub fn wasm(&mut self, id: &str) -> WasmResult {
-        let parsed = self.parsed(id);
         let typed = self.typed(id);
+        // The program that `typed` checked. A second `parsed` demand
+        // loads a program with imports again, and an imported file may
+        // change between two loads: the compiled program must be the
+        // checked one.
+        let parsed = match self.parsed.get(id) {
+            Some(memo) => memo.value.clone(),
+            None => self.parsed(id),
+        };
         let dep_parsed = self
             .parsed
             .get(id)
@@ -230,9 +264,10 @@ impl QueryDb {
             }
         }
         let new: WasmResult = match (&parsed, &typed) {
-            (Ok(module), Ok(())) => compile_module(module).map_err(|e| e.0),
-            (Err(_), _) => Err("cannot compile: source has parse errors".to_string()),
-            (_, Err(e)) => Err(format!("cannot compile: type error: {e:?}")),
+            (Ok(program), Ok(())) => {
+                compile_module(&program.clone().into_merged()).map_err(|e| e.0)
+            }
+            (Err(e), _) | (_, Err(e)) => Err(format!("cannot compile: {e}")),
         };
         self.recomputes += 1;
         let rev = self.revision;
@@ -289,6 +324,20 @@ mod tests {
             n,
             "identical set_source_text must not invalidate"
         );
+    }
+
+    /// A program that fails to load is loaded again on each demand (its
+    /// imports are not inputs). The same failure is not a change: the
+    /// queries after the parse do not run again.
+    #[test]
+    fn same_failure_does_not_recompute_downstream() {
+        let mut db = QueryDb::new();
+        db.set_source_text("m", "fn add(a: I32): I32 = a +\n");
+        assert!(db.parsed("m").is_err());
+        let _ = db.typed("m");
+        let n = db.recompute_count();
+        let _ = db.typed("m");
+        assert_eq!(db.recompute_count(), n + 1, "only the parse runs again");
     }
 
     #[test]

@@ -15,6 +15,7 @@ repository.workspace = true
 ephapax-syntax.workspace = true
 ephapax-lexer.workspace = true
 ephapax-parser.workspace = true
+ephapax-driver.workspace = true
 ephapax-typing.workspace = true
 ephapax-interp.workspace = true
 smol_str.workspace = true

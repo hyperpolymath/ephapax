@@ -20,7 +20,7 @@
 pub mod discipline;
 
 use ephapax_syntax::{
-    BaseTy, BinOp, Decl, Expr, ExprKind, ExternItem, Literal, MatchArm, Module, Pattern,
+    BaseTy, BinOp, Decl, Expr, ExprId, ExprKind, ExternItem, Literal, MatchArm, Module, Pattern,
     RegionName, Span, Ty, UnaryOp, Var, Visibility,
 };
 use smol_str::SmolStr;
@@ -45,6 +45,9 @@ pub enum TypeError {
 
     #[error("Type mismatch: expected {expected:?}, found {found:?}")]
     TypeMismatch { expected: Ty, found: Ty },
+
+    #[error("`==` and `!=` are not defined on type {0:?}: only the scalar types and String have equality")]
+    EqualityNotSupported(Ty),
 
     #[error("Cannot copy linear type {0:?}")]
     CannotCopyLinear(Ty),
@@ -856,8 +859,15 @@ fn is_useful(
 }
 
 /// Type checker state
+/// The type of every expression the checker visited, by [`ExprId`], with
+/// unification variables resolved. Codegen reads it to choose typed
+/// instructions and layouts (v2 plan rung E5).
+pub type ExprTypes = HashMap<ExprId, Ty>;
+
 pub struct TypeChecker {
     ctx: Context,
+    /// Type of each checked expression; see [`TypeChecker::expr_types`].
+    expr_types: ExprTypes,
     /// Next fresh unification variable ID.
     next_unif: u32,
     wildcard_obligations: Vec<(Span, Ty)>,
@@ -874,6 +884,7 @@ impl TypeChecker {
     pub fn new() -> Self {
         Self {
             ctx: Context::new(),
+            expr_types: ExprTypes::new(),
             next_unif: 0,
             wildcard_obligations: Vec::new(),
             unif_solutions: HashMap::new(),
@@ -1063,6 +1074,21 @@ impl TypeChecker {
     /// (most precise). Errors originating at THIS level carry this
     /// expression's span.
     pub fn check(&mut self, expr: &Expr) -> Result<Ty, SpannedTypeError> {
+        let ty = self.check_kind(expr)?;
+        self.expr_types.insert(expr.id, ty.clone());
+        Ok(ty)
+    }
+
+    /// The type of every expression checked so far, with unification
+    /// variables resolved.
+    pub fn expr_types(&self) -> ExprTypes {
+        self.expr_types
+            .iter()
+            .map(|(id, ty)| (*id, self.resolve(ty)))
+            .collect()
+    }
+
+    fn check_kind(&mut self, expr: &Expr) -> Result<Ty, SpannedTypeError> {
         let s = expr.span;
         match &expr.kind {
             ExprKind::Lit(lit) => self.check_lit(s, lit),
@@ -1977,9 +2003,28 @@ impl TypeChecker {
                     },
                 )),
             },
-            BinOp::Lt | BinOp::Le | BinOp::Gt | BinOp::Ge | BinOp::Eq | BinOp::Ne => {
-                Ok(Ty::Base(BaseTy::Bool))
-            }
+            // Ordering is defined on the numeric types only. (It used to
+            // accept any two operands of one type; the interpreter then
+            // failed at run time and the wasm compared handles.)
+            BinOp::Lt | BinOp::Le | BinOp::Gt | BinOp::Ge => match &left_ty {
+                Ty::Base(BaseTy::I32)
+                | Ty::Base(BaseTy::I64)
+                | Ty::Base(BaseTy::F32)
+                | Ty::Base(BaseTy::F64) => Ok(Ty::Base(BaseTy::Bool)),
+                _ => Err(self.at(
+                    s,
+                    TypeError::TypeMismatch {
+                        expected: Ty::Base(BaseTy::I32),
+                        found: left_ty,
+                    },
+                )),
+            },
+            // Equality is defined on the scalar types and on strings (by
+            // content). A pair, sum, list or function has no equality.
+            BinOp::Eq | BinOp::Ne => match &left_ty {
+                Ty::Base(_) | Ty::String(_) => Ok(Ty::Base(BaseTy::Bool)),
+                _ => Err(self.at(s, TypeError::EqualityNotSupported(left_ty))),
+            },
             BinOp::And | BinOp::Or => {
                 if left_ty != Ty::Base(BaseTy::Bool) {
                     return Err(self.at(
@@ -2356,6 +2401,12 @@ pub struct ModuleRegistry {
     modules: HashMap<Var, Vec<(Var, Ty, Visibility)>>,
 }
 
+/// `Foo.Bar` and `Foo/Bar` name the same module (`qualified_name` in
+/// ephapax.pest), so an import may spell it either way.
+fn module_key(name: &Var) -> Var {
+    name.replace('.', "/").into()
+}
+
 impl ModuleRegistry {
     pub fn new() -> Self {
         Self::default()
@@ -2449,26 +2500,28 @@ impl ModuleRegistry {
                 Decl::Data { .. } => {}
             }
         }
-        self.modules.insert(module.name.clone(), entries);
+        self.modules.insert(module_key(&module.name), entries);
     }
 
     /// Look up a public name from a registered module.
     pub fn lookup(&self, module_name: &Var, decl_name: &Var) -> Option<&Ty> {
-        self.modules.get(module_name).and_then(|entries| {
-            entries.iter().find_map(|(name, ty, vis)| {
-                if name == decl_name && *vis == Visibility::Public {
-                    Some(ty)
-                } else {
-                    None
-                }
+        self.modules
+            .get(&module_key(module_name))
+            .and_then(|entries| {
+                entries.iter().find_map(|(name, ty, vis)| {
+                    if name == decl_name && *vis == Visibility::Public {
+                        Some(ty)
+                    } else {
+                        None
+                    }
+                })
             })
-        })
     }
 
     /// Get all public names from a module.
     pub fn public_names(&self, module_name: &Var) -> Vec<(Var, Ty)> {
         self.modules
-            .get(module_name)
+            .get(&module_key(module_name))
             .map(|entries| {
                 entries
                     .iter()
@@ -2488,6 +2541,15 @@ pub fn type_check_module_with_registry(
     module: &Module,
     registry: &mut ModuleRegistry,
 ) -> Result<(), SpannedTypeError> {
+    module_expr_types(module, registry).map(|_| ())
+}
+
+/// [`type_check_module_with_registry`], also returning the type of every
+/// expression in the module.
+pub fn module_expr_types(
+    module: &Module,
+    registry: &mut ModuleRegistry,
+) -> Result<ExprTypes, SpannedTypeError> {
     let mut tc = TypeChecker::new();
 
     // Resolve imports: bring imported names into scope
@@ -2522,7 +2584,7 @@ pub fn type_check_module_with_registry(
     // Register this module's declarations for dependents
     registry.register(module);
 
-    Ok(())
+    Ok(tc.expr_types())
 }
 
 /// Internal module checking logic shared by single-module and registry paths.

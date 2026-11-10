@@ -77,6 +77,10 @@ pub enum RuntimeError {
     #[error("Division by zero")]
     DivisionByZero,
 
+    /// `MIN / -1`: the quotient does not fit. Wasm traps here too.
+    #[error("Integer overflow")]
+    IntegerOverflow,
+
     #[error("Unimplemented: {0}")]
     Unimplemented(String),
 
@@ -506,6 +510,9 @@ impl Interpreter {
                             )))
                         }
                     }
+                    // A 2-tuple is a pair.
+                    Value::Pair(left, _) if *index == 0 => Ok(*left),
+                    Value::Pair(_, right) if *index == 1 => Ok(*right),
                     _ => Err(RuntimeError::Unimplemented(
                         "tuple index on non-tuple".to_string(),
                     )),
@@ -529,29 +536,56 @@ impl Interpreter {
         let left_val = self.eval(left)?;
         let right_val = self.eval(right)?;
 
+        // Integer arithmetic wraps, as the compiled wasm does. `/` and `%`
+        // by zero, and `MIN / -1`, are errors (wasm traps); `MIN % -1` is 0.
         match op {
-            BinOp::Add => self.numeric_binop(left_val, right_val, |a, b| a + b, |a, b| a + b),
-            BinOp::Sub => self.numeric_binop(left_val, right_val, |a, b| a - b, |a, b| a - b),
-            BinOp::Mul => self.numeric_binop(left_val, right_val, |a, b| a * b, |a, b| a * b),
-            BinOp::Div => {
-                // Check for division by zero for integers
-                match (&left_val, &right_val) {
-                    (Value::I32(_), Value::I32(0)) | (Value::I64(_), Value::I64(0)) => {
-                        return Err(RuntimeError::DivisionByZero);
-                    }
-                    _ => {}
-                }
-                self.numeric_binop(left_val, right_val, |a, b| a / b, |a, b| a / b)
-            }
-            BinOp::Mod => {
-                match (&left_val, &right_val) {
-                    (Value::I32(_), Value::I32(0)) | (Value::I64(_), Value::I64(0)) => {
-                        return Err(RuntimeError::DivisionByZero);
-                    }
-                    _ => {}
-                }
-                self.numeric_binop(left_val, right_val, |a, b| a % b, |a, b| a % b)
-            }
+            BinOp::Add => self.numeric_binop(
+                left_val,
+                right_val,
+                |a, b| Ok(a.wrapping_add(b)),
+                |a, b| Ok(a.wrapping_add(b)),
+                |a, b| a + b,
+            ),
+            BinOp::Sub => self.numeric_binop(
+                left_val,
+                right_val,
+                |a, b| Ok(a.wrapping_sub(b)),
+                |a, b| Ok(a.wrapping_sub(b)),
+                |a, b| a - b,
+            ),
+            BinOp::Mul => self.numeric_binop(
+                left_val,
+                right_val,
+                |a, b| Ok(a.wrapping_mul(b)),
+                |a, b| Ok(a.wrapping_mul(b)),
+                |a, b| a * b,
+            ),
+            BinOp::Div => self.numeric_binop(
+                left_val,
+                right_val,
+                |a, b| match b {
+                    0 => Err(RuntimeError::DivisionByZero),
+                    _ => a.checked_div(b).ok_or(RuntimeError::IntegerOverflow),
+                },
+                |a, b| match b {
+                    0 => Err(RuntimeError::DivisionByZero),
+                    _ => a.checked_div(b).ok_or(RuntimeError::IntegerOverflow),
+                },
+                |a, b| a / b,
+            ),
+            BinOp::Mod => self.numeric_binop(
+                left_val,
+                right_val,
+                |a, b| match b {
+                    0 => Err(RuntimeError::DivisionByZero),
+                    _ => Ok(a.wrapping_rem(b)),
+                },
+                |a, b| match b {
+                    0 => Err(RuntimeError::DivisionByZero),
+                    _ => Ok(a.wrapping_rem(b)),
+                },
+                |a, b| a % b,
+            ),
             BinOp::Lt => self.compare_op(left_val, right_val, |a, b| a < b, |a, b| a < b),
             BinOp::Le => self.compare_op(left_val, right_val, |a, b| a <= b, |a, b| a <= b),
             BinOp::Gt => self.compare_op(left_val, right_val, |a, b| a > b, |a, b| a > b),
@@ -575,20 +609,19 @@ impl Interpreter {
         }
     }
 
-    fn numeric_binop<I, F>(
+    fn numeric_binop(
         &self,
         left: Value,
         right: Value,
-        int_op: I,
-        float_op: F,
-    ) -> Result<Value, RuntimeError>
-    where
-        I: Fn(i64, i64) -> i64,
-        F: Fn(f64, f64) -> f64,
-    {
+        i32_op: impl Fn(i32, i32) -> Result<i32, RuntimeError>,
+        i64_op: impl Fn(i64, i64) -> Result<i64, RuntimeError>,
+        float_op: impl Fn(f64, f64) -> f64,
+    ) -> Result<Value, RuntimeError> {
         match (left, right) {
-            (Value::I32(a), Value::I32(b)) => Ok(Value::I32(int_op(a as i64, b as i64) as i32)),
-            (Value::I64(a), Value::I64(b)) => Ok(Value::I64(int_op(a, b))),
+            (Value::I32(a), Value::I32(b)) => Ok(Value::I32(i32_op(a, b)?)),
+            (Value::I64(a), Value::I64(b)) => Ok(Value::I64(i64_op(a, b)?)),
+            // An F32 operation done in F64 and rounded once gives the
+            // correctly rounded F32 result.
             (Value::F32(a), Value::F32(b)) => Ok(Value::F32(float_op(a as f64, b as f64) as f32)),
             (Value::F64(a), Value::F64(b)) => Ok(Value::F64(float_op(a, b))),
             (l, r) => Err(RuntimeError::TypeError {
@@ -645,8 +678,8 @@ impl Interpreter {
                 }),
             },
             UnaryOp::Neg => match val {
-                Value::I32(n) => Ok(Value::I32(-n)),
-                Value::I64(n) => Ok(Value::I64(-n)),
+                Value::I32(n) => Ok(Value::I32(n.wrapping_neg())),
+                Value::I64(n) => Ok(Value::I64(n.wrapping_neg())),
                 Value::F32(n) => Ok(Value::F32(-n)),
                 Value::F64(n) => Ok(Value::F64(-n)),
                 v => Err(RuntimeError::TypeError {

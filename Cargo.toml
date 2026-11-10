@@ -22,10 +22,14 @@ members = [
     "ephapax-linear",
     "src/ephapax-surface",
     "src/ephapax-desugar",
+    "src/ephapax-driver",
     "src/ephapax-query",
     "src/ephapax-meta",
     "tests/fuzz",
     # "src/ephapax-vram-cache",  # Disabled: requires ephapax-proven repo
+    # "src/ephapax-tools",  # Excluded (v2 plan E3): no consumer. Its formatter and
+    #   linter are text heuristics that do not load programs, so they do not go
+    #   through ephapax-driver. It builds as a member: 31 tests pass, 8 clippy warnings.
 ]
 
 [workspace.package]
@@ -54,6 +58,7 @@ ephapax-lsp = { path = "src/ephapax-lsp" }
 ephapax-package = { path = "src/ephapax-package" }
 ephapax-query = { path = "src/ephapax-query" }
 ephapax-meta = { path = "src/ephapax-meta" }
+ephapax-driver = { path = "src/ephapax-driver" }
 ephapax-vram-cache = { path = "src/ephapax-vram-cache" }
 
 # Sibling-repo crates.

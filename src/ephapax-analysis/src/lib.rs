@@ -70,10 +70,7 @@ mod tests {
 
     /// Helper to create an expression with a dummy span.
     fn e(kind: ExprKind) -> Expr {
-        Expr {
-            kind,
-            span: Span::dummy(),
-        }
+        Expr::dummy(kind)
     }
 
     #[test]

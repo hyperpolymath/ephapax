@@ -26,7 +26,7 @@ build-coproc:
     set -euo pipefail
     command -v zig >/dev/null 2>&1 || { echo "zig not found"; exit 1; }
     zig build-lib -dynamic -O ReleaseSafe tools/coproc/ephapax_coproc.zig -femit-bin=libephapax_coproc.so
-    echo "built libephapax_coproc.so (run: ephapax run prog.eph -L libephapax_coproc.so)"
+    echo "built libephapax_coproc.so (run: ephapax run --interp prog.eph -L libephapax_coproc.so)"
 
 # Run the coprocessor seam's own unit tests (Zig).
 test-coproc:

@@ -74,7 +74,7 @@ The overall TRG grade is the *worst* of any MUST component.
 | F3 | Parser                  | *C*  | `src/ephapax-parser/src/lib.rs` (87KB, `chumsky`). Unit tests + property tests + grammar phase tests.
 | F4 | AST                     | *C*  | `src/ephapax-syntax/src/lib.rs` (23KB, core AST) + `src/ephapax-surface/src/lib.rs` (18KB, surface AST). `src/ephapax-desugar/src/lib.rs` (71KB) lowers surface → core. All three with unit tests.
 | F5 | Macro expander          | N/A  | Ephapax has no macros.
-| F6 | Import resolver / Modules | *D* | `src/ephapax-cli/src/import_resolver.rs`. Embedded in CLI; not a separate auditable component.
+| F6 | Import resolver / Modules | *D* | `src/ephapax-driver/src/resolver.rs`. Since v2 plan rung E3 it is part of the `ephapax-driver` crate, which every tool loads programs through; it was embedded in the CLI before. Grade not reassessed.
 | F7 | Diagnostics / Errors    | *D*  | `src/ephapax-parser/src/error.rs` (LexerError, ParseError). CLI error reporting in `main.rs`. No published error-code index.
 |===
 

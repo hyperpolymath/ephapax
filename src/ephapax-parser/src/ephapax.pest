@@ -16,6 +16,9 @@ expression_only = { SOI ~ expression ~ EOI }
 
 module_decl = { "module" ~ qualified_name }
 
+// Only the header, for `declared_module_name`.
+module_header = { SOI ~ module_decl }
+
 // Qualified name: Foo.Bar.Baz OR Foo/Bar/Baz (slash- and dot-segments both
 // allowed and treated as equivalent at the AST level — see canonicalisation
 // in `parse_module` / `parse_surface_module`). Slash-paths matter for the
@@ -425,6 +428,7 @@ variable = { identifier }
 literal = {
     unit_literal
     | boolean
+    | float32
     | float
     | integer
     | string
@@ -435,6 +439,9 @@ boolean = { "true" | "false" }
 
 integer = @{ ASCII_DIGIT+ }
 float = @{ ASCII_DIGIT+ ~ "." ~ ASCII_DIGIT+ }
+// An F32 literal carries the `f32` suffix (`1.5f32`); an unsuffixed float
+// literal is F64.
+float32 = @{ ASCII_DIGIT+ ~ "." ~ ASCII_DIGIT+ ~ "f32" }
 
 string = @{ "\"" ~ string_inner ~ "\"" }
 string_inner = @{ (escape | !("\"" | "\\") ~ ANY)* }

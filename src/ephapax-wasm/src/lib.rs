@@ -61,12 +61,13 @@ use ephapax_syntax::{
     BaseTy, BinOp, Decl, Expr, ExprKind, ExternItem, Linearity, Literal, MatchArm,
     Module as AstModule, Pattern, Ty, UnaryOp,
 };
+use ephapax_typing::ExprTypes;
 use smol_str::SmolStr;
 use std::collections::HashMap;
 use wasm_encoder::{
     CodeSection, ConstExpr, ElementSection, Elements, ExportKind, ExportSection, Function,
-    FunctionSection, ImportSection, Instruction, MemArg, MemorySection, MemoryType,
-    Module as WasmModule, RefType, TableSection, TableType, TypeSection, ValType,
+    FunctionSection, ImportSection, Instruction, MemorySection, MemoryType, Module as WasmModule,
+    RefType, TableSection, TableType, TypeSection, ValType,
 };
 
 // ---------------------------------------------------------------------------
@@ -75,6 +76,11 @@ use wasm_encoder::{
 
 /// WASM representation of a string: (pointer, length)
 pub const STRING_SIZE: u32 = 8; // 2 x i32
+
+/// Bytes per element of a tuple of three or more elements. One slot holds
+/// any scalar or handle, so an element's offset does not depend on the
+/// types of the other elements.
+const TUPLE_SLOT: i32 = 8;
 
 /// Region metadata size (bump_ptr + padding + region_sp + padding)
 pub const REGION_HEADER_SIZE: u32 = 16;
@@ -118,9 +124,11 @@ const OFFSET_REGION_EXIT: u32 = 6;
 const OFFSET_LIST_NEW: u32 = 7;
 const OFFSET_LIST_APPEND: u32 = 8;
 const OFFSET_LIST_GET: u32 = 9;
+const OFFSET_STRING_EQ: u32 = 10;
+const OFFSET_FMOD: u32 = 11;
 
 /// Number of runtime helper functions emitted in the code section.
-const NUM_RUNTIME_FNS: u32 = 10;
+const NUM_RUNTIME_FNS: u32 = 12;
 
 // ---------------------------------------------------------------------------
 // Well-known WASM type indices
@@ -145,8 +153,19 @@ const TYPE_I32_TO_I32: u32 = 6;
 /// Same signature as TYPE_I32_I32_I32 (type 3), aliased for clarity.
 const TYPE_CLOSURE_CALL: u32 = TYPE_I32_I32_I32;
 
+/// Type 7: `(i32, i64) -> i32`   (list_append: handle + element slot)
+const TYPE_LIST_APPEND: u32 = 7;
+/// Type 8: `(i32, i32) -> i64`   (list_get: handle + index -> element slot)
+const TYPE_LIST_GET: u32 = 8;
+/// Type 9: `(f64, f64) -> f64`   (fmod)
+const TYPE_F64_F64_F64: u32 = 9;
+
 /// Number of fixed type entries in the type section.
-const NUM_FIXED_TYPES: u32 = 7;
+const NUM_FIXED_TYPES: u32 = 10;
+
+/// Bytes per list element. A slot holds the i64 bit pattern of any scalar
+/// or handle, so one pair of runtime helpers serves every element type.
+const LIST_SLOT: i32 = 8;
 
 // ---------------------------------------------------------------------------
 // (Mode removed — dyadic property is per-binding, not a global switch)
@@ -173,10 +192,26 @@ impl std::error::Error for CodegenError {}
 /// module instead of planting an `unreachable` trap.
 pub const UNSUPPORTED_PREFIX: &str = "unsupported in codegen";
 
+/// Message prefix of the [`CodegenError`] for a program the type checker
+/// rejects. Codegen reads the checker's type table (v2 plan rung E5), so
+/// it only lowers well-typed programs.
+pub const NOT_WELL_TYPED: &str = "not well-typed";
+
 /// Return the first construct in `expr` that codegen cannot lower:
 /// effect `perform` / `handle` (no lowering until E17) and raw variadic
 /// `__ffi` (no sound lowering at all; typed `extern` is the FFI path).
 pub fn first_unsupported(expr: &Expr) -> Option<CodegenError> {
+    first_unsupported_in(expr, None)
+}
+
+/// [`first_unsupported`], plus the constructs whose lowering depends on a
+/// type: with the checker's table, a `match` on a value that has an I64,
+/// F32 or F64 component (patterns read every component as an i32).
+pub fn first_unsupported_typed(expr: &Expr, types: &ExprTypes) -> Option<CodegenError> {
+    first_unsupported_in(expr, Some(types))
+}
+
+fn first_unsupported_in(expr: &Expr, types: Option<&ExprTypes>) -> Option<CodegenError> {
     fn unsupported(what: &str, span: ephapax_syntax::Span) -> CodegenError {
         CodegenError(format!(
             "{UNSUPPORTED_PREFIX}: {what} (at byte {}..{})",
@@ -198,6 +233,36 @@ pub fn first_unsupported(expr: &Expr) -> Option<CodegenError> {
             ),
             expr.span,
         )),
+        // Every closure has the wasm signature (env: i32, arg: i32) -> i32
+        // until the closure ABI is typed (v2 plan rung E9).
+        ExprKind::Lambda { param_ty, body, .. }
+            if ty_to_valtype(param_ty) != ValType::I32
+                || types
+                    .and_then(|t| t.get(&body.id))
+                    .is_some_and(|ty| ty_to_valtype(ty) != ValType::I32) =>
+        {
+            Some(unsupported(
+                "a lambda with an I64, F32 or F64 parameter or result (a closure \
+                 passes 32-bit values only); use a named function",
+                expr.span,
+            ))
+        }
+        ExprKind::Match { scrutinee, arms } => types
+            .and_then(|t| t.get(&scrutinee.id))
+            .filter(|ty| {
+                arms.iter()
+                    .any(|arm| pattern_reads_wide_as_i32(&arm.pattern, ty))
+            })
+            .map(|ty| {
+                unsupported(
+                    &format!(
+                        "`match` with a tuple, constructor or literal pattern on a value \
+                         with an I64, F32 or F64 component (type {ty:?}); use a pair \
+                         pattern, `fst`, `snd`, `.N` or `case`"
+                    ),
+                    expr.span,
+                )
+            }),
         _ => None,
     };
     if here.is_some() {
@@ -253,7 +318,9 @@ pub fn first_unsupported(expr: &Expr) -> Option<CodegenError> {
         ExprKind::ListIndex { list, index } => vec![list, index],
         ExprKind::TupleIndex { tuple, .. } => vec![tuple],
     };
-    children.into_iter().find_map(first_unsupported)
+    children
+        .into_iter()
+        .find_map(|child| first_unsupported_in(child, types))
 }
 
 /// Check every function body using [`first_unsupported`].
@@ -261,13 +328,27 @@ pub fn first_unsupported(expr: &Expr) -> Option<CodegenError> {
 /// Returns the first unsupported-construct error in declaration order, with
 /// the function name added. Non-function declarations are ignored.
 pub fn validate_supported(module: &AstModule) -> Result<(), CodegenError> {
+    validate_supported_in(module, None)
+}
+
+/// [`validate_supported`] with the checker's type table, so the
+/// type-dependent limits ([`first_unsupported_typed`]) are checked too.
+/// The driver runs this, so `check` rejects what `compile` must reject.
+pub fn validate_supported_typed(module: &AstModule, types: &ExprTypes) -> Result<(), CodegenError> {
+    validate_supported_in(module, Some(types))
+}
+
+fn validate_supported_in(
+    module: &AstModule,
+    types: Option<&ExprTypes>,
+) -> Result<(), CodegenError> {
     for decl in &module.decls {
         let (name, expr, kind) = match decl {
             Decl::Fn { name, body, .. } => (name, body, "function"),
             Decl::Const { name, value, .. } => (name, value, "constant"),
             _ => continue,
         };
-        if let Some(CodegenError(msg)) = first_unsupported(expr) {
+        if let Some(CodegenError(msg)) = first_unsupported_in(expr, types) {
             return Err(CodegenError(format!("{msg} in {kind} `{name}`")));
         }
     }
@@ -362,11 +443,6 @@ impl LocalTracker {
         }
     }
 
-    /// Bind a named variable to the next available local slot.
-    fn bind(&mut self, name: &str, is_linear: bool) -> u32 {
-        self.bind_typed(name, is_linear, ValType::I32)
-    }
-
     /// Bind a named variable with its concrete WebAssembly local type.
     fn bind_typed(&mut self, name: &str, is_linear: bool, ty: ValType) -> u32 {
         let idx = self.next_idx;
@@ -380,11 +456,16 @@ impl LocalTracker {
         idx
     }
 
-    /// Allocate an anonymous temporary.
+    /// Allocate an anonymous i32 temporary.
     fn temp(&mut self) -> u32 {
+        self.temp_typed(ValType::I32)
+    }
+
+    /// Allocate an anonymous temporary of the given wasm type.
+    fn temp_typed(&mut self, ty: ValType) -> u32 {
         let idx = self.next_idx;
         self.next_idx += 1;
-        self.extra_local_types.push(ValType::I32);
+        self.extra_local_types.push(ty);
         idx
     }
 
@@ -402,15 +483,6 @@ impl LocalTracker {
     fn mark_consumed(&mut self, idx: u32) {
         if let Some(v) = self.linear_locals.get_mut(&idx) {
             *v = true;
-        }
-    }
-
-    /// Return a scratch local for temporary values, allocating one on first use.
-    fn scratch_local(&mut self) -> u32 {
-        if let Some(&idx) = self.name_to_idx.get("__scratch") {
-            idx
-        } else {
-            self.bind("__scratch", false)
         }
     }
 
@@ -448,6 +520,10 @@ pub struct Codegen {
     // -- Per-function state (set up before each function compilation) --------
     /// Local variable tracker for the function currently being compiled
     locals: LocalTracker,
+
+    /// The checker's type for each expression (v2 plan rung E5). Typed
+    /// instruction selection and layouts read it through [`Self::ty_of`].
+    types: ExprTypes,
 
     // -- Module-level bookkeeping -------------------------------------------
     /// String literal data section entries: (offset, bytes)
@@ -569,6 +645,7 @@ impl Codegen {
         Self {
             module: WasmModule::new(),
             locals: LocalTracker::default(),
+            types: ExprTypes::new(),
             data_entries: Vec::new(),
             data_offset: 1024, // Start string data after metadata area
             user_fns: HashMap::new(),
@@ -662,10 +739,13 @@ impl Codegen {
     fn fn_list_get(&self) -> u32 {
         self.import_count() + OFFSET_LIST_GET
     }
-    /// Region allocation aliases bump-allocation today.
-    fn fn_region_alloc(&self) -> u32 {
-        self.fn_bump_alloc()
+    fn fn_string_eq(&self) -> u32 {
+        self.import_count() + OFFSET_STRING_EQ
     }
+    fn fn_fmod(&self) -> u32 {
+        self.import_count() + OFFSET_FMOD
+    }
+
     /// First user-defined fn index, after imports and runtime helpers.
     fn first_user_fn(&self) -> u32 {
         self.import_count() + NUM_RUNTIME_FNS
@@ -729,6 +809,14 @@ impl Codegen {
         if let Some(err) = first_unsupported(main_expr) {
             return Err(err);
         }
+        let mut checker = ephapax_typing::TypeChecker::new();
+        checker
+            .check(main_expr)
+            .map_err(|e| CodegenError(format!("{NOT_WELL_TYPED}: {e}")))?;
+        self.types = checker.expr_types();
+        if let Some(err) = first_unsupported_typed(main_expr, &self.types) {
+            return Err(err);
+        }
         self.emit_types();
         self.emit_imports();
 
@@ -752,12 +840,7 @@ impl Codegen {
 
         // Main function (index self.first_user_fn())
         func_sec.function(TYPE_VOID_VOID);
-        self.locals = LocalTracker::new(0);
-        let mut main_func = Function::new(vec![(16, ValType::I32)]);
-        self.compile_expr(&mut main_func, main_expr);
-        main_func.instruction(&Instruction::Drop);
-        main_func.instruction(&Instruction::End);
-        code_sec.function(&main_func);
+        code_sec.function(&self.compile_standalone_body(main_expr));
 
         // Lambda functions discovered during expression compilation
         let _ = self.append_lambda_funcs(&mut func_sec, &mut code_sec);
@@ -782,6 +865,27 @@ impl Codegen {
         Ok(self.module.clone().finish())
     }
 
+    /// Compile `body` as the body of a parameterless function whose value
+    /// is dropped, declaring each local at the type it turned out to need.
+    ///
+    /// The locals are known only once the body is compiled, but they are
+    /// encoded before it. So the body is compiled into a function with no
+    /// locals, and its instructions are copied behind the declarations.
+    /// (This path declared 16 i32 locals, so an I64, F32 or F64 binding
+    /// gave an invalid module.)
+    fn compile_standalone_body(&mut self, body: &Expr) -> Function {
+        self.locals = LocalTracker::new(0);
+        let mut scratch = Function::new(Vec::<(u32, ValType)>::new());
+        self.compile_expr(&mut scratch, body);
+        scratch.instruction(&Instruction::Drop);
+        scratch.instruction(&Instruction::End);
+        let raw = scratch.into_raw_body();
+        let mut func = Function::new(self.locals.wasm_local_declarations());
+        // Skip the empty locals vector: one zero byte.
+        func.raw(raw[1..].iter().copied());
+        func
+    }
+
     /// Compile a module encoded as an S-expression string.
     pub fn compile_sexpr_module(&mut self, sexpr: &str) -> Result<Vec<u8>, String> {
         let module = module_from_sexpr(sexpr).map_err(|e| e.to_string())?;
@@ -801,6 +905,14 @@ impl Codegen {
         // ----- Phase 0: reject constructs with no wasm lowering ------------
         // (v2 plan E1: fail loudly, before any section is emitted.)
         validate_supported(ast)?;
+
+        // ----- Phase 0b: the checker's type for every expression -----------
+        // The module is the whole program (imports already merged in), so
+        // it is checked on its own, against an empty registry.
+        self.types =
+            ephapax_typing::module_expr_types(ast, &mut ephapax_typing::ModuleRegistry::new())
+                .map_err(|e| CodegenError(format!("{NOT_WELL_TYPED}: {e}")))?;
+        validate_supported_typed(ast, &self.types)?;
 
         // ----- Phase 1: collect function metadata --------------------------
         // Extern imports MUST be collected first so the import_count
@@ -851,7 +963,8 @@ impl Codegen {
     ///
     /// Unsupported constructs in either `module` or `main_body` return a
     /// [`CodegenError`] before compilation, even when `main_body` would not be
-    /// used. Other module-compilation errors are caught to select the fallback.
+    /// used. Other module-compilation errors are caught to select the
+    /// fallback, which is [`Self::compile_program`] on `main_body`.
     pub fn compile_module_with_main(
         &mut self,
         module: &AstModule,
@@ -867,43 +980,9 @@ impl Codegen {
             return Ok(bytes);
         }
 
-        // Fallback: just compile the main body as a standalone expression.
-        self.emit_types();
-        self.emit_imports();
-
-        let mut func_sec = FunctionSection::new();
-        let mut code_sec = CodeSection::new();
-
-        self.append_runtime_funcs(&mut func_sec, &mut code_sec);
-
-        // Main function (index self.first_user_fn())
-        func_sec.function(TYPE_VOID_VOID);
-
-        self.locals = LocalTracker::new(0);
-        let mut main_func = Function::new(vec![(16, ValType::I32)]);
-        self.compile_expr(&mut main_func, main_body);
-        main_func.instruction(&Instruction::Drop);
-        main_func.instruction(&Instruction::End);
-        code_sec.function(&main_func);
-
-        // Lambda functions discovered during expression compilation
-        let _ = self.append_lambda_funcs(&mut func_sec, &mut code_sec);
-
-        // Emit in WASM order: Type, Import, Function, Table, Memory, Export, Element, Code, Data
-        self.module.section(&func_sec);
-        self.emit_table();
-        self.emit_memory();
-
-        let mut exports = ExportSection::new();
-        self.add_runtime_exports(&mut exports);
-        exports.export("main", ExportKind::Func, self.first_user_fn());
-        self.module.section(&exports);
-
-        self.emit_elements();
-        self.module.section(&code_sec);
-        self.emit_data_section();
-        self.emit_debug_sections();
-        Ok(self.module.clone().finish())
+        // Fallback: the main body as a standalone expression, checked
+        // and compiled as `compile_program` does it.
+        self.compile_program(main_body)
     }
 
     // -----------------------------------------------------------------------
@@ -1024,6 +1103,18 @@ impl Codegen {
         );
         // Type 6: (i32) -> i32
         types.ty().function(vec![ValType::I32], vec![ValType::I32]);
+        // Type 7: (i32, i64) -> i32
+        types
+            .ty()
+            .function(vec![ValType::I32, ValType::I64], vec![ValType::I32]);
+        // Type 8: (i32, i32) -> i64
+        types
+            .ty()
+            .function(vec![ValType::I32, ValType::I32], vec![ValType::I64]);
+        // Type 9: (f64, f64) -> f64
+        types
+            .ty()
+            .function(vec![ValType::F64, ValType::F64], vec![ValType::F64]);
 
         // Dynamic extra types
         for (params, results) in &self.extra_types {
@@ -1196,8 +1287,8 @@ impl Codegen {
         code_sec.function(&f);
         self.record_access_sites(self.fn_string_new(), &sites);
 
-        // 4: string_len  (i32, i32) -> i32
-        func_sec.function(TYPE_I32_I32_I32);
+        // 4: string_len  (i32) -> i32
+        func_sec.function(TYPE_I32_TO_I32);
         let (f, sites) = self.gen_string_len();
         code_sec.function(&f);
         self.record_access_sites(self.fn_string_len(), &sites);
@@ -1224,13 +1315,23 @@ impl Codegen {
         func_sec.function(TYPE_I32_TO_I32);
         code_sec.function(&self.gen_list_new());
 
-        // 10: list_append  (i32, i32) -> i32
-        func_sec.function(TYPE_I32_I32_I32);
+        // 10: list_append  (i32, i64) -> i32
+        func_sec.function(TYPE_LIST_APPEND);
         code_sec.function(&self.gen_list_append());
 
-        // 11: list_get  (i32, i32) -> i32
-        func_sec.function(TYPE_I32_I32_I32);
+        // 11: list_get  (i32, i32) -> i64
+        func_sec.function(TYPE_LIST_GET);
         code_sec.function(&self.gen_list_get());
+
+        // 12: string_eq  (i32, i32) -> i32
+        func_sec.function(TYPE_I32_I32_I32);
+        let (f, sites) = self.gen_string_eq();
+        code_sec.function(&f);
+        self.record_access_sites(self.fn_string_eq(), &sites);
+
+        // 13: fmod  (f64, f64) -> f64
+        func_sec.function(TYPE_F64_F64_F64);
+        code_sec.function(&gen_fmod());
     }
 
     /// Append user-defined functions from the AST.
@@ -1520,16 +1621,18 @@ impl Codegen {
 
     fn emit_data_section(&mut self) {
         let mut data = wasm_encoder::DataSection::new();
-        // The bump pointer lives at `mem[0]`. Start it past the metadata
-        // area and the string data; left at 0, the first heap cell would
-        // be allocated over the bump pointer itself (nested pairs read back
-        // corrupted fields, e.g. `fst((1, (2, 3)))`).
-        let heap_start = self.data_offset.max(1024).next_multiple_of(8);
-        data.active(
-            0,
-            &wasm_encoder::ConstExpr::i32_const(0),
-            heap_start.to_le_bytes(),
-        );
+
+        // Allocator state. The bump pointer (address 0) starts above the
+        // string literals, and the region stack pointer (address 8) starts
+        // so that the first saved bump pointer lands at address 16. Both
+        // used to start at 0: the first allocation then returned address
+        // 0 and writing to it overwrote the bump pointer itself.
+        let heap_base = align_up(self.data_offset as u64, 8) as u32;
+        let mut header = [0u8; 12];
+        header[0..4].copy_from_slice(&heap_base.to_le_bytes());
+        header[8..12].copy_from_slice(&(REGION_HEADER_SIZE - 4).to_le_bytes());
+        data.active(0, &wasm_encoder::ConstExpr::i32_const(0), header);
+
         for (offset, bytes) in &self.data_entries {
             data.active(
                 0,
@@ -1864,9 +1967,9 @@ impl Codegen {
     fn gen_list_new(&self) -> Function {
         let mut f = Function::new(vec![(1, ValType::I32)]); // local for handle
 
-        // Calculate size: 8 (header) + capacity * 4 (elements)
+        // Calculate size: 8 (header) + capacity * LIST_SLOT (elements)
         f.instruction(&Instruction::LocalGet(0)); // capacity
-        f.instruction(&Instruction::I32Const(4));
+        f.instruction(&Instruction::I32Const(LIST_SLOT));
         f.instruction(&Instruction::I32Mul);
         f.instruction(&Instruction::I32Const(8));
         f.instruction(&Instruction::I32Add);
@@ -1892,7 +1995,7 @@ impl Codegen {
         f
     }
 
-    /// Append element to list: `(handle: i32, value: i32) -> handle: i32`
+    /// Append element to list: `(handle: i32, value: i64) -> handle: i32`
     /// May return same handle or new handle if resize needed
     fn gen_list_append(&self) -> Function {
         let mut f = Function::new(vec![
@@ -1927,7 +2030,7 @@ impl Codegen {
         // Uses memory.copy (bulk memory operations) when available,
         // falls back to element-by-element copy loop.
         // Source: old_handle + 8 (skip header), Dest: new_handle + 8
-        // Length: old_length * 4 bytes (i32 elements)
+        // Length: old_length * LIST_SLOT bytes
         f.instruction(&Instruction::LocalGet(4)); // dest = new_handle
         f.instruction(&Instruction::I32Const(8));
         f.instruction(&Instruction::I32Add); // dest + 8
@@ -1935,8 +2038,8 @@ impl Codegen {
         f.instruction(&Instruction::I32Const(8));
         f.instruction(&Instruction::I32Add); // src + 8
         f.instruction(&Instruction::LocalGet(3)); // length
-        f.instruction(&Instruction::I32Const(4));
-        f.instruction(&Instruction::I32Mul); // length * 4 = byte count
+        f.instruction(&Instruction::I32Const(LIST_SLOT));
+        f.instruction(&Instruction::I32Mul); // byte count
         f.instruction(&Instruction::MemoryCopy {
             src_mem: 0,
             dst_mem: 0,
@@ -1949,16 +2052,16 @@ impl Codegen {
         // No resize needed, use existing handle
         f.instruction(&Instruction::End);
 
-        // Append element at handle + 8 + length*4
+        // Append element at handle + 8 + length * LIST_SLOT
         f.instruction(&Instruction::LocalGet(0)); // handle
         f.instruction(&Instruction::I32Const(8));
         f.instruction(&Instruction::I32Add);
         f.instruction(&Instruction::LocalGet(3)); // length
-        f.instruction(&Instruction::I32Const(4));
+        f.instruction(&Instruction::I32Const(LIST_SLOT));
         f.instruction(&Instruction::I32Mul);
-        f.instruction(&Instruction::I32Add); // address = handle + 8 + length*4
+        f.instruction(&Instruction::I32Add);
         f.instruction(&Instruction::LocalGet(1)); // value
-        f.instruction(&Instruction::I32Store(mem_arg(0)));
+        f.instruction(&Instruction::I64Store(typed_mem_arg(ValType::I64, 0)));
 
         // Increment length
         f.instruction(&Instruction::LocalGet(0)); // handle
@@ -1973,23 +2076,101 @@ impl Codegen {
         f
     }
 
-    /// Get element from list: `(handle: i32, index: i32) -> element: i32`
+    /// Get element from list: `(handle: i32, index: i32) -> element: i64`.
+    /// Traps when the index is negative or not below the length.
     fn gen_list_get(&self) -> Function {
         let mut f = Function::new(vec![]);
 
-        // Calculate address: handle + 8 + index*4
+        // Bounds check, unsigned, so a negative index is out of range too.
+        f.instruction(&Instruction::LocalGet(1)); // index
+        f.instruction(&Instruction::LocalGet(0));
+        f.instruction(&Instruction::I32Load(mem_arg(4))); // length
+        f.instruction(&Instruction::I32GeU);
+        f.instruction(&Instruction::If(wasm_encoder::BlockType::Empty));
+        f.instruction(&Instruction::Unreachable);
+        f.instruction(&Instruction::End);
+
+        // Address: handle + 8 + index * LIST_SLOT
         f.instruction(&Instruction::LocalGet(0)); // handle
         f.instruction(&Instruction::I32Const(8));
         f.instruction(&Instruction::I32Add);
         f.instruction(&Instruction::LocalGet(1)); // index
-        f.instruction(&Instruction::I32Const(4));
+        f.instruction(&Instruction::I32Const(LIST_SLOT));
         f.instruction(&Instruction::I32Mul);
         f.instruction(&Instruction::I32Add);
 
         // Load element
-        f.instruction(&Instruction::I32Load(mem_arg(0)));
+        f.instruction(&Instruction::I64Load(typed_mem_arg(ValType::I64, 0)));
         f.instruction(&Instruction::End);
         f
+    }
+
+    /// String equality by content: `(a: i32, b: i32) -> i32` (1 or 0).
+    fn gen_string_eq(&self) -> (Function, Vec<(u32, u32)>) {
+        use wasm_encoder::BlockType::Empty;
+        // locals: 2 = len, 3 = bytes of a, 4 = bytes of b, 5 = i
+        let mut f = Function::new(vec![(4, ValType::I32)]);
+        let mut sites = Vec::new();
+        let byte = wasm_encoder::MemArg {
+            offset: 0,
+            align: 0,
+            memory_index: 0,
+        };
+
+        // Different lengths: not equal.
+        f.instruction(&Instruction::LocalGet(0));
+        sites.push((carriers::FIELD_LEN, f.byte_len() as u32));
+        f.instruction(&Instruction::I32Load(mem_arg(4)));
+        f.instruction(&Instruction::LocalTee(2));
+        f.instruction(&Instruction::LocalGet(1));
+        sites.push((carriers::FIELD_LEN, f.byte_len() as u32));
+        f.instruction(&Instruction::I32Load(mem_arg(4)));
+        f.instruction(&Instruction::I32Ne);
+        f.instruction(&Instruction::If(Empty));
+        f.instruction(&Instruction::I32Const(0));
+        f.instruction(&Instruction::Return);
+        f.instruction(&Instruction::End);
+
+        f.instruction(&Instruction::LocalGet(0));
+        sites.push((carriers::FIELD_PTR, f.byte_len() as u32));
+        f.instruction(&Instruction::I32Load(mem_arg(0)));
+        f.instruction(&Instruction::LocalSet(3));
+        f.instruction(&Instruction::LocalGet(1));
+        sites.push((carriers::FIELD_PTR, f.byte_len() as u32));
+        f.instruction(&Instruction::I32Load(mem_arg(0)));
+        f.instruction(&Instruction::LocalSet(4));
+
+        // Compare byte by byte.
+        f.instruction(&Instruction::Loop(Empty));
+        f.instruction(&Instruction::LocalGet(5));
+        f.instruction(&Instruction::LocalGet(2));
+        f.instruction(&Instruction::I32Eq);
+        f.instruction(&Instruction::If(Empty));
+        f.instruction(&Instruction::I32Const(1));
+        f.instruction(&Instruction::Return);
+        f.instruction(&Instruction::End);
+        f.instruction(&Instruction::LocalGet(3));
+        f.instruction(&Instruction::LocalGet(5));
+        f.instruction(&Instruction::I32Add);
+        f.instruction(&Instruction::I32Load8U(byte));
+        f.instruction(&Instruction::LocalGet(4));
+        f.instruction(&Instruction::LocalGet(5));
+        f.instruction(&Instruction::I32Add);
+        f.instruction(&Instruction::I32Load8U(byte));
+        f.instruction(&Instruction::I32Ne);
+        f.instruction(&Instruction::If(Empty));
+        f.instruction(&Instruction::I32Const(0));
+        f.instruction(&Instruction::Return);
+        f.instruction(&Instruction::End);
+        f.instruction(&Instruction::LocalGet(5));
+        f.instruction(&Instruction::I32Const(1));
+        f.instruction(&Instruction::I32Add);
+        f.instruction(&Instruction::LocalSet(5));
+        f.instruction(&Instruction::Br(0));
+        f.instruction(&Instruction::End);
+        f.instruction(&Instruction::Unreachable);
+        f.instruction(&Instruction::End);
+        (f, sites)
     }
 
     // -----------------------------------------------------------------------
@@ -2165,10 +2346,22 @@ impl Codegen {
         func.instruction(&Instruction::Call(self.fn_string_len()));
     }
 
-    /// Recover the concrete WebAssembly value type needed by local lowering.
-    /// The typechecker has already accepted the AST, but inferred let types
-    /// are not written back into `ExprKind::Let`, so codegen reconstructs the
-    /// small amount of representation information it needs here.
+    /// The checker's type for `expr`, if it recorded one.
+    fn ty_of(&self, expr: &Expr) -> Option<&Ty> {
+        self.types.get(&expr.id)
+    }
+
+    /// The wasm value type of `expr`: from the checker's type table, else
+    /// (an expression the checker did not record) the syntactic guess.
+    fn valtype_of(&self, expr: &Expr) -> ValType {
+        match self.ty_of(expr) {
+            Some(ty) => ty_to_valtype(ty),
+            None => self.infer_expr_valtype(expr),
+        }
+    }
+
+    /// Syntactic guess at the wasm value type of an expression that has no
+    /// entry in the type table. [`Self::valtype_of`] is the entry point.
     fn infer_expr_valtype(&self, expr: &Expr) -> ValType {
         match &expr.kind {
             ExprKind::Lit(Literal::I64(_)) => ValType::I64,
@@ -2228,7 +2421,7 @@ impl Codegen {
     ) {
         let local_ty = ty
             .map(ty_to_valtype)
-            .unwrap_or_else(|| self.infer_expr_valtype(value));
+            .unwrap_or_else(|| self.valtype_of(value));
 
         // Compile the value expression
         self.compile_expr(func, value);
@@ -2613,77 +2806,101 @@ impl Codegen {
         });
     }
 
-    fn compile_pair(&mut self, func: &mut Function, left: &Expr, right: &Expr) {
-        // Allocate 8 bytes for pair (2 x i32)
-        func.instruction(&Instruction::I32Const(8));
+    /// Wasm types of the two components of the pair `expr` evaluates to
+    /// (through a borrow). `(i32, i32)` when the type table has no pair
+    /// type for it.
+    fn pair_fields(&self, expr: &Expr) -> (ValType, ValType) {
+        fn of(ty: &Ty) -> Option<(ValType, ValType)> {
+            match ty {
+                Ty::Prod { left, right } => Some((ty_to_valtype(left), ty_to_valtype(right))),
+                Ty::Borrow { inner, .. } | Ty::Ref { inner, .. } => of(inner),
+                _ => None,
+            }
+        }
+        self.ty_of(expr)
+            .and_then(of)
+            .unwrap_or((ValType::I32, ValType::I32))
+    }
+
+    /// Wasm types of the left and right payloads of the sum `expr`
+    /// evaluates to (through a borrow); i32 where the table has none.
+    fn sum_payloads(&self, expr: &Expr) -> (ValType, ValType) {
+        fn of(ty: &Ty) -> Option<(ValType, ValType)> {
+            match ty {
+                Ty::Sum { left, right } => Some((ty_to_valtype(left), ty_to_valtype(right))),
+                Ty::Borrow { inner, .. } | Ty::Ref { inner, .. } => of(inner),
+                _ => None,
+            }
+        }
+        self.ty_of(expr)
+            .and_then(of)
+            .unwrap_or((ValType::I32, ValType::I32))
+    }
+
+    /// Allocate `size` bytes and leave the pointer in a fresh local.
+    fn alloc_to_local(&mut self, func: &mut Function, size: u64) -> u32 {
+        func.instruction(&Instruction::I32Const(size as i32));
         func.instruction(&Instruction::I32Const(0));
         func.instruction(&Instruction::Call(self.fn_bump_alloc()));
+        let local = self.locals.temp();
+        func.instruction(&Instruction::LocalSet(local));
+        local
+    }
 
-        let pair_local = self.locals.temp();
-        func.instruction(&Instruction::LocalTee(pair_local));
+    /// A pair is a pointer to its two components, each at its natural
+    /// alignment: `[left @ 0][right @ pair_layout]`.
+    fn compile_pair(&mut self, func: &mut Function, left: &Expr, right: &Expr) {
+        let (left_ty, right_ty) = (self.valtype_of(left), self.valtype_of(right));
+        let (right_offset, size) = pair_layout(left_ty, right_ty);
+        let pair_local = self.alloc_to_local(func, size);
 
-        // Store left at offset 0
+        func.instruction(&Instruction::LocalGet(pair_local));
         self.compile_expr(func, left);
-        func.instruction(&Instruction::I32Store(mem_arg(0)));
+        emit_typed_store(func, left_ty, 0);
 
-        // Store right at offset 4
         func.instruction(&Instruction::LocalGet(pair_local));
         self.compile_expr(func, right);
-        func.instruction(&Instruction::I32Store(mem_arg(4)));
+        emit_typed_store(func, right_ty, right_offset);
 
-        // Return pair pointer
         func.instruction(&Instruction::LocalGet(pair_local));
     }
 
     fn compile_fst(&mut self, func: &mut Function, inner: &Expr) {
+        let (left_ty, _) = self.pair_fields(inner);
         self.compile_expr(func, inner);
-        func.instruction(&Instruction::I32Load(mem_arg(0)));
+        emit_typed_load(func, left_ty, 0);
     }
 
     fn compile_snd(&mut self, func: &mut Function, inner: &Expr) {
+        let (left_ty, right_ty) = self.pair_fields(inner);
         self.compile_expr(func, inner);
-        func.instruction(&Instruction::I32Load(mem_arg(4)));
+        emit_typed_load(func, right_ty, pair_layout(left_ty, right_ty).0);
+    }
+
+    /// A sum is a pointer to `[tag: i32 @ 0][payload @ sum_payload_offset]`;
+    /// tag 0 is left, tag 1 is right.
+    fn compile_injection(&mut self, func: &mut Function, tag: i32, value: &Expr) {
+        let payload_ty = self.valtype_of(value);
+        let offset = sum_payload_offset(payload_ty);
+        let sum_local = self.alloc_to_local(func, offset + valtype_storage(payload_ty).0);
+
+        func.instruction(&Instruction::LocalGet(sum_local));
+        func.instruction(&Instruction::I32Const(tag));
+        func.instruction(&Instruction::I32Store(mem_arg(0)));
+
+        func.instruction(&Instruction::LocalGet(sum_local));
+        self.compile_expr(func, value);
+        emit_typed_store(func, payload_ty, offset);
+
+        func.instruction(&Instruction::LocalGet(sum_local));
     }
 
     fn compile_inl(&mut self, func: &mut Function, value: &Expr) {
-        // Sum types: tag (i32) + value (i32) = 8 bytes
-        func.instruction(&Instruction::I32Const(8));
-        func.instruction(&Instruction::I32Const(0));
-        func.instruction(&Instruction::Call(self.fn_bump_alloc()));
-
-        let sum_local = self.locals.temp();
-        func.instruction(&Instruction::LocalTee(sum_local));
-
-        // Store tag 0 (left)
-        func.instruction(&Instruction::I32Const(0));
-        func.instruction(&Instruction::I32Store(mem_arg(0)));
-
-        // Store value at offset 4
-        func.instruction(&Instruction::LocalGet(sum_local));
-        self.compile_expr(func, value);
-        func.instruction(&Instruction::I32Store(mem_arg(4)));
-
-        func.instruction(&Instruction::LocalGet(sum_local));
+        self.compile_injection(func, 0, value);
     }
 
     fn compile_inr(&mut self, func: &mut Function, value: &Expr) {
-        func.instruction(&Instruction::I32Const(8));
-        func.instruction(&Instruction::I32Const(0));
-        func.instruction(&Instruction::Call(self.fn_bump_alloc()));
-
-        let sum_local = self.locals.temp();
-        func.instruction(&Instruction::LocalTee(sum_local));
-
-        // Store tag 1 (right)
-        func.instruction(&Instruction::I32Const(1));
-        func.instruction(&Instruction::I32Store(mem_arg(0)));
-
-        // Store value at offset 4
-        func.instruction(&Instruction::LocalGet(sum_local));
-        self.compile_expr(func, value);
-        func.instruction(&Instruction::I32Store(mem_arg(4)));
-
-        func.instruction(&Instruction::LocalGet(sum_local));
+        self.compile_injection(func, 1, value);
     }
 
     fn compile_case(
@@ -2695,6 +2912,7 @@ impl Codegen {
         right_var: &str,
         right_body: &Expr,
     ) {
+        let (left_ty, right_ty) = self.sum_payloads(scrutinee);
         self.compile_expr(func, scrutinee);
 
         let scrutinee_local = self.locals.temp();
@@ -2705,13 +2923,13 @@ impl Codegen {
 
         // if tag != 0 (right branch) else (left branch)
         func.instruction(&Instruction::If(wasm_encoder::BlockType::Result(
-            ValType::I32,
+            self.valtype_of(left_body),
         )));
 
         // Right branch (tag == 1)
         func.instruction(&Instruction::LocalGet(scrutinee_local));
-        func.instruction(&Instruction::I32Load(mem_arg(4)));
-        let right_local = self.locals.bind(right_var, false);
+        emit_typed_load(func, right_ty, sum_payload_offset(right_ty));
+        let right_local = self.locals.bind_typed(right_var, false, right_ty);
         func.instruction(&Instruction::LocalSet(right_local));
         self.compile_expr(func, right_body);
 
@@ -2719,8 +2937,8 @@ impl Codegen {
 
         // Left branch (tag == 0)
         func.instruction(&Instruction::LocalGet(scrutinee_local));
-        func.instruction(&Instruction::I32Load(mem_arg(4)));
-        let left_local = self.locals.bind(left_var, false);
+        emit_typed_load(func, left_ty, sum_payload_offset(left_ty));
+        let left_local = self.locals.bind_typed(left_var, false, left_ty);
         func.instruction(&Instruction::LocalSet(left_local));
         self.compile_expr(func, left_body);
 
@@ -2766,7 +2984,13 @@ impl Codegen {
     /// through on inner refutation (needed once #66 admits patterns
     /// like `Some(Some(_))` + `Some(None)` + `None`).
     fn compile_match(&mut self, func: &mut Function, scrutinee: &Expr, arms: &[MatchArm]) {
+        // A variable, a wildcard and a pair pattern are lowered at the type
+        // of the value. A tuple, constructor or literal pattern reads i32
+        // values only; on a value with an I64, F32 or F64 component it
+        // never gets here: `first_unsupported_typed` refuses it.
         use wasm_encoder::BlockType;
+        let scrut_ty = self.ty_of(scrutinee).cloned();
+        let scrut_valtype = self.valtype_of(scrutinee);
 
         // Recover data type info from the first constructor pattern (if any).
         // For non-data scrutinees (Bool, Pair, Tuple, Unit, Int) no tag
@@ -2780,7 +3004,7 @@ impl Codegen {
         });
 
         self.compile_expr(func, scrutinee);
-        let scrut_local = self.locals.temp();
+        let scrut_local = self.locals.temp_typed(scrut_valtype);
         func.instruction(&Instruction::LocalSet(scrut_local));
 
         let payload_local = self.locals.temp();
@@ -2793,22 +3017,21 @@ impl Codegen {
             func.instruction(&Instruction::LocalGet(scrut_local));
             func.instruction(&Instruction::LocalSet(cur_local));
             self.emit_tag_walk(func, total, cur_local, tag_local, payload_local);
-        } else {
+        } else if scrut_valtype == ValType::I32 {
             // Single-ctor data type OR non-data scrutinee: payload = scrut.
             // tag_local stays uninitialized; arms with constructor
             // patterns over a single-ctor data type don't need to read
-            // it (position is forced to 0).
+            // it (position is forced to 0). (A scrutinee that is not an
+            // i32 has no constructor pattern, so no payload.)
             func.instruction(&Instruction::LocalGet(scrut_local));
             func.instruction(&Instruction::LocalSet(payload_local));
         }
 
-        // Linear arm dispatch. The `$done` block carries the arms' result
-        // type: every arm has the same type, so the first arm decides it
-        // (an `I64` extern call in a pair destructuring, for example).
-        let result_ty = arms
+        // Linear arm dispatch. Every arm has the type of the match.
+        let result = arms
             .first()
-            .map_or(ValType::I32, |arm| self.infer_expr_valtype(&arm.body));
-        func.instruction(&Instruction::Block(BlockType::Result(result_ty)));
+            .map_or(ValType::I32, |arm| self.valtype_of(&arm.body));
+        func.instruction(&Instruction::Block(BlockType::Result(result)));
 
         for arm in arms.iter() {
             // Open $arm_i_fail block. Inside, depth 0 = $arm_i_fail,
@@ -2831,7 +3054,13 @@ impl Codegen {
             // Top-level pattern binding / refutable check. The arm body
             // produces an i32 on the stack; we br $done (depth 1) to
             // carry it past the remaining arms.
-            self.compile_top_pattern(func, &arm.pattern, scrut_local, payload_local);
+            self.compile_top_pattern(
+                func,
+                &arm.pattern,
+                scrut_local,
+                payload_local,
+                scrut_ty.as_ref(),
+            );
 
             // Match guard (if any): evaluate under the arm's pattern
             // bindings; `br_if $arm_i_fail` (depth 0) when the guard
@@ -2869,40 +3098,36 @@ impl Codegen {
         pat: &Pattern,
         scrut_local: u32,
         payload_local: u32,
+        scrut_ty: Option<&Ty>,
     ) {
         match pat {
-            Pattern::Wildcard => {}
-            Pattern::Var(name) => {
-                let idx = self.locals.bind(name.as_str(), false);
-                func.instruction(&Instruction::LocalGet(scrut_local));
-                func.instruction(&Instruction::LocalSet(idx));
-            }
             Pattern::Constructor { args, .. } => {
                 self.destructure_payload(func, args, payload_local, 0);
             }
-            Pattern::Literal(_) | Pattern::Unit | Pattern::Pair(_, _) | Pattern::Tuple(_) => {
-                // Non-data top-level pattern: scrutinee IS the value
-                // to check / destructure. Sub-pattern handles
-                // refutability and binding uniformly.
-                self.compile_sub_pattern(func, pat, scrut_local, 0);
-            }
+            // Non-data top-level pattern: scrutinee IS the value to
+            // bind, check or destructure. Sub-pattern handles
+            // refutability and binding uniformly.
+            _ => self.compile_sub_pattern(func, pat, scrut_local, scrut_ty, 0),
         }
     }
 
     /// Recursively bind a sub-pattern against an already-extracted
-    /// value (held in `value_local`). Refutable patterns emit
-    /// `br_if fail_depth` on mismatch.
+    /// value (held in `value_local`, of type `ty`; `None` is a value the
+    /// type table has no entry for, which is an i32). Refutable patterns
+    /// emit `br_if fail_depth` on mismatch.
     fn compile_sub_pattern(
         &mut self,
         func: &mut Function,
         pat: &Pattern,
         value_local: u32,
+        ty: Option<&Ty>,
         fail_depth: u32,
     ) {
         match pat {
             Pattern::Wildcard => {}
             Pattern::Var(name) => {
-                let idx = self.locals.bind(name.as_str(), false);
+                let valtype = ty.map_or(ValType::I32, ty_to_valtype);
+                let idx = self.locals.bind_typed(name.as_str(), false, valtype);
                 func.instruction(&Instruction::LocalGet(value_local));
                 func.instruction(&Instruction::LocalSet(idx));
             }
@@ -2933,18 +3158,31 @@ impl Codegen {
                 }
             },
             Pattern::Pair(left, right) => {
-                let left_local = self.locals.temp();
+                // Each component at its own type and offset, as
+                // `compile_pair` stored it.
+                let (left_ty, right_ty) = match ty.map(peel_borrows) {
+                    Some(Ty::Prod { left, right }) => (Some(&**left), Some(&**right)),
+                    _ => (None, None),
+                };
+                let left_valtype = left_ty.map_or(ValType::I32, ty_to_valtype);
+                let right_valtype = right_ty.map_or(ValType::I32, ty_to_valtype);
+
+                let left_local = self.locals.temp_typed(left_valtype);
                 func.instruction(&Instruction::LocalGet(value_local));
-                func.instruction(&Instruction::I32Load(mem_arg(0)));
+                emit_typed_load(func, left_valtype, 0);
                 func.instruction(&Instruction::LocalSet(left_local));
 
-                let right_local = self.locals.temp();
+                let right_local = self.locals.temp_typed(right_valtype);
                 func.instruction(&Instruction::LocalGet(value_local));
-                func.instruction(&Instruction::I32Load(mem_arg(4)));
+                emit_typed_load(
+                    func,
+                    right_valtype,
+                    pair_layout(left_valtype, right_valtype).0,
+                );
                 func.instruction(&Instruction::LocalSet(right_local));
 
-                self.compile_sub_pattern(func, left, left_local, fail_depth);
-                self.compile_sub_pattern(func, right, right_local, fail_depth);
+                self.compile_sub_pattern(func, left, left_local, left_ty, fail_depth);
+                self.compile_sub_pattern(func, right, right_local, right_ty, fail_depth);
             }
             Pattern::Tuple(parts) => {
                 self.destructure_payload(func, parts, value_local, fail_depth);
@@ -3048,18 +3286,18 @@ impl Codegen {
     ) {
         match args.len() {
             0 => {}
-            1 => self.compile_sub_pattern(func, &args[0], payload_local, fail_depth),
+            1 => self.compile_sub_pattern(func, &args[0], payload_local, None, fail_depth),
             _ => {
                 let mut cur = payload_local;
                 for (i, arg) in args.iter().enumerate() {
                     if i + 1 == args.len() {
-                        self.compile_sub_pattern(func, arg, cur, fail_depth);
+                        self.compile_sub_pattern(func, arg, cur, None, fail_depth);
                     } else {
                         let left = self.locals.temp();
                         func.instruction(&Instruction::LocalGet(cur));
                         func.instruction(&Instruction::I32Load(mem_arg(0)));
                         func.instruction(&Instruction::LocalSet(left));
-                        self.compile_sub_pattern(func, arg, left, fail_depth);
+                        self.compile_sub_pattern(func, arg, left, None, fail_depth);
 
                         let next = self.locals.temp();
                         func.instruction(&Instruction::LocalGet(cur));
@@ -3081,7 +3319,7 @@ impl Codegen {
     ) {
         self.compile_expr(func, cond);
         func.instruction(&Instruction::If(wasm_encoder::BlockType::Result(
-            ValType::I32,
+            self.valtype_of(then_branch),
         )));
         self.compile_expr(func, then_branch);
         func.instruction(&Instruction::Else);
@@ -3095,30 +3333,20 @@ impl Codegen {
         func.instruction(&Instruction::Call(self.fn_region_exit()));
     }
 
+    /// `copy(e)` is the pair `(e, e)`.
     fn compile_copy(&mut self, func: &mut Function, inner: &Expr) {
-        let tmp = self.locals.temp();
+        let ty = self.valtype_of(inner);
+        let (second_offset, size) = pair_layout(ty, ty);
+        let value = self.locals.temp_typed(ty);
         self.compile_expr(func, inner);
-        func.instruction(&Instruction::LocalSet(tmp)); // save value, consume from stack
+        func.instruction(&Instruction::LocalSet(value));
 
-        // Allocate pair (8 bytes) and store value twice
-        func.instruction(&Instruction::I32Const(8));
-        func.instruction(&Instruction::I32Const(0));
-        func.instruction(&Instruction::Call(self.fn_bump_alloc()));
-
-        let pair_local = self.locals.temp();
-        func.instruction(&Instruction::LocalSet(pair_local)); // save pair ptr
-
-        // Store value at pair+0
-        func.instruction(&Instruction::LocalGet(pair_local));
-        func.instruction(&Instruction::LocalGet(tmp));
-        func.instruction(&Instruction::I32Store(mem_arg(0)));
-
-        // Store value at pair+4
-        func.instruction(&Instruction::LocalGet(pair_local));
-        func.instruction(&Instruction::LocalGet(tmp));
-        func.instruction(&Instruction::I32Store(mem_arg(4)));
-
-        // Return pair pointer
+        let pair_local = self.alloc_to_local(func, size);
+        for offset in [0, second_offset] {
+            func.instruction(&Instruction::LocalGet(pair_local));
+            func.instruction(&Instruction::LocalGet(value));
+            emit_typed_store(func, ty, offset);
+        }
         func.instruction(&Instruction::LocalGet(pair_local));
     }
 
@@ -3137,34 +3365,65 @@ impl Codegen {
     }
 
     fn compile_binop(&mut self, func: &mut Function, op: BinOp, left: &Expr, right: &Expr) {
-        self.compile_expr(func, left);
-        self.compile_expr(func, right);
-
-        let instr = match op {
-            BinOp::Add => Instruction::I32Add,
-            BinOp::Sub => Instruction::I32Sub,
-            BinOp::Mul => Instruction::I32Mul,
-            BinOp::Div => Instruction::I32DivS,
-            BinOp::Mod => Instruction::I32RemS,
-            BinOp::Lt => Instruction::I32LtS,
-            BinOp::Le => Instruction::I32LeS,
-            BinOp::Gt => Instruction::I32GtS,
-            BinOp::Ge => Instruction::I32GeS,
-            BinOp::Eq => Instruction::I32Eq,
-            BinOp::Ne => Instruction::I32Ne,
-            BinOp::And => Instruction::I32And,
-            BinOp::Or => Instruction::I32Or,
-        };
-        func.instruction(&instr);
+        // The checker unifies the two operand types, so the left one
+        // selects the instruction.
+        let operand = self.valtype_of(left);
+        let on_strings = matches!(self.ty_of(left), Some(Ty::String(_)));
+        match (op, operand) {
+            // Strings are equal when their contents are.
+            (BinOp::Eq | BinOp::Ne, _) if on_strings => {
+                self.compile_expr(func, left);
+                self.compile_expr(func, right);
+                func.instruction(&Instruction::Call(self.fn_string_eq()));
+                if op == BinOp::Ne {
+                    func.instruction(&Instruction::I32Eqz);
+                }
+            }
+            // Wasm has no float remainder: call the exact `fmod` helper.
+            // An F32 remainder taken in F64 is exact, so it is demoted
+            // without a second rounding.
+            (BinOp::Mod, ValType::F32) => {
+                self.compile_expr(func, left);
+                func.instruction(&Instruction::F64PromoteF32);
+                self.compile_expr(func, right);
+                func.instruction(&Instruction::F64PromoteF32);
+                func.instruction(&Instruction::Call(self.fn_fmod()));
+                func.instruction(&Instruction::F32DemoteF64);
+            }
+            (BinOp::Mod, ValType::F64) => {
+                self.compile_expr(func, left);
+                self.compile_expr(func, right);
+                func.instruction(&Instruction::Call(self.fn_fmod()));
+            }
+            _ => {
+                self.compile_expr(func, left);
+                self.compile_expr(func, right);
+                func.instruction(&binop_instruction(op, operand));
+            }
+        }
     }
 
     fn compile_unaryop(&mut self, func: &mut Function, op: UnaryOp, operand: &Expr) {
-        match op {
-            UnaryOp::Not => {
+        match (op, self.valtype_of(operand)) {
+            (UnaryOp::Not, _) => {
                 self.compile_expr(func, operand);
                 func.instruction(&Instruction::I32Eqz);
             }
-            UnaryOp::Neg => {
+            (UnaryOp::Neg, ValType::F32) => {
+                self.compile_expr(func, operand);
+                func.instruction(&Instruction::F32Neg);
+            }
+            (UnaryOp::Neg, ValType::F64) => {
+                self.compile_expr(func, operand);
+                func.instruction(&Instruction::F64Neg);
+            }
+            // Integer negation is `0 - x`, which wraps at the minimum.
+            (UnaryOp::Neg, ValType::I64) => {
+                func.instruction(&Instruction::I64Const(0));
+                self.compile_expr(func, operand);
+                func.instruction(&Instruction::I64Sub);
+            }
+            (UnaryOp::Neg, _) => {
                 func.instruction(&Instruction::I32Const(0));
                 self.compile_expr(func, operand);
                 func.instruction(&Instruction::I32Sub);
@@ -3173,112 +3432,71 @@ impl Codegen {
     }
 
     fn compile_list_lit(&mut self, func: &mut Function, elements: &[Expr]) {
-        // Create list with capacity = length
-        let capacity = elements.len() as i32;
-        func.instruction(&Instruction::I32Const(capacity));
+        // Create the list with capacity = length; the handle stays on the
+        // stack. Each append takes the handle and the element (widened to
+        // a slot) and leaves the handle.
+        func.instruction(&Instruction::I32Const(elements.len() as i32));
         func.instruction(&Instruction::Call(self.fn_list_new()));
-
-        // list_new returns handle on stack
-        // For each element: dup handle, append element, drop status, keep new handle
         for elem in elements {
-            // Duplicate handle for append call
-            func.instruction(&Instruction::LocalTee(self.locals.temp()));
-
-            // Compile element
             self.compile_expr(func, elem);
-
-            // Call list_append (consumes handle + element, returns new handle)
+            emit_to_slot(func, self.valtype_of(elem));
             func.instruction(&Instruction::Call(self.fn_list_append()));
-
-            // list_append returns new handle on stack
         }
-
-        // Final handle is on stack
     }
 
     fn compile_list_index(&mut self, func: &mut Function, list: &Expr, index: &Expr) {
-        // Compile list expression
+        let elem = match self.ty_of(list) {
+            Some(Ty::List(elem)) => ty_to_valtype(elem),
+            _ => ValType::I32,
+        };
         self.compile_expr(func, list);
-
-        // Compile index expression
         self.compile_expr(func, index);
-
-        // Call list_get(handle, idx) -> element
+        // list_get(handle, idx) -> slot; traps when idx is out of range.
         func.instruction(&Instruction::Call(self.fn_list_get()));
+        emit_from_slot(func, elem);
     }
 
     fn compile_tuple_lit(&mut self, func: &mut Function, elements: &[Expr]) {
-        if elements.is_empty() {
-            // Empty tuple = unit
-            func.instruction(&Instruction::I32Const(0));
-            return;
-        }
-
-        if elements.len() == 1 {
-            // Single element = just the element
-            self.compile_expr(func, &elements[0]);
-            return;
-        }
-
-        // Tuples are compiled by placing all elements on the WASM stack.
-        // For 2-element tuples (pairs), this maps directly to two stack values.
-        // For 3+ elements, we allocate a struct in linear memory:
-        //   [elem_count: i32, elem0: i64, elem1: i64, ...]
-        // and push the pointer as a single i64.
-        if elements.len() <= 2 {
-            // Small tuples: elements live on the stack
-            for elem in elements {
-                self.compile_expr(func, elem);
+        match elements {
+            // The checker types `()` as Unit, `(a)` as `a` and `(a, b)` as
+            // a pair; the layouts follow.
+            [] => {
+                func.instruction(&Instruction::I32Const(0));
             }
-        } else {
-            // Large tuples: allocate in memory (8 bytes per element + 4 header)
-            let size = 4 + (elements.len() as i32) * 8;
-            func.instruction(&Instruction::I32Const(size));
-            func.instruction(&Instruction::Call(self.fn_region_alloc()));
-            // Store count header
-            func.instruction(&Instruction::LocalTee(self.locals.scratch_local()));
-            func.instruction(&Instruction::I32Const(elements.len() as i32));
-            func.instruction(&Instruction::I32Store(MemArg {
-                offset: 0,
-                align: 2,
-                memory_index: 0,
-            }));
-            // Store each element at offset 4 + i*8
-            for (i, elem) in elements.iter().enumerate() {
-                func.instruction(&Instruction::LocalGet(self.locals.scratch_local()));
-                self.compile_expr(func, elem);
-                func.instruction(&Instruction::I64Store(MemArg {
-                    offset: 4 + (i as u64) * 8,
-                    align: 3,
-                    memory_index: 0,
-                }));
+            [only] => self.compile_expr(func, only),
+            [left, right] => self.compile_pair(func, left, right),
+            // Three or more: a pointer to one 8-byte slot per element.
+            // Element `i` is at offset `i * 8`, stored at its own type.
+            _ => {
+                func.instruction(&Instruction::I32Const(elements.len() as i32 * TUPLE_SLOT));
+                func.instruction(&Instruction::I32Const(0));
+                func.instruction(&Instruction::Call(self.fn_bump_alloc()));
+                let tuple_local = self.locals.temp();
+                func.instruction(&Instruction::LocalSet(tuple_local));
+                for (i, elem) in elements.iter().enumerate() {
+                    func.instruction(&Instruction::LocalGet(tuple_local));
+                    self.compile_expr(func, elem);
+                    emit_typed_store(func, self.valtype_of(elem), i as u64 * TUPLE_SLOT as u64);
+                }
+                func.instruction(&Instruction::LocalGet(tuple_local));
             }
-            // Push pointer as i64
-            func.instruction(&Instruction::LocalGet(self.locals.scratch_local()));
-            func.instruction(&Instruction::I64ExtendI32U);
         }
     }
 
     fn compile_tuple_index(&mut self, func: &mut Function, tuple: &Expr, index: usize) {
-        // Compile the tuple expression.
-        self.compile_expr(func, tuple);
-
-        // For 2-element tuples (pairs on stack): .0 and .1 are two stack values.
-        // For 3+ element tuples (memory-allocated): the pointer is on stack,
-        // and we load element at offset 4 + index*8.
-        //
-        // Heuristic: if the tuple type has <= 2 elements, it's on the stack.
-        // Otherwise, it's a pointer to a memory-allocated struct.
-        // For now, treat as memory-allocated (the general case) since
-        // stack-based pairs should use ExprKind::Fst/Snd instead.
-        //
-        // Stack has: [tuple_ptr as i64]
-        func.instruction(&Instruction::I32WrapI64); // ptr: i64 → i32
-        func.instruction(&Instruction::I64Load(MemArg {
-            offset: 4 + (index as u64) * 8,
-            align: 3,
-            memory_index: 0,
-        }));
+        match self.ty_of(tuple).cloned() {
+            Some(Ty::Tuple(elems)) if index < elems.len() => {
+                self.compile_expr(func, tuple);
+                emit_typed_load(
+                    func,
+                    ty_to_valtype(&elems[index]),
+                    index as u64 * TUPLE_SLOT as u64,
+                );
+            }
+            // A 2-tuple is a pair.
+            _ if index == 0 => self.compile_fst(func, tuple),
+            _ => self.compile_snd(func, tuple),
+        }
     }
 
     // -----------------------------------------------------------------------
@@ -3336,6 +3554,398 @@ fn collect_first_ctor(pat: &Pattern) -> Option<SmolStr> {
         Some(ctor.clone())
     } else {
         None
+    }
+}
+
+/// The instruction for `op` on two operands of wasm type `ty`.
+///
+/// Integer arithmetic wraps. Integer `/` and `%` are the signed forms:
+/// both trap on a zero divisor, `/` traps on `MIN / -1`, and `MIN % -1`
+/// is 0. `&&` and `||` take Bool operands, which are i32.
+fn binop_instruction(op: BinOp, ty: ValType) -> Instruction<'static> {
+    use Instruction as I;
+    use ValType as V;
+    match (op, ty) {
+        (BinOp::Add, V::I64) => I::I64Add,
+        (BinOp::Add, V::F32) => I::F32Add,
+        (BinOp::Add, V::F64) => I::F64Add,
+        (BinOp::Add, _) => I::I32Add,
+        (BinOp::Sub, V::I64) => I::I64Sub,
+        (BinOp::Sub, V::F32) => I::F32Sub,
+        (BinOp::Sub, V::F64) => I::F64Sub,
+        (BinOp::Sub, _) => I::I32Sub,
+        (BinOp::Mul, V::I64) => I::I64Mul,
+        (BinOp::Mul, V::F32) => I::F32Mul,
+        (BinOp::Mul, V::F64) => I::F64Mul,
+        (BinOp::Mul, _) => I::I32Mul,
+        (BinOp::Div, V::I64) => I::I64DivS,
+        (BinOp::Div, V::F32) => I::F32Div,
+        (BinOp::Div, V::F64) => I::F64Div,
+        (BinOp::Div, _) => I::I32DivS,
+        (BinOp::Mod, V::I64) => I::I64RemS,
+        // Float remainder is a call to the `fmod` helper (`compile_binop`).
+        (BinOp::Mod, V::F32 | V::F64) => I::Unreachable,
+        (BinOp::Mod, _) => I::I32RemS,
+        (BinOp::Lt, V::I64) => I::I64LtS,
+        (BinOp::Lt, V::F32) => I::F32Lt,
+        (BinOp::Lt, V::F64) => I::F64Lt,
+        (BinOp::Lt, _) => I::I32LtS,
+        (BinOp::Le, V::I64) => I::I64LeS,
+        (BinOp::Le, V::F32) => I::F32Le,
+        (BinOp::Le, V::F64) => I::F64Le,
+        (BinOp::Le, _) => I::I32LeS,
+        (BinOp::Gt, V::I64) => I::I64GtS,
+        (BinOp::Gt, V::F32) => I::F32Gt,
+        (BinOp::Gt, V::F64) => I::F64Gt,
+        (BinOp::Gt, _) => I::I32GtS,
+        (BinOp::Ge, V::I64) => I::I64GeS,
+        (BinOp::Ge, V::F32) => I::F32Ge,
+        (BinOp::Ge, V::F64) => I::F64Ge,
+        (BinOp::Ge, _) => I::I32GeS,
+        (BinOp::Eq, V::I64) => I::I64Eq,
+        (BinOp::Eq, V::F32) => I::F32Eq,
+        (BinOp::Eq, V::F64) => I::F64Eq,
+        (BinOp::Eq, _) => I::I32Eq,
+        (BinOp::Ne, V::I64) => I::I64Ne,
+        (BinOp::Ne, V::F32) => I::F32Ne,
+        (BinOp::Ne, V::F64) => I::F64Ne,
+        (BinOp::Ne, _) => I::I32Ne,
+        (BinOp::And, _) => I::I32And,
+        (BinOp::Or, _) => I::I32Or,
+    }
+}
+
+/// Widen the value of wasm type `ty` on the stack to a list slot (i64).
+fn emit_to_slot(func: &mut Function, ty: ValType) {
+    match ty {
+        ValType::I64 => {}
+        ValType::F64 => {
+            func.instruction(&Instruction::I64ReinterpretF64);
+        }
+        ValType::F32 => {
+            func.instruction(&Instruction::I32ReinterpretF32);
+            func.instruction(&Instruction::I64ExtendI32U);
+        }
+        _ => {
+            func.instruction(&Instruction::I64ExtendI32S);
+        }
+    }
+}
+
+/// Narrow the list slot (i64) on the stack back to wasm type `ty`.
+fn emit_from_slot(func: &mut Function, ty: ValType) {
+    match ty {
+        ValType::I64 => {}
+        ValType::F64 => {
+            func.instruction(&Instruction::F64ReinterpretI64);
+        }
+        ValType::F32 => {
+            func.instruction(&Instruction::I32WrapI64);
+            func.instruction(&Instruction::F32ReinterpretI32);
+        }
+        _ => {
+            func.instruction(&Instruction::I32WrapI64);
+        }
+    }
+}
+
+/// `fmod(x: f64, y: f64) -> f64`: the exact IEEE remainder with the sign
+/// of `x`, as Rust's `%` (and C's `fmod`) compute it. `x - trunc(x / y) * y`
+/// is not exact, so this is the bit-level algorithm (after musl's `fmod`):
+/// align the two significands by exponent and subtract-and-shift.
+fn gen_fmod() -> Function {
+    use wasm_encoder::BlockType::Empty;
+    use Instruction as I;
+    // params: 0 = x, 1 = y (f64)
+    // locals: 2 = ux, 3 = uy (bits), 4 = ex, 5 = ey (exponents, signed),
+    //         6 = t (scratch), 7 = sx (sign bit of x)
+    const UX: u32 = 2;
+    const UY: u32 = 3;
+    const EX: u32 = 4;
+    const EY: u32 = 5;
+    const T: u32 = 6;
+    const SX: u32 = 7;
+    let mut f = Function::new(vec![(6, ValType::I64)]);
+    let mut emit = |ins: &[I<'static>]| {
+        for i in ins {
+            f.instruction(i);
+        }
+    };
+    // `0.0 * x`: a zero with the sign of x.
+    let zero_like_x = [I::F64Const(0.0), I::LocalGet(0), I::F64Mul, I::Return];
+
+    emit(&[
+        I::LocalGet(0),
+        I::I64ReinterpretF64,
+        I::LocalSet(UX),
+        I::LocalGet(1),
+        I::I64ReinterpretF64,
+        I::LocalSet(UY),
+        // ex = (ux >> 52) & 0x7ff
+        I::LocalGet(UX),
+        I::I64Const(52),
+        I::I64ShrU,
+        I::I64Const(0x7ff),
+        I::I64And,
+        I::LocalSet(EX),
+        I::LocalGet(UY),
+        I::I64Const(52),
+        I::I64ShrU,
+        I::I64Const(0x7ff),
+        I::I64And,
+        I::LocalSet(EY),
+        I::LocalGet(UX),
+        I::I64Const(63),
+        I::I64ShrU,
+        I::LocalSet(SX),
+        // y is zero, y is NaN, or x is infinite or NaN: the result is NaN.
+        I::LocalGet(UY),
+        I::I64Const(1),
+        I::I64Shl,
+        I::I64Eqz,
+        I::LocalGet(1),
+        I::LocalGet(1),
+        I::F64Ne,
+        I::I32Or,
+        I::LocalGet(EX),
+        I::I64Const(0x7ff),
+        I::I64Eq,
+        I::I32Or,
+        I::If(Empty),
+        I::LocalGet(0),
+        I::LocalGet(1),
+        I::F64Mul,
+        I::LocalGet(0),
+        I::LocalGet(1),
+        I::F64Mul,
+        I::F64Div,
+        I::Return,
+        I::End,
+        // |x| <= |y|: the result is x, or a signed zero when they are equal.
+        I::LocalGet(UX),
+        I::I64Const(1),
+        I::I64Shl,
+        I::LocalGet(UY),
+        I::I64Const(1),
+        I::I64Shl,
+        I::I64LeU,
+        I::If(Empty),
+        I::LocalGet(UX),
+        I::I64Const(1),
+        I::I64Shl,
+        I::LocalGet(UY),
+        I::I64Const(1),
+        I::I64Shl,
+        I::I64Eq,
+        I::If(Empty),
+    ]);
+    emit(&zero_like_x);
+    emit(&[I::End, I::LocalGet(0), I::Return, I::End]);
+
+    // Normalise one operand: leave its significand with the implicit bit
+    // at position 52, and its exponent in `e` (below 1 for a subnormal).
+    let normalise = |u: u32, e: u32| -> Vec<I<'static>> {
+        vec![
+            I::LocalGet(e),
+            I::I64Eqz,
+            I::If(Empty),
+            // Subnormal: count the leading zeros of the significand.
+            I::LocalGet(u),
+            I::I64Const(12),
+            I::I64Shl,
+            I::LocalSet(T),
+            I::Block(Empty),
+            I::Loop(Empty),
+            I::LocalGet(T),
+            I::I64Const(63),
+            I::I64ShrU,
+            I::I32WrapI64,
+            I::BrIf(1),
+            I::LocalGet(e),
+            I::I64Const(1),
+            I::I64Sub,
+            I::LocalSet(e),
+            I::LocalGet(T),
+            I::I64Const(1),
+            I::I64Shl,
+            I::LocalSet(T),
+            I::Br(0),
+            I::End,
+            I::End,
+            // u <<= 1 - e
+            I::LocalGet(u),
+            I::I64Const(1),
+            I::LocalGet(e),
+            I::I64Sub,
+            I::I64Shl,
+            I::LocalSet(u),
+            I::Else,
+            // Normal: keep the 52 significand bits, set the implicit bit.
+            I::LocalGet(u),
+            I::I64Const(0x000f_ffff_ffff_ffff),
+            I::I64And,
+            I::I64Const(1 << 52),
+            I::I64Or,
+            I::LocalSet(u),
+            I::End,
+        ]
+    };
+    emit(&normalise(UX, EX));
+    emit(&normalise(UY, EY));
+
+    // One subtract step: t = ux - uy; when t >= 0, ux = t (and a zero t
+    // ends the whole computation with a signed zero).
+    let subtract_step: Vec<I<'static>> = [
+        vec![
+            I::LocalGet(UX),
+            I::LocalGet(UY),
+            I::I64Sub,
+            I::LocalTee(T),
+            I::I64Const(63),
+            I::I64ShrU,
+            I::I64Eqz,
+            I::If(Empty),
+            I::LocalGet(T),
+            I::I64Eqz,
+            I::If(Empty),
+        ],
+        zero_like_x.to_vec(),
+        vec![I::End, I::LocalGet(T), I::LocalSet(UX), I::End],
+    ]
+    .concat();
+
+    // for (; ex > ey; ex--) { subtract step; ux <<= 1 }
+    emit(&[
+        I::Block(Empty),
+        I::Loop(Empty),
+        I::LocalGet(EX),
+        I::LocalGet(EY),
+        I::I64LeS,
+        I::BrIf(1),
+    ]);
+    emit(&subtract_step);
+    emit(&[
+        I::LocalGet(UX),
+        I::I64Const(1),
+        I::I64Shl,
+        I::LocalSet(UX),
+        I::LocalGet(EX),
+        I::I64Const(1),
+        I::I64Sub,
+        I::LocalSet(EX),
+        I::Br(0),
+        I::End,
+        I::End,
+    ]);
+    emit(&subtract_step);
+
+    emit(&[
+        // for (; ux >> 52 == 0; ux <<= 1, ex--);
+        I::Block(Empty),
+        I::Loop(Empty),
+        I::LocalGet(UX),
+        I::I64Const(52),
+        I::I64ShrU,
+        I::I64Eqz,
+        I::I32Eqz,
+        I::BrIf(1),
+        I::LocalGet(UX),
+        I::I64Const(1),
+        I::I64Shl,
+        I::LocalSet(UX),
+        I::LocalGet(EX),
+        I::I64Const(1),
+        I::I64Sub,
+        I::LocalSet(EX),
+        I::Br(0),
+        I::End,
+        I::End,
+        // Scale the result back.
+        I::LocalGet(EX),
+        I::I64Const(0),
+        I::I64GtS,
+        I::If(Empty),
+        // Normal: drop the implicit bit, put the exponent back.
+        I::LocalGet(UX),
+        I::I64Const(1 << 52),
+        I::I64Sub,
+        I::LocalGet(EX),
+        I::I64Const(52),
+        I::I64Shl,
+        I::I64Or,
+        I::LocalSet(UX),
+        I::Else,
+        // Subnormal: ux >>= 1 - ex
+        I::LocalGet(UX),
+        I::I64Const(1),
+        I::LocalGet(EX),
+        I::I64Sub,
+        I::I64ShrU,
+        I::LocalSet(UX),
+        I::End,
+        // Sign of x.
+        I::LocalGet(UX),
+        I::LocalGet(SX),
+        I::I64Const(63),
+        I::I64Shl,
+        I::I64Or,
+        I::F64ReinterpretI64,
+        I::End,
+    ]);
+    f
+}
+
+/// Layout of a pair: the offset of the second component and the total
+/// size, with each component at its natural alignment. `(i32, i32)` is
+/// `(4, 8)`.
+fn pair_layout(first: ValType, second: ValType) -> (u64, u64) {
+    let (first_size, _, _) = valtype_storage(first);
+    let (second_size, second_align, _) = valtype_storage(second);
+    let offset = align_up(first_size, second_align);
+    (offset, offset + second_size)
+}
+
+/// Offset of the payload of a sum cell, after its i32 tag: 4, or 8 for
+/// an 8-byte payload.
+fn sum_payload_offset(payload: ValType) -> u64 {
+    align_up(4, valtype_storage(payload).1)
+}
+
+/// `ty` without its borrows and references (identity at run time).
+fn peel_borrows(ty: &Ty) -> &Ty {
+    match ty {
+        Ty::Borrow { inner, .. } | Ty::Ref { inner, .. } => peel_borrows(inner),
+        _ => ty,
+    }
+}
+
+/// True when the lowering of `pattern` against a value of type `ty`
+/// would read an I64, F32 or F64 component as an i32. A variable, a
+/// wildcard and a pair pattern are lowered at the type of the value; a
+/// tuple, constructor or literal pattern reads i32 values only.
+fn pattern_reads_wide_as_i32(pattern: &Pattern, ty: &Ty) -> bool {
+    match (pattern, peel_borrows(ty)) {
+        (Pattern::Wildcard | Pattern::Var(_) | Pattern::Unit, _) => false,
+        (Pattern::Pair(l, r), Ty::Prod { left, right }) => {
+            pattern_reads_wide_as_i32(l, left) || pattern_reads_wide_as_i32(r, right)
+        }
+        _ => has_non_i32_component(ty),
+    }
+}
+
+/// True when a value of type `ty` has a component that is not an i32 at
+/// run time (an I64, F32 or F64 inside a pair, sum, tuple or list, or
+/// the value itself).
+fn has_non_i32_component(ty: &Ty) -> bool {
+    match ty {
+        Ty::Base(BaseTy::I64 | BaseTy::F32 | BaseTy::F64) => true,
+        Ty::Prod { left, right } | Ty::Sum { left, right } => {
+            has_non_i32_component(left) || has_non_i32_component(right)
+        }
+        Ty::Tuple(elems) => elems.iter().any(has_non_i32_component),
+        Ty::List(elem) => has_non_i32_component(elem),
+        Ty::Borrow { inner, .. } | Ty::Ref { inner, .. } => has_non_i32_component(inner),
+        _ => false,
     }
 }
 
@@ -3547,6 +4157,24 @@ mod tests {
     }
 
     /// Shorthand for creating a dummy expression.
+    /// `{ drop(s); 0 }`: the body of a well-typed function that takes a
+    /// linear `s` and returns an I32.
+    fn drop_s_then_zero() -> Expr {
+        e(ExprKind::Block(vec![
+            e(ExprKind::Drop(Box::new(e(ExprKind::Var("s".into()))))),
+            e(ExprKind::Lit(Literal::I32(0))),
+        ]))
+    }
+
+    /// `region r { drop(<string>) }`: a string expression in a well-typed
+    /// program (its region is active, and it does not escape).
+    fn in_region_dropped(string: Expr) -> Expr {
+        e(ExprKind::Region {
+            name: "r".into(),
+            body: Box::new(e(ExprKind::Drop(Box::new(string)))),
+        })
+    }
+
     fn e(kind: ExprKind) -> Expr {
         Expr::new(kind, Span::dummy())
     }
@@ -4153,6 +4781,39 @@ mod tests {
         validate_wasm(&wasm);
     }
 
+    /// The fallback of `compile_module_with_main` checks the main body
+    /// before it compiles it. It used to compile it with no type table,
+    /// so a 64-bit `if` got an i32 block type.
+    #[test]
+    fn module_with_main_fallback_checks_the_body() {
+        // fn f(): I32 = true   (not well typed: the fallback is taken)
+        let module = AstModule {
+            name: "test".into(),
+            imports: vec![],
+            decls: vec![Decl::Fn {
+                name: "f".into(),
+                visibility: Visibility::Private,
+                type_params: vec![],
+                params: vec![],
+                ret_ty: Ty::Base(BaseTy::I32),
+                body: e(ExprKind::Lit(Literal::Bool(true))),
+            }],
+        };
+        // if true then fst((1i64, 2)) else 3i64
+        let main_body = e(ExprKind::If {
+            cond: Box::new(e(ExprKind::Lit(Literal::Bool(true)))),
+            then_branch: Box::new(e(ExprKind::Fst(Box::new(e(ExprKind::Pair {
+                left: Box::new(e(ExprKind::Lit(Literal::I64(1)))),
+                right: Box::new(e(ExprKind::Lit(Literal::I32(2)))),
+            }))))),
+            else_branch: Box::new(e(ExprKind::Lit(Literal::I64(3)))),
+        });
+        let wasm = Codegen::new()
+            .compile_module_with_main(&module, &main_body)
+            .expect("the main body compiles on its own");
+        validate_wasm(&wasm);
+    }
+
     #[test]
     fn compile_module_multiple_functions() {
         // fn double(x: I32) -> I32 = x + x
@@ -4334,16 +4995,35 @@ mod tests {
     #[test]
     fn compile_drop_expression() {
         let mut codegen = Codegen::new();
-        // let x = 42 in drop(x)  -- simplified: drop returns unit
-        let expr = e(ExprKind::Let {
-            name: "x".into(),
-            ty: None,
-            value: Box::new(e(ExprKind::Lit(Literal::I32(42)))),
-            body: Box::new(e(ExprKind::Drop(Box::new(e(ExprKind::Var("x".into())))))),
-        });
+        // region r { drop(String.new@r("x")) }: only a linear value can
+        // be dropped.
+        let expr = in_region_dropped(e(ExprKind::StringNew {
+            region: "r".into(),
+            value: "x".to_string(),
+        }));
         let wasm = codegen.compile_program(&expr).unwrap();
         assert_wasm_header(&wasm);
         validate_wasm(&wasm);
+    }
+
+    /// The single-expression path declares each local at its own type.
+    /// (It declared 16 i32 locals, so this module did not validate.)
+    #[test]
+    fn compile_program_declares_typed_locals() {
+        for value in [
+            Literal::F64(1.5),
+            Literal::I64(5_000_000_000),
+            Literal::F32(1.5),
+        ] {
+            let expr = e(ExprKind::Let {
+                name: "x".into(),
+                ty: None,
+                value: Box::new(e(ExprKind::Lit(value))),
+                body: Box::new(e(ExprKind::Var("x".into()))),
+            });
+            let wasm = Codegen::new().compile_program(&expr).unwrap();
+            validate_wasm(&wasm);
+        }
     }
 
     #[test]
@@ -4443,10 +5123,10 @@ mod tests {
     #[test]
     fn compile_string_new() {
         let mut codegen = Codegen::new();
-        let expr = e(ExprKind::StringNew {
+        let expr = in_region_dropped(e(ExprKind::StringNew {
             region: "r".into(),
             value: "hello".to_string(),
-        });
+        }));
         let wasm = codegen.compile_program(&expr).unwrap();
         assert_wasm_header(&wasm);
         validate_wasm(&wasm);
@@ -4455,7 +5135,7 @@ mod tests {
     #[test]
     fn compile_string_concat() {
         let mut codegen = Codegen::new();
-        let expr = e(ExprKind::StringConcat {
+        let expr = in_region_dropped(e(ExprKind::StringConcat {
             left: Box::new(e(ExprKind::StringNew {
                 region: "r".into(),
                 value: "hello ".to_string(),
@@ -4464,7 +5144,7 @@ mod tests {
                 region: "r".into(),
                 value: "world".to_string(),
             })),
-        });
+        }));
         let wasm = codegen.compile_program(&expr).unwrap();
         assert_wasm_header(&wasm);
         validate_wasm(&wasm);
@@ -4473,12 +5153,17 @@ mod tests {
     #[test]
     fn compile_string_in_region() {
         let mut codegen = Codegen::new();
-        // region r { String.new@r("test") }
+        // region r { let! s = String.new@r("test") in drop(s) }
         let expr = e(ExprKind::Region {
             name: "r".into(),
-            body: Box::new(e(ExprKind::StringNew {
-                region: "r".into(),
-                value: "test".to_string(),
+            body: Box::new(e(ExprKind::LetLin {
+                name: "s".into(),
+                ty: None,
+                value: Box::new(e(ExprKind::StringNew {
+                    region: "r".into(),
+                    value: "test".to_string(),
+                })),
+                body: Box::new(e(ExprKind::Drop(Box::new(e(ExprKind::Var("s".into())))))),
             })),
         });
         let wasm = codegen.compile_program(&expr).unwrap();
@@ -4494,27 +5179,15 @@ mod tests {
     fn compile_simple_lambda() {
         // Test: (lambda (x : I32) (+ x 1))
         let mut codegen = Codegen::new();
-        let expr = Expr {
-            kind: ExprKind::Lambda {
-                param: "x".into(),
-                param_ty: Ty::Base(BaseTy::I32),
-                body: Box::new(Expr {
-                    kind: ExprKind::BinOp {
-                        op: BinOp::Add,
-                        left: Box::new(Expr {
-                            kind: ExprKind::Var("x".into()),
-                            span: Span::dummy(),
-                        }),
-                        right: Box::new(Expr {
-                            kind: ExprKind::Lit(Literal::I32(1)),
-                            span: Span::dummy(),
-                        }),
-                    },
-                    span: Span::dummy(),
-                }),
-            },
-            span: Span::dummy(),
-        };
+        let expr = Expr::dummy(ExprKind::Lambda {
+            param: "x".into(),
+            param_ty: Ty::Base(BaseTy::I32),
+            body: Box::new(Expr::dummy(ExprKind::BinOp {
+                op: BinOp::Add,
+                left: Box::new(Expr::dummy(ExprKind::Var("x".into()))),
+                right: Box::new(Expr::dummy(ExprKind::Lit(Literal::I32(1)))),
+            })),
+        });
         let wasm = codegen.compile_program(&expr).unwrap();
         assert_wasm_header(&wasm);
         validate_wasm(&wasm);
@@ -5097,6 +5770,64 @@ mod tests {
         validate_wasm(&wasm);
     }
 
+    /// A pair pattern is lowered at the type of each component. A literal
+    /// pattern still reads an i32, so on an I64 value it is refused; it
+    /// is not lowered to an arm that never matches.
+    #[test]
+    fn match_patterns_on_wide_values() {
+        let module = |ret_ty, body| AstModule {
+            name: "t".into(),
+            imports: vec![],
+            decls: vec![Decl::Fn {
+                name: "f".into(),
+                visibility: Visibility::Private,
+                type_params: vec![],
+                params: vec![],
+                ret_ty,
+                body,
+            }],
+        };
+        let wide = || e(ExprKind::Lit(Literal::I64(5_000_000_000)));
+        let arm = |pattern, body| MatchArm {
+            pattern,
+            guard: None,
+            body,
+        };
+
+        // match (1, 5000000000) of | (a, b) => b end
+        let pair = e(ExprKind::Pair {
+            left: Box::new(e(ExprKind::Lit(Literal::I32(1)))),
+            right: Box::new(wide()),
+        });
+        let typed = e(ExprKind::Match {
+            scrutinee: Box::new(pair),
+            arms: vec![arm(
+                P::Pair(Box::new(P::Var("a".into())), Box::new(P::Var("b".into()))),
+                e(ExprKind::Var("b".into())),
+            )],
+        });
+        let wasm = compile_module(&module(Ty::Base(BaseTy::I64), typed)).expect("typed pair");
+        validate_wasm(&wasm);
+
+        // match 5000000000 of | 5000000000 => 1 | _ => 0 end
+        let literal = e(ExprKind::Match {
+            scrutinee: Box::new(wide()),
+            arms: vec![
+                arm(
+                    P::Literal(Literal::I64(5_000_000_000)),
+                    e(ExprKind::Lit(Literal::I32(1))),
+                ),
+                arm(P::Wildcard, e(ExprKind::Lit(Literal::I32(0)))),
+            ],
+        });
+        let err = compile_module(&module(Ty::Base(BaseTy::I32), literal)).expect_err("refused");
+        assert!(
+            err.0.starts_with(UNSUPPORTED_PREFIX) && err.0.contains("`match`"),
+            "{}",
+            err.0
+        );
+    }
+
     /// Three constructors → br_table over 3 labels, last constructor
     /// uses the bare-payload path.
     #[test]
@@ -5319,8 +6050,8 @@ mod tests {
         let entries =
             carriers::parse_access_sites_payload(&payload).expect("access-sites payload parses");
         // string_new (2 stores) + string_len (1 load) + string_concat
-        // (4 loads + 2 stores) = 9 typed accesses.
-        assert_eq!(entries.len(), 9);
+        // (4 loads + 2 stores) + string_eq (4 loads) = 13 typed accesses.
+        assert_eq!(entries.len(), 13);
 
         // Collect function bodies in index order + the import count so
         // entry.func_idx (imports-included space) maps to a body.
@@ -5370,7 +6101,7 @@ mod tests {
                 type_params: vec![],
                 params: vec![("s".into(), Ty::String("r".into()))],
                 ret_ty: Ty::Base(BaseTy::I32),
-                body: e(ExprKind::Lit(Literal::I32(0))),
+                body: drop_s_then_zero(),
             }],
         };
         let wasm = compile_module(&module).expect("compilation failed");
@@ -5456,7 +6187,7 @@ mod tests {
                     type_params: vec![],
                     params: vec![("s".into(), Ty::String("r".into()))],
                     ret_ty: Ty::Base(BaseTy::I32),
-                    body: e(ExprKind::Lit(Literal::I32(0))),
+                    body: drop_s_then_zero(),
                 },
                 Decl::Fn {
                     name: "second_consume".into(),
@@ -5464,7 +6195,7 @@ mod tests {
                     type_params: vec![],
                     params: vec![("s".into(), Ty::String("r".into()))],
                     ret_ty: Ty::Base(BaseTy::I32),
-                    body: e(ExprKind::Lit(Literal::I32(0))),
+                    body: drop_s_then_zero(),
                 },
             ],
         };
@@ -5501,7 +6232,7 @@ mod tests {
                     type_params: vec![],
                     params: vec![("s".into(), Ty::String("r".into()))],
                     ret_ty: Ty::Base(BaseTy::I32),
-                    body: e(ExprKind::Lit(Literal::I32(0))),
+                    body: drop_s_then_zero(),
                 },
             ],
         };

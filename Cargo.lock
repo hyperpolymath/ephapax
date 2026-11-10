@@ -756,6 +756,7 @@ dependencies = [
  "clap",
  "colored",
  "ephapax-desugar",
+ "ephapax-driver",
  "ephapax-interp",
  "ephapax-ir",
  "ephapax-lexer",
@@ -763,7 +764,6 @@ dependencies = [
  "ephapax-parser",
  "ephapax-query",
  "ephapax-repl",
- "ephapax-surface",
  "ephapax-syntax",
  "ephapax-typing",
  "ephapax-wasm",
@@ -786,6 +786,20 @@ dependencies = [
  "ephapax-syntax",
  "ephapax-typing",
  "smol_str",
+ "thiserror 2.0.18",
+]
+
+[[package]]
+name = "ephapax-driver"
+version = "0.1.0"
+dependencies = [
+ "ephapax-desugar",
+ "ephapax-parser",
+ "ephapax-surface",
+ "ephapax-syntax",
+ "ephapax-typing",
+ "ephapax-wasm",
+ "tempfile",
  "thiserror 2.0.18",
 ]
 
@@ -844,9 +858,8 @@ dependencies = [
 name = "ephapax-lsp"
 version = "0.1.0"
 dependencies = [
- "ephapax-parser",
+ "ephapax-driver",
  "ephapax-syntax",
- "ephapax-typing",
  "serde_json",
  "smol_str",
  "tokio",
@@ -904,9 +917,7 @@ dependencies = [
 name = "ephapax-query"
 version = "0.1.0"
 dependencies = [
- "ephapax-parser",
- "ephapax-syntax",
- "ephapax-typing",
+ "ephapax-driver",
  "ephapax-wasm",
 ]
 
@@ -915,6 +926,7 @@ name = "ephapax-repl"
 version = "0.1.0"
 dependencies = [
  "colored",
+ "ephapax-driver",
  "ephapax-interp",
  "ephapax-lexer",
  "ephapax-parser",
@@ -968,6 +980,7 @@ version = "0.1.0"
 dependencies = [
  "ephapax-ir",
  "ephapax-syntax",
+ "ephapax-typing",
  "gimli 0.31.1",
  "object 0.36.7",
  "proptest",

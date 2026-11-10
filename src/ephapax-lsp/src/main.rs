@@ -12,9 +12,8 @@
 //! - Document symbols
 //! - Keyword and declaration completions
 
-use ephapax_parser::parse_module;
+use ephapax_driver::DriverError;
 use ephapax_syntax::{Decl, Expr, ExprKind, ExternItem, Module, Span, Ty};
-use ephapax_typing::type_check_module;
 use std::collections::HashMap;
 use std::sync::Mutex;
 use tower_lsp::jsonrpc::Result;
@@ -71,6 +70,10 @@ enum DeclKind {
 struct Backend {
     client: Client,
     documents: Mutex<HashMap<Url, DocumentState>>,
+    /// Number of the latest analysis started for each document. An
+    /// analysis runs on the blocking pool, so an older one can finish
+    /// after a newer one; only the latest may commit its result.
+    generations: Mutex<HashMap<Url, u64>>,
 }
 
 impl Backend {
@@ -78,62 +81,43 @@ impl Backend {
         Self {
             client,
             documents: Mutex::new(HashMap::new()),
+            generations: Mutex::new(HashMap::new()),
         }
     }
 
-    /// Parse, type-check, and cache analysis for a document.
-    async fn analyze_document(&self, uri: &Url, text: &str) -> Vec<Diagnostic> {
-        let mut diagnostics = Vec::new();
-        let mut declarations = Vec::new();
-        let mut module_opt = None;
-
-        // Parse the document
-        match parse_module(text, "document") {
-            Ok(module) => {
-                // Extract declarations
-                declarations = extract_declarations(&module, text);
-                module_opt = Some(module.clone());
-
-                // Type-check
-                if let Err(err) = type_check_module(&module) {
-                    diagnostics.push(Diagnostic {
-                        range: span_to_range(text, err.span),
+    /// Parse, type-check, and cache analysis for a document. `None`: a
+    /// newer analysis of the same document started meanwhile, so this
+    /// result is stale and nothing was cached; do not publish it.
+    async fn analyze_document(&self, uri: &Url, text: &str) -> Option<Vec<Diagnostic>> {
+        let generation = {
+            let mut generations = self.generations.lock().ok()?;
+            let latest = generations.entry(uri.clone()).or_insert(0);
+            *latest += 1;
+            *latest
+        };
+        // The analysis reads imported files from disk, so it runs on the
+        // blocking pool, not on the async worker that serves requests.
+        let (owned_uri, owned_text) = (uri.clone(), text.to_string());
+        let (diagnostics, module_opt) =
+            match tokio::task::spawn_blocking(move || analyze(&owned_uri, &owned_text)).await {
+                Ok(result) => result,
+                Err(e) => (
+                    vec![Diagnostic {
                         severity: Some(DiagnosticSeverity::ERROR),
-                        code: None,
-                        source: Some("ephapax-typing".to_string()),
-                        message: format!("Type error: {}", err),
-                        related_information: None,
-                        tags: None,
-                        code_description: None,
-                        data: None,
-                    });
-                }
-            }
-            Err(errors) => {
-                for err in errors {
-                    diagnostics.push(Diagnostic {
-                        range: Range {
-                            start: Position {
-                                line: 0,
-                                character: 0,
-                            },
-                            end: Position {
-                                line: 0,
-                                character: 0,
-                            },
-                        },
-                        severity: Some(DiagnosticSeverity::ERROR),
-                        code: None,
                         source: Some("ephapax".to_string()),
-                        message: format!("Parse error: {:?}", err),
-                        related_information: None,
-                        tags: None,
-                        code_description: None,
-                        data: None,
-                    });
-                }
-            }
+                        message: format!("analysis failed: {e}"),
+                        ..Diagnostic::default()
+                    }],
+                    None,
+                ),
+            };
+        if self.generations.lock().ok()?.get(uri) != Some(&generation) {
+            return None;
         }
+        let declarations = module_opt
+            .as_ref()
+            .map(|m| extract_declarations(m, text))
+            .unwrap_or_default();
 
         // Cache the state
         if let Ok(mut docs) = self.documents.lock() {
@@ -147,7 +131,7 @@ impl Backend {
             );
         }
 
-        diagnostics
+        Some(diagnostics)
     }
 
     /// Find the declaration at a given position (for go-to-definition).
@@ -351,34 +335,45 @@ impl LanguageServer for Backend {
         let uri = params.text_document.uri;
         let text = params.text_document.text;
 
-        let diagnostics = self.analyze_document(&uri, &text).await;
-        self.client
-            .publish_diagnostics(uri, diagnostics, None)
-            .await;
+        if let Some(diagnostics) = self.analyze_document(&uri, &text).await {
+            self.client
+                .publish_diagnostics(uri, diagnostics, None)
+                .await;
+        }
     }
 
     async fn did_change(&self, params: DidChangeTextDocumentParams) {
         let uri = params.text_document.uri;
         let text = &params.content_changes[0].text;
 
-        let diagnostics = self.analyze_document(&uri, text).await;
-        self.client
-            .publish_diagnostics(uri, diagnostics, None)
-            .await;
-    }
-
-    async fn did_save(&self, params: DidSaveTextDocumentParams) {
-        if let Some(text) = params.text {
-            let diagnostics = self
-                .analyze_document(&params.text_document.uri, &text)
-                .await;
+        if let Some(diagnostics) = self.analyze_document(&uri, text).await {
             self.client
-                .publish_diagnostics(params.text_document.uri, diagnostics, None)
+                .publish_diagnostics(uri, diagnostics, None)
                 .await;
         }
     }
 
+    async fn did_save(&self, params: DidSaveTextDocumentParams) {
+        if let Some(text) = params.text {
+            if let Some(diagnostics) = self
+                .analyze_document(&params.text_document.uri, &text)
+                .await
+            {
+                self.client
+                    .publish_diagnostics(params.text_document.uri, diagnostics, None)
+                    .await;
+            }
+        }
+    }
+
     async fn did_close(&self, params: DidCloseTextDocumentParams) {
+        // An analysis still in flight is now stale: it must not cache
+        // state or publish diagnostics for a closed document.
+        if let Ok(mut generations) = self.generations.lock() {
+            *generations
+                .entry(params.text_document.uri.clone())
+                .or_insert(0) += 1;
+        }
         // Clear diagnostics and cached state
         if let Ok(mut docs) = self.documents.lock() {
             docs.remove(&params.text_document.uri);
@@ -731,6 +726,57 @@ fn format_ty(ty: &Ty) -> String {
 }
 
 /// Convert byte offset span to LSP range.
+/// Load a document through the one front end (`ephapax-driver`, the same
+/// pipeline `ephapax check` runs) and turn the outcome into diagnostics.
+/// Imports resolve next to the document's file, then in the stdlib.
+/// Returns the document's own core module when it parses.
+fn analyze(uri: &Url, text: &str) -> (Vec<Diagnostic>, Option<Module>) {
+    fn diagnostic(range: Range, source: &str, message: String) -> Diagnostic {
+        Diagnostic {
+            range,
+            severity: Some(DiagnosticSeverity::ERROR),
+            source: Some(source.to_string()),
+            message,
+            ..Diagnostic::default()
+        }
+    }
+
+    let base_dir = uri
+        .to_file_path()
+        .ok()
+        .and_then(|p| p.parent().map(|d| d.to_path_buf()));
+    let stdlib = ephapax_driver::stdlib_dir(None);
+    let program = match ephapax_driver::parse_source(
+        text,
+        "document",
+        base_dir.as_deref(),
+        stdlib.as_deref(),
+    ) {
+        Ok(program) => program,
+        Err(e) => {
+            return (
+                vec![diagnostic(Range::default(), "ephapax", e.to_string())],
+                None,
+            )
+        }
+    };
+    let diagnostics = match ephapax_driver::check_program(&program) {
+        Ok(()) => Vec::new(),
+        Err(e) => {
+            // A type error in this document has a position. Any other
+            // failure, or one in an imported module, goes at the top.
+            let range = match &e {
+                DriverError::Type { path, error, .. } if *path == program.root().file_path => {
+                    span_to_range(text, error.span)
+                }
+                _ => Range::default(),
+            };
+            vec![diagnostic(range, "ephapax-typing", e.to_string())]
+        }
+    };
+    (diagnostics, Some(program.root().core.clone()))
+}
+
 fn span_to_range(text: &str, span: Span) -> Range {
     let start = offset_to_position(text, span.start);
     let end = offset_to_position(text, span.end);
@@ -904,4 +950,53 @@ async fn main() {
 
     let (service, socket) = LspService::new(Backend::new);
     Server::new(stdin, stdout, socket).serve(service).await;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::{Path, PathBuf};
+
+    fn eph_files(dir: &Path, out: &mut Vec<PathBuf>) {
+        for entry in std::fs::read_dir(dir).into_iter().flatten().flatten() {
+            let path = entry.path();
+            let name = entry.file_name().to_string_lossy().into_owned();
+            if path.is_dir() {
+                if !matches!(
+                    name.as_str(),
+                    "target" | ".git" | ".claude" | "node_modules"
+                ) {
+                    eph_files(&path, out);
+                }
+            } else if name.ends_with(".eph") {
+                out.push(path);
+            }
+        }
+    }
+
+    /// v2 plan rung E3: the LSP reports no diagnostic exactly when
+    /// `ephapax-driver` loads the file, on every .eph file in the repo
+    /// (LSP twin of src/ephapax-cli/tests/driver_agreement.rs).
+    #[test]
+    fn diagnostics_agree_with_the_driver_on_every_corpus_file() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../..")
+            .canonicalize()
+            .expect("repo root");
+        let stdlib = ephapax_driver::stdlib_dir(None);
+        let mut files = Vec::new();
+        eph_files(&root, &mut files);
+        assert!(files.len() > 100, "corpus walk found too few files");
+
+        let mut clean = 0;
+        for path in &files {
+            let text = std::fs::read_to_string(path).expect("read corpus file");
+            let uri = Url::from_file_path(path).expect("file URL");
+            let lsp_ok = analyze(&uri, &text).0.is_empty();
+            let driver_ok = ephapax_driver::load_program(path, stdlib.as_deref()).is_ok();
+            assert_eq!(lsp_ok, driver_ok, "{}", path.display());
+            clean += usize::from(lsp_ok);
+        }
+        assert!(clean > 0, "no corpus file is clean: gate misconfigured");
+    }
 }

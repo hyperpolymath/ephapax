@@ -433,11 +433,45 @@ pub struct HandlerClause {
     pub body: Expr,
 }
 
+/// Identity of an expression node, for side tables keyed by expression
+/// (the checker's type table, which codegen reads; v2 plan rung E5).
+///
+/// [`Expr::new`] gives every node a fresh id. A clone keeps the id of its
+/// original, so a table entry still applies to it. The id is not part of
+/// equality, of the `Debug` form or of the serialised form: two parses of
+/// the same text are equal.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct ExprId(u64);
+
+impl ExprId {
+    fn fresh() -> Self {
+        static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+        ExprId(NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed))
+    }
+}
+
 /// Expressions
-#[derive(Debug, Clone, PartialEq, Serialize)]
+#[derive(Clone, Serialize)]
 pub struct Expr {
     pub kind: ExprKind,
     pub span: Span,
+    #[serde(skip)]
+    pub id: ExprId,
+}
+
+impl PartialEq for Expr {
+    fn eq(&self, other: &Self) -> bool {
+        self.kind == other.kind && self.span == other.span
+    }
+}
+
+impl std::fmt::Debug for Expr {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Expr")
+            .field("kind", &self.kind)
+            .field("span", &self.span)
+            .finish()
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -615,14 +649,15 @@ pub enum ExprKind {
 
 impl Expr {
     pub fn new(kind: ExprKind, span: Span) -> Self {
-        Self { kind, span }
+        Self {
+            kind,
+            span,
+            id: ExprId::fresh(),
+        }
     }
 
     pub fn dummy(kind: ExprKind) -> Self {
-        Self {
-            kind,
-            span: Span::dummy(),
-        }
+        Self::new(kind, Span::dummy())
     }
 }
 

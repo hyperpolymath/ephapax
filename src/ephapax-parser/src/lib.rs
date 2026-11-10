@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: MPL-2.0
 // Owner: Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk>
 // SPDX-FileCopyrightText: 2025 Jonathan D.A. Jewell
-// hypatia: allow code_safety/unwrap_dangerous_default -- the two integer-literal `parse().unwrap_or(0)` sites (see inline notes) only fall back on i64 overflow in a fn returning `Literal` (no Result); 0 is a deliberate lossy fallback pending the parse_literal Result refactor.
+// hypatia: allow code_safety/unwrap_dangerous_default -- the float-literal `parse().unwrap_or(0.0)` sites cannot take the default: grammar `float = ASCII_DIGIT+ "." ASCII_DIGIT+` (and `float32`, the same with an `f32` suffix that is trimmed first; ephapax.pest) always parses.
 
 //! Ephapax Parser
 //!
@@ -98,9 +98,58 @@ pub fn parse_module(source: &str, name: &str) -> Result<Module, Vec<ParseError>>
     })
 }
 
+/// The name in the `module` header of `source`, as written, if it has
+/// one. Only the header is parsed (comments before it are skipped), so
+/// this also works on a file with an error further down.
+pub fn declared_module_name(source: &str) -> Option<String> {
+    let header = EphapaxParser::parse(Rule::module_header, source)
+        .ok()?
+        .next()?;
+    let decl = header
+        .into_inner()
+        .find(|p| p.as_rule() == Rule::module_decl)?;
+    Some(decl.into_inner().next()?.as_str().to_string())
+}
+
 // ============================================================================
 // Helper Functions
 // ============================================================================
+
+/// An integer literal: `I32` when it fits, else `I64`. `negative` is set
+/// for a `-` written directly on the digits, so `-9223372036854775808` is
+/// one literal, `i64::MIN`. A literal outside the I64 range is a
+/// [`ParseError::IntegerOutOfRange`]; it used to become 0.
+pub(crate) fn integer_literal(
+    digits: &str,
+    negative: bool,
+    span: Span,
+) -> Result<Literal, ParseError> {
+    let out_of_range = || ParseError::IntegerOutOfRange {
+        literal: format!("{}{digits}", if negative { "-" } else { "" }),
+        span,
+    };
+    // Grammar `integer = ASCII_DIGIT+` (ephapax.pest): parse() can only
+    // fail on overflow.
+    let magnitude: i128 = digits.parse().map_err(|_| out_of_range())?;
+    let n =
+        i64::try_from(if negative { -magnitude } else { magnitude }).map_err(|_| out_of_range())?;
+    Ok(i32::try_from(n).map_or(Literal::I64(n), Literal::I32))
+}
+
+/// An F32 literal, `<digits>.<digits>f32`: the decimal rounded once to F32.
+pub(crate) fn float32_literal(text: &str) -> Literal {
+    // Grammar `float32` (ephapax.pest): the digits always parse.
+    Literal::F32(text.trim_end_matches("f32").parse().unwrap_or(0.0))
+}
+
+/// The operand of a unary `-` when it is an integer literal with nothing
+/// else around it (`-5`, not `-(5)` or `-x`): its digits.
+pub(crate) fn negated_integer_digits<'a>(
+    operand: &pest::iterators::Pair<'a, Rule>,
+) -> Option<&'a str> {
+    let text = operand.as_str().trim();
+    (!text.is_empty() && text.bytes().all(|b| b.is_ascii_digit())).then_some(text)
+}
 
 fn span_from_pair(pair: &pest::iterators::Pair<Rule>) -> Span {
     let span = pair.as_span();
@@ -915,7 +964,7 @@ fn parse_pattern_core(pair: pest::iterators::Pair<Rule>) -> Result<Pattern, Pars
                 .into_inner()
                 .next()
                 .ok_or_else(|| ParseError::missing("literal"))?;
-            Ok(Pattern::Literal(parse_literal_value_core(lit_pair)))
+            Ok(Pattern::Literal(parse_literal_value_core(lit_pair)?))
         }
         Rule::var_pattern => {
             let name = parse_identifier(
@@ -969,20 +1018,13 @@ fn parse_constructor_pattern_core(
 /// `literal` rule wraps one of `unit_literal | boolean | float |
 /// integer | string`; this function handles either the wrapped or
 /// unwrapped form by recursing one level when needed.
-fn parse_literal_value_core(pair: pest::iterators::Pair<Rule>) -> Literal {
-    match pair.as_rule() {
+fn parse_literal_value_core(pair: pest::iterators::Pair<Rule>) -> Result<Literal, ParseError> {
+    Ok(match pair.as_rule() {
         Rule::unit_literal => Literal::Unit,
         Rule::boolean => Literal::Bool(pair.as_str() == "true"),
         Rule::float => Literal::F64(pair.as_str().parse().unwrap_or(0.0)),
-        Rule::integer => {
-            // hypatia: allow code_safety/unwrap_dangerous_default -- grammar `integer = ASCII_DIGIT+` (ephapax.pest) means parse() can only fail on i64 overflow; this fn returns `Literal` (no Result), so 0 is a deliberate lossy fallback. TODO: propagate overflow as ParseError (ripples to callers at lib.rs:896/978).
-            let n: i64 = pair.as_str().parse().unwrap_or(0);
-            if n > i32::MAX as i64 || n < i32::MIN as i64 {
-                Literal::I64(n)
-            } else {
-                Literal::I32(n as i32)
-            }
-        }
+        Rule::float32 => float32_literal(pair.as_str()),
+        Rule::integer => integer_literal(pair.as_str(), false, span_from_pair(&pair))?,
         Rule::string => {
             let s = pair.as_str();
             let content = &s[1..s.len() - 1];
@@ -998,12 +1040,12 @@ fn parse_literal_value_core(pair: pest::iterators::Pair<Rule>) -> Literal {
         _ => {
             // `literal` wraps the actual variant — recurse once.
             if let Some(inner) = pair.into_inner().next() {
-                parse_literal_value_core(inner)
+                parse_literal_value_core(inner)?
             } else {
                 Literal::Unit
             }
         }
-    }
+    })
 }
 
 fn parse_let_expr(pair: pest::iterators::Pair<Rule>) -> Result<Expr, ParseError> {
@@ -1561,11 +1603,17 @@ fn parse_unary_expr(pair: pest::iterators::Pair<Rule>) -> Result<Expr, ParseErro
             },
             span,
         ))
-    } else if text.starts_with('-') && !text.chars().nth(1).is_some_and(|c| c.is_ascii_digit()) {
+    } else if text.starts_with('-') {
         let inner = pair
             .into_inner()
             .next()
             .ok_or_else(|| ParseError::missing("unary negation operand"))?;
+        if let Some(digits) = negated_integer_digits(&inner) {
+            return Ok(Expr::new(
+                ExprKind::Lit(integer_literal(digits, true, span)?),
+                span,
+            ));
+        }
         let operand = parse_unary_expr(inner)?;
         Ok(Expr::new(
             ExprKind::UnaryOp {
@@ -1659,19 +1707,16 @@ fn parse_postfix_expr(pair: pest::iterators::Pair<Rule>) -> Result<Expr, ParseEr
                                     span: span_from_pair(&member),
                                 }
                             })?;
-                            if index == 0 {
-                                result = Expr::new(ExprKind::Fst(Box::new(result)), span);
-                            } else if index == 1 {
-                                result = Expr::new(ExprKind::Snd(Box::new(result)), span);
-                            } else {
-                                result = Expr::new(
-                                    ExprKind::TupleIndex {
-                                        tuple: Box::new(result),
-                                        index,
-                                    },
-                                    span,
-                                );
-                            }
+                            // `.0` and `.1` are tuple indices like any
+                            // other: the checker resolves them on a pair
+                            // or on a longer tuple.
+                            result = Expr::new(
+                                ExprKind::TupleIndex {
+                                    tuple: Box::new(result),
+                                    index,
+                                },
+                                span,
+                            );
                         }
                         Rule::identifier => {
                             // Field access by name not currently supported
@@ -2009,15 +2054,8 @@ fn parse_literal(pair: pest::iterators::Pair<Rule>) -> Result<Expr, ParseError> 
             let n: f64 = inner.as_str().parse().unwrap_or(0.0);
             Literal::F64(n)
         }
-        Rule::integer => {
-            // hypatia: allow code_safety/unwrap_dangerous_default -- as above: parse() only fails on i64 overflow and there is no Result to propagate here, so 0 is a deliberate lossy fallback pending the parse_literal Result refactor.
-            let n: i64 = inner.as_str().parse().unwrap_or(0);
-            if n > i32::MAX as i64 || n < i32::MIN as i64 {
-                Literal::I64(n)
-            } else {
-                Literal::I32(n as i32)
-            }
-        }
+        Rule::float32 => float32_literal(inner.as_str()),
+        Rule::integer => integer_literal(inner.as_str(), false, span_from_pair(&inner))?,
         Rule::string => {
             let s = inner.as_str();
             // Remove quotes and process escapes
@@ -2241,11 +2279,13 @@ mod tests {
 
     #[test]
     fn test_parse_projection() {
+        // `.0` is a tuple index: the checker resolves it on a pair or on
+        // a longer tuple (it used to parse as `fst`, which only a pair has).
         let expr = parse_ok("p.0");
-        if let ExprKind::Fst(inner) = expr.kind {
-            assert!(matches!(inner.kind, ExprKind::Var(_)));
+        if let ExprKind::TupleIndex { tuple, index: 0 } = expr.kind {
+            assert!(matches!(tuple.kind, ExprKind::Var(_)));
         } else {
-            panic!("Expected fst projection");
+            panic!("Expected tuple index 0");
         }
     }
 

@@ -153,7 +153,7 @@ coprocessor seam is reachable today only through raw `__ffi("eph_coproc_*",
 
 *This is the single highest-leverage v2 toolchain item:* module-import +
 qualified-member access (the import resolver in
-`src/ephapax-cli/src/import_resolver.rs` already loads the import graph for
+`src/ephapax-driver/src/resolver.rs`, at the time `src/ephapax-cli/src/import_resolver.rs`, already loads the import graph for
 multi-file `compile`, but the surface parser/desugarer does not expose
 imported members). Landing it unblocks consumption of the entire stdlib at
 once.

@@ -8,8 +8,7 @@ description = "Language Server Protocol implementation for Ephapax"
 
 [dependencies]
 ephapax-syntax = { path = "../ephapax-syntax" }
-ephapax-parser = { path = "../ephapax-parser" }
-ephapax-typing = { path = "../ephapax-typing" }
+ephapax-driver = { path = "../ephapax-driver" }
 tower-lsp = "0.20"
 tokio = { version = "1", features = ["full"] }
 serde_json = "1.0"

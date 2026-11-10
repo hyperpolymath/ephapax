@@ -8,9 +8,10 @@
 //! Interactive environment for exploring and testing Ephapax code.
 
 use colored::Colorize;
+use ephapax_driver::DriverError;
 use ephapax_interp::{Interpreter, RuntimeError, Value};
 use ephapax_lexer::Lexer;
-use ephapax_parser::{parse, parse_module, ParseError};
+use ephapax_parser::{parse, ParseError};
 use ephapax_syntax::Ty;
 use ephapax_typing::{type_check, SpannedTypeError};
 use rustyline::error::ReadlineError;
@@ -168,13 +169,11 @@ impl Repl {
                 if parts.len() < 2 {
                     return CommandResult::Error("Usage: :load <filename>".to_string());
                 }
-                match std::fs::read_to_string(parts[1]) {
-                    Ok(content) => {
-                        self.load_file(parts[1], &content);
+                match self.load_path(std::path::Path::new(parts[1])) {
+                    Ok(decls) => {
+                        println!("{} {} ({} declarations)", "Loaded".green(), parts[1], decls)
                     }
-                    Err(e) => {
-                        eprintln!("{} Cannot read file: {}", "Error:".red().bold(), e);
-                    }
+                    Err(e) => eprintln!("{} {}", "Error:".red().bold(), e),
                 }
                 CommandResult::Continue
             }
@@ -280,10 +279,12 @@ impl Repl {
             Err(errors) => {
                 // Try parsing as declaration/module
                 let module_src = format!("{}\n", line);
-                match parse_module(&module_src, "repl") {
-                    Ok(module) => {
-                        self.interpreter.load_module(&module);
-                        println!("{}", "Loaded.".green());
+                match self.load_declarations(&module_src) {
+                    Ok(()) => println!("{}", "Loaded.".green()),
+                    // The line parses as declarations but does not load:
+                    // that is the error to show, not the expression's.
+                    Err(e) if !matches!(e, DriverError::Parse { .. }) => {
+                        eprintln!("{} {}", "Error:".red().bold(), e);
                     }
                     Err(_) => {
                         // Show parse errors
@@ -324,33 +325,6 @@ impl Repl {
         }
     }
 
-    fn load_file(&mut self, filename: &str, content: &str) {
-        match parse_module(content, filename) {
-            Ok(module) => {
-                // Type check module
-                match ephapax_typing::type_check_module(&module) {
-                    Ok(()) => {
-                        self.interpreter.load_module(&module);
-                        println!(
-                            "{} {} ({} declarations)",
-                            "Loaded".green(),
-                            filename,
-                            module.decls.len()
-                        );
-                    }
-                    Err(e) => {
-                        eprintln!("{} {}", "Type error:".red().bold(), e);
-                    }
-                }
-            }
-            Err(errors) => {
-                for error in errors {
-                    eprintln!("{} {}", "Parse error:".red().bold(), error);
-                }
-            }
-        }
-    }
-
     /// Evaluate a single expression and return the result
     pub fn eval_expr(&mut self, source: &str) -> Result<Value, ReplError> {
         let expr = parse(source).map_err(ReplError::Parse)?;
@@ -358,12 +332,44 @@ impl Repl {
         self.interpreter.eval(&expr).map_err(ReplError::Runtime)
     }
 
-    /// Load a module into the REPL
+    /// Load a file, and everything it imports, into the REPL. Returns the
+    /// number of declarations loaded.
+    pub fn load_path(&mut self, path: &std::path::Path) -> Result<usize, ReplError> {
+        let stdlib = ephapax_driver::stdlib_dir(None);
+        self.load(ephapax_driver::load_program(path, stdlib.as_deref()))
+    }
+
+    /// Load a module held in memory into the REPL. It has no directory, so
+    /// its imports resolve against the stdlib only.
     pub fn load_module(&mut self, source: &str, name: &str) -> Result<(), ReplError> {
-        let module = parse_module(source, name).map_err(ReplError::Parse)?;
-        ephapax_typing::type_check_module(&module).map_err(ReplError::Type)?;
-        self.interpreter.load_module(&module);
+        let stdlib = ephapax_driver::stdlib_dir(None);
+        self.load(ephapax_driver::load_source(
+            source,
+            name,
+            None,
+            stdlib.as_deref(),
+        ))
+        .map(|_| ())
+    }
+
+    /// Load declarations typed at the prompt. They go through the driver's
+    /// front end (imports, parse, desugar) but are not type-checked: a
+    /// line may use a function an earlier line defined, which only the
+    /// interpreter knows. (The REPL never checked prompt declarations.)
+    fn load_declarations(&mut self, source: &str) -> Result<(), DriverError> {
+        let stdlib = ephapax_driver::stdlib_dir(None);
+        let program = ephapax_driver::parse_source(source, "repl", None, stdlib.as_deref())?;
+        self.interpreter.load_module(&program.into_merged());
         Ok(())
+    }
+
+    fn load(
+        &mut self,
+        program: Result<ephapax_driver::Program, DriverError>,
+    ) -> Result<usize, ReplError> {
+        let module = program.map_err(ReplError::Load)?.into_merged();
+        self.interpreter.load_module(&module);
+        Ok(module.decls.len())
     }
 }
 
@@ -386,6 +392,8 @@ pub enum ReplError {
     Parse(Vec<ParseError>),
     Type(SpannedTypeError),
     Runtime(RuntimeError),
+    /// A module did not load through the front end (`ephapax-driver`).
+    Load(DriverError),
 }
 
 impl std::fmt::Display for ReplError {
@@ -400,6 +408,7 @@ impl std::fmt::Display for ReplError {
             }
             ReplError::Type(e) => write!(f, "Type error: {}", e),
             ReplError::Runtime(e) => write!(f, "Runtime error: {}", e),
+            ReplError::Load(e) => write!(f, "{}", e),
         }
     }
 }
@@ -467,6 +476,23 @@ mod tests {
             .eval_expr("let x = 1 in x")
             .expect("eval should succeed");
         assert!(matches!(result, Value::I32(1)));
+    }
+
+    /// A declaration typed at the prompt may use one from an earlier line.
+    /// (One parameter each: the interpreter cannot yet call a function
+    /// of zero or several parameters by name.)
+    #[test]
+    fn prompt_declarations_see_earlier_ones() {
+        let mut repl = Repl::new().expect("REPL should initialize");
+        repl.load_declarations("fn f(x: I32): I32 = x + 41\n")
+            .expect("f loads");
+        repl.load_declarations("fn g(y: I32): I32 = f(y) + 1\n")
+            .expect("g loads although only the interpreter knows f");
+        let result = repl
+            .interpreter
+            .call("g", vec![Value::I32(0)])
+            .expect("g runs");
+        assert!(matches!(result, Value::I32(42)));
     }
 
     #[test]

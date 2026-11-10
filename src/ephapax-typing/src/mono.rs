@@ -98,9 +98,10 @@ pub fn monomorphise(module: &Module) -> Result<Module, SpannedTypeError> {
     for decl in &module.decls {
         match decl {
             Decl::Fn { type_params, .. } if !type_params.is_empty() => {}
-            Decl::Fn { .. } => {
+            // The value of a constant can use a generic function too.
+            Decl::Fn { .. } | Decl::Const { .. } => {
                 let mut decl = decl.clone();
-                if let Decl::Fn { body, .. } = &mut decl {
+                if let Decl::Fn { body, .. } | Decl::Const { value: body, .. } = &mut decl {
                     mono.rewrite(body, &Subst::new());
                 }
                 decls.push(decl);

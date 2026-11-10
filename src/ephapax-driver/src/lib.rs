@@ -332,7 +332,7 @@ pub fn check_program_with(program: &Program, features: Features) -> Result<(), D
         let mut callables = Vec::new();
         for decl in &m.core.decls {
             match decl {
-                Decl::Fn { name, .. } => callables.push((name, None)),
+                Decl::Fn { name, .. } | Decl::Const { name, .. } => callables.push((name, None)),
                 Decl::Extern { abi, items } => {
                     callables.extend(items.iter().filter_map(|item| match item {
                         ExternItem::Fn { name, .. } => Some((name, Some((abi, item)))),

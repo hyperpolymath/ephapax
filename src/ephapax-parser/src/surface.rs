@@ -142,11 +142,34 @@ fn parse_surface_declaration(pair: pest::iterators::Pair<Rule>) -> Result<Surfac
         Rule::fn_decl => parse_fn_decl(inner),
         Rule::type_decl => parse_type_decl(inner),
         Rule::extern_block => parse_extern_block(inner),
+        Rule::const_decl => parse_const_decl(inner),
         _ => Err(ParseError::Syntax {
             message: format!("Unexpected declaration: {:?}", inner.as_rule()),
             span: span_from_pair(&inner),
         }),
     }
+}
+
+/// Parse `let NAME = expr` or `let NAME: T = expr` at the top level into
+/// a `SurfaceDecl::Const`. (The surface parser refused it: only the core
+/// parser had the declaration.)
+fn parse_const_decl(pair: pest::iterators::Pair<Rule>) -> Result<SurfaceDecl, ParseError> {
+    let mut name = None;
+    let mut ty = None;
+    let mut value = None;
+    for item in pair.into_inner() {
+        match item.as_rule() {
+            Rule::identifier if name.is_none() => name = Some(parse_identifier(item)),
+            Rule::ty => ty = Some(parse_type(item)?),
+            Rule::expression => value = Some(parse_expression(item)?),
+            _ => {}
+        }
+    }
+    Ok(SurfaceDecl::Const {
+        name: name.ok_or_else(|| ParseError::missing("constant name"))?,
+        ty,
+        value: value.ok_or_else(|| ParseError::missing("constant value"))?,
+    })
 }
 
 /// Parse an `extern "abi" { ... }` block into a `SurfaceDecl::Extern`.

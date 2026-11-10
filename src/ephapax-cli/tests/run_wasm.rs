@@ -538,6 +538,21 @@ fn a_constructor_gets_its_type_arguments_from_its_use() {
             "let o = None in match o of | None => 42 | Some(n) => n end",
             "42",
         ),
+        // The arms of the `match` fix the type after the constructor and
+        // the scrutinee are checked. (The type table kept the type as
+        // not known, and the wasm module was not valid.)
+        (
+            option.to_string(),
+            "I64",
+            "let o = None in match o of | None => 5000000000 | Some(n) => n end",
+            "5000000000i64",
+        ),
+        (
+            option.to_string(),
+            "F64",
+            "let o = None in match o of | None => 1.5 | Some(n) => n end",
+            "1.5",
+        ),
         // The 2 branches of an `if` give the 2 sides of the sum.
         (
             format!("{option}{or}"),

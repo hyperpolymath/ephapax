@@ -1149,9 +1149,15 @@ impl TypeChecker {
             // 2 recursive types are equal when their bodies are, with one
             // name for the 2 bound variables. A recursive type is not
             // equal to its unfolding (iso-recursive, decision D7).
+            (Ty::Mu { var: v1, body: b1 }, Ty::Mu { var: v2, body: b2 }) if v1 == v2 => {
+                self.unify(s, b1, b2)
+            }
+            // The one name is a new one: a body can have a recursive type
+            // in it that binds the name of the other variable.
             (Ty::Mu { var: v1, body: b1 }, Ty::Mu { var: v2, body: b2 }) => {
-                let b2 = b2.subst_var(v2, &Ty::Var(v1.clone()));
-                self.unify(s, b1, &b2)
+                let fresh = Ty::Var(format!("#{}", self.next_unif).into());
+                self.next_unif += 1;
+                self.unify(s, &b1.subst_var(v1, &fresh), &b2.subst_var(v2, &fresh))
             }
             (Ty::Tuple(e1), Ty::Tuple(e2)) if e1.len() == e2.len() => {
                 for (t1, t2) in e1.iter().zip(e2.iter()) {

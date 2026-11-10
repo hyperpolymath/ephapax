@@ -141,11 +141,12 @@ pub enum DesugarError {
     #[error("recursive type alias `{name}` is not supported: only a `data` type can refer to itself (expansion cycle: {cycle})")]
     RecursiveAlias { name: String, cycle: String },
 
-    /// 2 or more `data` types refer to each other. A `data` type can
-    /// refer to itself (v2 plan rung E9); a cycle through another `data`
-    /// type has no lowering yet.
-    #[error("the `data` types {cycle} refer to each other, which is not supported yet: a recursive `data` type can refer only to itself (a `type` alias in the cycle is permitted)")]
-    MutualRecursion { cycle: String },
+    /// The expansion of a named type is too large or too deep. `data`
+    /// types that refer to each other become nested recursive types, and
+    /// a dense cycle makes them grow fast: 4 types that each refer to
+    /// each of the 4 need 3613 bodies, and 5 such types need 8 million.
+    #[error("the type `{name}` is too large: its expansion needs more than {MAX_EXPANSIONS} bodies of named types, or nests them more than {MAX_EXPANSION_DEPTH} deep. `data` types that refer to each other in a dense cycle have this effect: use fewer references between them, or 1 `data` type for the cycle")]
+    TypeTooLarge { name: String },
 
     /// A `data` type refers to itself with other type arguments
     /// (`data Grow(a) = More(Grow([a]))`): its expansion does not end.
@@ -335,6 +336,16 @@ impl DataRegistry {
 // Desugarer
 // =========================================================================
 
+/// The most bodies of named types that the expansion of 1 type can have
+/// ([`DesugarError::TypeTooLarge`]). A cycle of 5 `data` types as in a
+/// syntax tree needs fewer than 400.
+const MAX_EXPANSIONS: usize = 10_000;
+
+/// The most named types that an expansion can nest. Each one is a level
+/// of recursion in this pass and in each later pass over the type: a
+/// chain of 700 nested `data` types overflowed the stack.
+const MAX_EXPANSION_DEPTH: usize = 256;
+
 /// A named type whose body is being expanded by `desugar_named_type`.
 #[derive(Debug, Clone)]
 struct Expansion {
@@ -349,6 +360,10 @@ struct Expansion {
     params: HashMap<SmolStr, Ty>,
     /// The body referred to the type itself: the type is recursive.
     recursive: bool,
+    /// The type is not a variable for the expansion in progress: a `data`
+    /// type that comes before it was entered after it
+    /// ([`Desugarer::expand_data`]).
+    hidden: bool,
 }
 
 /// The variable of the recursive type of the `data` type `name`. A
@@ -384,6 +399,9 @@ pub struct Desugarer {
     /// innermost last. A `data` type that is entered again is a recursive
     /// type (v2 plan rung E9).
     expanding: RefCell<Vec<Expansion>>,
+    /// The number of bodies of named types in the expansion in progress,
+    /// for [`MAX_EXPANSIONS`].
+    expansions: std::cell::Cell<usize>,
     /// Key of the module whose scope gives a name its meaning: the module
     /// being desugared, or, while the body of a named type expands, the
     /// module that declares that type.
@@ -401,6 +419,7 @@ impl Desugarer {
             registry: DataRegistry::new(),
             module_qualifiers: HashSet::new(),
             expanding: RefCell::new(Vec::new()),
+            expansions: std::cell::Cell::new(0),
             scope: RefCell::default(),
             fn_type_params: Vec::new(),
         }
@@ -412,6 +431,7 @@ impl Desugarer {
             registry,
             module_qualifiers: HashSet::new(),
             expanding: RefCell::new(Vec::new()),
+            expansions: std::cell::Cell::new(0),
             scope: RefCell::default(),
             fn_type_params: Vec::new(),
         }
@@ -1050,9 +1070,10 @@ impl Desugarer {
             .collect::<Result<Vec<_>, _>>()?;
 
         // Build right-nested sum from constructor field types
-        self.expand_data(name, home, params, core_args, |this| {
+        let expanded = self.expand_data(name, home, params, core_args, |this| {
             this.build_sum_type(ctors)
-        })
+        });
+        expanded.map(|(ty, _)| ty)
     }
 
     /// The names of the expansions from `start`, then `name`: the cycle
@@ -1061,6 +1082,23 @@ impl Desugarer {
         let mut names: Vec<&str> = stack[start..].iter().map(|e| e.name.as_str()).collect();
         names.push(name);
         names.join(" -> ")
+    }
+
+    /// Count one more body of a named type in the expansion in progress,
+    /// which starts when `stack` is empty. An expansion that is too large
+    /// or too deep is an error by name, not a compiler that does not end
+    /// or that overflows its stack.
+    fn count_expansion(&self, stack: &[Expansion], name: &SmolStr) -> Result<(), DesugarError> {
+        let count = match stack {
+            [] => 1,
+            _ => self.expansions.get() + 1,
+        };
+        self.expansions.set(count);
+        if count > MAX_EXPANSIONS || stack.len() >= MAX_EXPANSION_DEPTH {
+            let name = stack.first().map_or(name, |e| &e.name).to_string();
+            return Err(DesugarError::TypeTooLarge { name });
+        }
+        Ok(())
     }
 
     /// Run `f`, which expands the body of the alias `name` of the module
@@ -1085,6 +1123,7 @@ impl Desugarer {
                     cycle: Self::cycle(&stack, seen, name),
                 });
             }
+            self.count_expansion(&stack, name)?;
         }
         self.expanding.borrow_mut().push(Expansion {
             home: home.clone(),
@@ -1092,6 +1131,7 @@ impl Desugarer {
             args: None,
             params: HashMap::new(),
             recursive: false,
+            hidden: false,
         });
         let result = self.in_scope(home, f);
         self.expanding.borrow_mut().pop();
@@ -1101,13 +1141,34 @@ impl Desugarer {
     /// The type of the `data` type `name` of the module `home`, with the
     /// type parameters `params`, at the type arguments `args`. `f` builds
     /// the sum of its constructors, with the names of `home` in scope and
-    /// each type parameter as its argument.
+    /// each type parameter as its argument. The result also says if the
+    /// type is folded: a value of it is made by `fold` and read by `unfold`.
     ///
     /// A reference to the type inside its own body, with the same
-    /// arguments, is the variable of a recursive type, and the result is
-    /// then `mu var. body` (v2 plan decision D7: iso-recursive). Not
-    /// supported, each with its own error: a cycle through another `data`
-    /// type, and a reference with other arguments.
+    /// arguments, is the variable of a recursive type. The result is then
+    /// `mu var. body`, and the type is folded (v2 plan decision D7:
+    /// iso-recursive).
+    ///
+    /// `data` types that refer to each other become nested recursive
+    /// types (Bekic's construction), in the order of their names. A
+    /// `data` type that is entered hides, for its body, each `data` type
+    /// in progress that comes after it: in that body, such a type is not
+    /// a variable, and it is expanded again. For `Forest` before `Tree`:
+    ///
+    /// ```text
+    /// Forest = mu F. () + ((() + F) * F)     -- Tree is expanded in it
+    /// Tree   = () + Forest                   -- not folded
+    /// ```
+    ///
+    /// So the unfolding of `Forest` has `Tree` and `Forest` themselves in
+    /// it, and not types that are only equal to them after more unfolds:
+    /// a field of a constructor has the type that its declaration names.
+    ///
+    /// Not supported, with its own error: a reference with other
+    /// arguments.
+    // snip: nested recursive types; a cycle of n `data` types can make
+    // types of a size up to 2^n bodies. Upgrade to a recursive type of n
+    // variables (as the `rec` groups of WasmGC) if a large cycle is slow.
     fn expand_data(
         &self,
         name: &SmolStr,
@@ -1115,24 +1176,34 @@ impl Desugarer {
         params: &[SmolStr],
         args: Vec<Ty>,
         f: impl FnOnce(&Self) -> Result<Ty, DesugarError>,
-    ) -> Result<Ty, DesugarError> {
-        let is_data = |e: &Expansion| e.args.is_some();
+    ) -> Result<(Ty, bool), DesugarError> {
+        let hidden: Vec<usize>;
         {
             let mut stack = self.expanding.borrow_mut();
-            let entered = stack
+            let same = |e: &Expansion| e.args.is_some() && e.home == *home && e.name == *name;
+            // In progress with other arguments, as a variable or not.
+            if let Some(entered) = stack
                 .iter()
-                .rposition(|e| is_data(e) && e.home == *home && e.name == *name);
-            if let Some(entered) = entered {
-                let cycle = Self::cycle(&stack, entered, name);
-                let name = name.to_string();
-                if stack[entered + 1..].iter().any(is_data) {
-                    return Err(DesugarError::MutualRecursion { cycle });
-                }
-                if stack[entered].args.as_ref() != Some(&args) {
-                    return Err(DesugarError::NonRegularRecursion { name, cycle });
-                }
-                stack[entered].recursive = true;
-                return Ok(Ty::Var(mu_var(&name)));
+                .position(|e| same(e) && e.args.as_ref() != Some(&args))
+            {
+                return Err(DesugarError::NonRegularRecursion {
+                    name: name.to_string(),
+                    cycle: Self::cycle(&stack, entered, name),
+                });
+            }
+            if let Some(entered) = stack.iter_mut().find(|e| same(e) && !e.hidden) {
+                entered.recursive = true;
+                return Ok((Ty::Var(mu_var(name)), false));
+            }
+            self.count_expansion(&stack, name)?;
+            hidden = stack
+                .iter()
+                .enumerate()
+                .filter(|(_, e)| e.args.is_some() && !e.hidden && (&e.home, &e.name) > (home, name))
+                .map(|(i, _)| i)
+                .collect();
+            for &i in &hidden {
+                stack[i].hidden = true;
             }
             stack.push(Expansion {
                 home: home.clone(),
@@ -1140,46 +1211,46 @@ impl Desugarer {
                 params: params.iter().cloned().zip(args.iter().cloned()).collect(),
                 args: Some(args),
                 recursive: false,
+                hidden: false,
             });
         }
         let body = self.in_scope(home, f);
-        let recursive = self
-            .expanding
-            .borrow_mut()
-            .pop()
-            .is_some_and(|e| e.recursive);
+        let recursive = {
+            let mut stack = self.expanding.borrow_mut();
+            let recursive = stack.pop().is_some_and(|e| e.recursive);
+            for &i in &hidden {
+                stack[i].hidden = false;
+            }
+            recursive
+        };
         let body = body?;
         Ok(if recursive {
-            Ty::Mu {
-                var: mu_var(name),
-                body: Box::new(body),
-            }
+            let var = mu_var(name);
+            let body = Box::new(body);
+            (Ty::Mu { var, body }, true)
         } else {
-            body
+            (body, false)
         })
     }
 
-    /// The type parameters of the `data` type of the constructor `info`,
-    /// and the type of that `data` type with them as type variables. The
-    /// type is a recursive type (`Ty::Mu`) if the `data` type refers to
-    /// itself.
-    fn data_ty(&self, info: &ConstructorInfo) -> Result<(Vec<SmolStr>, Ty), DesugarError> {
-        let params = match self.registry.get_type(&info.home, &info.data_name) {
-            Some(TypeInfo {
-                def: TypeDef::Data { params, .. },
-                ..
-            }) => params.clone(),
-            _ => {
-                return Err(DesugarError::UnknownType {
-                    name: info.data_name.to_string(),
-                })
-            }
+    /// For the `data` type of the constructor `info`: its type parameters,
+    /// its type with them as type variables, and if the type is folded
+    /// ([`Self::expand_data`]).
+    fn data_ty(&self, info: &ConstructorInfo) -> Result<(Vec<SmolStr>, Ty, bool), DesugarError> {
+        let Some(TypeInfo {
+            def: TypeDef::Data { params, ctors },
+            ..
+        }) = self.registry.get_type(&info.home, &info.data_name)
+        else {
+            return Err(DesugarError::UnknownType {
+                name: info.data_name.to_string(),
+            });
         };
-        let args: Vec<SurfaceTy> = params.iter().cloned().map(SurfaceTy::Var).collect();
-        let ty = self.in_scope(&info.home, |this| {
-            this.desugar_named_type(&info.data_name, &args)
+        let args = params.iter().cloned().map(Ty::Var).collect();
+        let (ty, folded) = self.expand_data(&info.data_name, &info.home, params, args, |this| {
+            this.build_sum_type(ctors)
         })?;
-        Ok((params, ty))
+        Ok((params.clone(), ty, folded))
     }
 
     /// Build the right-nested binary sum type for a list of constructors.
@@ -1260,7 +1331,7 @@ impl Desugarer {
         // annotation: the type checker finds a type for each one from the
         // use of the value. (An annotation had the parameter itself, which
         // is no type at the constructor: `None` was not an `Option(I32)`.)
-        let (params, ty) = self.data_ty(&info)?;
+        let (params, ty, folded) = self.data_ty(&info)?;
 
         // Wrap in inl/inr chain based on index. The types of the other
         // constructors are names of the module that declares the type.
@@ -1269,15 +1340,16 @@ impl Desugarer {
         })?;
         // A value of a recursive type is folded (v2 plan rung E9). The
         // fold makes the annotations of the injections agree.
-        Ok(match ty {
-            Ty::Mu { .. } => Expr::new(
+        Ok(if folded {
+            Expr::new(
                 ExprKind::Fold {
                     ty: quantify(ty, &params),
                     value: Box::new(value),
                 },
                 span,
-            ),
-            _ => value,
+            )
+        } else {
+            value
         })
     }
 
@@ -1461,9 +1533,10 @@ impl Desugarer {
         let ctors = self.ctors_of(info)?;
         // A value of a recursive type is unfolded before its sum is read
         // (v2 plan rung E9).
-        let core_scrutinee = match self.data_ty(info)?.1 {
-            Ty::Mu { .. } => Expr::new(ExprKind::Unfold(Box::new(core_scrutinee)), span),
-            _ => core_scrutinee,
+        let core_scrutinee = if self.data_ty(info)?.2 {
+            Expr::new(ExprKind::Unfold(Box::new(core_scrutinee)), span)
+        } else {
+            core_scrutinee
         };
 
         // The constructor index of each arm; `None` for an arm that takes

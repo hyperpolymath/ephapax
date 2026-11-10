@@ -453,13 +453,16 @@ fn a_recursive_form_with_no_lowering_is_a_named_desugar_error() {
         Err(PipelineError::Desugar(error)) => error,
         other => panic!("expected a desugar error, got {other:?}"),
     };
-    // 2 `data` types that refer to each other.
+    // 5 `data` types that each refer to each of the 5: the nested
+    // recursive type of the last one by name needs 8 million bodies.
+    let dense: String = (0..5)
+        .map(|i| format!("data T{i} = L{i} | N{i}(T0, T1, T2, T3, T4)\n"))
+        .collect();
     assert!(matches!(
-        refused(
-            "data Tree = Leaf | Node(Forest)\ndata Forest = FNil | FCons(Tree, Forest)\n\
-             fn f(t: Tree): I32 = 0\nfn main(): I32 = 0\n"
-        ),
-        DesugarError::MutualRecursion { cycle } if cycle == "Tree -> Forest -> Tree"
+        refused(&format!(
+            "{dense}fn f(t: T4): I32 = 0\nfn main(): I32 = 0\n"
+        )),
+        DesugarError::TypeTooLarge { .. }
     ));
     // A `data` type that refers to itself with other type arguments.
     assert!(matches!(

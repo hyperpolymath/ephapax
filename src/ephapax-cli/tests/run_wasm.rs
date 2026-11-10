@@ -211,6 +211,59 @@ fn each_module_calls_its_own_function_of_a_shared_name() {
     assert_eq!(stdout_of(tmp.path(), &["run", "param.eph"]), "1000");
 }
 
+/// `M.Ctor(args)` builds a value of a data type of the imported module
+/// `M`, with 0, 1 or 2 fields. The desugarer used to read `M.Ctor` as a
+/// constructor with no arguments, then refuse the arguments.
+#[test]
+fn a_qualified_constructor_takes_its_arguments() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let write =
+        |name: &str, text: &str| std::fs::write(tmp.path().join(name), text).expect("write module");
+    write(
+        "shapes.eph",
+        "module shapes\n\npub data Shape = Dot | Seg(I32) | Rect(I32, I32)\n\n\
+         pub fn area(s: Shape): I32 =\n  \
+         match s of | Dot => 1 | Seg(n) => n | Rect(w, h) => w * h end\n",
+    );
+    for (shape, want) in [
+        ("shapes.Dot", "1"),
+        ("shapes.Dot()", "1"),
+        ("shapes.Seg(5)", "5"),
+        ("shapes.Seg(7)", "7"),
+        ("shapes.Rect(3, 4)", "12"),
+        ("shapes.Rect(4, 5)", "20"),
+    ] {
+        write(
+            "app.eph",
+            &format!("module app\n\nimport shapes\n\nfn main(): I32 = shapes.area({shape})\n"),
+        );
+        for args in [&["run", "app.eph"][..], &["run", "--interp", "app.eph"]] {
+            assert_eq!(stdout_of(tmp.path(), args), want, "{shape} under {args:?}");
+        }
+    }
+
+    // (call, text of the load error)
+    for (shape, error) in [
+        (
+            "shapes.Seg(5, 6)",
+            "constructor `Seg` expects 1 arguments, got 2",
+        ),
+        ("other.Seg(5)", "`other` is not an imported module"),
+    ] {
+        write(
+            "bad.eph",
+            &format!("module bad\n\nimport shapes\n\nfn main(): I32 = shapes.area({shape})\n"),
+        );
+        let out = ephapax(tmp.path(), &["compile", "bad.eph"]);
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        assert!(
+            !out.status.success() && stderr.contains(error),
+            "{shape}: exit {:?}, stderr:\n{stderr}",
+            out.status.code()
+        );
+    }
+}
+
 /// A pair pattern binds each component at its own type: a destructuring
 /// `let`, and a constructor with several fields (a right-nested pair).
 /// Patterns used to read every component as an i32.

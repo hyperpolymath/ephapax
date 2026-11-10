@@ -470,10 +470,15 @@ impl Desugarer {
                 body: Box::new(self.desugar_expr(body)?),
             },
 
-            SurfaceExprKind::App { func, arg } => ExprKind::App {
-                func: Box::new(self.desugar_expr(func)?),
-                arg: Box::new(self.desugar_expr(arg)?),
-            },
+            SurfaceExprKind::App { func, arg } => {
+                if let Some((ctor, args)) = self.qualified_ctor_call(expr) {
+                    return self.desugar_construct(ctor, &args, span);
+                }
+                ExprKind::App {
+                    func: Box::new(self.desugar_expr(func)?),
+                    arg: Box::new(self.desugar_expr(arg)?),
+                }
+            }
 
             SurfaceExprKind::Pair { left, right } => ExprKind::Pair {
                 left: Box::new(self.desugar_expr(left)?),
@@ -595,6 +600,46 @@ impl Desugarer {
         };
 
         Ok(Expr::new(kind, span))
+    }
+
+    /// The constructor and the arguments of `M.Ctor(a, b)`, if `expr` is
+    /// such a call on an imported module. The parser gives the call as
+    /// `App(App(M.Ctor, a), b)`, and `M.Ctor()` as `App(M.Ctor, ())`.
+    fn qualified_ctor_call<'e>(
+        &self,
+        expr: &'e SurfaceExpr,
+    ) -> Option<(&'e SmolStr, Vec<SurfaceExpr>)> {
+        let mut args = Vec::new();
+        let mut head = expr;
+        while let SurfaceExprKind::App { func, arg } = &head.kind {
+            args.push(arg.as_ref().clone());
+            head = func;
+        }
+        let SurfaceExprKind::FieldAccess { base, field } = &head.kind else {
+            return None;
+        };
+        let imported =
+            module_qualifier_of(base).is_some_and(|q| self.module_qualifiers.contains(&q));
+        if !imported || !field.starts_with(|c: char| c.is_ascii_uppercase()) {
+            return None;
+        }
+        args.reverse();
+        let nullary = self
+            .registry
+            .get_ctor(field.as_str())
+            .is_some_and(|info| info.fields.is_empty());
+        if nullary
+            && matches!(
+                args[..],
+                [SurfaceExpr {
+                    kind: SurfaceExprKind::Lit(Literal::Unit),
+                    ..
+                }]
+            )
+        {
+            args.clear();
+        }
+        Some((field, args))
     }
 
     /// Desugar qualified module-member access `M.member`.

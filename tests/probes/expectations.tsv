@@ -54,10 +54,10 @@ gen_angle	check	ok	ok	E7 generics: id<a> instantiated at I32
 gen_angle	compile	ok	ok	E7
 gen_angle	run	ok:3	ok:3	E7
 gen_angle	wasm-run	ok:3	ok:3	E7 (baseline recorded from `ephapax run`, same engine; no wasmtime CLI in that session)
-qa/app2	check	error:DesugarError	ok	E7: qualified M.Ctor(x) across modules
-qa/app2	compile	error:DesugarError	ok	E7
-qa/app2	run	error:DesugarError	ok:9	E7 + E3 (run goes through ephapax-driver::load_program)
-qa/app2	wasm-run	no-module	ok:9	E7
+qa/app2	check	ok	ok	E7: qualified M.Ctor(x) across modules
+qa/app2	compile	ok	ok	E7
+qa/app2	run	ok:9	ok:9	E7 + E3 (run goes through ephapax-driver::load_program)
+qa/app2	wasm-run	ok:9	ok:9	E7 (baseline recorded from `ephapax run`, same engine; no wasmtime CLI in that session)
 p1	check	ok	ok	already accepted
 p1	compile	ok	ok	already compiles (959 B in the survey)
 p1	run	ok:162	ok:162	E3/E4: ephapax run executes the wasm and prints 162

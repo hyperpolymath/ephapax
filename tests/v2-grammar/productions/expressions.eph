@@ -1,0 +1,72 @@
+// SPDX-License-Identifier: MPL-2.0
+// Grammar fixture (v2 plan rung E7): each expression, pattern and type
+// form of the parser grammar. The grammar conformance test of
+// ephapax-parser reads the parse tree of this file; nothing runs it,
+// and the type checker does not see it.
+module fixtures/expressions
+
+data Option(a) = None | Some(a)
+
+fn literals(): () =
+  let a = () in
+  let b = true in
+  let c = 1.5f32 in
+  let d = 2.5 in
+  let e = 42 in
+  let f = "text\n" in
+  ()
+
+fn operators(x: I32, y: I32): Bool =
+  !(x + y * 2 - y / 3 % 4 < 9) || x <= y && x == y || x != -y
+
+fn lets(p: (I32, I32)): I32 =
+  let (a, b) = p in
+  let! c: I32 = a in
+  let d = b
+  let! e = c
+  d + e
+
+fn control(o: Option(I32), s: I32 + I32): I32 =
+  let f = fn(n: I32) -> n + 1 in
+  let g = if true then 1 else 2 in
+  let h = match o of
+    | None => 0
+    | Some(0) => 1
+    | Some(n) if n > 5 => n
+    | _ => 2
+    end in
+  let i = match (g, h) of | (a, b) => a + b end in
+  let k = match () of | () => 0 end in
+  let j = case s of inl(l) -> l inr(r) -> r end in
+  f(g) + i + j
+
+fn regions(): I32 =
+  region r {
+    let! s = String.new@r("hi")
+    let n = String.len(&s)
+    let m = &mut n
+    drop(s);
+    copy(n)
+  }
+
+fn sums(n: I32): I32 + Bool =
+  if n > 0 then inl[Bool](n) else inr[I32](false)
+
+fn aggregates(xs: [I32], rec: { x: I32, y: I32 }, t: &I32): I32 =
+  let ys = [1, 2, 3] in
+  let p = (ys[0], xs[1]) in
+  let q = { x = 1, y: I32 = 2, z: 3, } in
+  let w = Point { x = 1 } in
+  let v = Some(snd(p)) in
+  let u = id[I32](fst(p)) in
+  p.0 + lib.helper(u, 2) + unit()
+
+fn effects(): I32 =
+  handle perform get(1) + perform tick with
+  | return(x) => x
+  | get(n, resume) => n
+  | put(resume(once)) => 0
+  | all(resume(multi)) => 1
+  end
+
+fn foreign(n: I32): I32 = __ffi("host_add", n, 1)

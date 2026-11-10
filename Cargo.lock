@@ -909,6 +909,7 @@ dependencies = [
  "ephapax-typing",
  "pest",
  "pest_derive",
+ "pest_meta",
  "smol_str",
  "thiserror 2.0.18",
 ]

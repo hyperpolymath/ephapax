@@ -5,103 +5,553 @@
  * Ephapax v2 Grammar Specification
  * ================================
  *
- * Complete grammar covering: modules, generics, comptime meta plane,
- * traits, algebraic effects, contracts, FFI capabilities, visibility,
- * annotations, iterators, and pattern matching.
+ * This file and src/ephapax-parser/src/ephapax.pest are ONE normative
+ * grammar (v2 plan rung E7; owner decision 2026-11-10: the parser
+ * grammar is the source).
  *
  * Architecture:
- *   SURFACE GRAMMAR (this file) → desugar → CORE CALCULUS (existing)
+ *   SURFACE GRAMMAR (this file) -> desugar -> CORE CALCULUS
  *
  * The core calculus (binary sums, case, inl/inr, let/let!, regions)
  * remains unchanged. Everything here desugars into it.
  *
- * Two planes:
- *   DATA PLANE  — runtime, linear/affine, regions, effects
- *   META PLANE  — compile-time, total, pure, unrestricted
+ * The file has 2 parts.
+ *
+ * PART 1: THE PARSER GRAMMAR. It says what the parser accepts. A test
+ *   makes it from ephapax.pest, and fails when the 2 files are not the
+ *   same grammar. Do not edit part 1 by hand. After a change of
+ *   ephapax.pest, run:
+ *
+ *     UPDATE_GRAMMAR=1 cargo test -p ephapax-parser grammar_conformance
+ *
+ *   Each rule is in the parse tree of a fixture in
+ *   tests/v2-grammar/productions.
+ *
+ * PART 2: THE V2 DESIGN, NOT IN THE PARSER BY THAT NAME. These are the
+ *   productions of the v2 design grammar that are not rules of the
+ *   parser: traits, effect and handler declarations, the comptime meta
+ *   plane, contracts, capabilities, and some other forms. Each one is as
+ *   the design wrote it, and each one has a mark on the line before it:
+ *
+ *     [ALIAS rule]      The parser has the construct as `rule` of part 1.
+ *                       Part 1 is the current form.
+ *     [UNIMPLEMENTED]   The parser does not have it. The parser refuses
+ *                       the fixture that the mark names.
+ *
+ *   A "DESIGN FORM" comment keeps the design form of a production that
+ *   part 1 has in a smaller form.
+ *
+ *   The specification does not shrink: a production leaves part 2 only
+ *   when the parser has it. Which form wins, where the design and the
+ *   parser write one construct in 2 ways, is an owner decision for each
+ *   construct.
+ *
+ * The same test counts the productions: each one is a rule of the parser,
+ * an alias, or a refused production. 0 productions are unaccounted for.
+ *
+ * Notation of part 1 (ISO EBNF, with 2 additions for a PEG):
+ *   a , b      a, then b          a | b     a, or else b (the first match)
+ *   [ a ]      a or nothing       { a }     a, 0 or more times
+ *   { a }-     a, 1 or more times
+ *   &( a )     a follows here (lookahead, takes no input)
+ *   !( a )     a does not follow here (lookahead, takes no input)
+ *   ? ... ?    a character range, or a character with no printed form
+ *   Names in upper case with no production are from pest:
+ *   ASCII_ALPHA, ASCII_ALPHA_UPPER, ASCII_ALPHANUMERIC, ASCII_DIGIT, ANY
+ *   (one character), SOI and EOI (start and end of the input).
+ *   White space and comments (WHITESPACE, COMMENT) can stand between 2
+ *   parts of a production, but not in an atomic production.
+ *
+ * Two planes of the design:
+ *   DATA PLANE  - runtime, linear/affine, regions, effects
+ *   META PLANE  - compile-time, total, pure, unrestricted
  *
  * The meta plane (comptime) can observe types and generate code.
  * It cannot reference runtime values or violate linearity.
  * Harvard separation: meta plane output is validated by the type checker.
- *
- * Status: ACTIVE — the v2 surface grammar, landing in phases.
- *   This is the second-draft grammar. The v1 surface (parsed straight
- *   into the core, no desugaring layer) worked for the core calculus
- *   but could not grow into modules / generics / effects / comptime;
- *   v2 adds the surface -> desugar -> core layer that v1 lacked. See
- *   ../V1-TO-V2.adoc for the full v1 -> v2 story.
- *
- *   The specification below is complete. Implementation proceeds in
- *   phases, each gated by its own CLI test
- *   (src/ephapax-cli/tests/v2_grammar_phase_*.rs); landed phases pass.
- *   "Draft" here means the surface is still growing toward full
- *   coverage, NOT that it is abandoned or wrong.
+ * See ../V1-TO-V2.adoc for the v1 -> v2 story.
  *)
 
 
+(* ################################################################ *)
+(* PART 1: THE PARSER GRAMMAR                                       *)
+(* ################################################################ *)
+
+(* BEGIN GENERATED: the parser grammar, from ephapax.pest. Do not edit. *)
+
+
+(* Ephapax Grammar - PEG Parser *)
+
+(* Top-level rules *)
+module = SOI , [ module_decl ] , { import_decl | declaration } , EOI ;
+expression_only = SOI , expression , EOI ;
+
+(* Module Declaration *)
+
+module_decl = "module" , qualified_name ;
+
+(* Only the header, for `declared_module_name`. *)
+module_header = SOI , module_decl ;
+
+(* Qualified name: Foo.Bar.Baz OR Foo/Bar/Baz (slash- and dot-segments both *)
+(* allowed and treated as equivalent at the AST level - see canonicalisation *)
+(* in `parse_module` / `parse_surface_module`). Slash-paths matter for the *)
+(* `hypatia/ui/bridge` style used by downstream consumers; dot-paths are *)
+(* historical. *)
+qualified_name = ( ASCII_ALPHA | "_" ) , { ASCII_ALPHANUMERIC | "_" | "." | "/" } ; (* atomic: no white space between the parts *)
+
+(* Imports *)
+
+import_decl = "import" , qualified_name , [ "(" , identifier , { "," , identifier } , ")" ] ;
+
+(* Declarations *)
+
+declaration = { annotation } , ( extern_block | data_decl | fn_decl | type_decl | const_decl ) ;
+
+(* `@identifier` decorators attached to top-level declarations. Currently *)
+(* parser-only - annotations are parsed and stored on the surface AST so *)
+(* they survive round-tripping, but the typechecker and codegen ignore *)
+(* them. They exist so that downstream tools (hypatia's `@tail_recursive`, *)
+(* future `@inline`, `@no_mangle`, etc.) can hang metadata off a decl *)
+(* without breaking the parser today. *)
+annotation = "@" , identifier ;
+
+(* Extern Blocks *)
+(* `extern "abi" { items... }` declares foreign types and function *)
+(* signatures. Items have no body; codegen lowers fn items to host *)
+(* `import` directives and treats type items as opaque externs. *)
+(* Example: *)
+(* extern "gossamer" { *)
+(* type Window *)
+(* fn window_open(title: String, body: String): Window *)
+(* } *)
+
+extern_block = "extern" , string , "{" , { extern_item } , "}" ;
+extern_item = extern_type_item | extern_fn_item ;
+extern_type_item = "type" , identifier ;
+extern_fn_item = "fn" , identifier , "(" , [ param_list ] , ")" , ( ":" | "->" ) , ty ;
+
+(* Top-level constant binding: let NAME = expr *)
+const_decl = "let" , identifier , [ ":" , ty ] , "=" , expression ;
+
+(* Optional "pub" prefix for visibility *)
+visibility = "pub" ;
+
+(* Optional generic type parameters: <T>, <T, U> *)
+fn_type_params = "<" , identifier , { "," , identifier } , ">" ;
+
+fn_decl = [ visibility ] , "fn" , identifier , [ fn_type_params ] , "(" , [ param_list ] , ")" , ( ":" | "->" ) , ty , "=" , expression ;
+
+param_list = param , { "," , param } ;
+
+param = identifier , ":" , ty ;
+
+type_decl = [ visibility ] , [ linearity ] , "type" , identifier , "=" , ( named_record_type_def | record_type_def | sum_type_def | ty ) ;
+
+(* Named record: TypeName = ConstructorName { field: Type, ... } *)
+named_record_type_def = constructor_name , "{" , record_field , { "," , record_field } , [ "," ] , "}" ;
+
+linearity = "linear" | "affine" ;
+
+(* Data type declaration: data Option(a) = None | Some(a) *)
+(* Optional `pub` prefix makes the type + its constructors importable. *)
+data_decl = [ visibility ] , "data" , constructor_name , [ type_params ] , "=" , [ "|" ] , data_variant , { "|" , data_variant } ;
+
+type_params = "(" , identifier , { "," , identifier } , ")" ;
+
+data_variant = constructor_name , [ "(" , [ ty_list ] , ")" ] ;
+ty_list = ty , { "," , ty } ;
+
+(* Constructor names start with uppercase *)
+constructor_name = ASCII_ALPHA_UPPER , { ASCII_ALPHANUMERIC | "_" } ; (* atomic: no white space between the parts *)
+
+sum_type_def = [ "|" ] , sum_variant , { "|" , sum_variant } ;
+sum_variant = identifier , [ "(" , ty , ")" ] ;
+
+record_type_def = "{" , record_field , { "," , record_field } , [ "," ] , "}" ;
+record_field = identifier , ":" , ty ;
+
+(* Types *)
+
+ty = sum_ty , [ "->" , ty ] ;
+
+sum_ty = type_atom , { "+" , type_atom } ;
+
+type_atom = base_ty
+          | string_ty
+          | borrow_ty
+          | list_ty
+          | product_ty
+          | record_ty
+          | named_ty
+          | type_var
+          ;
+
+(* Type variables are single lowercase or uppercase identifiers that are NOT *)
+(* constructor names with arguments. The named_ty rule handles constructors. *)
+(* For single uppercase letters like T, A, B - the parser tries named_ty first, *)
+(* which matches as a nullary constructor. The type checker resolves whether *)
+(* it's a type variable or a constructor based on scope. *)
+
+(* Named type application: Option(I32), Result(String@r, Error), Color *)
+(* Nullary named types (no parens) are also valid: Color, Unit, etc. *)
+named_ty = constructor_name , [ "(" , ty_list , ")" ] ;
+
+record_ty = "{" , record_field , { "," , record_field } , "}" ;
+
+base_ty = unit_ty | "Bool" | "I32" | "I64" | "F32" | "F64" ;
+unit_ty = "()" ;
+
+string_ty = "String" , [ "@" , identifier ] ;
+
+borrow_ty = "&" , [ mut_marker ] , type_atom ;
+
+mut_marker = "mut" , !( ASCII_ALPHANUMERIC | "_" ) ; (* atomic: no white space between the parts *)
+
+list_ty = "[" , ty , "]" ;
+
+product_ty = "(" , ty , { "," , ty }- , ")" ;
+
+type_var = identifier ;
+
+(* Expressions *)
+
+expression = seq_expr ;
+
+(* Statement sequencing: e1 ; e2 ; e3  (last expression is the result) *)
+seq_expr = single_expr , { ";" , single_expr } ;
+
+single_expr = block_expr
+            | let_lin_expr
+            | let_expr
+            | lambda_expr
+            | if_expr
+            | region_expr
+            | match_expr
+            | case_expr
+            | handle_expr
+            | or_expr
+            ;
+
+(* One or more `sequential_let`s followed by a trailing result expression. *)
+(* The trailing expression can itself be any `expression` (which folds back *)
+(* through `seq_expr` / `single_expr`), so nested block forms and explicit *)
+(* `let ... in ...` both compose normally. *)
+block_expr = { sequential_let }- , expression ;
+
+sequential_let = ( "let!" | "let" ) , let_binder , [ ":" , ty ] , "=" , block_rhs ;
+
+(* A `sequential_let`'s rhs may be any expression form *except* a top-level *)
+(* `let`/`let!` - those participate in the block via the next iteration of *)
+(* `sequential_let`. *)
+block_rhs = lambda_expr
+          | if_expr
+          | region_expr
+          | match_expr
+          | case_expr
+          | handle_expr
+          | or_expr
+          ;
+
+(* Pattern matching: match x of | None => 0 | Some(v) => v end *)
+match_expr = "match" , expression , "of" , [ "|" ] , match_arm , { "|" , match_arm } , "end" ;
+
+match_arm = pattern , [ "if" , expression ] , "=>" , expression ;
+
+pattern = constructor_pattern
+        | pair_pattern
+        | wildcard_pattern
+        | literal_pattern
+        | var_pattern
+        ;
+
+constructor_pattern = constructor_name , [ "(" , [ pattern_list ] , ")" ] ;
+pair_pattern = "(" , pattern , "," , pattern , ")" ;
+wildcard_pattern = "_" ;
+literal_pattern = literal ;
+var_pattern = identifier ;
+
+pattern_list = pattern , { "," , pattern } ;
+
+let_expr = "let" , let_binder , [ ":" , ty ] , "=" , expression , "in" , expression ;
+
+let_lin_expr = "let!" , let_binder , [ ":" , ty ] , "=" , expression , "in" , expression ;
+
+(* Either a single identifier (the common case) or a parenthesised tuple *)
+(* of identifiers for destructuring binds: *)
+(* let (a, b) = pair() in ... *)
+(* let! (ch2, msg_bytes) = ipc_recv(ch) in ... *)
+(* Tuple binders desugar to a 1-arm `match scrutinee of | (a, b) => body end` *)
+(* at parse time, reusing the existing pair-pattern handling. *)
+let_binder = tuple_binder | identifier ;
+tuple_binder = "(" , identifier , { "," , identifier }- , ")" ;
+
+lambda_expr = "fn" , "(" , identifier , ":" , ty , ")" , "->" , expression ;
+
+if_expr = "if" , expression , "then" , expression , "else" , expression ;
+
+region_expr = "region" , identifier , ( ":" | "{" ) , expression , [ "}" ] ;
+
+case_expr = "case" , expression , "of" , "inl" , "(" , identifier , ")" , "->" , expression , "inr" , "(" , identifier , ")" , "->" , expression , "end" ;
+
+(* Effect handling: handle expr with { return(x) => e | Op(args, resume) => e } end *)
+handle_expr = "handle" , expression , "with" , [ "|" ] , handler_clause , { "|" , handler_clause } , "end" ;
+
+handler_clause = handler_return_clause | handler_op_clause ;
+
+(* return(x) => expr *)
+handler_return_clause = "return" , "(" , identifier , ")" , "=>" , expression ;
+
+(* Op(param1, param2, resume) => expr *)
+(* resume may optionally have a mode: resume(once) or resume(multi) *)
+handler_op_clause = identifier , "(" , [ handler_param_list ] , ")" , "=>" , expression ;
+
+handler_param_list = handler_param , { "," , handler_param } ;
+handler_param = resume_param | identifier ;
+
+resume_param = "resume" , [ "(" , resume_mode , ")" ] ;
+resume_mode = "once" | "multi" ;
+
+(* Binary Operators (by precedence, lowest to highest) *)
+
+or_expr = and_expr , { "||" , and_expr } ;
+
+and_expr = eq_expr , { "&&" , eq_expr } ;
+
+eq_expr = cmp_expr , { eq_op , cmp_expr } ;
+eq_op = "==" | "!=" ;
+
+cmp_expr = add_expr , { cmp_op , add_expr } ;
+cmp_op = "<=" | ">=" | "<" | ">" ;
+
+add_expr = mul_expr , { add_op , mul_expr } ;
+add_op = "+" | "-" ;
+
+mul_expr = unary_expr , { mul_op , unary_expr } ;
+mul_op = "*" | "/" | "%" ;
+
+(* Unary and Postfix Expressions *)
+
+unary_expr = "!" , unary_expr | "-" , unary_expr | postfix_expr ;
+
+postfix_expr = atom_expr , { postfix_op } ;
+
+postfix_op = call_op | type_app_op | index_op | member_op ;
+
+call_op = "(" , [ call_args ] , ")" ;
+call_args = expression , { "," , expression } ;
+(* Explicit type arguments of a generic function: `id[I32](3)`. Only *)
+(* before a call, and before `index_op`: `xs[i](3)` has the two readings *)
+(* when `i` is one name. The desugarer reads that case as an index, unless *)
+(* the name is a type parameter of the function it is in. *)
+type_app_op = "[" , ty_list , "]" , &( "(" ) ;
+index_op = "[" , expression , "]" ;
+member_op = "." , ( integer | identifier | constructor_name ) ;
+
+(* Atomic Expressions *)
+
+atom_expr = perform_expr
+          | ffi_expr
+          | string_method
+          | inl_expr
+          | inr_expr
+          | borrow_expr
+          | fst_expr
+          | snd_expr
+          | drop_expr
+          | copy_expr
+          | construct_expr
+          | record_literal
+          | list_literal
+          | paren_or_pair
+          | literal
+          | variable
+          ;
+
+(* Perform an effect operation: perform Op(args...) *)
+perform_expr = "perform" , identifier , [ "(" , [ expr_list ] , ")" ] ;
+
+(* Named constructor: Some(42), None, Ok(value), or named record: GsaApp { field = val } *)
+construct_expr = constructor_name , [ "(" , [ expr_list ] , ")" | "{" , record_field_assign , { "," , record_field_assign } , [ "," ] , "}" ] ;
+
+(* FFI call: __ffi("symbol_name", arg1, arg2, ...) *)
+(* Calls a C ABI function from a linked shared library. *)
+ffi_expr = "__ffi" , "(" , string , { "," , expression } , ")" ;
+
+record_literal = "{" , record_field_assign , { "," , record_field_assign } , [ "," ] , "}" ;
+(* Three surface forms, all producing the same AST node: *)
+(* 1. `field: ty = value`  (typed, explicit assignment) *)
+(* 2. `field = value`      (untyped, explicit assignment) *)
+(* 3. `field: value`       (ML/Haskell-style shorthand - value *)
+(* expression directly after `:`, no `=`) *)
+(* PEG ordering: the `=` forms are tried first; the shorthand fires *)
+(* only when no `=` follows the named-ty. *)
+record_field_assign = identifier , ":" , ty , "=" , expression
+                    | identifier , "=" , expression
+                    | identifier , ":" , expression
+                    ;
+
+string_method = "String" , "." , identifier , [ "@" , identifier ] , "(" , [ expr_list ] , ")" ;
+
+expr_list = expression , { "," , expression } ;
+
+inl_expr = "inl" , "[" , ty , "]" , "(" , expression , ")" ;
+inr_expr = "inr" , "[" , ty , "]" , "(" , expression , ")" ;
+
+borrow_expr = "&" , [ mut_marker ] , unary_expr ;
+
+fst_expr = "fst" , "(" , expression , ")" ;
+snd_expr = "snd" , "(" , expression , ")" ;
+drop_expr = "drop" , "(" , expression , ")" ;
+copy_expr = "copy" , "(" , expression , ")" ;
+
+list_literal = "[" , [ expression , { "," , expression } ] , "]" ;
+
+paren_or_pair = "(" , [ expression , { "," , expression } ] , ")" ;
+
+variable = identifier ;
+
+(* Literals *)
+
+literal = unit_literal | boolean | float32 | float | integer | string ;
+
+unit_literal = "()" ;
+boolean = "true" | "false" ;
+
+integer = { ASCII_DIGIT }- ; (* atomic: no white space between the parts *)
+float = { ASCII_DIGIT }- , "." , { ASCII_DIGIT }- ; (* atomic: no white space between the parts *)
+(* An F32 literal carries the `f32` suffix (`1.5f32`); an unsuffixed float *)
+(* literal is F64. *)
+float32 = { ASCII_DIGIT }- , "." , { ASCII_DIGIT }- , "f32" ; (* atomic: no white space between the parts *)
+
+string = '"' , string_inner , '"' ; (* atomic: no white space between the parts *)
+string_inner = { escape | !( '"' | "\" ) , ANY } ; (* atomic: no white space between the parts *)
+escape = "\" , ( "n" | "r" | "t" | "\" | '"' ) ; (* atomic: no white space between the parts *)
+
+(* Identifiers and Whitespace *)
+
+identifier = !( keyword_boundary ) , ( ASCII_ALPHA | "_" ) , { ASCII_ALPHANUMERIC | "_" } ; (* atomic: no white space between the parts *)
+
+(* Keywords must be followed by a non-identifier character (word boundary) *)
+keyword_boundary = ( "let!" | "let" | "in" | "fn" | "if" | "then" | "else" | "region" | "case" | "of" | "inl" | "inr" | "end" | "fst" | "snd" | "drop" | "copy" | "type" | "data" | "match" | "extern" | "true" | "false" | "pub" | "import" | "module" | "linear" | "mut" | "perform" | "handle" | "with" | "return" | "resume" | "once" | "multi" | "Bool" | "I32" | "I64" | "F32" | "F64" | "String" ) , !( ASCII_ALPHANUMERIC | "_" ) ;
+
+keyword = "let"
+        | "let!"
+        | "in"
+        | "fn"
+        | "if"
+        | "then"
+        | "else"
+        | "region"
+        | "case"
+        | "of"
+        | "inl"
+        | "inr"
+        | "end"
+        | "fst"
+        | "snd"
+        | "drop"
+        | "copy"
+        | "type"
+        | "data"
+        | "match"
+        | "extern"
+        | "true"
+        | "false"
+        | "pub"
+        | "import"
+        | "module"
+        | "linear"
+        | "mut"
+        | "perform"
+        | "handle"
+        | "with"
+        | "return"
+        | "resume"
+        | "once"
+        | "multi"
+        | "Bool"
+        | "I32"
+        | "I64"
+        | "F32"
+        | "F64"
+        | "String"
+        ;
+
+WHITESPACE = " " | ? TAB ? | ? LF ? | ? CR ? ; (* silent: no node in the parse tree *)
+COMMENT = "--" , { !( ? LF ? ) , ANY }
+        | "//" , { !( ? LF ? ) , ANY }
+        | "/*" , { !( "*/" ) , ANY } , "*/"
+        ; (* silent: no node in the parse tree *)
+
+(* END GENERATED *)
+
+
+(* ################################################################ *)
+(* PART 2: THE V2 DESIGN, NOT IN THE PARSER BY THAT NAME            *)
+(* ################################################################ *)
+
 (* ================================================================ *)
-(* 1. TOP LEVEL                                                      *)
+(* 1. TOP LEVEL                                                     *)
 (* ================================================================ *)
 
 (* A source file is a module. *)
+(* [ALIAS module] the parser takes imports and declarations in any order *)
 source_file  = { module_header } , { import } , { top_decl } ;
 
-module_header = "module" , module_path , [ capability_decl ] ;
+(* DESIGN FORM of module_header. The parser rule module_header in part 1 is the current form.
+ * This form has productions that are not implemented: capability_decl.
+ *
+ * module_header = "module" , module_path , [ capability_decl ] ;
+ *)
 
+(* [ALIAS qualified_name] the parser rule is the current form *)
 module_path  = IDENT , { "." , IDENT } ;
 
+
 (* ================================================================ *)
-(* 2. MODULES AND IMPORTS                                            *)
+(* 2. MODULES AND IMPORTS                                           *)
 (* ================================================================ *)
 
+(* [UNIMPLEMENTED] refused: tests/v2-grammar/unimplemented/import_from.eph (the parser has import_decl: `import a/b` and `import a/b(x, y)`) *)
 import       = "import" , import_spec , "from" , STRING ;
 
+(* [UNIMPLEMENTED] refused: tests/v2-grammar/unimplemented/import_from.eph *)
 import_spec  = IDENT                                 (* import Foo from "foo" *)
              | "{" , IDENT , { "," , IDENT } , "}"   (* import { a, b } from "foo" *)
              | "*" , "as" , IDENT                     (* import * as Foo from "foo" *)
              ;
 
 (* Re-export: make imported names visible to importers of this module *)
+(* [UNIMPLEMENTED] refused: tests/v2-grammar/unimplemented/reexport.eph *)
 reexport     = "pub" , import ;
 
-(* ================================================================ *)
-(* 3. VISIBILITY                                                     *)
-(* ================================================================ *)
-
-(* Default: private to module. `pub` makes visible to importers. *)
-visibility   = [ "pub" ] ;
 
 (* ================================================================ *)
-(* 4. ANNOTATIONS                                                    *)
+(* 4. ANNOTATIONS                                                   *)
 (* ================================================================ *)
 
-(* Annotations are compile-time metadata on declarations.            *)
-(* The comptime meta plane processes them.                           *)
-
-annotation   = "@" , IDENT , [ "(" , annotation_args , ")" ] ;
-annotation_args = annotation_arg , { "," , annotation_arg } ;
-annotation_arg  = IDENT | STRING | INTEGER | annotation ;
-
-(* Common annotations:
- *   @inline          — inline this function at call sites
- *   @noinline        — never inline
- *   @tail_recursive  — verify tail recursion (comptime-checked)
- *   @no_alloc        — verify no allocation (comptime-checked)
- *   @repr(C)         — C-compatible memory layout
- *   @repr(packed)    — no padding
- *   @deprecated(msg) — emit warning on use
- *   @comptime        — execute at compile time
- *   @reflectable     — generate runtime TypeDesc
- *   @derive(Eq, Show) — generate trait impls via comptime
- *   @pure            — no side effects (comptime-verified)
- *   @total           — always terminates (comptime-verified)
+(* DESIGN FORM of annotation. The parser rule annotation in part 1 is the current form.
+ * This form has productions that are not implemented: annotation_args.
+ *
+ * annotation   = "@" , IDENT , [ "(" , annotation_args , ")" ] ;
  *)
 
+(* [UNIMPLEMENTED] refused: tests/v2-grammar/unimplemented/annotation_args.eph *)
+annotation_args = annotation_arg , { "," , annotation_arg } ;
+
+(* [UNIMPLEMENTED] refused: tests/v2-grammar/unimplemented/annotation_args.eph *)
+annotation_arg  = IDENT | STRING | INTEGER | annotation ;
+
+
 (* ================================================================ *)
-(* 5. DECLARATIONS                                                   *)
+(* 5. DECLARATIONS                                                  *)
 (* ================================================================ *)
 
+(* [ALIAS declaration] the parser has no trait, impl, effect, handler or comptime declaration *)
 top_decl     = { annotation } , visibility , decl_body ;
 
+(* [ALIAS declaration] the parser has no trait, impl, effect, handler or comptime declaration *)
 decl_body    = fn_decl
              | data_decl
              | type_decl
@@ -112,86 +562,86 @@ decl_body    = fn_decl
              | comptime_decl
              ;
 
-(* --- 5a. Functions --- *)
+(* DESIGN FORM of fn_decl. The parser rule fn_decl in part 1 is the current form.
+ * This form has productions that are not implemented: contract_block, effect_annotation, where_clause.
+ *
+ * fn_decl      = "fn" , IDENT , [ type_params ] ,
+ *                "(" , [ param_list ] , ")" , ":" , ty ,
+ *                [ where_clause ] ,
+ *                [ contract_block ] ,
+ *                [ effect_annotation ] ,
+ *                "=" , expr ;
+ *)
 
-fn_decl      = "fn" , IDENT , [ type_params ] ,
-               "(" , [ param_list ] , ")" , ":" , ty ,
-               [ where_clause ] ,
-               [ contract_block ] ,
-               [ effect_annotation ] ,
-               "=" , expr ;
+(* DESIGN FORM of type_params. The parser rule type_params in part 1 is the current form.
+ * This form has productions that are not implemented: type_param.
+ *
+ * type_params  = "[" , type_param , { "," , type_param } , "]" ;
+ *)
 
-type_params  = "[" , type_param , { "," , type_param } , "]" ;
+(* [UNIMPLEMENTED] refused: tests/v2-grammar/unimplemented/type_param_bound.eph (the parser has type parameters with no bound: fn_type_params, type_params) *)
 type_param   = IDENT , [ ":" , trait_bound ] ;
 
+(* [UNIMPLEMENTED] refused: tests/v2-grammar/unimplemented/type_param_bound.eph *)
 trait_bound  = CTOR_IDENT , { "+" , CTOR_IDENT } ;
-(* e.g. [a: Eq + Show]  means  a must implement Eq and Show *)
 
-param_list   = param , { "," , param } ;
-param        = IDENT , ":" , ty ;
-
+(* [UNIMPLEMENTED] refused: tests/v2-grammar/unimplemented/where.eph *)
 where_clause = "where" , constraint , { "," , constraint } ;
+
+(* [UNIMPLEMENTED] refused: tests/v2-grammar/unimplemented/where.eph *)
 constraint   = IDENT , ":" , trait_bound ;
-(* where clause allows complex bounds that don't fit in type_params *)
 
-(* --- 5b. Data types --- *)
-
-data_decl    = "data" , CTOR_IDENT , [ type_params ] , "=" ,
-               [ "|" ] , data_variant , { "|" , data_variant } ;
-
-data_variant = CTOR_IDENT , [ "(" , ty_list , ")" ] ;
-
-ty_list      = ty , { "," , ty } ;
-
-(* --- 5c. Type aliases --- *)
-
-type_decl    = "type" , IDENT , [ type_params ] , "=" , ty ;
-
-(* --- 5d. Traits --- *)
-
+(* [UNIMPLEMENTED] refused: tests/v2-grammar/unimplemented/trait.eph *)
 trait_decl   = "trait" , CTOR_IDENT , "(" , type_param , ")" ,
                [ ":" , trait_bound ] ,  (* supertrait bounds *)
                "=" , { trait_item } , "end" ;
 
+(* [UNIMPLEMENTED] refused: tests/v2-grammar/unimplemented/trait.eph *)
 trait_item   = { annotation } , trait_fn_sig ;
 
+(* [UNIMPLEMENTED] refused: tests/v2-grammar/unimplemented/trait.eph *)
 trait_fn_sig = "fn" , IDENT , [ type_params ] ,
                "(" , [ param_list ] , ")" , ":" , ty ,
                [ "=" , expr ]  (* default implementation *)
                ;
 
-(* --- 5e. Trait implementations --- *)
-
+(* [UNIMPLEMENTED] refused: tests/v2-grammar/unimplemented/impl.eph *)
 impl_decl    = "impl" , CTOR_IDENT , "(" , ty , ")" ,
                [ where_clause ] ,
                "=" , { impl_item } , "end" ;
 
+(* [UNIMPLEMENTED] refused: tests/v2-grammar/unimplemented/impl.eph *)
 impl_item    = { annotation } , fn_decl ;
 
-(* --- 5f. Effects --- *)
-
+(* [UNIMPLEMENTED] refused: tests/v2-grammar/unimplemented/effect.eph *)
 effect_decl  = "effect" , CTOR_IDENT , [ type_params ] , "=" ,
                { effect_op } , "end" ;
 
+(* [UNIMPLEMENTED] refused: tests/v2-grammar/unimplemented/effect.eph *)
 effect_op    = "fn" , IDENT , [ type_params ] ,
                "(" , [ param_list ] , ")" , ":" , ty ;
 
-(* --- 5g. Effect handlers --- *)
-
+(* [UNIMPLEMENTED] refused: tests/v2-grammar/unimplemented/handler_decl.eph *)
 handler_decl = "handler" , IDENT , [ type_params ] ,
                "for" , CTOR_IDENT , [ type_params ] ,
                [ "with" , "(" , param_list , ")" ] ,  (* handler-local state *)
                "=" , { handler_clause } , "end" ;
 
-handler_clause = return_clause
-               | op_clause
-               | finally_clause
-               ;
+(* DESIGN FORM of handler_clause. The parser rule handler_clause in part 1 is the current form.
+ * This form has productions that are not implemented: finally_clause, op_clause.
+ *
+ * handler_clause = return_clause
+ *                | op_clause
+ *                | finally_clause
+ *                ;
+ *)
 
 (* What to do when the handled computation returns normally *)
+(* [ALIAS handler_return_clause] the parser rule is the current form *)
 return_clause = "return" , "(" , IDENT , ")" , "=>" , expr ;
 
 (* Handler for an effect operation *)
+(* [UNIMPLEMENTED] refused: tests/v2-grammar/unimplemented/handler_decl.eph (the parser has handler_op_clause, with `resume` in the parameter list) *)
 op_clause     = "|" , IDENT , "(" , [ param_list ] , ")" ,
                 [ "," , resume_binding ] ,
                 "=>" , expr ;
@@ -202,40 +652,45 @@ op_clause     = "|" , IDENT , "(" , [ param_list ] , ")" ,
  *          the continuation captures linear values)
  * - multi: multi-shot, type error if linear captures exist
  * - omitted: compiler infers from captures *)
+(* [ALIAS resume_param] the parser rule is the current form *)
 resume_binding = "resume" , [ "(" , resume_mode , ")" ] ;
-resume_mode    = "once" | "multi" ;
 
 (* Cleanup when continuation is discarded without resuming.
  * CRITICAL for linear safety: if a handler doesn't call resume,
  * any linear values captured by the continuation must be consumed.
  * The finally clause handles this. *)
+(* [UNIMPLEMENTED] refused: tests/v2-grammar/unimplemented/finally.eph *)
 finally_clause = "finally" , "=>" , expr ;
 
-(* --- 5h. Comptime declarations (meta plane) --- *)
-
+(* [UNIMPLEMENTED] refused: tests/v2-grammar/unimplemented/comptime.eph *)
 comptime_decl = "@comptime" , "{" , { comptime_item } , "}" ;
 
+(* [UNIMPLEMENTED] refused: tests/v2-grammar/unimplemented/comptime.eph *)
 comptime_item = comptime_fn | comptime_let ;
 
+(* [UNIMPLEMENTED] refused: tests/v2-grammar/unimplemented/comptime.eph *)
 comptime_fn  = "fn" , IDENT ,
                "(" , [ comptime_param_list ] , ")" , ":" , comptime_ty ,
                "=" , comptime_expr ;
 
+(* [UNIMPLEMENTED] refused: tests/v2-grammar/unimplemented/comptime.eph *)
 comptime_param_list = comptime_param , { "," , comptime_param } ;
+
+(* [UNIMPLEMENTED] refused: tests/v2-grammar/unimplemented/comptime.eph *)
 comptime_param      = IDENT , ":" , comptime_ty ;
 
+(* [UNIMPLEMENTED] refused: tests/v2-grammar/unimplemented/comptime.eph *)
 comptime_let = "let" , IDENT , "=" , comptime_expr ;
 
+
 (* ================================================================ *)
-(* 6. CONTRACTS                                                      *)
+(* 6. CONTRACTS                                                     *)
 (* ================================================================ *)
 
-(* Contracts are pre/post conditions and invariants.                 *)
-(* Static contracts are verified at comptime.                        *)
-(* Dynamic contracts emit runtime checks (erasable in release).      *)
-
+(* [UNIMPLEMENTED] refused: tests/v2-grammar/unimplemented/contract.eph *)
 contract_block = { contract_clause } ;
 
+(* [UNIMPLEMENTED] refused: tests/v2-grammar/unimplemented/contract.eph *)
 contract_clause = "requires" , expr           (* precondition *)
                 | "ensures" , result_expr     (* postcondition *)
                 | "invariant" , expr          (* maintained through body *)
@@ -246,44 +701,56 @@ contract_clause = "requires" , expr           (* precondition *)
  * the result as an unrestricted snapshot. This is needed because
  * linear values are consumed by the body and cannot be referenced
  * in ensures directly. old() implicitly borrows. *)
+(* [UNIMPLEMENTED] refused: tests/v2-grammar/unimplemented/contract.eph *)
 result_expr  = expr ;
+
+(* [UNIMPLEMENTED] refused: tests/v2-grammar/unimplemented/contract.eph *)
 old_expr     = "old" , "(" , expr , ")" ;
 
+
 (* ================================================================ *)
-(* 7. FFI CAPABILITIES                                               *)
+(* 7. FFI CAPABILITIES                                              *)
 (* ================================================================ *)
 
-(* Module-level capability declaration restricts what FFI can do.    *)
-(* Comptime-verified: if a module declares capabilities, every       *)
-(* __ffi call must fit within them.                                  *)
-
+(* [UNIMPLEMENTED] refused: tests/v2-grammar/unimplemented/capability.eph *)
 capability_decl = "capabilities" , ":" ,
                   "[" , capability , { "," , capability } , "]" ;
 
+(* [UNIMPLEMENTED] refused: tests/v2-grammar/unimplemented/capability.eph *)
 capability   = "memory_read"       (* can read from raw memory *)
              | "memory_write"      (* can write to raw memory *)
              | "io"                (* can perform I/O *)
              | "network"           (* can access network *)
              | "filesystem"        (* can access filesystem *)
              | "process"           (* can spawn/signal processes *)
-             | "ffi_unrestricted"  (* no restrictions — escape hatch *)
+             | "ffi_unrestricted"  (* no restrictions - escape hatch *)
              | IDENT               (* user-defined capability *)
              ;
 
-(* FFI calls carry capability requirements *)
-ffi_expr     = "__ffi" , [ capability_annotation ] ,
-               "(" , STRING , { "," , expr } , ")" ;
+(* DESIGN FORM of ffi_expr. The parser rule ffi_expr in part 1 is the current form.
+ * This form has productions that are not implemented: capability_annotation.
+ *
+ * ffi_expr     = "__ffi" , [ capability_annotation ] ,
+ *                "(" , STRING , { "," , expr } , ")" ;
+ *)
 
+(* [UNIMPLEMENTED] refused: tests/v2-grammar/unimplemented/capability_annotation.eph *)
 capability_annotation = "@capabilities" ,
                         "(" , capability , { "," , capability } , ")" ;
 
+
 (* ================================================================ *)
-(* 8. TYPES                                                          *)
+(* 8. TYPES                                                         *)
 (* ================================================================ *)
 
-ty           = effect_ty ;
+(* DESIGN FORM of ty. The parser rule ty in part 1 is the current form.
+ * This form has productions that are not implemented: effect_ty.
+ *
+ * ty           = effect_ty ;
+ *)
 
 (* Effect annotation on function types: a -> b with IO + State(s) *)
+(* [UNIMPLEMENTED] refused: tests/v2-grammar/unimplemented/effect_ty.eph *)
 effect_ty    = fun_ty , [ "with" , effect_row ] ;
 
 (* Effect rows support both concrete effects and effect variables.
@@ -291,48 +758,36 @@ effect_ty    = fun_ty , [ "with" , effect_row ] ;
  * polymorphism over effects:
  *   fn map[a, b, E: Effect](f: a -> b with E, xs: List(a)): List(b) with E
  * No `with` clause = pure (no effects). *)
+(* [UNIMPLEMENTED] refused: tests/v2-grammar/unimplemented/effect_row.eph *)
 effect_row   = effect_ref , { "+" , effect_ref }
              | IDENT                                  (* effect variable *)
              | effect_ref , { "+" , effect_ref } , "+" , IDENT  (* concrete + variable *)
              ;
+
+(* [UNIMPLEMENTED] refused: tests/v2-grammar/unimplemented/effect_row.eph *)
 effect_ref   = CTOR_IDENT , [ "(" , ty_list , ")" ] ;
 
+(* [ALIAS ty] the parser rule is the current form *)
 fun_ty       = sum_ty , [ "->" , ty ] ;
 
-sum_ty       = prod_ty , { "+" , prod_ty } ;
+(* DESIGN FORM of sum_ty. The parser rule sum_ty in part 1 is the current form.
+ * This form has productions that are not implemented: prod_ty.
+ *
+ * sum_ty       = prod_ty , { "+" , prod_ty } ;
+ *)
 
+(* [UNIMPLEMENTED] refused: tests/v2-grammar/unimplemented/prod_ty.eph *)
 prod_ty      = type_atom , { "*" , type_atom } ;
 
-type_atom    = base_ty
-             | string_ty
-             | borrow_ty
-             | list_ty
-             | tuple_ty
-             | named_ty
-             | type_var
-             | "(" , ty , ")"
-             ;
-
-base_ty      = "()" | "Bool" | "I32" | "I64" | "F32" | "F64" ;
-
-string_ty    = "String" , [ "@" , IDENT ] ;
-
-borrow_ty    = "&" , type_atom ;
-
-list_ty      = "[" , ty , "]" ;
-
+(* [ALIAS product_ty] the parser rule is the current form *)
 tuple_ty     = "(" , ty , "," , ty , { "," , ty } , ")" ;
 
-(* Named type application: Option(I32), Result(String@r, Error) *)
-(* Also bare names for nullary types: Color, Unit *)
-named_ty     = CTOR_IDENT , [ "(" , ty_list , ")" ] ;
-
-type_var     = IDENT ;
 
 (* ================================================================ *)
-(* 9. EXPRESSIONS                                                    *)
+(* 9. EXPRESSIONS                                                   *)
 (* ================================================================ *)
 
+(* [ALIAS expression] the parser rule is the current form *)
 expr         = let_expr
              | let_lin_expr
              | lambda_expr
@@ -344,194 +799,127 @@ expr         = let_expr
              | perform_expr
              | or_expr
              ;
-(* NOTE: No for-loops. Use recursion + fold + @tail_recursive.
- * The compiler recognises tail-recursive patterns and compiles
- * to efficient WASM loops. See ADR-015. *)
 
-(* --- Bindings --- *)
+(* DESIGN FORM of lambda_expr. The parser rule lambda_expr in part 1 is the current form.
+ * This form has productions that are not implemented: effect_annotation.
+ *
+ * lambda_expr  = "fn" , [ type_params ] ,
+ *                "(" , [ param_list ] , ")" ,
+ *                [ ":" , ty ] ,
+ *                [ effect_annotation ] ,
+ *                "->" , expr ;
+ *)
 
-let_expr     = "let" , pattern , [ ":" , ty ] , "=" , expr , "in" , expr ;
-
-let_lin_expr = "let!" , pattern , [ ":" , ty ] , "=" , expr , "in" , expr ;
-
-(* Note: let now accepts patterns, not just identifiers.
- * let (a, b) = pair in ...
- * let! Some(x) = opt in ...  (partial — must be exhaustive or in match) *)
-
-(* --- Functions --- *)
-
-lambda_expr  = "fn" , [ type_params ] ,
-               "(" , [ param_list ] , ")" ,
-               [ ":" , ty ] ,
-               [ effect_annotation ] ,
-               "->" , expr ;
-
+(* [UNIMPLEMENTED] refused: tests/v2-grammar/unimplemented/effect_row.eph *)
 effect_annotation = "with" , effect_row ;
 
-(* --- Control flow --- *)
+(* DESIGN FORM of handle_expr. The parser rule handle_expr in part 1 is the current form.
+ * This form has productions that are not implemented: handle_mode, handler_ref.
+ *
+ * handle_expr  = "handle" , [ handle_mode ] , expr , "with" ,
+ *                handler_ref , "end" ;
+ *)
 
-if_expr      = "if" , expr , "then" , expr , "else" , expr ;
+(* [UNIMPLEMENTED] refused: tests/v2-grammar/unimplemented/handle_mode.eph *)
+handle_mode  = "shallow" ;
 
-(* --- Pattern matching --- *)
-
-match_expr   = "match" , expr , "of" ,
-               [ "|" ] , match_arm , { "|" , match_arm } ,
-               "end" ;
-
-match_arm    = pattern , [ "if" , expr ] , "=>" , expr ;
-
-(* --- Regions --- *)
-
-region_expr  = "region" , IDENT , "{" , expr , "}" ;
-
-(* --- Binary case (core — still valid for expert use) --- *)
-
-case_expr    = "case" , expr , "of" ,
-               "inl" , "(" , IDENT , ")" , "->" , expr ,
-               "inr" , "(" , IDENT , ")" , "->" , expr ,
-               "end" ;
-
-(* --- Effects --- *)
-
-(* Perform an effect operation.
- * REGION SAFETY: arguments must not reference regions that the handler
- * might outlive. Use borrows (&) for region-bound values. *)
-perform_expr = "perform" , IDENT , [ "(" , [ expr_list ] , ")" ] ;
-
-(* Handle effects with a handler.
- * handle_mode: "shallow" handles first occurrence only (default: deep).
- * handler_state: optional handler-local state.
- * The handler body contains return, operation, and finally clauses. *)
-handle_expr  = "handle" , [ handle_mode ] , expr , "with" ,
-               handler_ref , "end" ;
-
-handle_mode  = "shallow" ;   (* default: deep — handle all occurrences *)
-
+(* [UNIMPLEMENTED] refused: tests/v2-grammar/unimplemented/handler_ref.eph *)
 handler_ref  = IDENT                         (* named handler *)
              | [ "(" , param_list , ")" ] ,  (* handler-local state *)
                { inline_handler_clause }     (* inline handler *)
              ;
 
+(* [ALIAS handler_clause] the parser has no finally clause *)
 inline_handler_clause = return_clause | inline_op_clause | finally_clause ;
 
+(* [UNIMPLEMENTED] refused: tests/v2-grammar/unimplemented/resume_after_params.eph (the parser has handler_op_clause, with `resume` in the parameter list) *)
 inline_op_clause = "|" , IDENT , "(" , [ param_list ] , ")" ,
                    [ "," , resume_binding ] ,
                    "=>" , expr ;
 
+
 (* ================================================================ *)
-(* 10. PATTERNS                                                      *)
+(* 10. PATTERNS                                                     *)
 (* ================================================================ *)
 
-pattern      = constructor_pattern
-             | pair_pattern
-             | tuple_pattern
-             | wildcard_pattern
-             | literal_pattern
-             | borrow_pattern
-             | var_pattern
-             | "(" , pattern , ")"
-             ;
+(* DESIGN FORM of pattern. The parser rule pattern in part 1 is the current form.
+ * This form has productions that are not implemented: borrow_pattern, tuple_pattern.
+ *
+ * pattern      = constructor_pattern
+ *              | pair_pattern
+ *              | tuple_pattern
+ *              | wildcard_pattern
+ *              | literal_pattern
+ *              | borrow_pattern
+ *              | var_pattern
+ *              | "(" , pattern , ")"
+ *              ;
+ *)
 
-constructor_pattern = CTOR_IDENT , [ "(" , pattern_list , ")" ] ;
-
-pair_pattern    = "(" , pattern , "," , pattern , ")" ;
+(* [UNIMPLEMENTED] refused: tests/v2-grammar/unimplemented/tuple_pattern.eph (the parser has the pattern of 2 parts as pair_pattern) *)
 tuple_pattern   = "(" , pattern , "," , pattern , { "," , pattern } , ")" ;
-wildcard_pattern = "_" ;
-literal_pattern  = literal ;
+
+(* [UNIMPLEMENTED] refused: tests/v2-grammar/unimplemented/borrow_pattern.eph *)
 borrow_pattern   = "&" , pattern ;
-var_pattern      = IDENT ;
 
-pattern_list = pattern , { "," , pattern } ;
 
 (* ================================================================ *)
-(* 11. BINARY AND UNARY OPERATORS                                    *)
+(* 11. BINARY AND UNARY OPERATORS                                   *)
 (* ================================================================ *)
 
-or_expr      = and_expr , { "||" , and_expr } ;
-and_expr     = eq_expr , { "&&" , eq_expr } ;
-eq_expr      = cmp_expr , { ( "==" | "!=" ) , cmp_expr } ;
-cmp_expr     = add_expr , { ( "<" | "<=" | ">" | ">=" ) , add_expr } ;
-add_expr     = mul_expr , { ( "+" | "-" ) , mul_expr } ;
-mul_expr     = concat_expr , { ( "*" | "/" | "%" ) , concat_expr } ;
+(* DESIGN FORM of mul_expr. The parser rule mul_expr in part 1 is the current form.
+ * This form has productions that are not implemented: concat_expr.
+ *
+ * mul_expr     = concat_expr , { ( "*" | "/" | "%" ) , concat_expr } ;
+ *)
+
+(* [UNIMPLEMENTED] refused: tests/v2-grammar/unimplemented/concat.eph *)
 concat_expr  = unary_expr , { "++" , unary_expr } ;
 
-unary_expr   = "!" , unary_expr
-             | "-" , unary_expr
-             | postfix_expr
-             ;
-
-postfix_expr = atom_expr , { postfix_op } ;
-
-postfix_op   = call_op | index_op | member_op | type_app_op ;
-call_op      = "(" , [ expr_list ] , ")" ;
-index_op     = "[" , expr , "]" ;
-member_op    = "." , ( INTEGER | IDENT ) ;
-type_app_op  = "[" , ty_list , "]" ;
-(* Type application: identity[I32](42) — explicit type argument *)
 
 (* ================================================================ *)
-(* 12. ATOMIC EXPRESSIONS                                            *)
+(* 12. ATOMIC EXPRESSIONS                                           *)
 (* ================================================================ *)
 
-atom_expr    = ffi_expr
-             | string_method
-             | inl_expr
-             | inr_expr
-             | borrow_expr
-             | deref_expr
-             | drop_expr
-             | copy_expr
-             | construct_expr
-             | list_literal
-             | paren_or_pair
-             | block_expr
-             | comptime_splice
-             | type_desc_expr
-             | literal
-             | variable
-             ;
+(* DESIGN FORM of atom_expr. The parser rule atom_expr in part 1 is the current form.
+ * This form has productions that are not implemented: comptime_splice, deref_expr, type_desc_expr.
+ *
+ * atom_expr    = ffi_expr
+ *              | string_method
+ *              | inl_expr
+ *              | inr_expr
+ *              | borrow_expr
+ *              | deref_expr
+ *              | drop_expr
+ *              | copy_expr
+ *              | construct_expr
+ *              | list_literal
+ *              | paren_or_pair
+ *              | block_expr
+ *              | comptime_splice
+ *              | type_desc_expr
+ *              | literal
+ *              | variable
+ *              ;
+ *)
 
-string_method = "String" , "." , IDENT , [ "@" , IDENT ] ,
-                "(" , [ expr_list ] , ")" ;
-
-inl_expr     = "inl" , "[" , ty , "]" , "(" , expr , ")" ;
-inr_expr     = "inr" , "[" , ty , "]" , "(" , expr , ")" ;
-
-borrow_expr  = "&" , unary_expr ;
+(* [UNIMPLEMENTED] refused: tests/v2-grammar/unimplemented/deref.eph *)
 deref_expr   = "*" , unary_expr ;
-drop_expr    = "drop" , "(" , expr , ")" ;
-copy_expr    = "copy" , "(" , expr , ")" ;
-
-(* Named constructor: Some(42), None, Ok(value) *)
-construct_expr = CTOR_IDENT , [ "(" , [ expr_list ] , ")" ] ;
-
-list_literal = "[" , [ expr , { "," , expr } ] , "]" ;
-
-paren_or_pair = "(" , [ expr , { "," , expr } ] , ")" ;
-
-block_expr   = "{" , { expr , ";" } , expr , "}" ;
 
 (* Splice comptime result into runtime code *)
+(* [UNIMPLEMENTED] refused: tests/v2-grammar/unimplemented/splice.eph *)
 comptime_splice = "@splice" , "(" , comptime_expr , ")" ;
 
 (* Runtime type descriptor (unrestricted value, Harvard-safe) *)
+(* [UNIMPLEMENTED] refused: tests/v2-grammar/unimplemented/type_desc.eph *)
 type_desc_expr = "@type_desc_of" , "(" , ty , ")" ;
 
-expr_list    = expr , { "," , expr } ;
-
-variable     = IDENT ;
-
-literal      = "()" | BOOLEAN | FLOAT32 | FLOAT | INTEGER | STRING ;
 
 (* ================================================================ *)
-(* 13. COMPTIME EXPRESSIONS (META PLANE)                             *)
+(* 13. COMPTIME EXPRESSIONS (META PLANE)                            *)
 (* ================================================================ *)
 
-(* Comptime expressions are total and pure by definition.            *)
-(* They can inspect types and generate surface AST.                  *)
-(* They CANNOT reference runtime values.                             *)
-(* Their output is validated by the type checker (Harvard guarantee). *)
-
+(* [UNIMPLEMENTED] refused: tests/v2-grammar/unimplemented/comptime.eph *)
 comptime_ty   = "Type"           (* reified type *)
               | "TypeDesc"       (* runtime type descriptor *)
               | "SurfaceDecl"    (* surface AST declaration *)
@@ -543,6 +931,7 @@ comptime_ty   = "Type"           (* reified type *)
               | IDENT
               ;
 
+(* [UNIMPLEMENTED] refused: tests/v2-grammar/unimplemented/comptime.eph *)
 comptime_expr = comptime_intrinsic
               | comptime_match
               | comptime_if
@@ -553,6 +942,7 @@ comptime_expr = comptime_intrinsic
               | IDENT
               ;
 
+(* [UNIMPLEMENTED] refused: tests/v2-grammar/unimplemented/comptime.eph *)
 comptime_intrinsic = "@type_desc_of" , "(" , ty , ")"
                    | "@fields_of" , "(" , ty , ")"
                    | "@constructors_of" , "(" , ty , ")"
@@ -568,196 +958,94 @@ comptime_intrinsic = "@type_desc_of" , "(" , ty , ")"
                    | "@warning" , "(" , STRING , ")" (* compile warning *)
                    ;
 
+(* [UNIMPLEMENTED] refused: tests/v2-grammar/unimplemented/comptime.eph *)
 comptime_match = "match" , comptime_expr , "of" ,
                  { "|" , comptime_pattern , "=>" , comptime_expr } ,
                  "end" ;
 
+(* [UNIMPLEMENTED] refused: tests/v2-grammar/unimplemented/comptime.eph *)
 comptime_pattern = CTOR_IDENT , [ "(" , comptime_pattern_list , ")" ]
                  | "_"
                  | IDENT
                  | comptime_literal
                  ;
 
+(* [UNIMPLEMENTED] refused: tests/v2-grammar/unimplemented/comptime.eph *)
 comptime_pattern_list = comptime_pattern , { "," , comptime_pattern } ;
 
+(* [UNIMPLEMENTED] refused: tests/v2-grammar/unimplemented/comptime.eph *)
 comptime_if  = "if" , comptime_expr , "then" , comptime_expr ,
                "else" , comptime_expr ;
 
+(* [UNIMPLEMENTED] refused: tests/v2-grammar/unimplemented/comptime.eph *)
 comptime_let_in = "let" , IDENT , "=" , comptime_expr , "in" , comptime_expr ;
 
+(* [UNIMPLEMENTED] refused: tests/v2-grammar/unimplemented/comptime.eph *)
 comptime_call = IDENT , "(" , [ comptime_expr , { "," , comptime_expr } ] , ")" ;
 
+(* [UNIMPLEMENTED] refused: tests/v2-grammar/unimplemented/comptime.eph *)
 comptime_list = "[" , [ comptime_expr , { "," , comptime_expr } ] , "]" ;
 
+(* [UNIMPLEMENTED] refused: tests/v2-grammar/unimplemented/comptime.eph *)
 comptime_literal = INTEGER | STRING | BOOLEAN | "()" ;
 
+
 (* ================================================================ *)
-(* 14. TERMINALS                                                     *)
+(* 14. TERMINALS                                                    *)
 (* ================================================================ *)
 
 (* Lowercase identifier: variables, functions, type variables *)
+(* [ALIAS identifier] the parser rule is the current form *)
 IDENT        = LOWER_ALPHA , { ALPHA_NUM | "_" } ;
 
 (* Uppercase identifier: constructors, type names, trait names *)
+(* [ALIAS constructor_name] the parser rule is the current form *)
 CTOR_IDENT   = UPPER_ALPHA , { ALPHA_NUM | "_" } ;
 
+(* [ALIAS integer] the parser rule is the current form *)
 INTEGER      = DIGIT , { DIGIT } ;
+
+(* [ALIAS float] the parser rule is the current form *)
 FLOAT        = DIGIT , { DIGIT } , "." , DIGIT , { DIGIT } ;
+
 (* An F32 literal carries the `f32` suffix: 1.5f32. An unsuffixed float
    literal is F64. An INTEGER is I32 when it fits, else I64; a `-` written
    directly on the digits is part of the literal. *)
+(* [ALIAS float32] the parser rule is the current form *)
 FLOAT32      = FLOAT , "f32" ;
+
+(* [ALIAS boolean] the parser rule is the current form *)
 BOOLEAN      = "true" | "false" ;
+
+(* [ALIAS string] the parser rule is the current form *)
 STRING       = '"' , { CHAR } , '"' ;
 
+(* [ALIAS ASCII_ALPHA] the parser takes an upper-case letter at the start of an identifier too *)
 LOWER_ALPHA  = "a" | ... | "z" | "_" ;
+
+(* [ALIAS ASCII_ALPHA_UPPER] the parser rule is the current form *)
 UPPER_ALPHA  = "A" | ... | "Z" ;
+
+(* [ALIAS ASCII_ALPHANUMERIC] the parser rule is the current form *)
 ALPHA_NUM    = LOWER_ALPHA | UPPER_ALPHA | DIGIT ;
+
+(* [ALIAS ASCII_DIGIT] the parser rule is the current form *)
 DIGIT        = "0" | ... | "9" ;
+
+(* [ALIAS string_inner] the parser rule is the current form *)
 CHAR         = (* any character except unescaped '"' *) ;
 
-(* ================================================================ *)
-(* 15. KEYWORDS                                                      *)
-(* ================================================================ *)
-
-(* Reserved words that cannot be used as IDENT:
- *
- *   module import from pub
- *   fn let let! in type data
- *   trait impl effect handler
- *   if then else match of end case
- *   old shallow finally return resume once multi
- *   inl inr region
- *   drop copy
- *   handle perform with where
- *   requires ensures invariant
- *   capabilities
- *   true false
- *   Bool I32 I64 F32 F64 String
- *)
 
 (* ================================================================ *)
-(* 16. WHITESPACE AND COMMENTS                                       *)
+(* 16. WHITESPACE AND COMMENTS                                      *)
 (* ================================================================ *)
 
-WHITESPACE   = " " | "\t" | "\n" | "\r" ;
+(* [ALIAS COMMENT] the parser rule is the current form *)
 LINE_COMMENT = "//" , { NOT_NEWLINE } ;
+
+(* [ALIAS COMMENT] the parser rule is the current form *)
 BLOCK_COMMENT = "/*" , { NOT_STAR_SLASH } , "*/" ;
 
 (* Doc comments generate documentation *)
+(* [ALIAS COMMENT] the parser reads `///` as a line comment *)
 DOC_COMMENT  = "///" , { NOT_NEWLINE } ;
-
-
-(* ================================================================ *)
-(* APPENDIX A: DESUGARING TARGETS                                    *)
-(* ================================================================ *)
-
-(* Each surface feature desugars to the core calculus:
- *
- * | Surface                | Core                              |
- * |------------------------|-----------------------------------|
- * | data T = A | B(x)      | type T = () + x  (binary sums)   |
- * | match e of ...          | nested case/inl/inr              |
- * | Construct(args)         | inl/inr chains                   |
- * | Named(T1, T2)           | substituted binary sum type      |
- * | fn f[a](x: a): a       | monomorphised or Λa. ...         |
- * | trait T(a) = ...        | @derive → comptime generation    |
- * |                        | polymorphic → dictionary records  |
- * | (no for-loops)          | recursion + fold + @tail_recursive|
- * | perform Op(args)       | effect operation call             |
- * | handle e with h        | handler application               |
- * | requires P             | if !P then abort else ...         |
- * | ensures P              | let result = ... in assert(P)     |
- * | old(expr)              | evaluated before body, borrows     |
- * | @comptime { ... }      | run at compile time, splice result|
- * | @derive(Eq)            | comptime-generated impl block     |
- * | pub fn ...              | (visibility checked, then erased) |
- * | @inline fn ...          | (inlining directive, then erased) |
- * | capabilities: [...]     | (comptime-verified, then erased)  |
- *)
-
-
-(* ================================================================ *)
-(* APPENDIX B: LINEAR SAFETY INVARIANTS                              *)
-(* ================================================================ *)
-
-(* These invariants must hold across ALL features:
- *
- * 1. CONSUMPTION (dyadic):
- *    - let! bindings are consumed exactly once (linear discipline)
- *    - let bindings are consumed at most once (affine — implicit drop OK)
- *    - match arms on linear values must be exhaustive
- *    - effect handlers: resume(once) when continuation captures linear values
- *    - finally clause must consume captured linears if resume not called
- *
- * 2. REGIONS:
- *    - values referencing region r cannot escape r (NoRegionInType)
- *    - closures capturing region-bound values are region-scoped
- *    - effect operations CANNOT pass region-bound values to handlers
- *      outside the region (prevents dangling references)
- *    - use borrows (&) for region-bound values in effect operations
- *
- * 3. COMPTIME SEPARATION (Harvard):
- *    - @comptime blocks cannot reference runtime values
- *    - TypeDesc is unrestricted (freely copyable)
- *    - @splice output is validated by the type checker
- *    - comptime functions are total and pure
- *
- * 4. EFFECTS:
- *    - no `with` clause = pure (no effects)
- *    - effect handlers must handle all operations in the effect
- *    - resume(once): one-shot, required when linear captures exist
- *    - resume(multi): multi-shot, type error if linear captures exist
- *    - finally clause: runs when continuation discarded, must clean up
- *    - effect variables must be explicit (no implicit effect polymorphism)
- *
- * 5. CONTRACTS:
- *    - requires: evaluated before body, borrows arguments
- *    - ensures: evaluated after body, can reference `result` and `old(expr)`
- *    - old(expr): borrows before consumption, captures as unrestricted
- *    - invariant: maintained across body execution
- *
- * 6. CAPABILITIES:
- *    - __ffi calls must satisfy module capability declarations
- *    - capability checking is comptime (zero runtime cost)
- *    - ffi_unrestricted is an explicit escape hatch
- *
- * 7. GENERICS:
- *    - [a] defaults to linear (most restrictive = compatible with all types)
- *    - [a: Affine] opts into affine (can drop)
- *    - [a: Unrestricted] opts into unrestricted (can copy and drop)
- *)
-
-
-(* ================================================================ *)
-(* APPENDIX C: INTERACTION MATRIX                                    *)
-(* ================================================================ *)
-
-(* How features interact with linear/affine types:
- *
- * | Feature        | Linear (let!) interaction                 |
- * |----------------|-------------------------------------------|
- * | Generics       | [a] defaults to linear (most restrictive).|
- * |                | Generic code works with ALL types.        |
- * |                | [a: Affine] or [a: Unrestricted] opt out. |
- * | Traits         | Observe traits borrow (&). Transform      |
- * |                | traits consume and return. Trait bound     |
- * |                | documents ownership cost.                  |
- * | Effects        | perform consumes linear args.             |
- * |                | resume(once) when continuation captures   |
- * |                | linear values (prevents laundering).      |
- * |                | finally clause for cleanup on discard.    |
- * |                | Region-bound values: borrow, don't pass.  |
- * | Contracts      | requires borrows (&) to inspect.         |
- * |                | ensures uses old(expr) for pre-state.    |
- * | Comptime       | Cannot reference linear runtime values.   |
- * |                | Harvard separation guarantees this.       |
- * | FFI            | Linear values passed to FFI are consumed. |
- * |                | Capabilities restrict what FFI can do.    |
- * | Patterns       | Case vars use Param discipline.           |
- * |                | Linear types demand consumption.          |
- * |                | Wildcards on let!-bound = error.          |
- * |                | Wildcards on let-bound = implicit drop.   |
- * | Modules        | Name scoping only. No interaction with    |
- * |                | linearity, regions, or effects.           |
- *)

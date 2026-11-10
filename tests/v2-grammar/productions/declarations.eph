@@ -1,0 +1,37 @@
+// SPDX-License-Identifier: MPL-2.0
+// Grammar fixture (v2 plan rung E7): module header, imports, and each
+// kind of declaration. The grammar conformance test of ephapax-parser
+// reads the parse tree of this file; nothing runs it.
+module fixtures/declarations
+
+import lib/math
+import lib.shapes(area, Shape)
+
+extern "host" {
+    type Window
+    fn window_open(title: String): Window
+    fn window_close(w: Window) -> ()
+}
+
+let limit: I32 = 10
+let name = 7
+
+pub data Option(a) = None | Some(a)
+data Shape = | Dot | Seg(I32) | Rect(I32, I32)
+
+pub type Id = I32
+type Pair = (I32, I64)
+linear type Handle = I32
+affine type Token = I32
+type Point = { x: I32, y: I32 }
+type App = GsaApp { title: String, width: I32, }
+type Color = red | green(I32) | blue
+type Callback = I32 -> I32 + ()
+
+@inline
+@tail_recursive
+pub fn id<a>(x: a): a = x
+
+fn first<a, b>(p: (a, b)): a = fst(p)
+
+fn unit(): () = ()

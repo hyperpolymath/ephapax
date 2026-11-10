@@ -26,6 +26,8 @@ use pest_derive::Parser;
 use smol_str::SmolStr;
 
 pub mod error;
+#[cfg(test)]
+mod grammar_conformance;
 pub mod surface;
 
 pub use error::{ParseError, Report};

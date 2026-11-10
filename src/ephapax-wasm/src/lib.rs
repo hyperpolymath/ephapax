@@ -963,7 +963,8 @@ impl Codegen {
     ///
     /// Unsupported constructs in either `module` or `main_body` return a
     /// [`CodegenError`] before compilation, even when `main_body` would not be
-    /// used. Other module-compilation errors are caught to select the fallback.
+    /// used. Other module-compilation errors are caught to select the
+    /// fallback, which is [`Self::compile_program`] on `main_body`.
     pub fn compile_module_with_main(
         &mut self,
         module: &AstModule,
@@ -979,38 +980,9 @@ impl Codegen {
             return Ok(bytes);
         }
 
-        // Fallback: just compile the main body as a standalone expression.
-        self.emit_types();
-        self.emit_imports();
-
-        let mut func_sec = FunctionSection::new();
-        let mut code_sec = CodeSection::new();
-
-        self.append_runtime_funcs(&mut func_sec, &mut code_sec);
-
-        // Main function (index self.first_user_fn())
-        func_sec.function(TYPE_VOID_VOID);
-
-        code_sec.function(&self.compile_standalone_body(main_body));
-
-        // Lambda functions discovered during expression compilation
-        let _ = self.append_lambda_funcs(&mut func_sec, &mut code_sec);
-
-        // Emit in WASM order: Type, Import, Function, Table, Memory, Export, Element, Code, Data
-        self.module.section(&func_sec);
-        self.emit_table();
-        self.emit_memory();
-
-        let mut exports = ExportSection::new();
-        self.add_runtime_exports(&mut exports);
-        exports.export("main", ExportKind::Func, self.first_user_fn());
-        self.module.section(&exports);
-
-        self.emit_elements();
-        self.module.section(&code_sec);
-        self.emit_data_section();
-        self.emit_debug_sections();
-        Ok(self.module.clone().finish())
+        // Fallback: the main body as a standalone expression, checked
+        // and compiled as `compile_program` does it.
+        self.compile_program(main_body)
     }
 
     // -----------------------------------------------------------------------
@@ -4806,6 +4778,39 @@ mod tests {
         };
         let wasm = compile_module(&module).expect("compilation failed");
         assert_wasm_header(&wasm);
+        validate_wasm(&wasm);
+    }
+
+    /// The fallback of `compile_module_with_main` checks the main body
+    /// before it compiles it. It used to compile it with no type table,
+    /// so a 64-bit `if` got an i32 block type.
+    #[test]
+    fn module_with_main_fallback_checks_the_body() {
+        // fn f(): I32 = true   (not well typed: the fallback is taken)
+        let module = AstModule {
+            name: "test".into(),
+            imports: vec![],
+            decls: vec![Decl::Fn {
+                name: "f".into(),
+                visibility: Visibility::Private,
+                type_params: vec![],
+                params: vec![],
+                ret_ty: Ty::Base(BaseTy::I32),
+                body: e(ExprKind::Lit(Literal::Bool(true))),
+            }],
+        };
+        // if true then fst((1i64, 2)) else 3i64
+        let main_body = e(ExprKind::If {
+            cond: Box::new(e(ExprKind::Lit(Literal::Bool(true)))),
+            then_branch: Box::new(e(ExprKind::Fst(Box::new(e(ExprKind::Pair {
+                left: Box::new(e(ExprKind::Lit(Literal::I64(1)))),
+                right: Box::new(e(ExprKind::Lit(Literal::I32(2)))),
+            }))))),
+            else_branch: Box::new(e(ExprKind::Lit(Literal::I64(3)))),
+        });
+        let wasm = Codegen::new()
+            .compile_module_with_main(&module, &main_body)
+            .expect("the main body compiles on its own");
         validate_wasm(&wasm);
     }
 

@@ -272,3 +272,27 @@ fn query_engine_sees_an_edit_to_an_imported_file() {
     std::fs::write(&lib, "module lib\n\npub fn inc(n: Bool): Bool = n\n").expect("rewrite lib");
     assert!(db.typed(&id).is_err(), "the stale memo was served");
 }
+
+/// `wasm` loads a program with imports one time for each demand, so the
+/// program it compiles is the program it checked. It used to load it two
+/// times, and an imported file could change between the two loads.
+#[test]
+fn query_engine_compiles_the_program_that_it_checked() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    std::fs::write(
+        tmp.path().join("lib.eph"),
+        "module lib\n\npub fn inc(n: I32): I32 = n + 1\n",
+    )
+    .expect("write lib");
+    let app = tmp.path().join("app.eph");
+    let app_text = "module app\n\nimport lib\n\nfn main(): I32 = inc(41)\n";
+    std::fs::write(&app, app_text).expect("write app");
+
+    let id = app.to_string_lossy();
+    let mut db = ephapax_query::QueryDb::new();
+    db.set_source_text(&id, app_text);
+    assert!(db.wasm(&id).is_ok(), "the program compiles");
+    let n = db.recompute_count();
+    assert!(db.wasm(&id).is_ok());
+    assert_eq!(db.recompute_count(), n + 1, "one load, and no other work");
+}

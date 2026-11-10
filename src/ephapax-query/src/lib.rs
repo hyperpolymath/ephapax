@@ -239,8 +239,15 @@ impl QueryDb {
     /// Codegen query. Memoises `compile_module`, gated on a clean
     /// typecheck; depends on `parsed` and `typed`.
     pub fn wasm(&mut self, id: &str) -> WasmResult {
-        let parsed = self.parsed(id);
         let typed = self.typed(id);
+        // The program that `typed` checked. A second `parsed` demand
+        // loads a program with imports again, and an imported file may
+        // change between two loads: the compiled program must be the
+        // checked one.
+        let parsed = match self.parsed.get(id) {
+            Some(memo) => memo.value.clone(),
+            None => self.parsed(id),
+        };
         let dep_parsed = self
             .parsed
             .get(id)

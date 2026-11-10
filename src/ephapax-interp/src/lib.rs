@@ -10,9 +10,9 @@
 //! The evaluator is a loop with its own stack of frames on the heap
 //! ([`Interpreter::eval`]). A call in the program uses no native stack,
 //! so deep calls end with a value or with the runtime error
-//! [`RuntimeError::StackOverflow`]. A [`Value`] still copies, prints and
-//! frees its parts with native recursion, so a value with a long chain
-//! of parts (a long list) can exhaust the native stack.
+//! [`RuntimeError::StackOverflow`]. A [`Value`] shares its parts, and
+//! its copy, its print and its free use a loop, so a long list does not
+//! exhaust the native stack.
 
 use ephapax_syntax::{
     BaseTy, BinOp, Decl, Expr, ExprKind, Literal, Module, Pattern, RegionName, Ty, UnaryOp, Var,
@@ -122,14 +122,12 @@ pub enum RuntimeError {
 }
 
 /// Runtime values
-//
-// clippy::large_enum_variant — `Closure` is ~168 bytes against ~48 for the next
-// largest variant. The fix is to box the closure payload, but that changes every
-// construction and match site in the interpreter, so it is deliberately NOT bundled
-// into the CI-revival change that first surfaced this lint. Tracked separately;
-// remove this allow when the boxing lands.
-#[allow(clippy::large_enum_variant)]
-#[derive(Debug, Clone)]
+///
+/// A value shares its parts (`Arc`), so a copy of a value is 1 step for
+/// each size of value. A long list is a deep chain of parts: the copy,
+/// the print and the free of a value use no native recursion, so the
+/// length of a list has no limit from the native stack.
+#[derive(Clone)]
 pub enum Value {
     Unit,
     Bool(bool),
@@ -137,25 +135,56 @@ pub enum Value {
     I64(i64),
     F32(f32),
     F64(f64),
-    String {
-        data: String,
-        region: RegionName,
-    },
-    Pair(Box<Value>, Box<Value>),
-    Tuple(Vec<Value>),
-    List(Vec<Value>),
-    Left(Box<Value>),
-    Right(Box<Value>),
-    Closure {
-        param: Var,
-        param_ty: Ty,
-        body: Code,
-        env: Environment,
-    },
-    Borrow(Box<Value>),
+    String { data: String, region: RegionName },
+    Pair(Arc<Value>, Arc<Value>),
+    Tuple(Arc<[Value]>),
+    List(Arc<[Value]>),
+    Left(Arc<Value>),
+    Right(Arc<Value>),
+    Closure(Arc<Closure>),
+    Borrow(Arc<Value>),
+}
+
+/// A function value: its parameter, its body, and the environment of
+/// the place that made it.
+#[derive(Debug)]
+pub struct Closure {
+    pub param: Var,
+    pub param_ty: Ty,
+    pub body: Code,
+    pub env: Environment,
+}
+
+/// The value of a part: the part itself when no other value shares it,
+/// else a copy (which shares the parts of the part).
+fn take(part: &mut Arc<Value>) -> Value {
+    match Arc::get_mut(part) {
+        Some(value) => std::mem::replace(value, Value::Unit),
+        None => Value::clone(part),
+    }
 }
 
 impl Value {
+    /// The pair of `left` and `right`.
+    pub fn pair(left: Value, right: Value) -> Value {
+        Value::Pair(Arc::new(left), Arc::new(right))
+    }
+
+    /// The left injection of `value`.
+    pub fn left(value: Value) -> Value {
+        Value::Left(Arc::new(value))
+    }
+
+    /// The right injection of `value`.
+    pub fn right(value: Value) -> Value {
+        Value::Right(Arc::new(value))
+    }
+
+    /// A borrow of `value`.
+    pub fn borrow(value: Value) -> Value {
+        Value::Borrow(Arc::new(value))
+    }
+
     pub fn type_name(&self) -> &'static str {
         match self {
             Value::Unit => "Unit",
@@ -170,43 +199,54 @@ impl Value {
             Value::List(_) => "List",
             Value::Left(_) => "Left",
             Value::Right(_) => "Right",
-            Value::Closure { .. } => "Function",
+            Value::Closure(_) => "Function",
             Value::Borrow(_) => "Borrow",
         }
     }
 
     /// Check if this value is linear (must be used exactly once)
     pub fn is_linear(&self) -> bool {
-        match self {
-            // Strings are linear resources
-            Value::String { .. } => true,
-            // Pairs are linear if either component is linear
-            Value::Pair(l, r) => l.is_linear() || r.is_linear(),
-            // Tuples are linear if any element is linear
-            Value::Tuple(elements) => elements.iter().any(|v| v.is_linear()),
-            // Lists are linear if any element is linear
-            Value::List(elements) => elements.iter().any(|v| v.is_linear()),
-            // Sum types are linear if either variant type is linear
-            Value::Left(v) | Value::Right(v) => v.is_linear(),
-            // Closures that capture linear values are linear
-            // (Conservative: treat all closures as potentially linear)
-            Value::Closure { .. } => false, // Could be refined with capture analysis
-            // Base types are unrestricted
-            Value::Unit
-            | Value::Bool(_)
-            | Value::I32(_)
-            | Value::I64(_)
-            | Value::F32(_)
-            | Value::F64(_) => false,
-            // Borrows are second-class (not linear in the sense of consumption)
-            Value::Borrow(_) => false,
+        let mut work = vec![self];
+        while let Some(value) = work.pop() {
+            match value {
+                // Strings are linear resources
+                Value::String { .. } => return true,
+                // Pairs are linear if either component is linear
+                Value::Pair(l, r) => work.extend([&**l, &**r]),
+                // Tuples and lists are linear if any element is linear
+                Value::Tuple(elements) | Value::List(elements) => work.extend(elements.iter()),
+                // Sum types are linear if either variant type is linear
+                Value::Left(v) | Value::Right(v) => work.push(v),
+                // Closures that capture linear values are linear
+                // (Conservative: treat all closures as potentially linear)
+                // Could be refined with capture analysis.
+                // Borrows are second-class (not linear in the sense of consumption).
+                // Base types are unrestricted.
+                _ => {}
+            }
         }
+        false
     }
 
     /// Get the inferred type of this value
     pub fn to_type(&self) -> Ty {
+        self.type_to_depth(TYPE_DEPTH)
+    }
+
+    /// The type of this value, to `depth` levels of parts. A part below
+    /// that has the placeholder type `()`, which this function also uses
+    /// for the side of a sum that the value does not have.
+    // snip: a depth limit, because `Ty` is a boxed tree and a long list
+    // gives a type as deep as the list; upgrade to the declared type of
+    // the value when the interpreter has types.
+    fn type_to_depth(&self, depth: usize) -> Ty {
+        let unit = || Ty::Base(BaseTy::Unit);
+        let Some(depth) = depth.checked_sub(1) else {
+            return unit();
+        };
+        let part = |value: &Value| Box::new(value.type_to_depth(depth));
         match self {
-            Value::Unit => Ty::Base(BaseTy::Unit),
+            Value::Unit => unit(),
             Value::Bool(_) => Ty::Base(BaseTy::Bool),
             Value::I32(_) => Ty::Base(BaseTy::I32),
             Value::I64(_) => Ty::Base(BaseTy::I64),
@@ -214,73 +254,162 @@ impl Value {
             Value::F64(_) => Ty::Base(BaseTy::F64),
             Value::String { region, .. } => Ty::String(region.clone()),
             Value::Pair(l, r) => Ty::Prod {
-                left: Box::new(l.to_type()),
-                right: Box::new(r.to_type()),
+                left: part(l),
+                right: part(r),
             },
-            Value::Tuple(elements) => Ty::Tuple(elements.iter().map(|v| v.to_type()).collect()),
-            Value::List(elements) => {
-                let elem_ty = elements
-                    .first()
-                    .map(|v| v.to_type())
-                    .unwrap_or(Ty::Base(BaseTy::Unit));
-                Ty::List(Box::new(elem_ty))
-            }
+            Value::Tuple(elements) => Ty::Tuple(elements.iter().map(|v| *part(v)).collect()),
+            Value::List(elements) => Ty::List(elements.first().map_or(Box::new(unit()), part)),
             Value::Left(v) => Ty::Sum {
-                left: Box::new(v.to_type()),
-                right: Box::new(Ty::Base(BaseTy::Unit)),
+                left: part(v),
+                right: Box::new(unit()),
             },
             Value::Right(v) => Ty::Sum {
-                left: Box::new(Ty::Base(BaseTy::Unit)),
-                right: Box::new(v.to_type()),
+                left: Box::new(unit()),
+                right: part(v),
             },
-            Value::Closure { param_ty, .. } => Ty::Fun {
-                param: Box::new(param_ty.clone()),
-                ret: Box::new(Ty::Base(BaseTy::Unit)), // Unknown without evaluation
+            Value::Closure(closure) => Ty::Fun {
+                param: Box::new(closure.param_ty.clone()),
+                ret: Box::new(unit()), // Unknown without evaluation
             },
             Value::Borrow(inner) => Ty::Borrow {
-                inner: Box::new(inner.to_type()),
+                inner: part(inner),
                 mutable: false,
             },
+        }
+    }
+
+    /// Move each part of this value that has parts of its own, and that
+    /// no other value shares, into `out`.
+    fn take_parts(&mut self, out: &mut Vec<Value>) {
+        let mut take = |part: &mut Value| {
+            if !matches!(
+                part,
+                Value::Unit
+                    | Value::Bool(_)
+                    | Value::I32(_)
+                    | Value::I64(_)
+                    | Value::F32(_)
+                    | Value::F64(_)
+                    | Value::String { .. }
+            ) {
+                out.push(std::mem::replace(part, Value::Unit));
+            }
+        };
+        match self {
+            Value::Pair(left, right) => {
+                Arc::get_mut(left).map(&mut take);
+                Arc::get_mut(right).map(&mut take);
+            }
+            Value::Left(part) | Value::Right(part) | Value::Borrow(part) => {
+                Arc::get_mut(part).map(&mut take);
+            }
+            Value::Tuple(parts) | Value::List(parts) => {
+                if let Some(parts) = Arc::get_mut(parts) {
+                    parts.iter_mut().for_each(&mut take);
+                }
+            }
+            Value::Closure(closure) => {
+                if let Some(closure) = Arc::get_mut(closure) {
+                    closure.env.bindings.values_mut().for_each(&mut take);
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
+/// The depth of parts to which [`Value::to_type`] gives a type.
+const TYPE_DEPTH: usize = 64;
+
+impl Drop for Value {
+    /// Free the parts with a loop. The default drop goes 1 native call
+    /// deeper for each part of a chain, and a long list is a long chain.
+    fn drop(&mut self) {
+        let mut parts = Vec::new();
+        self.take_parts(&mut parts);
+        while let Some(mut part) = parts.pop() {
+            part.take_parts(&mut parts);
+            // `part` has no part with parts now: its drop is 1 step.
         }
     }
 }
 
 impl std::fmt::Display for Value {
+    /// Print with a loop: the work list has the values and the texts
+    /// that are still to print, the next one last.
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Value::Unit => write!(f, "()"),
-            Value::Bool(b) => write!(f, "{}", b),
-            Value::I32(n) => write!(f, "{}", n),
-            Value::I64(n) => write!(f, "{}i64", n),
-            Value::F32(n) => write!(f, "{}f32", n),
-            Value::F64(n) => write!(f, "{}", n),
-            Value::String { data, region } => write!(f, "\"{}\"@{}", data, region),
-            Value::Pair(l, r) => write!(f, "({}, {})", l, r),
-            Value::Tuple(elements) => {
-                write!(f, "(")?;
-                for (i, elem) in elements.iter().enumerate() {
-                    if i > 0 {
-                        write!(f, ", ")?;
-                    }
-                    write!(f, "{}", elem)?;
-                }
-                write!(f, ")")
-            }
-            Value::List(elements) => {
-                write!(f, "[")?;
-                for (i, elem) in elements.iter().enumerate() {
-                    if i > 0 {
-                        write!(f, ", ")?;
-                    }
-                    write!(f, "{}", elem)?;
-                }
-                write!(f, "]")
-            }
-            Value::Left(v) => write!(f, "inl({})", v),
-            Value::Right(v) => write!(f, "inr({})", v),
-            Value::Closure { param, .. } => write!(f, "<fn({})>", param),
-            Value::Borrow(v) => write!(f, "&{}", v),
+        enum Item<'a> {
+            Value(&'a Value),
+            Text(&'static str),
         }
+        // The parts of a sequence, with ", " between them.
+        fn sequence<'a>(work: &mut Vec<Item<'a>>, open: &'static str, parts: &'a [Value]) {
+            for (i, part) in parts.iter().enumerate().rev() {
+                work.push(Item::Value(part));
+                if i > 0 {
+                    work.push(Item::Text(", "));
+                }
+            }
+            work.push(Item::Text(open));
+        }
+        let mut work = vec![Item::Value(self)];
+        while let Some(item) = work.pop() {
+            let value = match item {
+                Item::Text(text) => {
+                    f.write_str(text)?;
+                    continue;
+                }
+                Item::Value(value) => value,
+            };
+            match value {
+                Value::Unit => write!(f, "()")?,
+                Value::Bool(b) => write!(f, "{}", b)?,
+                Value::I32(n) => write!(f, "{}", n)?,
+                Value::I64(n) => write!(f, "{}i64", n)?,
+                Value::F32(n) => write!(f, "{}f32", n)?,
+                Value::F64(n) => write!(f, "{}", n)?,
+                Value::String { data, region } => write!(f, "\"{}\"@{}", data, region)?,
+                Value::Pair(l, r) => {
+                    work.push(Item::Text(")"));
+                    work.push(Item::Value(r));
+                    work.push(Item::Text(", "));
+                    work.push(Item::Value(l));
+                    work.push(Item::Text("("));
+                }
+                Value::Tuple(elements) => {
+                    work.push(Item::Text(")"));
+                    sequence(&mut work, "(", elements);
+                }
+                Value::List(elements) => {
+                    work.push(Item::Text("]"));
+                    sequence(&mut work, "[", elements);
+                }
+                Value::Left(v) => {
+                    work.push(Item::Text(")"));
+                    work.push(Item::Value(v));
+                    work.push(Item::Text("inl("));
+                }
+                Value::Right(v) => {
+                    work.push(Item::Text(")"));
+                    work.push(Item::Value(v));
+                    work.push(Item::Text("inr("));
+                }
+                Value::Closure(closure) => write!(f, "<fn({})>", closure.param)?,
+                Value::Borrow(v) => {
+                    work.push(Item::Value(v));
+                    work.push(Item::Text("&"));
+                }
+            }
+        }
+        Ok(())
+    }
+}
+
+/// The debug form is the printed form: a derived form goes 1 native call
+/// deeper for each part.
+impl std::fmt::Debug for Value {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        std::fmt::Display::fmt(self, f)
     }
 }
 
@@ -481,8 +610,8 @@ impl Seq {
     fn value(self, mut values: Vec<Value>) -> Value {
         match self {
             Seq::Block => values.pop().unwrap_or(Value::Unit),
-            Seq::List => Value::List(values),
-            Seq::Tuple => Value::Tuple(values),
+            Seq::List => Value::List(values.into()),
+            Seq::Tuple => Value::Tuple(values.into()),
         }
     }
 }
@@ -658,12 +787,12 @@ fn function_value(params: &[(Var, Ty)], body: &Arc<Node>) -> Value {
             body,
         })
     });
-    Value::Closure {
+    Value::Closure(Arc::new(Closure {
         param,
         param_ty,
         body: Code(body),
         env: Environment::new(),
-    }
+    }))
 }
 
 /// The element `index` of a list value.
@@ -791,12 +920,12 @@ impl Interpreter {
                 param_ty,
                 body,
             } => {
-                return Ok(State::Value(Value::Closure {
+                return Ok(State::Value(Value::Closure(Arc::new(Closure {
                     param: param.clone(),
                     param_ty: param_ty.clone(),
                     body: Code(body.clone()),
                     env: self.env.clone(),
-                }));
+                }))));
             }
             Node::Unimplemented(what) => {
                 return Err(RuntimeError::Unimplemented((*what).into()));
@@ -809,7 +938,7 @@ impl Interpreter {
                         return Err(RuntimeError::LinearValueConsumed);
                     }
                     if let Some(value) = self.env.get(name) {
-                        return Ok(State::Value(Value::Borrow(Box::new(value.clone()))));
+                        return Ok(State::Value(Value::borrow(value.clone())));
                     }
                 }
                 stack.push(Frame::Unary(*op));
@@ -868,7 +997,7 @@ impl Interpreter {
     fn resume(
         &mut self,
         frame: Frame,
-        value: Value,
+        mut value: Value,
         stack: &mut Vec<Frame>,
     ) -> Result<State, RuntimeError> {
         let next = match frame {
@@ -894,12 +1023,12 @@ impl Interpreter {
                 }
             },
             Frame::Case(left, right) => {
-                let ((name, body), inner) = match value {
-                    Value::Left(inner) => (left, inner),
-                    Value::Right(inner) => (right, inner),
+                let ((name, body), inner) = match &mut value {
+                    Value::Left(inner) => (left, take(inner)),
+                    Value::Right(inner) => (right, take(inner)),
                     _ => return Err(RuntimeError::NotASum),
                 };
-                let saved = self.bind(vec![(name, *inner)]);
+                let saved = self.bind(vec![(name, inner)]);
                 stack.push(Frame::Unbind(saved));
                 body
             }
@@ -1012,7 +1141,7 @@ impl Interpreter {
     }
 
     /// The result of `op` on the value of its operand.
-    fn unary(&self, op: Unary, val: Value) -> Result<Value, RuntimeError> {
+    fn unary(&self, op: Unary, mut val: Value) -> Result<Value, RuntimeError> {
         match op {
             Unary::Op(op) => self.eval_unaryop(op, val),
             Unary::StringLen => match &val {
@@ -1029,19 +1158,19 @@ impl Interpreter {
                     found: val.type_name().to_string(),
                 }),
             },
-            Unary::Fst => match val {
-                Value::Pair(left, _) => Ok(*left),
+            Unary::Fst => match &mut val {
+                Value::Pair(left, _) => Ok(take(left)),
                 _ => Err(RuntimeError::NotAPair),
             },
-            Unary::Snd => match val {
-                Value::Pair(_, right) => Ok(*right),
+            Unary::Snd => match &mut val {
+                Value::Pair(_, right) => Ok(take(right)),
                 _ => Err(RuntimeError::NotAPair),
             },
-            Unary::Inl => Ok(Value::Left(Box::new(val))),
-            Unary::Inr => Ok(Value::Right(Box::new(val))),
-            Unary::Borrow => Ok(Value::Borrow(Box::new(val))),
-            Unary::Deref => match val {
-                Value::Borrow(inner) => Ok(*inner),
+            Unary::Inl => Ok(Value::left(val)),
+            Unary::Inr => Ok(Value::right(val)),
+            Unary::Borrow => Ok(Value::borrow(val)),
+            Unary::Deref => match &mut val {
+                Value::Borrow(inner) => Ok(take(inner)),
                 _ => Err(RuntimeError::TypeError {
                     expected: "Borrow".to_string(),
                     found: val.type_name().to_string(),
@@ -1058,9 +1187,9 @@ impl Interpreter {
                     });
                 }
                 // For unrestricted types, return a pair of copies
-                Ok(Value::Pair(Box::new(val.clone()), Box::new(val)))
+                Ok(Value::pair(val.clone(), val))
             }
-            Unary::TupleIndex(index) => match val {
+            Unary::TupleIndex(index) => match &mut val {
                 Value::Tuple(values) => {
                     if index < values.len() {
                         Ok(values[index].clone())
@@ -1072,8 +1201,8 @@ impl Interpreter {
                     }
                 }
                 // A 2-tuple is a pair.
-                Value::Pair(left, _) if index == 0 => Ok(*left),
-                Value::Pair(_, right) if index == 1 => Ok(*right),
+                Value::Pair(left, _) if index == 0 => Ok(take(left)),
+                Value::Pair(_, right) if index == 1 => Ok(take(right)),
                 _ => Err(RuntimeError::Unimplemented(
                     "tuple index on non-tuple".to_string(),
                 )),
@@ -1094,10 +1223,10 @@ impl Interpreter {
         Ok(State::Value(match op {
             Binary::Op(op) => self.eval_binop(op, left, right)?,
             Binary::Concat => self.eval_string_concat(left, right)?,
-            Binary::Pair => Value::Pair(Box::new(left), Box::new(right)),
-            Binary::ListIndex => match (left, right) {
-                (Value::List(elements), Value::I32(i)) => list_element(&elements, i as usize)?,
-                (Value::List(elements), Value::I64(i)) => list_element(&elements, i as usize)?,
+            Binary::Pair => Value::pair(left, right),
+            Binary::ListIndex => match (&left, &right) {
+                (Value::List(elements), Value::I32(i)) => list_element(elements, *i as usize)?,
+                (Value::List(elements), Value::I64(i)) => list_element(elements, *i as usize)?,
                 _ => {
                     return Err(RuntimeError::TypeError {
                         expected: "list and integer".to_string(),
@@ -1105,12 +1234,10 @@ impl Interpreter {
                     });
                 }
             },
-            Binary::App => match left {
-                Value::Closure {
-                    param, body, env, ..
-                } => {
-                    let mut callee = env;
-                    callee.extend(param, right);
+            Binary::App => match &left {
+                Value::Closure(closure) => {
+                    let mut callee = closure.env.clone();
+                    callee.extend(closure.param.clone(), right);
                     let caller = std::mem::replace(&mut self.env, callee);
                     // A tail call: the frame on top gives the environment
                     // back already, so this call adds no frame, and a
@@ -1118,7 +1245,7 @@ impl Interpreter {
                     if !matches!(stack.last(), Some(Frame::Env(_))) {
                         stack.push(Frame::Env(caller));
                     }
-                    return Ok(State::Eval(body.0));
+                    return Ok(State::Eval(closure.body.0.clone()));
                 }
                 _ => return Err(RuntimeError::NotAFunction),
             },
@@ -1352,7 +1479,7 @@ impl Interpreter {
     }
 
     fn eval_string_concat(&self, left_val: Value, right_val: Value) -> Result<Value, RuntimeError> {
-        match (left_val, right_val) {
+        match (&left_val, &right_val) {
             (
                 Value::String {
                     data: d1,
@@ -1370,8 +1497,8 @@ impl Interpreter {
                     });
                 }
                 Ok(Value::String {
-                    data: d1 + &d2,
-                    region: r1,
+                    data: format!("{d1}{d2}"),
+                    region: r1.clone(),
                 })
             }
             (l, r) => Err(RuntimeError::TypeError {
@@ -2228,6 +2355,49 @@ mod tests {
             Err(RuntimeError::StackOverflow)
         ));
         assert!(interp.get_binding("n").is_none());
+    }
+
+    /// The printed form of each kind of value.
+    #[test]
+    fn a_value_prints_each_of_its_parts() {
+        let int = Value::I32;
+        let string = Value::String {
+            data: "a".into(),
+            region: "r".into(),
+        };
+        let list = Value::List(vec![int(2), int(3)].into());
+        let nested = Value::pair(int(1), Value::left(Value::borrow(list)));
+        assert_eq!(nested.to_string(), "(1, inl(&[2, 3]))");
+        let tuple = Value::Tuple(vec![Value::Unit, Value::right(string), Value::I64(5)].into());
+        assert_eq!(tuple.to_string(), "((), inr(\"a\"@r), 5i64)");
+        assert_eq!(Value::Tuple(Vec::new().into()).to_string(), "()");
+        assert_eq!(Value::List(Vec::new().into()).to_string(), "[]");
+        assert_eq!(format!("{:?}", Value::F32(1.5)), "1.5f32");
+        assert_eq!(
+            function_value(&[], &lower(&lit_i32_expr(1))).to_string(),
+            "<fn(_)>"
+        );
+    }
+
+    /// A list of 1000000 elements is a chain of 2000000 parts. Its copy,
+    /// its print, its type, its linearity and its free use no native
+    /// recursion: they run on the 2 MB stack of a test thread. (With
+    /// boxed parts, the copy of 1000 elements overflowed that stack.)
+    #[test]
+    fn a_long_list_value_uses_no_native_stack() {
+        let mut list = Value::left(Value::Unit);
+        for i in 0..1_000_000 {
+            list = Value::right(Value::pair(Value::I32(i), list));
+        }
+        let copy = list.clone();
+        assert!(!list.is_linear());
+        assert!(matches!(list.to_type(), Ty::Sum { .. }));
+        // "inr((" + number + ", " for each element, "inl(())" at the end,
+        // and "))" for each element.
+        let digits: usize = (0..1_000_000).map(|i: i32| i.to_string().len()).sum();
+        assert_eq!(list.to_string().len(), digits + 9 * 1_000_000 + 7);
+        drop(list);
+        drop(copy);
     }
 
     /// An error in the value of a constant gives the environment back to

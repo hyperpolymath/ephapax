@@ -216,15 +216,13 @@ fn out_of_range_integer_literal_is_a_parse_error() {
 }
 
 /// A limit of the typed lowering is a load error too: `check` must not
-/// accept a program that `compile` refuses. Not lowered yet: a pair or
-/// tuple pattern on a value with a 64-bit component, and a lambda with a
-/// parameter or result that is not 32 bits wide.
+/// accept a program that `compile` refuses. Not lowered yet: a lambda
+/// with a parameter or result that is not 32 bits wide.
 #[test]
 fn check_rejects_what_typed_codegen_cannot_lower() {
     let tmp = tempfile::tempdir().expect("tempdir");
     // (result type, body, text the error names)
     for (ty, body, what) in [
-        ("I64", "let (a, b) = (1, 5000000000)\n  b", "`match`"),
         (
             "F32",
             "let f = fn(x: F32) -> x + 1.0f32\n  f(2.0f32)",

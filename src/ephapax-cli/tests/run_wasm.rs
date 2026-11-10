@@ -210,3 +210,41 @@ fn each_module_calls_its_own_function_of_a_shared_name() {
     );
     assert_eq!(stdout_of(tmp.path(), &["run", "param.eph"]), "1000");
 }
+
+/// A pair pattern binds each component at its own type: a destructuring
+/// `let`, and a constructor with several fields (a right-nested pair).
+/// Patterns used to read every component as an i32.
+#[test]
+fn pair_patterns_bind_each_component_at_its_type() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let record = "data S = S(F32, I64, I32, F64)\n\n";
+    let matched = |ty: &str, field: &str| {
+        format!(
+            "{record}fn main(): {ty} =\n  match S(1.5f32, 9000000000, 3, 0.25) of\n  \
+             | S(a, b, c, d) => {field}\n  end\n"
+        )
+    };
+    for (program, want) in [
+        (
+            "fn main(): I64 =\n  let (a, b) = (1, 5000000000)\n  b\n".to_string(),
+            "5000000000i64",
+        ),
+        (
+            "fn main(): F64 =\n  let (a, b) = (2.5, 7)\n  a\n".to_string(),
+            "2.5",
+        ),
+        (matched("F32", "a"), "1.5f32"),
+        (matched("I64", "b"), "9000000000i64"),
+        (matched("I32", "c"), "3"),
+        (matched("F64", "d"), "0.25"),
+    ] {
+        std::fs::write(
+            tmp.path().join("pat.eph"),
+            format!("module pat\n\n{program}"),
+        )
+        .expect("write program");
+        for args in [&["run", "pat.eph"][..], &["run", "--interp", "pat.eph"]] {
+            assert_eq!(stdout_of(tmp.path(), args), want, "{args:?}:\n{program}");
+        }
+    }
+}

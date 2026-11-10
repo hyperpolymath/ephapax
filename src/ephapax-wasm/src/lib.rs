@@ -247,15 +247,18 @@ fn first_unsupported_in(expr: &Expr, types: Option<&ExprTypes>) -> Option<Codege
                 expr.span,
             ))
         }
-        ExprKind::Match { scrutinee, .. } => types
+        ExprKind::Match { scrutinee, arms } => types
             .and_then(|t| t.get(&scrutinee.id))
-            .filter(|ty| has_non_i32_component(ty))
+            .filter(|ty| {
+                arms.iter()
+                    .any(|arm| pattern_reads_wide_as_i32(&arm.pattern, ty))
+            })
             .map(|ty| {
                 unsupported(
                     &format!(
-                        "`match` (or a destructuring `let`) on a value with an I64, F32 \
-                         or F64 component (type {ty:?}); read the component with `fst`, \
-                         `snd`, `.N` or `case`"
+                        "`match` with a tuple, constructor or literal pattern on a value \
+                         with an I64, F32 or F64 component (type {ty:?}); use a pair \
+                         pattern, `fst`, `snd`, `.N` or `case`"
                     ),
                     expr.span,
                 )
@@ -438,11 +441,6 @@ impl LocalTracker {
             linear_locals: HashMap::new(),
             extra_local_types: Vec::new(),
         }
-    }
-
-    /// Bind a named variable to the next available local slot.
-    fn bind(&mut self, name: &str, is_linear: bool) -> u32 {
-        self.bind_typed(name, is_linear, ValType::I32)
     }
 
     /// Bind a named variable with its concrete WebAssembly local type.
@@ -3014,10 +3012,13 @@ impl Codegen {
     /// through on inner refutation (needed once #66 admits patterns
     /// like `Some(Some(_))` + `Some(None)` + `None`).
     fn compile_match(&mut self, func: &mut Function, scrutinee: &Expr, arms: &[MatchArm]) {
-        // Patterns read every component as an i32 at the i32 layout. A
-        // scrutinee with an I64, F32 or F64 component never gets here:
-        // `first_unsupported_typed` refuses it before any code is emitted.
+        // A variable, a wildcard and a pair pattern are lowered at the type
+        // of the value. A tuple, constructor or literal pattern reads i32
+        // values only; on a value with an I64, F32 or F64 component it
+        // never gets here: `first_unsupported_typed` refuses it.
         use wasm_encoder::BlockType;
+        let scrut_ty = self.ty_of(scrutinee).cloned();
+        let scrut_valtype = self.valtype_of(scrutinee);
 
         // Recover data type info from the first constructor pattern (if any).
         // For non-data scrutinees (Bool, Pair, Tuple, Unit, Int) no tag
@@ -3031,7 +3032,7 @@ impl Codegen {
         });
 
         self.compile_expr(func, scrutinee);
-        let scrut_local = self.locals.temp();
+        let scrut_local = self.locals.temp_typed(scrut_valtype);
         func.instruction(&Instruction::LocalSet(scrut_local));
 
         let payload_local = self.locals.temp();
@@ -3044,11 +3045,12 @@ impl Codegen {
             func.instruction(&Instruction::LocalGet(scrut_local));
             func.instruction(&Instruction::LocalSet(cur_local));
             self.emit_tag_walk(func, total, cur_local, tag_local, payload_local);
-        } else {
+        } else if scrut_valtype == ValType::I32 {
             // Single-ctor data type OR non-data scrutinee: payload = scrut.
             // tag_local stays uninitialized; arms with constructor
             // patterns over a single-ctor data type don't need to read
-            // it (position is forced to 0).
+            // it (position is forced to 0). (A scrutinee that is not an
+            // i32 has no constructor pattern, so no payload.)
             func.instruction(&Instruction::LocalGet(scrut_local));
             func.instruction(&Instruction::LocalSet(payload_local));
         }
@@ -3080,7 +3082,13 @@ impl Codegen {
             // Top-level pattern binding / refutable check. The arm body
             // produces an i32 on the stack; we br $done (depth 1) to
             // carry it past the remaining arms.
-            self.compile_top_pattern(func, &arm.pattern, scrut_local, payload_local);
+            self.compile_top_pattern(
+                func,
+                &arm.pattern,
+                scrut_local,
+                payload_local,
+                scrut_ty.as_ref(),
+            );
 
             // Match guard (if any): evaluate under the arm's pattern
             // bindings; `br_if $arm_i_fail` (depth 0) when the guard
@@ -3118,40 +3126,36 @@ impl Codegen {
         pat: &Pattern,
         scrut_local: u32,
         payload_local: u32,
+        scrut_ty: Option<&Ty>,
     ) {
         match pat {
-            Pattern::Wildcard => {}
-            Pattern::Var(name) => {
-                let idx = self.locals.bind(name.as_str(), false);
-                func.instruction(&Instruction::LocalGet(scrut_local));
-                func.instruction(&Instruction::LocalSet(idx));
-            }
             Pattern::Constructor { args, .. } => {
                 self.destructure_payload(func, args, payload_local, 0);
             }
-            Pattern::Literal(_) | Pattern::Unit | Pattern::Pair(_, _) | Pattern::Tuple(_) => {
-                // Non-data top-level pattern: scrutinee IS the value
-                // to check / destructure. Sub-pattern handles
-                // refutability and binding uniformly.
-                self.compile_sub_pattern(func, pat, scrut_local, 0);
-            }
+            // Non-data top-level pattern: scrutinee IS the value to
+            // bind, check or destructure. Sub-pattern handles
+            // refutability and binding uniformly.
+            _ => self.compile_sub_pattern(func, pat, scrut_local, scrut_ty, 0),
         }
     }
 
     /// Recursively bind a sub-pattern against an already-extracted
-    /// value (held in `value_local`). Refutable patterns emit
-    /// `br_if fail_depth` on mismatch.
+    /// value (held in `value_local`, of type `ty`; `None` is a value the
+    /// type table has no entry for, which is an i32). Refutable patterns
+    /// emit `br_if fail_depth` on mismatch.
     fn compile_sub_pattern(
         &mut self,
         func: &mut Function,
         pat: &Pattern,
         value_local: u32,
+        ty: Option<&Ty>,
         fail_depth: u32,
     ) {
         match pat {
             Pattern::Wildcard => {}
             Pattern::Var(name) => {
-                let idx = self.locals.bind(name.as_str(), false);
+                let valtype = ty.map_or(ValType::I32, ty_to_valtype);
+                let idx = self.locals.bind_typed(name.as_str(), false, valtype);
                 func.instruction(&Instruction::LocalGet(value_local));
                 func.instruction(&Instruction::LocalSet(idx));
             }
@@ -3182,18 +3186,31 @@ impl Codegen {
                 }
             },
             Pattern::Pair(left, right) => {
-                let left_local = self.locals.temp();
+                // Each component at its own type and offset, as
+                // `compile_pair` stored it.
+                let (left_ty, right_ty) = match ty.map(peel_borrows) {
+                    Some(Ty::Prod { left, right }) => (Some(&**left), Some(&**right)),
+                    _ => (None, None),
+                };
+                let left_valtype = left_ty.map_or(ValType::I32, ty_to_valtype);
+                let right_valtype = right_ty.map_or(ValType::I32, ty_to_valtype);
+
+                let left_local = self.locals.temp_typed(left_valtype);
                 func.instruction(&Instruction::LocalGet(value_local));
-                func.instruction(&Instruction::I32Load(mem_arg(0)));
+                emit_typed_load(func, left_valtype, 0);
                 func.instruction(&Instruction::LocalSet(left_local));
 
-                let right_local = self.locals.temp();
+                let right_local = self.locals.temp_typed(right_valtype);
                 func.instruction(&Instruction::LocalGet(value_local));
-                func.instruction(&Instruction::I32Load(mem_arg(4)));
+                emit_typed_load(
+                    func,
+                    right_valtype,
+                    pair_layout(left_valtype, right_valtype).0,
+                );
                 func.instruction(&Instruction::LocalSet(right_local));
 
-                self.compile_sub_pattern(func, left, left_local, fail_depth);
-                self.compile_sub_pattern(func, right, right_local, fail_depth);
+                self.compile_sub_pattern(func, left, left_local, left_ty, fail_depth);
+                self.compile_sub_pattern(func, right, right_local, right_ty, fail_depth);
             }
             Pattern::Tuple(parts) => {
                 self.destructure_payload(func, parts, value_local, fail_depth);
@@ -3297,18 +3314,18 @@ impl Codegen {
     ) {
         match args.len() {
             0 => {}
-            1 => self.compile_sub_pattern(func, &args[0], payload_local, fail_depth),
+            1 => self.compile_sub_pattern(func, &args[0], payload_local, None, fail_depth),
             _ => {
                 let mut cur = payload_local;
                 for (i, arg) in args.iter().enumerate() {
                     if i + 1 == args.len() {
-                        self.compile_sub_pattern(func, arg, cur, fail_depth);
+                        self.compile_sub_pattern(func, arg, cur, None, fail_depth);
                     } else {
                         let left = self.locals.temp();
                         func.instruction(&Instruction::LocalGet(cur));
                         func.instruction(&Instruction::I32Load(mem_arg(0)));
                         func.instruction(&Instruction::LocalSet(left));
-                        self.compile_sub_pattern(func, arg, left, fail_depth);
+                        self.compile_sub_pattern(func, arg, left, None, fail_depth);
 
                         let next = self.locals.temp();
                         func.instruction(&Instruction::LocalGet(cur));
@@ -3920,6 +3937,28 @@ fn pair_layout(first: ValType, second: ValType) -> (u64, u64) {
 /// an 8-byte payload.
 fn sum_payload_offset(payload: ValType) -> u64 {
     align_up(4, valtype_storage(payload).1)
+}
+
+/// `ty` without its borrows and references (identity at run time).
+fn peel_borrows(ty: &Ty) -> &Ty {
+    match ty {
+        Ty::Borrow { inner, .. } | Ty::Ref { inner, .. } => peel_borrows(inner),
+        _ => ty,
+    }
+}
+
+/// True when the lowering of `pattern` against a value of type `ty`
+/// would read an I64, F32 or F64 component as an i32. A variable, a
+/// wildcard and a pair pattern are lowered at the type of the value; a
+/// tuple, constructor or literal pattern reads i32 values only.
+fn pattern_reads_wide_as_i32(pattern: &Pattern, ty: &Ty) -> bool {
+    match (pattern, peel_borrows(ty)) {
+        (Pattern::Wildcard | Pattern::Var(_) | Pattern::Unit, _) => false,
+        (Pattern::Pair(l, r), Ty::Prod { left, right }) => {
+            pattern_reads_wide_as_i32(l, left) || pattern_reads_wide_as_i32(r, right)
+        }
+        _ => has_non_i32_component(ty),
+    }
 }
 
 /// True when a value of type `ty` has a component that is not an i32 at
@@ -5724,6 +5763,64 @@ mod tests {
         let wasm = compile_module(&module).expect("Option match should compile");
         assert_wasm_header(&wasm);
         validate_wasm(&wasm);
+    }
+
+    /// A pair pattern is lowered at the type of each component. A literal
+    /// pattern still reads an i32, so on an I64 value it is refused; it
+    /// is not lowered to an arm that never matches.
+    #[test]
+    fn match_patterns_on_wide_values() {
+        let module = |ret_ty, body| AstModule {
+            name: "t".into(),
+            imports: vec![],
+            decls: vec![Decl::Fn {
+                name: "f".into(),
+                visibility: Visibility::Private,
+                type_params: vec![],
+                params: vec![],
+                ret_ty,
+                body,
+            }],
+        };
+        let wide = || e(ExprKind::Lit(Literal::I64(5_000_000_000)));
+        let arm = |pattern, body| MatchArm {
+            pattern,
+            guard: None,
+            body,
+        };
+
+        // match (1, 5000000000) of | (a, b) => b end
+        let pair = e(ExprKind::Pair {
+            left: Box::new(e(ExprKind::Lit(Literal::I32(1)))),
+            right: Box::new(wide()),
+        });
+        let typed = e(ExprKind::Match {
+            scrutinee: Box::new(pair),
+            arms: vec![arm(
+                P::Pair(Box::new(P::Var("a".into())), Box::new(P::Var("b".into()))),
+                e(ExprKind::Var("b".into())),
+            )],
+        });
+        let wasm = compile_module(&module(Ty::Base(BaseTy::I64), typed)).expect("typed pair");
+        validate_wasm(&wasm);
+
+        // match 5000000000 of | 5000000000 => 1 | _ => 0 end
+        let literal = e(ExprKind::Match {
+            scrutinee: Box::new(wide()),
+            arms: vec![
+                arm(
+                    P::Literal(Literal::I64(5_000_000_000)),
+                    e(ExprKind::Lit(Literal::I32(1))),
+                ),
+                arm(P::Wildcard, e(ExprKind::Lit(Literal::I32(0)))),
+            ],
+        });
+        let err = compile_module(&module(Ty::Base(BaseTy::I32), literal)).expect_err("refused");
+        assert!(
+            err.0.starts_with(UNSUPPORTED_PREFIX) && err.0.contains("`match`"),
+            "{}",
+            err.0
+        );
     }
 
     /// Three constructors → br_table over 3 labels, last constructor

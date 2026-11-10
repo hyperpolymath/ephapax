@@ -2401,6 +2401,12 @@ pub struct ModuleRegistry {
     modules: HashMap<Var, Vec<(Var, Ty, Visibility)>>,
 }
 
+/// `Foo.Bar` and `Foo/Bar` name the same module (`qualified_name` in
+/// ephapax.pest), so an import may spell it either way.
+fn module_key(name: &Var) -> Var {
+    name.replace('.', "/").into()
+}
+
 impl ModuleRegistry {
     pub fn new() -> Self {
         Self::default()
@@ -2494,26 +2500,28 @@ impl ModuleRegistry {
                 Decl::Data { .. } => {}
             }
         }
-        self.modules.insert(module.name.clone(), entries);
+        self.modules.insert(module_key(&module.name), entries);
     }
 
     /// Look up a public name from a registered module.
     pub fn lookup(&self, module_name: &Var, decl_name: &Var) -> Option<&Ty> {
-        self.modules.get(module_name).and_then(|entries| {
-            entries.iter().find_map(|(name, ty, vis)| {
-                if name == decl_name && *vis == Visibility::Public {
-                    Some(ty)
-                } else {
-                    None
-                }
+        self.modules
+            .get(&module_key(module_name))
+            .and_then(|entries| {
+                entries.iter().find_map(|(name, ty, vis)| {
+                    if name == decl_name && *vis == Visibility::Public {
+                        Some(ty)
+                    } else {
+                        None
+                    }
+                })
             })
-        })
     }
 
     /// Get all public names from a module.
     pub fn public_names(&self, module_name: &Var) -> Vec<(Var, Ty)> {
         self.modules
-            .get(module_name)
+            .get(&module_key(module_name))
             .map(|entries| {
                 entries
                     .iter()

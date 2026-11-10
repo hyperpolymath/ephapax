@@ -98,6 +98,19 @@ pub fn parse_module(source: &str, name: &str) -> Result<Module, Vec<ParseError>>
     })
 }
 
+/// The name in the `module` header of `source`, as written, if it has
+/// one. Only the header is parsed (comments before it are skipped), so
+/// this also works on a file with an error further down.
+pub fn declared_module_name(source: &str) -> Option<String> {
+    let header = EphapaxParser::parse(Rule::module_header, source)
+        .ok()?
+        .next()?;
+    let decl = header
+        .into_inner()
+        .find(|p| p.as_rule() == Rule::module_decl)?;
+    Some(decl.into_inner().next()?.as_str().to_string())
+}
+
 // ============================================================================
 // Helper Functions
 // ============================================================================

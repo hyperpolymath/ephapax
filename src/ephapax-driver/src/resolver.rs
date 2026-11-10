@@ -226,7 +226,7 @@ impl Resolver<'_> {
     }
 }
 
-/// Walk `base_dir` recursively, reading the first `module a/b/c` line of
+/// Walk `base_dir` recursively, reading the `module a/b/c` header of
 /// every `.eph` file we find, and return a map from declared module name
 /// to file path. Files without a `module` header are skipped.
 fn scan_module_index(base_dir: &Path) -> HashMap<String, PathBuf> {
@@ -263,26 +263,10 @@ fn scan_module_index(base_dir: &Path) -> HashMap<String, PathBuf> {
     idx
 }
 
+/// The module the source declares, from the parser's own header rule: a
+/// line that looks like a header inside a comment is not one.
 fn first_module_declaration(source: &str) -> Option<String> {
-    for line in source.lines() {
-        let line = line.trim_start();
-        // The keyword, then whitespace: not `module_size(x)` or `modules`.
-        if let Some(rest) = line
-            .strip_prefix("module")
-            .filter(|r| r.starts_with(char::is_whitespace))
-        {
-            let rest = rest.trim();
-            // Take everything up to a whitespace, comma, or comment marker.
-            let end = rest
-                .find(|c: char| !(c.is_ascii_alphanumeric() || c == '_' || c == '.' || c == '/'))
-                .unwrap_or(rest.len());
-            let name = &rest[..end];
-            if !name.is_empty() {
-                return Some(normalise_path(name));
-            }
-        }
-    }
-    None
+    ephapax_parser::declared_module_name(source).map(|name| normalise_path(&name))
 }
 
 fn normalise_path(raw: &str) -> String {

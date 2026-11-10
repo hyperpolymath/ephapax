@@ -23,7 +23,7 @@ performance, correctness, 13 tests)
 `+src/ephapax-vram-cache/benches/cache_bench.rs+`
 * Total: *582 tests* (`+cargo test --workspace --all-targets+`);
 pass/fail enforced by `+rust-ci.yml+`
-* Documented all-target tests: 582
+* Documented all-target tests: 585
 
 === CRG Testing Taxonomy — Status
 

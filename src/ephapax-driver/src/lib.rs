@@ -58,7 +58,8 @@ impl Program {
     /// interpreter. Wasm produces a single binary; each imported module's
     /// `Fn` declarations become part of the same wasm module. A function,
     /// or an extern item, that an earlier module already declared is
-    /// dropped (first-seen wins, the root first).
+    /// dropped (first-seen wins, the root first). [`check_program`]
+    /// refuses a program in which that would drop a function.
     pub fn into_merged(self) -> Module {
         // Dedup keys: `fn:<name>` for a function, `extern:<abi>:<name>` for
         // an extern item (each extern fn is one wasm import, so the same
@@ -240,6 +241,32 @@ pub fn check_program(program: &Program) -> Result<(), DriverError> {
             }
         })?);
     }
+    // A program is one wasm module with one flat function namespace
+    // (`Program::into_merged`). If two modules declared a function of the
+    // same name, the merge would keep one, and the callers of the other
+    // would run the wrong code.
+    // snip: an error; lift it with module-qualified names in the merge.
+    let mut declared_in = std::collections::HashMap::new();
+    for m in &program.modules {
+        for decl in &m.core.decls {
+            let Decl::Fn { name, .. } = decl else {
+                continue;
+            };
+            let first = declared_in.insert(name, &m.logical_path);
+            if let Some(first) = first.filter(|first| *first != &m.logical_path) {
+                return Err(DriverError::Unsupported {
+                    path: m.file_path.clone(),
+                    error: CodegenError(format!(
+                        "{}: function `{name}` is declared in module `{first}` and in \
+                         module `{}` (a program compiles to one wasm module, which \
+                         holds one function of each name)",
+                        ephapax_wasm::UNSUPPORTED_PREFIX,
+                        m.logical_path
+                    )),
+                });
+            }
+        }
+    }
     // With the types, so a limit of the typed lowering (a `match` on a
     // 64-bit component) is an error here and not only in `compile`.
     for (m, types) in program.modules.iter().zip(&types) {
@@ -332,6 +359,82 @@ mod tests {
             matches!(&err, DriverError::Io { message, .. } if message.contains("module not found")),
             "{err}"
         );
+    }
+
+    /// Two modules that each declare `helper` cannot share one wasm
+    /// module. The merge used to keep one `helper` for both, without a
+    /// diagnostic.
+    #[test]
+    fn same_function_name_in_two_modules_is_refused() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let write = |name: &str, text: &str| {
+            std::fs::write(dir.path().join(name), text).expect("write module")
+        };
+        write(
+            "deep.eph",
+            "module deep\n\nfn helper(n: I32): I32 = n + 100\n\n\
+             pub fn deep_val(n: I32): I32 = helper(n)\n",
+        );
+        write(
+            "app.eph",
+            "module app\n\nimport deep\n\nfn helper(n: I32): I32 = n + 7\n\n\
+             fn main(): I32 = helper(1) + deep_val(0)\n",
+        );
+        let err = load_program(&dir.path().join("app.eph"), None).expect_err("refused");
+        assert!(
+            matches!(&err, DriverError::Unsupported { error, .. } if error.0.contains("`helper`")),
+            "{err}"
+        );
+    }
+
+    /// `foo.bar` and `foo/bar` name the same module: an import may use
+    /// either spelling, whichever one the header uses.
+    #[test]
+    fn import_and_header_may_spell_the_module_path_differently() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        std::fs::create_dir(dir.path().join("foo")).expect("mkdir");
+        let write = |name: &str, text: &str| {
+            std::fs::write(dir.path().join(name), text).expect("write module")
+        };
+        write(
+            "foo/bar.eph",
+            "module foo/bar\n\npub fn inc(n: I32): I32 = n + 1\n",
+        );
+        write(
+            "foo/baz.eph",
+            "module foo.baz\n\npub fn dec(n: I32): I32 = n - 1\n",
+        );
+        for imports in [
+            "import foo.bar\nimport foo/baz",
+            "import foo.bar(inc)\nimport foo/baz(dec)",
+        ] {
+            write(
+                "app.eph",
+                &format!("module app\n\n{imports}\n\nfn main(): I32 = inc(dec(41))\n"),
+            );
+            load_program(&dir.path().join("app.eph"), None)
+                .unwrap_or_else(|e| panic!("`{imports}`: {e}"));
+        }
+    }
+
+    /// The module index reads the header the parser reads: a line in a
+    /// comment that looks like a header is not one.
+    #[test]
+    fn module_index_ignores_a_header_inside_a_comment() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let write = |name: &str, text: &str| {
+            std::fs::write(dir.path().join(name), text).expect("write module")
+        };
+        // Not at the literal path `Real.eph`: only the index finds it.
+        write(
+            "impl.eph",
+            "/*\nmodule Example\n*/\nmodule Real\n\npub fn inc(n: I32): I32 = n + 1\n",
+        );
+        write(
+            "app.eph",
+            "module app\n\nimport Real\n\nfn main(): I32 = inc(41)\n",
+        );
+        load_program(&dir.path().join("app.eph"), None).expect("loads");
     }
 
     /// `module_size(x)` is not a `module` header.

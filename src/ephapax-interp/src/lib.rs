@@ -6,13 +6,18 @@
 //!
 //! A simple interpreter for debugging and rapid development.
 //! Useful for testing before compiling to WASM.
+//!
+//! The evaluator is a loop with its own stack of frames on the heap
+//! ([`Interpreter::eval`]). A call in the program uses no native stack,
+//! so deep recursion ends with a value or with the runtime error
+//! [`RuntimeError::StackOverflow`], and the process does not abort.
 
 use ephapax_syntax::{
-    BaseTy, BinOp, Decl, Expr, ExprKind, Literal, MatchArm, Module, Pattern, RegionName, Ty,
-    UnaryOp, Var,
+    BaseTy, BinOp, Decl, Expr, ExprKind, Literal, Module, Pattern, RegionName, Ty, UnaryOp, Var,
 };
 use smol_str::SmolStr;
 use std::collections::HashMap;
+use std::sync::Arc;
 use thiserror::Error;
 
 /// Runtime info for a single constructor: (position, total, arity).
@@ -107,11 +112,16 @@ pub enum RuntimeError {
 
     #[error("Index {index} out of bounds (length {length})")]
     IndexOutOfBounds { index: usize, length: usize },
+
+    /// The calls of the program are too deep: the evaluator has its
+    /// greatest number of frames. Wasm traps with this text too.
+    #[error("call stack exhausted")]
+    StackOverflow,
 }
 
 /// Runtime values
 //
-// clippy::large_enum_variant — `Closure` is ~264 bytes against ~48 for the next
+// clippy::large_enum_variant — `Closure` is ~168 bytes against ~48 for the next
 // largest variant. The fix is to box the closure payload, but that changes every
 // construction and match site in the interpreter, so it is deliberately NOT bundled
 // into the CI-revival change that first surfaced this lint. Tracked separately;
@@ -137,7 +147,7 @@ pub enum Value {
     Closure {
         param: Var,
         param_ty: Ty,
-        body: Expr,
+        body: Code,
         env: Environment,
     },
     Borrow(Box<Value>),
@@ -315,8 +325,13 @@ impl Environment {
     }
 }
 
-/// Function definition: (parameters, return type, body expression).
-type FnDef = (Vec<(Var, Ty)>, Ty, Expr);
+/// A top-level function, in the form that the evaluator runs.
+struct Function {
+    params: Vec<(Var, Ty)>,
+    body: Arc<Node>,
+    /// The function as a value ([`function_value`]).
+    value: Value,
+}
 
 /// Interpreter state
 pub struct Interpreter {
@@ -324,9 +339,9 @@ pub struct Interpreter {
     /// Active regions stack
     regions: Vec<RegionName>,
     /// Function definitions
-    functions: HashMap<Var, FnDef>,
+    functions: HashMap<Var, Function>,
     /// The value expression of each top-level constant.
-    constants: HashMap<Var, Expr>,
+    constants: HashMap<Var, Arc<Node>>,
     /// Data declarations from loaded modules, used by `eval_match` to
     /// resolve `Pattern::Constructor` against the runtime binary-sum
     /// encoding.
@@ -351,6 +366,314 @@ fn value_matches_literal(val: &Value, lit: &Literal) -> bool {
         (Value::String { data, .. }, Literal::String(s)) => data == s,
         _ => false,
     }
+}
+
+/// The greatest number of frames of the evaluator. A frame holds the work
+/// that waits for a value, so this is the limit of the depth of the calls
+/// of a program. More frames give [`RuntimeError::StackOverflow`].
+const MAX_FRAMES: usize = 1_000_000;
+
+/// The code of a closure, in the form that the evaluator runs.
+#[derive(Clone)]
+pub struct Code(Arc<Node>);
+
+impl std::fmt::Debug for Code {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "<code>")
+    }
+}
+
+/// An expression in the form that the evaluator runs. Each part is
+/// shared, so a frame of the evaluator can hold the part that runs next.
+#[derive(Debug)]
+enum Node {
+    Lit(Literal),
+    Var(Var),
+    StringNew {
+        region: RegionName,
+        value: String,
+    },
+    Lambda {
+        param: Var,
+        param_ty: Ty,
+        body: Arc<Node>,
+    },
+    Unary(Unary, Arc<Node>),
+    Binary(Binary, Arc<Node>, Arc<Node>),
+    Let {
+        name: Var,
+        value: Arc<Node>,
+        body: Arc<Node>,
+    },
+    If {
+        cond: Arc<Node>,
+        then_branch: Arc<Node>,
+        else_branch: Arc<Node>,
+    },
+    /// `left` and `right`: the name and the body of each branch.
+    Case {
+        scrutinee: Arc<Node>,
+        left: (Var, Arc<Node>),
+        right: (Var, Arc<Node>),
+    },
+    Match {
+        scrutinee: Arc<Node>,
+        arms: Arc<[Arm]>,
+    },
+    Region {
+        name: RegionName,
+        body: Arc<Node>,
+    },
+    Seq(Seq, Arc<[Arc<Node>]>),
+    /// A form with no implementation in the interpreter: the text of the
+    /// error.
+    Unimplemented(&'static str),
+}
+
+/// An arm of a [`Node::Match`].
+#[derive(Debug)]
+struct Arm {
+    pattern: Pattern,
+    guard: Option<Arc<Node>>,
+    body: Arc<Node>,
+}
+
+/// An operation on the value of 1 operand.
+#[derive(Debug, Clone, Copy)]
+enum Unary {
+    Op(UnaryOp),
+    StringLen,
+    Fst,
+    Snd,
+    Inl,
+    Inr,
+    Borrow,
+    Deref,
+    Drop,
+    Copy,
+    TupleIndex(usize),
+}
+
+/// An operation on the values of 2 operands, the left one first.
+#[derive(Debug, Clone, Copy)]
+enum Binary {
+    Op(BinOp),
+    Concat,
+    Pair,
+    ListIndex,
+    /// The function, then its argument.
+    App,
+}
+
+/// The forms with a sequence of parts, each evaluated in order.
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum Seq {
+    Block,
+    List,
+    Tuple,
+}
+
+impl Seq {
+    /// The value of the form from the values of its parts. For a block,
+    /// `values` has the value of the last part only.
+    fn value(self, mut values: Vec<Value>) -> Value {
+        match self {
+            Seq::Block => values.pop().unwrap_or(Value::Unit),
+            Seq::List => Value::List(values),
+            Seq::Tuple => Value::Tuple(values),
+        }
+    }
+}
+
+/// The form of `expr` that the evaluator runs.
+fn lower(expr: &Expr) -> Arc<Node> {
+    let unary = |op, inner: &Expr| Node::Unary(op, lower(inner));
+    let binary = |op, left: &Expr, right: &Expr| Node::Binary(op, lower(left), lower(right));
+    let seq = |kind, parts: &[Expr]| Node::Seq(kind, parts.iter().map(lower).collect());
+    Arc::new(match &expr.kind {
+        ExprKind::Lit(lit) => Node::Lit(lit.clone()),
+        // The interpreter runs a generic function as it is: the type
+        // arguments select no code.
+        ExprKind::Var(name) | ExprKind::TypeApp { name, .. } => Node::Var(name.clone()),
+        ExprKind::StringNew { region, value } => Node::StringNew {
+            region: region.clone(),
+            value: value.clone(),
+        },
+        ExprKind::StringConcat { left, right } => binary(Binary::Concat, left, right),
+        ExprKind::StringLen(inner) => unary(Unary::StringLen, inner),
+        ExprKind::Let {
+            name, value, body, ..
+        }
+        | ExprKind::LetLin {
+            name, value, body, ..
+        } => Node::Let {
+            name: name.clone(),
+            value: lower(value),
+            body: lower(body),
+        },
+        ExprKind::Lambda {
+            param,
+            param_ty,
+            body,
+        } => Node::Lambda {
+            param: param.clone(),
+            param_ty: param_ty.clone(),
+            body: lower(body),
+        },
+        ExprKind::App { func, arg } => binary(Binary::App, func, arg),
+        ExprKind::Pair { left, right } => binary(Binary::Pair, left, right),
+        ExprKind::Fst(inner) => unary(Unary::Fst, inner),
+        ExprKind::Snd(inner) => unary(Unary::Snd, inner),
+        ExprKind::Inl { value, .. } => unary(Unary::Inl, value),
+        ExprKind::Inr { value, .. } => unary(Unary::Inr, value),
+        // A value of a recursive type is the value of its unfolding:
+        // `fold` and `unfold` change the type only.
+        ExprKind::Fold { value, .. } | ExprKind::Unfold(value) => return lower(value),
+        ExprKind::Case {
+            scrutinee,
+            left_var,
+            left_body,
+            right_var,
+            right_body,
+        } => Node::Case {
+            scrutinee: lower(scrutinee),
+            left: (left_var.clone(), lower(left_body)),
+            right: (right_var.clone(), lower(right_body)),
+        },
+        ExprKind::If {
+            cond,
+            then_branch,
+            else_branch,
+        } => Node::If {
+            cond: lower(cond),
+            then_branch: lower(then_branch),
+            else_branch: lower(else_branch),
+        },
+        ExprKind::Region { name, body } => Node::Region {
+            name: name.clone(),
+            body: lower(body),
+        },
+        ExprKind::Borrow { inner, .. } => unary(Unary::Borrow, inner),
+        ExprKind::Deref(inner) => unary(Unary::Deref, inner),
+        ExprKind::Drop(inner) => unary(Unary::Drop, inner),
+        ExprKind::Copy(inner) => unary(Unary::Copy, inner),
+        ExprKind::Block(exprs) => seq(Seq::Block, exprs),
+        ExprKind::BinOp { op, left, right } => binary(Binary::Op(*op), left, right),
+        ExprKind::UnaryOp { op, operand } => unary(Unary::Op(*op), operand),
+        ExprKind::ListLit(elements) => seq(Seq::List, elements),
+        ExprKind::ListIndex { list, index } => binary(Binary::ListIndex, list, index),
+        ExprKind::TupleLit(exprs) => seq(Seq::Tuple, exprs),
+        ExprKind::TupleIndex { tuple, index } => unary(Unary::TupleIndex(*index), tuple),
+        ExprKind::FFI { .. } => {
+            Node::Unimplemented("raw __ffi is not supported; use typed extern declarations")
+        }
+        ExprKind::Perform { .. } => {
+            Node::Unimplemented("effect perform not yet implemented in interpreter")
+        }
+        ExprKind::Handle { .. } => {
+            Node::Unimplemented("effect handle not yet implemented in interpreter")
+        }
+        ExprKind::Match { scrutinee, arms } => Node::Match {
+            scrutinee: lower(scrutinee),
+            arms: arms
+                .iter()
+                .map(|arm| Arm {
+                    pattern: arm.pattern.clone(),
+                    guard: arm.guard.as_deref().map(lower),
+                    body: lower(&arm.body),
+                })
+                .collect(),
+        },
+    })
+}
+
+/// The evaluator either evaluates code or has a value for the top frame.
+enum State {
+    Eval(Arc<Node>),
+    Value(Value),
+}
+
+/// What a name had before a binding: its value and its consumed mark.
+type Saved = (Var, Option<Value>, Option<bool>);
+
+/// Work that waits for a value. The frames are on the heap: they take the
+/// place of the native stack frames of a recursive evaluator.
+enum Frame {
+    /// The operand of a unary operation.
+    Unary(Unary),
+    /// The left operand of a binary operation; the code of the right one.
+    Left(Binary, Arc<Node>),
+    /// The right operand of a binary operation; the value of the left one.
+    Right(Binary, Value),
+    /// The value of a `let`; its name and its body.
+    Let(Var, Arc<Node>),
+    /// The condition of an `if`; its 2 branches.
+    If(Arc<Node>, Arc<Node>),
+    /// The scrutinee of a `case`; the name and the body of each branch.
+    Case((Var, Arc<Node>), (Var, Arc<Node>)),
+    /// The scrutinee of a `match`.
+    Match(Arc<[Arm]>),
+    /// The guard of arm `arm`, with the names of the arm bound.
+    Guard {
+        arms: Arc<[Arm]>,
+        arm: usize,
+        scrutinee: Value,
+        saved: Vec<Saved>,
+    },
+    /// Part `next - 1` of a sequence; the values of the parts before it.
+    Seq {
+        kind: Seq,
+        parts: Arc<[Arc<Node>]>,
+        next: usize,
+        values: Vec<Value>,
+    },
+    /// The body of a `let`, of a `case` branch or of a match arm: its
+    /// names go out of scope.
+    Unbind(Vec<Saved>),
+    /// The body of a closure or the value of a constant: the evaluation
+    /// goes back to the environment `saved`. `on_error` is set for a
+    /// constant, which also goes back when its value is an error.
+    Env { saved: Environment, on_error: bool },
+    /// The body of a region: the region ends.
+    Region(RegionName),
+}
+
+/// A top-level function as a value: a closure for its first
+/// parameter, with a lambda in its body for each next parameter. So
+/// `f(a, b)`, which is `(f a) b`, gives each parameter its argument.
+/// A function with no parameter takes the unit argument of `f()`.
+/// The closure starts from an empty environment: the body of a
+/// top-level function sees its parameters and the top-level
+/// functions, and no local name of the caller.
+fn function_value(params: &[(Var, Ty)], body: &Arc<Node>) -> Value {
+    let mut params = params.iter().cloned();
+    let (param, param_ty) = params
+        .next()
+        .unwrap_or_else(|| ("_".into(), Ty::Base(BaseTy::Unit)));
+    let body = params.rev().fold(body.clone(), |body, (param, param_ty)| {
+        Arc::new(Node::Lambda {
+            param,
+            param_ty,
+            body,
+        })
+    });
+    Value::Closure {
+        param,
+        param_ty,
+        body: Code(body),
+        env: Environment::new(),
+    }
+}
+
+/// The element `index` of a list value.
+fn list_element(elements: &[Value], index: usize) -> Result<Value, RuntimeError> {
+    elements
+        .get(index)
+        .cloned()
+        .ok_or(RuntimeError::IndexOutOfBounds {
+            index,
+            length: elements.len(),
+        })
 }
 
 impl Interpreter {
@@ -391,19 +714,19 @@ impl Interpreter {
     pub fn load_module(&mut self, module: &Module) {
         for decl in &module.decls {
             if let Decl::Fn {
-                name,
-                visibility: _,
-                params,
-                ret_ty,
-                body,
-                type_params: _,
+                name, params, body, ..
             } = decl
             {
-                self.functions
-                    .insert(name.clone(), (params.clone(), ret_ty.clone(), body.clone()));
+                let body = lower(body);
+                let function = Function {
+                    value: function_value(params, &body),
+                    params: params.clone(),
+                    body,
+                };
+                self.functions.insert(name.clone(), function);
             }
             if let Decl::Const { name, value, .. } = decl {
-                self.constants.insert(name.clone(), value.clone());
+                self.constants.insert(name.clone(), lower(value));
             }
         }
         self.data_registry.populate_from_module(module);
@@ -411,142 +734,398 @@ impl Interpreter {
 
     /// Evaluate an expression
     pub fn eval(&mut self, expr: &Expr) -> Result<Value, RuntimeError> {
-        match &expr.kind {
-            ExprKind::Lit(lit) => self.eval_lit(lit),
-            // The interpreter runs a generic function as it is: the type
-            // arguments select no code.
-            ExprKind::Var(name) | ExprKind::TypeApp { name, .. } => self.eval_var(name),
-            ExprKind::StringNew { region, value } => self.eval_string_new(region, value),
-            ExprKind::StringConcat { left, right } => self.eval_string_concat(left, right),
-            ExprKind::StringLen(inner) => self.eval_string_len(inner),
-            ExprKind::Let {
-                name, value, body, ..
-            } => self.eval_let(name, value, body),
-            ExprKind::LetLin {
-                name, value, body, ..
-            } => self.eval_let(name, value, body),
-            ExprKind::Lambda {
-                param,
-                param_ty,
-                body,
-            } => self.eval_lambda(param, param_ty, body),
-            ExprKind::App { func, arg } => self.eval_app(func, arg),
-            ExprKind::Pair { left, right } => self.eval_pair(left, right),
-            ExprKind::Fst(inner) => self.eval_fst(inner),
-            ExprKind::Snd(inner) => self.eval_snd(inner),
-            ExprKind::Inl { value, .. } => self.eval_inl(value),
-            ExprKind::Inr { value, .. } => self.eval_inr(value),
-            // A value of a recursive type is the value of its unfolding:
-            // `fold` and `unfold` change the type only.
-            ExprKind::Fold { value, .. } | ExprKind::Unfold(value) => self.eval(value),
-            ExprKind::Case {
-                scrutinee,
-                left_var,
-                left_body,
-                right_var,
-                right_body,
-            } => self.eval_case(scrutinee, left_var, left_body, right_var, right_body),
-            ExprKind::If {
-                cond,
-                then_branch,
-                else_branch,
-            } => self.eval_if(cond, then_branch, else_branch),
-            ExprKind::Region { name, body } => self.eval_region(name, body),
-            ExprKind::Borrow { inner, .. } => self.eval_borrow(inner),
-            ExprKind::Deref(inner) => self.eval_deref(inner),
-            ExprKind::Drop(inner) => self.eval_drop(inner),
-            ExprKind::Copy(inner) => self.eval_copy(inner),
-            ExprKind::Block(exprs) => self.eval_block(exprs),
-            ExprKind::BinOp { op, left, right } => self.eval_binop(*op, left, right),
-            ExprKind::UnaryOp { op, operand } => self.eval_unaryop(*op, operand),
-            ExprKind::ListLit(elements) => {
-                // Evaluate all list elements and collect into a list value.
-                let mut values = Vec::new();
-                for expr in elements {
-                    values.push(self.eval(expr)?);
-                }
-                Ok(Value::List(values))
-            }
-            ExprKind::ListIndex { list, index } => {
-                // Evaluate the list and index, then extract the element.
-                let list_val = self.eval(list)?;
-                let index_val = self.eval(index)?;
-                match (list_val, index_val) {
-                    (Value::List(elements), Value::I32(i)) => {
-                        let idx = i as usize;
-                        if idx < elements.len() {
-                            Ok(elements[idx].clone())
-                        } else {
-                            Err(RuntimeError::IndexOutOfBounds {
-                                index: idx,
-                                length: elements.len(),
-                            })
-                        }
-                    }
-                    (Value::List(elements), Value::I64(i)) => {
-                        let idx = i as usize;
-                        if idx < elements.len() {
-                            Ok(elements[idx].clone())
-                        } else {
-                            Err(RuntimeError::IndexOutOfBounds {
-                                index: idx,
-                                length: elements.len(),
-                            })
-                        }
-                    }
-                    _ => Err(RuntimeError::TypeError {
-                        expected: "list and integer".to_string(),
-                        found: "non-list or non-integer".to_string(),
-                    }),
-                }
-            }
-            ExprKind::TupleLit(exprs) => {
-                // Evaluate all tuple elements
-                let mut values = Vec::new();
-                for expr in exprs {
-                    values.push(self.eval(expr)?);
-                }
-                Ok(Value::Tuple(values))
-            }
-            ExprKind::TupleIndex { tuple, index } => {
-                let tuple_val = self.eval(tuple)?;
-                match tuple_val {
-                    Value::Tuple(values) => {
-                        if *index < values.len() {
-                            Ok(values[*index].clone())
-                        } else {
-                            Err(RuntimeError::Unimplemented(format!(
-                                "tuple index {} out of bounds",
-                                index
-                            )))
-                        }
-                    }
-                    // A 2-tuple is a pair.
-                    Value::Pair(left, _) if *index == 0 => Ok(*left),
-                    Value::Pair(_, right) if *index == 1 => Ok(*right),
-                    _ => Err(RuntimeError::Unimplemented(
-                        "tuple index on non-tuple".to_string(),
-                    )),
-                }
-            }
-            ExprKind::FFI { .. } => Err(RuntimeError::Unimplemented(
-                "raw __ffi is not supported; use typed extern declarations".into(),
-            )),
+        self.run(lower(expr))
+    }
 
-            ExprKind::Perform { .. } => Err(RuntimeError::Unimplemented(
-                "effect perform not yet implemented in interpreter".into(),
-            )),
-            ExprKind::Handle { .. } => Err(RuntimeError::Unimplemented(
-                "effect handle not yet implemented in interpreter".into(),
-            )),
-            ExprKind::Match { scrutinee, arms } => self.eval_match(scrutinee, arms),
+    /// Run `code` to a value. The work that waits for a value is in
+    /// `stack`, on the heap, so a call in the program uses no native
+    /// stack: the limit of the depth is [`MAX_FRAMES`], not the size of
+    /// the native stack.
+    fn run(&mut self, code: Arc<Node>) -> Result<Value, RuntimeError> {
+        let mut stack: Vec<Frame> = Vec::new();
+        let mut state = State::Eval(code);
+        loop {
+            let step = match state {
+                State::Eval(code) => self.enter(&code, &mut stack),
+                State::Value(value) => match stack.pop() {
+                    Some(frame) => self.resume(frame, value, &mut stack),
+                    None => return Ok(value),
+                },
+            };
+            state = match step {
+                Ok(state) if stack.len() <= MAX_FRAMES => state,
+                step => {
+                    // An error leaves the environment as it is at the
+                    // error. The one exception is the value of a
+                    // constant, which gives the environment back to the
+                    // code that used the constant.
+                    for frame in stack.into_iter().rev() {
+                        if let Frame::Env {
+                            saved,
+                            on_error: true,
+                        } = frame
+                        {
+                            self.env = saved;
+                        }
+                    }
+                    return Err(step.err().unwrap_or(RuntimeError::StackOverflow));
+                }
+            };
         }
     }
 
-    fn eval_binop(&mut self, op: BinOp, left: &Expr, right: &Expr) -> Result<Value, RuntimeError> {
-        let left_val = self.eval(left)?;
-        let right_val = self.eval(right)?;
+    /// Start the evaluation of `code`: give its value, or push a frame for
+    /// the rest of its work and give the part to evaluate first.
+    fn enter(&mut self, code: &Arc<Node>, stack: &mut Vec<Frame>) -> Result<State, RuntimeError> {
+        let first = match &**code {
+            Node::Lit(lit) => return Ok(State::Value(self.eval_lit(lit)?)),
+            Node::Var(name) => return self.enter_var(name, stack),
+            Node::StringNew { region, value } => {
+                return Ok(State::Value(self.eval_string_new(region, value)?));
+            }
+            Node::Lambda {
+                param,
+                param_ty,
+                body,
+            } => {
+                return Ok(State::Value(Value::Closure {
+                    param: param.clone(),
+                    param_ty: param_ty.clone(),
+                    body: Code(body.clone()),
+                    env: self.env.clone(),
+                }));
+            }
+            Node::Unimplemented(what) => {
+                return Err(RuntimeError::Unimplemented((*what).into()));
+            }
+            Node::Unary(op, inner) => {
+                // A borrow of a variable reads the value and leaves it in
+                // place: `&s` is not a use of `s`.
+                if let (Unary::Borrow, Node::Var(name)) = (op, &**inner) {
+                    if self.env.is_consumed(name) {
+                        return Err(RuntimeError::LinearValueConsumed);
+                    }
+                    if let Some(value) = self.env.get(name) {
+                        return Ok(State::Value(Value::Borrow(Box::new(value.clone()))));
+                    }
+                }
+                stack.push(Frame::Unary(*op));
+                inner
+            }
+            Node::Binary(op, left, right) => {
+                stack.push(Frame::Left(*op, right.clone()));
+                left
+            }
+            Node::Let { name, value, body } => {
+                stack.push(Frame::Let(name.clone(), body.clone()));
+                value
+            }
+            Node::If {
+                cond,
+                then_branch,
+                else_branch,
+            } => {
+                stack.push(Frame::If(then_branch.clone(), else_branch.clone()));
+                cond
+            }
+            Node::Case {
+                scrutinee,
+                left,
+                right,
+            } => {
+                stack.push(Frame::Case(left.clone(), right.clone()));
+                scrutinee
+            }
+            Node::Match { scrutinee, arms } => {
+                stack.push(Frame::Match(arms.clone()));
+                scrutinee
+            }
+            Node::Region { name, body } => {
+                self.regions.push(name.clone());
+                stack.push(Frame::Region(name.clone()));
+                body
+            }
+            Node::Seq(kind, parts) => match parts.first() {
+                Some(first) => {
+                    stack.push(Frame::Seq {
+                        kind: *kind,
+                        parts: parts.clone(),
+                        next: 1,
+                        values: Vec::new(),
+                    });
+                    first
+                }
+                None => return Ok(State::Value(kind.value(Vec::new()))),
+            },
+        };
+        Ok(State::Eval(first.clone()))
+    }
 
+    /// Continue the work of `frame` with the `value` that it waits for.
+    fn resume(
+        &mut self,
+        frame: Frame,
+        value: Value,
+        stack: &mut Vec<Frame>,
+    ) -> Result<State, RuntimeError> {
+        let next = match frame {
+            Frame::Unary(op) => return Ok(State::Value(self.unary(op, value)?)),
+            Frame::Left(op, right) => {
+                stack.push(Frame::Right(op, value));
+                right
+            }
+            Frame::Right(op, left) => return self.binary(op, left, value, stack),
+            Frame::Let(name, body) => {
+                let saved = self.bind(vec![(name, value)]);
+                stack.push(Frame::Unbind(saved));
+                body
+            }
+            Frame::If(then_branch, else_branch) => match value {
+                Value::Bool(true) => then_branch,
+                Value::Bool(false) => else_branch,
+                other => {
+                    return Err(RuntimeError::TypeError {
+                        expected: "Bool".to_string(),
+                        found: other.type_name().to_string(),
+                    });
+                }
+            },
+            Frame::Case(left, right) => {
+                let ((name, body), inner) = match value {
+                    Value::Left(inner) => (left, inner),
+                    Value::Right(inner) => (right, inner),
+                    _ => return Err(RuntimeError::NotASum),
+                };
+                let saved = self.bind(vec![(name, *inner)]);
+                stack.push(Frame::Unbind(saved));
+                body
+            }
+            Frame::Match(arms) => return self.match_arms(arms, value, 0, stack),
+            Frame::Guard {
+                arms,
+                arm,
+                scrutinee,
+                saved,
+            } => match value {
+                Value::Bool(true) => {
+                    stack.push(Frame::Unbind(saved));
+                    arms[arm].body.clone()
+                }
+                // The guard is false: the names of the arm go out of
+                // scope, and the next arms get the value.
+                Value::Bool(false) => {
+                    self.unbind(saved);
+                    return self.match_arms(arms, scrutinee, arm + 1, stack);
+                }
+                other => {
+                    return Err(RuntimeError::TypeError {
+                        expected: "Bool".into(),
+                        found: other.type_name().into(),
+                    });
+                }
+            },
+            Frame::Seq {
+                kind,
+                parts,
+                next,
+                mut values,
+            } => {
+                if kind == Seq::Block {
+                    values.clear();
+                }
+                values.push(value);
+                match parts.get(next).cloned() {
+                    Some(part) => {
+                        stack.push(Frame::Seq {
+                            kind,
+                            parts,
+                            next: next + 1,
+                            values,
+                        });
+                        part
+                    }
+                    None => return Ok(State::Value(kind.value(values))),
+                }
+            }
+            Frame::Unbind(saved) => {
+                self.unbind(saved);
+                return Ok(State::Value(value));
+            }
+            Frame::Env { saved, .. } => {
+                self.env = saved;
+                return Ok(State::Value(value));
+            }
+            Frame::Region(name) => {
+                self.regions.pop();
+                // Check for region escape
+                if let Value::String { region, data } = &value {
+                    if *region == name {
+                        return Err(RuntimeError::StringEscaped(data.clone()));
+                    }
+                }
+                return Ok(State::Value(value));
+            }
+        };
+        Ok(State::Eval(next))
+    }
+
+    /// Bind each name of `bindings` in the environment. The result has
+    /// what each name had before, for [`Self::unbind`].
+    fn bind(&mut self, bindings: Vec<(Var, Value)>) -> Vec<Saved> {
+        // Save-restore: prevents environment leaking between nested let bindings.
+        // The old extend/remove pattern clobbered outer bindings on name shadowing
+        // and leaked intermediate env state to sibling expressions.
+        // See formal/DESIGN-NOTE-2026-03-28.md for the soundness proof.
+        let saved = bindings
+            .iter()
+            .map(|(name, _)| {
+                (
+                    name.clone(),
+                    self.env.bindings.get(name).cloned(),
+                    self.env.consumed.get(name).copied(),
+                )
+            })
+            .collect();
+        for (name, value) in bindings {
+            self.env.extend(name, value);
+        }
+        saved
+    }
+
+    /// Give each name of `saved` what it had before [`Self::bind`], the
+    /// last name first.
+    fn unbind(&mut self, saved: Vec<Saved>) {
+        for (name, value, consumed) in saved.into_iter().rev() {
+            match value {
+                Some(value) => {
+                    self.env.bindings.insert(name.clone(), value);
+                    if let Some(consumed) = consumed {
+                        self.env.consumed.insert(name, consumed);
+                    }
+                }
+                None => self.env.remove(&name),
+            }
+        }
+    }
+
+    /// The result of `op` on the value of its operand.
+    fn unary(&self, op: Unary, val: Value) -> Result<Value, RuntimeError> {
+        match op {
+            Unary::Op(op) => self.eval_unaryop(op, val),
+            Unary::StringLen => match &val {
+                Value::String { data, .. } => Ok(Value::I32(data.len() as i32)),
+                Value::Borrow(inner) => match inner.as_ref() {
+                    Value::String { data, .. } => Ok(Value::I32(data.len() as i32)),
+                    _ => Err(RuntimeError::TypeError {
+                        expected: "String".to_string(),
+                        found: val.type_name().to_string(),
+                    }),
+                },
+                _ => Err(RuntimeError::TypeError {
+                    expected: "String".to_string(),
+                    found: val.type_name().to_string(),
+                }),
+            },
+            Unary::Fst => match val {
+                Value::Pair(left, _) => Ok(*left),
+                _ => Err(RuntimeError::NotAPair),
+            },
+            Unary::Snd => match val {
+                Value::Pair(_, right) => Ok(*right),
+                _ => Err(RuntimeError::NotAPair),
+            },
+            Unary::Inl => Ok(Value::Left(Box::new(val))),
+            Unary::Inr => Ok(Value::Right(Box::new(val))),
+            Unary::Borrow => Ok(Value::Borrow(Box::new(val))),
+            Unary::Deref => match val {
+                Value::Borrow(inner) => Ok(*inner),
+                _ => Err(RuntimeError::TypeError {
+                    expected: "Borrow".to_string(),
+                    found: val.type_name().to_string(),
+                }),
+            },
+            // Evaluate and discard
+            Unary::Drop => Ok(Value::Unit),
+            Unary::Copy => {
+                // Only unrestricted types can be copied - linear types (String, etc.) cannot
+                if val.is_linear() {
+                    return Err(RuntimeError::TypeError {
+                        expected: "unrestricted (copyable) type".to_string(),
+                        found: format!("linear type {}", val.type_name()),
+                    });
+                }
+                // For unrestricted types, return a pair of copies
+                Ok(Value::Pair(Box::new(val.clone()), Box::new(val)))
+            }
+            Unary::TupleIndex(index) => match val {
+                Value::Tuple(values) => {
+                    if index < values.len() {
+                        Ok(values[index].clone())
+                    } else {
+                        Err(RuntimeError::Unimplemented(format!(
+                            "tuple index {} out of bounds",
+                            index
+                        )))
+                    }
+                }
+                // A 2-tuple is a pair.
+                Value::Pair(left, _) if index == 0 => Ok(*left),
+                Value::Pair(_, right) if index == 1 => Ok(*right),
+                _ => Err(RuntimeError::Unimplemented(
+                    "tuple index on non-tuple".to_string(),
+                )),
+            },
+        }
+    }
+
+    /// The result of `op` on the values of its 2 operands. A call gives
+    /// the body of the function, to evaluate in the environment of the
+    /// closure.
+    fn binary(
+        &mut self,
+        op: Binary,
+        left: Value,
+        right: Value,
+        stack: &mut Vec<Frame>,
+    ) -> Result<State, RuntimeError> {
+        Ok(State::Value(match op {
+            Binary::Op(op) => self.eval_binop(op, left, right)?,
+            Binary::Concat => self.eval_string_concat(left, right)?,
+            Binary::Pair => Value::Pair(Box::new(left), Box::new(right)),
+            Binary::ListIndex => match (left, right) {
+                (Value::List(elements), Value::I32(i)) => list_element(&elements, i as usize)?,
+                (Value::List(elements), Value::I64(i)) => list_element(&elements, i as usize)?,
+                _ => {
+                    return Err(RuntimeError::TypeError {
+                        expected: "list and integer".to_string(),
+                        found: "non-list or non-integer".to_string(),
+                    });
+                }
+            },
+            Binary::App => match left {
+                Value::Closure {
+                    param, body, env, ..
+                } => {
+                    let mut callee = env;
+                    callee.extend(param, right);
+                    let caller = std::mem::replace(&mut self.env, callee);
+                    stack.push(Frame::Env {
+                        saved: caller,
+                        on_error: false,
+                    });
+                    return Ok(State::Eval(body.0));
+                }
+                _ => return Err(RuntimeError::NotAFunction),
+            },
+        }))
+    }
+
+    fn eval_binop(
+        &self,
+        op: BinOp,
+        left_val: Value,
+        right_val: Value,
+    ) -> Result<Value, RuntimeError> {
         // Integer arithmetic wraps, as the compiled wasm does. `/` and `%`
         // by zero, and `MIN / -1`, are errors (wasm traps); `MIN % -1` is 0.
         match op {
@@ -680,8 +1259,7 @@ impl Interpreter {
         }
     }
 
-    fn eval_unaryop(&mut self, op: UnaryOp, operand: &Expr) -> Result<Value, RuntimeError> {
-        let val = self.eval(operand)?;
+    fn eval_unaryop(&self, op: UnaryOp, val: Value) -> Result<Value, RuntimeError> {
         match op {
             UnaryOp::Not => match val {
                 Value::Bool(b) => Ok(Value::Bool(!b)),
@@ -721,50 +1299,24 @@ impl Interpreter {
         })
     }
 
-    /// A top-level function as a value: a closure for its first
-    /// parameter, with a lambda in its body for each next parameter. So
-    /// `f(a, b)`, which is `(f a) b`, gives each parameter its argument.
-    /// A function with no parameter takes the unit argument of `f()`.
-    /// The closure starts from an empty environment: the body of a
-    /// top-level function sees its parameters and the top-level
-    /// functions, and no local name of the caller.
-    fn function_value(&self, params: Vec<(Var, Ty)>, body: Expr) -> Value {
-        let mut params = params.into_iter();
-        let (param, param_ty) = params
-            .next()
-            .unwrap_or_else(|| ("_".into(), Ty::Base(BaseTy::Unit)));
-        let body = params.rev().fold(body, |body, (param, param_ty)| {
-            let span = body.span;
-            let lambda = ExprKind::Lambda {
-                param,
-                param_ty,
-                body: Box::new(body),
-            };
-            Expr::new(lambda, span)
-        });
-        Value::Closure {
-            param,
-            param_ty,
-            body,
-            env: Environment::new(),
-        }
-    }
-
-    fn eval_var(&mut self, name: &Var) -> Result<Value, RuntimeError> {
+    /// The value of the name `name`. A constant gives its value
+    /// expression, to evaluate in an empty environment.
+    fn enter_var(&mut self, name: &Var, stack: &mut Vec<Frame>) -> Result<State, RuntimeError> {
         // A parameter or a `let` of this name shadows a top-level
         // function, also after its value was consumed.
         let local = self.env.get(name).is_some() || self.env.is_consumed(name);
         if !local {
-            if let Some((params, _ret_ty, body)) = self.functions.get(name).cloned() {
-                return Ok(self.function_value(params, body));
+            if let Some(function) = self.functions.get(name) {
+                return Ok(State::Value(function.value.clone()));
             }
             // A constant: its value, from an empty environment, at each
             // use of the name (as wasm, which calls a function).
             if let Some(value) = self.constants.get(name).cloned() {
-                let caller = std::mem::replace(&mut self.env, Environment::new());
-                let result = self.eval(&value);
-                self.env = caller;
-                return result;
+                stack.push(Frame::Env {
+                    saved: std::mem::take(&mut self.env),
+                    on_error: true,
+                });
+                return Ok(State::Eval(value));
             }
         }
 
@@ -784,7 +1336,7 @@ impl Interpreter {
             self.env.mark_consumed(name);
         }
 
-        Ok(value)
+        Ok(State::Value(value))
     }
 
     fn eval_string_new(&self, region: &RegionName, value: &str) -> Result<Value, RuntimeError> {
@@ -797,10 +1349,7 @@ impl Interpreter {
         })
     }
 
-    fn eval_string_concat(&mut self, left: &Expr, right: &Expr) -> Result<Value, RuntimeError> {
-        let left_val = self.eval(left)?;
-        let right_val = self.eval(right)?;
-
+    fn eval_string_concat(&self, left_val: Value, right_val: Value) -> Result<Value, RuntimeError> {
         match (left_val, right_val) {
             (
                 Value::String {
@@ -830,184 +1379,43 @@ impl Interpreter {
         }
     }
 
-    fn eval_string_len(&mut self, inner: &Expr) -> Result<Value, RuntimeError> {
-        let val = self.eval(inner)?;
-        match &val {
-            Value::String { data, .. } => Ok(Value::I32(data.len() as i32)),
-            Value::Borrow(inner) => match inner.as_ref() {
-                Value::String { data, .. } => Ok(Value::I32(data.len() as i32)),
-                _ => Err(RuntimeError::TypeError {
-                    expected: "String".to_string(),
-                    found: val.type_name().to_string(),
-                }),
-            },
-            _ => Err(RuntimeError::TypeError {
-                expected: "String".to_string(),
-                found: val.type_name().to_string(),
-            }),
-        }
-    }
-
-    fn eval_let(&mut self, name: &Var, value: &Expr, body: &Expr) -> Result<Value, RuntimeError> {
-        let val = self.eval(value)?;
-        // Save-restore: prevents environment leaking between nested let bindings.
-        // The old extend/remove pattern clobbered outer bindings on name shadowing
-        // and leaked intermediate env state to sibling expressions.
-        // See formal/DESIGN-NOTE-2026-03-28.md for the soundness proof.
-        let prev = self.env.bindings.get(name).cloned();
-        let prev_consumed = self.env.consumed.get(name).copied();
-        self.env.extend(name.clone(), val);
-        let result = self.eval(body)?;
-        // Restore previous binding (or remove if there was none)
-        match prev {
-            Some(old_val) => {
-                self.env.bindings.insert(name.clone(), old_val);
-                if let Some(c) = prev_consumed {
-                    self.env.consumed.insert(name.clone(), c);
-                }
-            }
-            None => {
-                self.env.remove(name);
-            }
-        }
-        Ok(result)
-    }
-
-    fn eval_lambda(&self, param: &Var, param_ty: &Ty, body: &Expr) -> Result<Value, RuntimeError> {
-        Ok(Value::Closure {
-            param: param.clone(),
-            param_ty: param_ty.clone(),
-            body: body.clone(),
-            env: self.env.clone(),
-        })
-    }
-
-    fn eval_app(&mut self, func: &Expr, arg: &Expr) -> Result<Value, RuntimeError> {
-        let func_val = self.eval(func)?;
-        let arg_val = self.eval(arg)?;
-
-        match func_val {
-            Value::Closure {
-                param, body, env, ..
-            } => {
-                let mut new_env = env;
-                new_env.extend(param, arg_val);
-                let old_env = std::mem::replace(&mut self.env, new_env);
-                let result = self.eval(&body)?;
-                self.env = old_env;
-                Ok(result)
-            }
-            _ => Err(RuntimeError::NotAFunction),
-        }
-    }
-
-    fn eval_pair(&mut self, left: &Expr, right: &Expr) -> Result<Value, RuntimeError> {
-        let left_val = self.eval(left)?;
-        let right_val = self.eval(right)?;
-        Ok(Value::Pair(Box::new(left_val), Box::new(right_val)))
-    }
-
-    fn eval_fst(&mut self, inner: &Expr) -> Result<Value, RuntimeError> {
-        let val = self.eval(inner)?;
-        match val {
-            Value::Pair(left, _) => Ok(*left),
-            _ => Err(RuntimeError::NotAPair),
-        }
-    }
-
-    fn eval_snd(&mut self, inner: &Expr) -> Result<Value, RuntimeError> {
-        let val = self.eval(inner)?;
-        match val {
-            Value::Pair(_, right) => Ok(*right),
-            _ => Err(RuntimeError::NotAPair),
-        }
-    }
-
-    fn eval_inl(&mut self, value: &Expr) -> Result<Value, RuntimeError> {
-        let val = self.eval(value)?;
-        Ok(Value::Left(Box::new(val)))
-    }
-
-    fn eval_inr(&mut self, value: &Expr) -> Result<Value, RuntimeError> {
-        let val = self.eval(value)?;
-        Ok(Value::Right(Box::new(val)))
-    }
-
-    /// Evaluate a core `ExprKind::Match`.
+    /// Give `scrutinee` to the arms of a match, from arm `start`.
     ///
     /// Tries each arm in order; on the first matching pattern, binds
-    /// captured names in the environment, evaluates the arm body,
-    /// and restores prior bindings. No arms matching is a runtime
+    /// captured names in the environment and gives the guard of the arm,
+    /// or its body, to evaluate. No arms matching is a runtime
     /// error — the typechecker's exhaustiveness pass should prevent
     /// this when the module is well-typed.
-    fn eval_match(&mut self, scrutinee: &Expr, arms: &[MatchArm]) -> Result<Value, RuntimeError> {
-        let scrut_val = self.eval(scrutinee)?;
-        for arm in arms {
-            let mut new_bindings: Vec<(Var, Value)> = Vec::new();
-            if self.try_match_pattern(&scrut_val, &arm.pattern, &mut new_bindings)? {
-                let saved: Vec<(Var, Option<Value>, Option<bool>)> = new_bindings
-                    .iter()
-                    .map(|(name, _)| {
-                        (
-                            name.clone(),
-                            self.env.bindings.get(name).cloned(),
-                            self.env.consumed.get(name).copied(),
-                        )
-                    })
-                    .collect();
-                for (name, value) in new_bindings {
-                    self.env.extend(name, value);
-                }
-
-                // Evaluate guard (if any) under the arm's pattern
-                // bindings. If it returns `false`, restore prior
-                // bindings and try the next arm.
-                let guard_ok = match &arm.guard {
-                    None => true,
-                    Some(g) => match self.eval(g)? {
-                        Value::Bool(b) => b,
-                        other => {
-                            return Err(RuntimeError::TypeError {
-                                expected: "Bool".into(),
-                                found: other.type_name().into(),
-                            });
-                        }
-                    },
-                };
-
-                if !guard_ok {
-                    for (name, prev_val, prev_consumed) in saved.iter().rev() {
-                        match prev_val {
-                            Some(v) => {
-                                self.env.bindings.insert(name.clone(), v.clone());
-                                if let Some(c) = prev_consumed {
-                                    self.env.consumed.insert(name.clone(), *c);
-                                }
-                            }
-                            None => {
-                                self.env.remove(name);
-                            }
-                        }
-                    }
-                    continue;
-                }
-
-                let result = self.eval(&arm.body)?;
-                for (name, prev_val, prev_consumed) in saved.iter().rev() {
-                    match prev_val {
-                        Some(v) => {
-                            self.env.bindings.insert(name.clone(), v.clone());
-                            if let Some(c) = prev_consumed {
-                                self.env.consumed.insert(name.clone(), *c);
-                            }
-                        }
-                        None => {
-                            self.env.remove(name);
-                        }
-                    }
-                }
-                return Ok(result);
+    fn match_arms(
+        &mut self,
+        arms: Arc<[Arm]>,
+        scrutinee: Value,
+        start: usize,
+        stack: &mut Vec<Frame>,
+    ) -> Result<State, RuntimeError> {
+        for (index, arm) in arms.iter().enumerate().skip(start) {
+            let mut bindings: Vec<(Var, Value)> = Vec::new();
+            if !self.try_match_pattern(&scrutinee, &arm.pattern, &mut bindings)? {
+                continue;
             }
+            let saved = self.bind(bindings);
+            return Ok(State::Eval(match &arm.guard {
+                None => {
+                    stack.push(Frame::Unbind(saved));
+                    arm.body.clone()
+                }
+                // The guard runs under the pattern bindings of the arm.
+                Some(guard) => {
+                    let guard = guard.clone();
+                    stack.push(Frame::Guard {
+                        arms: arms.clone(),
+                        arm: index,
+                        scrutinee,
+                        saved,
+                    });
+                    guard
+                }
+            }));
         }
         Err(RuntimeError::PatternMatchFailed)
     }
@@ -1114,143 +1522,6 @@ impl Interpreter {
         }
     }
 
-    fn eval_case(
-        &mut self,
-        scrutinee: &Expr,
-        left_var: &Var,
-        left_body: &Expr,
-        right_var: &Var,
-        right_body: &Expr,
-    ) -> Result<Value, RuntimeError> {
-        let scrutinee_val = self.eval(scrutinee)?;
-
-        match scrutinee_val {
-            Value::Left(inner) => {
-                let prev = self.env.bindings.get(left_var).cloned();
-                let prev_c = self.env.consumed.get(left_var).copied();
-                self.env.extend(left_var.clone(), *inner);
-                let result = self.eval(left_body)?;
-                match prev {
-                    Some(v) => {
-                        self.env.bindings.insert(left_var.clone(), v);
-                        if let Some(c) = prev_c {
-                            self.env.consumed.insert(left_var.clone(), c);
-                        }
-                    }
-                    None => {
-                        self.env.remove(left_var);
-                    }
-                }
-                Ok(result)
-            }
-            Value::Right(inner) => {
-                let prev = self.env.bindings.get(right_var).cloned();
-                let prev_c = self.env.consumed.get(right_var).copied();
-                self.env.extend(right_var.clone(), *inner);
-                let result = self.eval(right_body)?;
-                match prev {
-                    Some(v) => {
-                        self.env.bindings.insert(right_var.clone(), v);
-                        if let Some(c) = prev_c {
-                            self.env.consumed.insert(right_var.clone(), c);
-                        }
-                    }
-                    None => {
-                        self.env.remove(right_var);
-                    }
-                }
-                Ok(result)
-            }
-            _ => Err(RuntimeError::NotASum),
-        }
-    }
-
-    fn eval_if(
-        &mut self,
-        cond: &Expr,
-        then_branch: &Expr,
-        else_branch: &Expr,
-    ) -> Result<Value, RuntimeError> {
-        let cond_val = self.eval(cond)?;
-
-        match cond_val {
-            Value::Bool(true) => self.eval(then_branch),
-            Value::Bool(false) => self.eval(else_branch),
-            _ => Err(RuntimeError::TypeError {
-                expected: "Bool".to_string(),
-                found: cond_val.type_name().to_string(),
-            }),
-        }
-    }
-
-    fn eval_region(&mut self, name: &RegionName, body: &Expr) -> Result<Value, RuntimeError> {
-        self.regions.push(name.clone());
-        let result = self.eval(body)?;
-        self.regions.pop();
-
-        // Check for region escape
-        if let Value::String { region, data } = &result {
-            if region == name {
-                return Err(RuntimeError::StringEscaped(data.clone()));
-            }
-        }
-
-        Ok(result)
-    }
-
-    fn eval_borrow(&mut self, inner: &Expr) -> Result<Value, RuntimeError> {
-        // A borrow of a variable reads the value and leaves it in place:
-        // `&s` is not a use of `s`.
-        if let ExprKind::Var(name) = &inner.kind {
-            if self.env.is_consumed(name) {
-                return Err(RuntimeError::LinearValueConsumed);
-            }
-            if let Some(value) = self.env.get(name) {
-                return Ok(Value::Borrow(Box::new(value.clone())));
-            }
-        }
-        let val = self.eval(inner)?;
-        Ok(Value::Borrow(Box::new(val)))
-    }
-
-    fn eval_deref(&mut self, inner: &Expr) -> Result<Value, RuntimeError> {
-        let val = self.eval(inner)?;
-        match val {
-            Value::Borrow(inner) => Ok(*inner),
-            _ => Err(RuntimeError::TypeError {
-                expected: "Borrow".to_string(),
-                found: val.type_name().to_string(),
-            }),
-        }
-    }
-
-    fn eval_drop(&mut self, inner: &Expr) -> Result<Value, RuntimeError> {
-        // Evaluate and discard
-        let _ = self.eval(inner)?;
-        Ok(Value::Unit)
-    }
-
-    fn eval_copy(&mut self, inner: &Expr) -> Result<Value, RuntimeError> {
-        let val = self.eval(inner)?;
-        // Only unrestricted types can be copied - linear types (String, etc.) cannot
-        if val.is_linear() {
-            return Err(RuntimeError::TypeError {
-                expected: "unrestricted (copyable) type".to_string(),
-                found: format!("linear type {}", val.type_name()),
-            });
-        }
-        // For unrestricted types, return a pair of copies
-        Ok(Value::Pair(Box::new(val.clone()), Box::new(val)))
-    }
-
-    fn eval_block(&mut self, exprs: &[Expr]) -> Result<Value, RuntimeError> {
-        let mut result = Value::Unit;
-        for expr in exprs {
-            result = self.eval(expr)?;
-        }
-        Ok(result)
-    }
-
     /// Get a binding from the environment
     pub fn get_binding(&self, name: &str) -> Option<&Value> {
         let name: SmolStr = name.into();
@@ -1267,32 +1538,31 @@ impl Interpreter {
     pub fn call_main(&mut self) -> Result<Value, RuntimeError> {
         let name: SmolStr = "main".into();
 
-        let (params, _ret_ty, body) = self
+        let main = self
             .functions
             .get(&name)
-            .ok_or_else(|| RuntimeError::UnboundVariable(name.clone()))?
-            .clone();
+            .ok_or_else(|| RuntimeError::UnboundVariable(name.clone()))?;
 
         // Main should have no parameters
-        if !params.is_empty() {
+        if !main.params.is_empty() {
             return Err(RuntimeError::TypeError {
                 expected: "main with no parameters".to_string(),
-                found: format!("main with {} parameters", params.len()),
+                found: format!("main with {} parameters", main.params.len()),
             });
         }
 
-        self.eval(&body)
+        self.run(main.body.clone())
     }
 
     /// Call a named function with arguments
     pub fn call(&mut self, name: &str, args: Vec<Value>) -> Result<Value, RuntimeError> {
         let name: SmolStr = name.into();
 
-        let (params, _ret_ty, body) = self
+        let function = self
             .functions
             .get(&name)
-            .ok_or_else(|| RuntimeError::UnboundVariable(name.clone()))?
-            .clone();
+            .ok_or_else(|| RuntimeError::UnboundVariable(name.clone()))?;
+        let (params, body) = (function.params.clone(), function.body.clone());
 
         if args.len() != params.len() {
             return Err(RuntimeError::TypeError {
@@ -1311,7 +1581,7 @@ impl Interpreter {
         }
 
         // Evaluate body
-        let result = self.eval(&body)?;
+        let result = self.run(body)?;
 
         // Restore previous environment
         self.env = saved_env;
@@ -1880,6 +2150,86 @@ mod tests {
         });
         let result = interp.eval(&expr).expect("fall-through should evaluate");
         assert!(matches!(result, Value::I32(999)), "got {:?}", result);
+    }
+
+    /// A module with `fn f(n: I32): I32 = if n == 0 then 0 else 1 + f(n - step)`
+    /// and the constant `K = 1 / 0`.
+    fn recursion_module(step: i32) -> Module {
+        let var = |name: &str| dummy_expr(ExprKind::Var(name.into()));
+        let int = |n: i32| dummy_expr(ExprKind::Lit(Literal::I32(n)));
+        let op = |op, left: Expr, right: Expr| {
+            dummy_expr(ExprKind::BinOp {
+                op,
+                left: Box::new(left),
+                right: Box::new(right),
+            })
+        };
+        let call = dummy_expr(ExprKind::App {
+            func: Box::new(var("f")),
+            arg: Box::new(op(BinOp::Sub, var("n"), int(step))),
+        });
+        let body = dummy_expr(ExprKind::If {
+            cond: Box::new(op(BinOp::Eq, var("n"), int(0))),
+            then_branch: Box::new(int(0)),
+            else_branch: Box::new(op(BinOp::Add, int(1), call)),
+        });
+        Module {
+            name: "m".into(),
+            imports: Vec::new(),
+            decls: vec![
+                Decl::Fn {
+                    name: "f".into(),
+                    visibility: Default::default(),
+                    type_params: Vec::new(),
+                    params: vec![("n".into(), Ty::Base(BaseTy::I32))],
+                    ret_ty: Ty::Base(BaseTy::I32),
+                    body,
+                },
+                Decl::Const {
+                    name: "K".into(),
+                    ty: None,
+                    value: op(BinOp::Div, int(1), int(0)),
+                },
+            ],
+        }
+    }
+
+    /// A call uses no native stack: 100000 calls deep give a value on the
+    /// 2 MB stack of a test thread. (The recursive evaluator aborted the
+    /// process at a depth of about 160 on a stack of 8 MB.)
+    #[test]
+    fn deep_calls_use_no_native_stack() {
+        let mut interp = Interpreter::new();
+        interp.load_module(&recursion_module(1));
+        let result = interp.call("f", vec![Value::I32(100_000)]);
+        assert!(matches!(result, Ok(Value::I32(100_000))), "{result:?}");
+    }
+
+    /// Calls with no end give the named error at the limit of the frames.
+    #[test]
+    fn calls_with_no_end_are_a_named_error() {
+        let mut interp = Interpreter::new();
+        interp.load_module(&recursion_module(0));
+        let result = interp.call("f", vec![Value::I32(1)]);
+        assert!(
+            matches!(result, Err(RuntimeError::StackOverflow)),
+            "{result:?}"
+        );
+    }
+
+    /// An error in the value of a constant gives the environment back to
+    /// the code that used the constant.
+    #[test]
+    fn an_error_in_a_constant_keeps_the_environment_of_its_user() {
+        let mut interp = Interpreter::new();
+        interp.load_module(&recursion_module(1));
+        interp.env.extend("v".into(), Value::I32(100));
+        let result = interp.eval(&dummy_expr(ExprKind::Var("K".into())));
+        assert!(
+            matches!(result, Err(RuntimeError::DivisionByZero)),
+            "{result:?}"
+        );
+        assert!(matches!(interp.get_binding("v"), Some(Value::I32(100))));
     }
 }
 

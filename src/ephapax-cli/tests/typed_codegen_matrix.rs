@@ -12,7 +12,9 @@
 // Covered: every binary operator, unary operator and comparison on every
 // operand type the checker accepts, and each value type in each container
 // position (pair field, tuple field, list element, sum payload, `copy`,
-// `if` / `let` / `match` result, extern parameter and result).
+// `if` / `let` / `match` result, extern parameter and result), and each
+// value type as a closure parameter, a closure result and a captured
+// value (v2 plan rung E9).
 
 use ephapax_interp::Interpreter;
 use wasmtime::{Engine, Linker, Module, Store, Val};
@@ -176,6 +178,40 @@ fn cases_matrix() -> Vec<Case> {
             format!("match Some(1) of\n  | None => {w}\n  | Some(n) => {v}\n  end"),
         ));
     }
+
+    // Each value type as a closure parameter and as a closure result, next
+    // to each other type (v2 plan rung E9). A closure function has the
+    // wasm type of its parameter and of its result.
+    for ty in VALUE_TYPES {
+        let v = &samples(ty)[1];
+        for other in VALUE_TYPES {
+            let o = &samples(other)[1];
+            // A lambda: parameter `other`, result `ty`.
+            out.push(case(ty, format!("let f = fn(x: {other}) -> {v}\n  f({o})")));
+            // The result is a captured value.
+            out.push(case(
+                ty,
+                format!("let k = {v}\n  let f = fn(x: {other}) -> k\n  f({o})"),
+            ));
+            // A lambda in a lambda: the first parameter is captured.
+            out.push(case(
+                ty,
+                format!("let f = fn(a: {ty}) -> fn(b: {other}) -> a\n  f({v})({o})"),
+            ));
+            // A named function as a value, with 1 argument at a time.
+            out.push(case(
+                ty,
+                format!("let f = first_{ty}_{other}\n  f({v})({o})"),
+            ));
+            out.push(case(
+                ty,
+                format!("let f = first_{ty}_{other}({v})\n  f({o})"),
+            ));
+        }
+        // A closure as an argument: a lambda, then a named function.
+        out.push(case(ty, format!("apply_{ty}(fn(x: {ty}) -> x, {v})")));
+        out.push(case(ty, format!("apply_{ty}(same_{ty}, {v})")));
+    }
     out
 }
 
@@ -250,12 +286,51 @@ fn pinned() -> Vec<(Case, Option<&'static str>)> {
             ),
             Some("true"),
         ),
+        // A closure keeps the full width of its parameter, of its result
+        // and of a captured value (v2 plan rung E9).
+        (
+            case("I64", "let f = fn(x: I64) -> x + x\n  f(5000000000)"),
+            Some("10000000000i64"),
+        ),
+        (
+            case("F64", "let f = fn(x: F64) -> x + 1.5\n  f(40.5)"),
+            Some("42"),
+        ),
+        (
+            case("F32", "let f = fn(x: F32) -> x + 1.5f32\n  f(40.5f32)"),
+            Some("42f32"),
+        ),
+        (
+            case(
+                "I64",
+                "let k = 5000000000\n  let f = fn(x: I32) -> k + k\n  f(1)",
+            ),
+            Some("10000000000i64"),
+        ),
+        // A named function as a value takes its arguments 1 at a time.
+        (
+            case("I64", "let f = first_I64_F64(5000000000)\n  f(1.5)"),
+            Some("5000000000i64"),
+        ),
+        (case("F64", "apply_F64(same_F64, 2.5)"), Some("2.5")),
     ]
 }
 
-/// The module: `data Option`, then one function per case.
+/// The module: `data Option`, the functions that the closure cases call,
+/// then one function per case.
 fn module_source(cases: &[Case]) -> String {
     let mut src = String::from("module matrix\n\ndata Option(a) = None | Some(a)\n\n");
+    for ty in VALUE_TYPES {
+        src.push_str(&format!("fn same_{ty}(x: {ty}): {ty} = x\n\n"));
+        src.push_str(&format!(
+            "fn apply_{ty}(f: {ty} -> {ty}, x: {ty}): {ty} = f(x)\n\n"
+        ));
+        for other in VALUE_TYPES {
+            src.push_str(&format!(
+                "fn first_{ty}_{other}(a: {ty}, b: {other}): {ty} = a\n\n"
+            ));
+        }
+    }
     for (i, c) in cases.iter().enumerate() {
         src.push_str(&format!("fn c{i}(): {} =\n  {}\n\n", c.ty, c.expr));
     }
@@ -275,10 +350,14 @@ fn show(ty: &str, val: Val) -> String {
     }
 }
 
-/// Load a program through the driver, as one merged module.
+/// Load a program through the driver, as one merged module. The closure
+/// cases need the flag `--unstable-core`.
 fn load(src: &str) -> ephapax_syntax::Module {
     let stdlib = ephapax_driver::stdlib_dir(None);
-    ephapax_driver::load_source(src, "matrix", None, stdlib.as_deref())
+    let features = ephapax_driver::Features {
+        unstable_core: true,
+    };
+    ephapax_driver::load_source_with(src, "matrix", None, stdlib.as_deref(), features)
         .unwrap_or_else(|e| panic!("the matrix module must load: {e}"))
         .into_merged()
         .expect("the matrix module merges")

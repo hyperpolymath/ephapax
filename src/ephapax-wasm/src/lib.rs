@@ -149,10 +149,6 @@ const TYPE_VOID_VOID: u32 = 4;
 const TYPE_CONCAT: u32 = 5;
 /// Type 6: `(i32) -> i32`   (single-param unary functions)
 const TYPE_I32_TO_I32: u32 = 6;
-/// Closure call type: `(i32, i32) -> i32`  (env_ptr + param -> result)
-/// Same signature as TYPE_I32_I32_I32 (type 3), aliased for clarity.
-const TYPE_CLOSURE_CALL: u32 = TYPE_I32_I32_I32;
-
 /// Type 7: `(i32, i64) -> i32`   (list_append: handle + element slot)
 const TYPE_LIST_APPEND: u32 = 7;
 /// Type 8: `(i32, i32) -> i64`   (list_get: handle + index -> element slot)
@@ -197,23 +193,34 @@ pub const UNSUPPORTED_PREFIX: &str = "unsupported in codegen";
 /// it only lowers well-typed programs.
 pub const NOT_WELL_TYPED: &str = "not well-typed";
 
+/// Message prefix of the [`CodegenError`] for a form that a program can
+/// use only with the flag `--unstable-core` (v2 plan rung E9). Codegen
+/// lowers such a form; [`validate_accepted`] refuses it without the flag.
+pub const UNSTABLE_CORE_PREFIX: &str = "behind the flag `--unstable-core`";
+
 /// Return the first construct in `expr` that codegen cannot lower:
 /// effect `perform` / `handle` (no lowering until E17) and raw variadic
 /// `__ffi` (no sound lowering at all; typed `extern` is the FFI path).
 pub fn first_unsupported(expr: &Expr) -> Option<CodegenError> {
-    first_unsupported_in(expr, None)
+    first_unsupported_in(expr, None, true)
 }
 
 /// [`first_unsupported`], plus the constructs whose lowering depends on a
 /// type: with the checker's table, a `match` on a value that has an I64,
 /// F32 or F64 component (patterns read every component as an i32).
 pub fn first_unsupported_typed(expr: &Expr, types: &ExprTypes) -> Option<CodegenError> {
-    first_unsupported_in(expr, Some(types))
+    first_unsupported_in(expr, Some(types), true)
 }
 
 /// The first construct in `expr` that code generation cannot lower, as an
 /// error. With `types`, it also finds the limits of the typed lowering.
-fn first_unsupported_in(expr: &Expr, types: Option<&ExprTypes>) -> Option<CodegenError> {
+/// Without `unstable_core`, it also finds each form that is behind the
+/// flag `--unstable-core`.
+fn first_unsupported_in(
+    expr: &Expr,
+    types: Option<&ExprTypes>,
+    unstable_core: bool,
+) -> Option<CodegenError> {
     fn unsupported(what: &str, span: ephapax_syntax::Span) -> CodegenError {
         CodegenError(format!(
             "{UNSUPPORTED_PREFIX}: {what} (at byte {}..{})",
@@ -235,19 +242,20 @@ fn first_unsupported_in(expr: &Expr, types: Option<&ExprTypes>) -> Option<Codege
             ),
             expr.span,
         )),
-        // Every closure has the wasm signature (env: i32, arg: i32) -> i32
-        // until the closure ABI is typed (v2 plan rung E9).
+        // A closure function has the type of its parameter and of its
+        // result (v2 plan rung E9). A type other than i32 is behind the flag.
         ExprKind::Lambda { param_ty, body, .. }
-            if ty_to_valtype(param_ty) != ValType::I32
-                || types
-                    .and_then(|t| t.get(&body.id))
-                    .is_some_and(|ty| ty_to_valtype(ty) != ValType::I32) =>
+            if !unstable_core
+                && (ty_to_valtype(param_ty) != ValType::I32
+                    || types
+                        .and_then(|t| t.get(&body.id))
+                        .is_some_and(|ty| ty_to_valtype(ty) != ValType::I32)) =>
         {
-            Some(unsupported(
-                "a lambda with an I64, F32 or F64 parameter or result (a closure \
-                 passes 32-bit values only); use a named function",
-                expr.span,
-            ))
+            Some(CodegenError(format!(
+                "{UNSTABLE_CORE_PREFIX}: a lambda with an I64, F32 or F64 parameter or \
+                 result (at byte {}..{})",
+                expr.span.start, expr.span.end
+            )))
         }
         ExprKind::Match { scrutinee, arms } => types
             .and_then(|t| t.get(&scrutinee.id))
@@ -323,7 +331,7 @@ fn first_unsupported_in(expr: &Expr, types: Option<&ExprTypes>) -> Option<Codege
     };
     children
         .into_iter()
-        .find_map(|child| first_unsupported_in(child, types))
+        .find_map(|child| first_unsupported_in(child, types, unstable_core))
 }
 
 /// Check every function body using [`first_unsupported`].
@@ -331,20 +339,32 @@ fn first_unsupported_in(expr: &Expr, types: Option<&ExprTypes>) -> Option<Codege
 /// Returns the first unsupported-construct error in declaration order, with
 /// the function name added. Non-function declarations are ignored.
 pub fn validate_supported(module: &AstModule) -> Result<(), CodegenError> {
-    validate_supported_in(module, None)
+    validate_supported_in(module, None, true)
 }
 
 /// [`validate_supported`] with the checker's type table, so the
 /// type-dependent limits ([`first_unsupported_typed`]) are checked too.
-/// The driver runs this, so `check` rejects what `compile` must reject.
 pub fn validate_supported_typed(module: &AstModule, types: &ExprTypes) -> Result<(), CodegenError> {
-    validate_supported_in(module, Some(types))
+    validate_supported_in(module, Some(types), true)
+}
+
+/// [`validate_supported_typed`] for the front door of the language. The
+/// driver runs this, so `check` rejects what `compile` must reject.
+/// Without `unstable_core`, it also refuses each form that is behind the
+/// flag `--unstable-core` (v2 plan rung E9), with [`UNSTABLE_CORE_PREFIX`].
+pub fn validate_accepted(
+    module: &AstModule,
+    types: &ExprTypes,
+    unstable_core: bool,
+) -> Result<(), CodegenError> {
+    validate_supported_in(module, Some(types), unstable_core)
 }
 
 /// Check each function body of `module` with [`first_unsupported_in`].
 fn validate_supported_in(
     module: &AstModule,
     types: Option<&ExprTypes>,
+    unstable_core: bool,
 ) -> Result<(), CodegenError> {
     for decl in &module.decls {
         let (name, expr, kind) = match decl {
@@ -352,7 +372,7 @@ fn validate_supported_in(
             Decl::Const { name, value, .. } => (name, value, "constant"),
             _ => continue,
         };
-        if let Some(CodegenError(msg)) = first_unsupported_in(expr, types) {
+        if let Some(CodegenError(msg)) = first_unsupported_in(expr, types, unstable_core) {
             return Err(CodegenError(format!("{msg} in {kind} `{name}`")));
         }
     }
@@ -511,11 +531,6 @@ impl LocalTracker {
         }
     }
 
-    /// Total number of extra (non-parameter) locals needed.
-    fn num_extra_locals(&self) -> u32 {
-        self.extra_local_types.len() as u32
-    }
-
     /// Declarations for `wasm_encoder::Function::new`, preserving local
     /// index order across mixed-width Ephapax bindings.
     fn wasm_local_declarations(&self) -> Vec<(u32, ValType)> {
@@ -569,6 +584,14 @@ pub struct Codegen {
     /// Lambda functions generated during compilation
     /// Each lambda gets compiled to a named function and stored here
     lambda_fns: Vec<LambdaInfo>,
+
+    /// The parameter types of each function that a program can call by
+    /// its name: a function of the module, or an extern function. A use
+    /// of the name as a value needs them ([`Self::compile_fn_value`]).
+    callable_params: HashMap<String, Vec<Ty>>,
+    /// The table index of the closure function that stands for a named
+    /// function used as a value, by the name of that function.
+    fn_value_slots: HashMap<String, u32>,
 
     /// Optional debug information (enabled with --debug flag)
     debug_info: Option<DebugInfo>,
@@ -677,6 +700,8 @@ impl Codegen {
             access_sites: Vec::new(),
             extra_types: Vec::new(),
             lambda_fns: Vec::new(),
+            callable_params: HashMap::new(),
+            fn_value_slots: HashMap::new(),
             debug_info: None,
             optimize_closures: false,
             extern_imports: Vec::new(),
@@ -844,8 +869,6 @@ impl Codegen {
         if let Some(err) = first_unsupported_typed(main_expr, &self.types) {
             return Err(err);
         }
-        self.emit_types();
-        self.emit_imports();
 
         // Register main as a user function so lambda index calculation is correct.
         // compile_lambda uses user_fns.len() to compute function/table indices.
@@ -873,7 +896,11 @@ impl Codegen {
         let _ = self.append_lambda_funcs(&mut func_sec, &mut code_sec);
 
         // Emit sections in WASM-required order:
-        // Type, Import, Function, Table, Memory, Export, Element, Code, Data
+        // Type, Import, Function, Table, Memory, Export, Element, Code, Data.
+        // The type section comes after the bodies are compiled: a closure
+        // adds the type of its signature while its body is compiled.
+        self.emit_types();
+        self.emit_imports();
         self.module.section(&func_sec);
         self.emit_table();
         self.emit_memory();
@@ -906,6 +933,14 @@ impl Codegen {
         self.compile_expr(&mut scratch, body);
         scratch.instruction(&Instruction::Drop);
         scratch.instruction(&Instruction::End);
+        self.with_locals(scratch)
+    }
+
+    /// The function `scratch`, which was compiled with no local, with the
+    /// declarations of the locals that its body turned out to need. One
+    /// compile of a body is thus enough: a second one would add each
+    /// lambda of the body to the module again.
+    fn with_locals(&self, scratch: Function) -> Function {
         let raw = scratch.into_raw_body();
         let mut func = Function::new(self.locals.wasm_local_declarations());
         // Skip the empty locals vector: one zero byte.
@@ -950,9 +985,6 @@ impl Codegen {
         self.populate_data_ctors(ast);
 
         // ----- Phase 2: emit sections --------------------------------------
-        self.emit_types();
-        self.emit_imports();
-
         // Build function + code sections together (runtime + user)
         let mut func_sec = FunctionSection::new();
         let mut code_sec = CodeSection::new();
@@ -967,7 +999,11 @@ impl Codegen {
         self.append_lambda_funcs(&mut func_sec, &mut code_sec)?;
 
         // Emit sections in WASM-required order:
-        // Type, Import, Function, Table, Memory, Export, Element, Code, Data
+        // Type, Import, Function, Table, Memory, Export, Element, Code, Data.
+        // The type section comes after the bodies are compiled: a closure
+        // adds the type of its signature while its body is compiled.
+        self.emit_types();
+        self.emit_imports();
         self.module.section(&func_sec);
         self.emit_table();
         self.emit_memory();
@@ -1003,8 +1039,8 @@ impl Codegen {
             return Err(err);
         }
         // Try full module compilation first; fall back to expression mode.
-        // An unsupported construct that only the types show (a wide
-        // lambda) is a hard error too.
+        // An unsupported construct that only the types show (a `match`
+        // on a 64-bit component) is a hard error too.
         match self.compile_ast_module(module) {
             Ok(bytes) => return Ok(bytes),
             Err(e) if e.0.starts_with(UNSUPPORTED_PREFIX) => return Err(e),
@@ -1042,6 +1078,10 @@ impl Codegen {
                         .iter()
                         .map(|(_, ty)| ty_to_ownership_kind(ty))
                         .collect();
+                    self.callable_params.insert(
+                        name.to_string(),
+                        params.iter().map(|(_, ty)| ty.clone()).collect(),
+                    );
 
                     self.user_fns.insert(
                         name.to_string(),
@@ -1230,6 +1270,10 @@ impl Codegen {
                             });
                             self.extern_fn_indices
                                 .insert(name.to_string(), (import_idx, wasm_result));
+                            self.callable_params.insert(
+                                name.to_string(),
+                                params.iter().map(|(_, ty)| ty.clone()).collect(),
+                            );
                         }
                     }
                 }
@@ -1367,14 +1411,8 @@ impl Codegen {
 
     /// Append user-defined functions from the AST.
     ///
-    /// Uses a two-pass approach per function:
-    /// 1. First pass: compile body to count how many extra locals are needed.
-    /// 2. Second pass: compile body again into a Function with the correct
-    ///    local declarations.
-    ///
-    /// Side effects like `add_string_literal` are idempotent for the same
-    /// strings, so running twice is safe (duplicates are harmless since each
-    /// string gets its own data segment entry).
+    /// Each body is compiled one time, into a function with no local;
+    /// [`Self::with_locals`] then declares the locals that it needs.
     fn append_user_funcs(
         &mut self,
         ast: &AstModule,
@@ -1392,10 +1430,7 @@ impl Codegen {
 
                     func_sec.function(info.wasm_type_idx);
 
-                    let num_params = params.len() as u32;
-
-                    // --- Pass 1: count locals by doing a dry-run compile ----
-                    self.locals = LocalTracker::new(num_params);
+                    self.locals = LocalTracker::new(params.len() as u32);
                     for (i, (pname, pty)) in params.iter().enumerate() {
                         self.locals.name_to_idx.insert(pname.to_string(), i as u32);
                         self.locals
@@ -1406,44 +1441,10 @@ impl Codegen {
                         }
                     }
 
-                    // Save data state so pass 1 string literals don't duplicate
-                    let data_snapshot = (self.data_entries.len(), self.data_offset);
-
-                    let mut dummy_func = Function::new(vec![(64, ValType::I32)]); // generous
-                    self.compile_expr(&mut dummy_func, body);
-                    let extra = self.locals.num_extra_locals();
-                    let local_declarations = self.locals.wasm_local_declarations();
-
-                    // Restore data state
-                    self.data_entries.truncate(data_snapshot.0);
-                    self.data_offset = data_snapshot.1;
-
-                    // --- Pass 2: compile for real with correct local count --
-                    self.locals = LocalTracker::new(num_params);
-                    for (i, (pname, pty)) in params.iter().enumerate() {
-                        self.locals.name_to_idx.insert(pname.to_string(), i as u32);
-                        self.locals
-                            .name_to_type
-                            .insert(pname.to_string(), ty_to_valtype(pty));
-                        if pty.is_linear() {
-                            self.locals.linear_locals.insert(i as u32, false);
-                        }
-                    }
-
-                    debug_assert_eq!(
-                        extra,
-                        local_declarations
-                            .iter()
-                            .map(|(count, _)| count)
-                            .copied()
-                            .sum::<u32>()
-                    );
-                    let mut func = Function::new(local_declarations);
-
-                    self.compile_expr(&mut func, body);
-                    func.instruction(&Instruction::End);
-
-                    code_sec.function(&func);
+                    let mut scratch = Function::new(Vec::<(u32, ValType)>::new());
+                    self.compile_expr(&mut scratch, body);
+                    scratch.instruction(&Instruction::End);
+                    code_sec.function(&self.with_locals(scratch));
                 }
                 Decl::Type { .. } => {}
                 Decl::Const { .. } => {} // constants inlined
@@ -1461,128 +1462,48 @@ impl Codegen {
         Ok(())
     }
 
-    /// Append lambda functions to the code section.
-    /// Called after user functions are compiled, since lambdas are discovered
-    /// during user function compilation.
+    /// Append the closure functions to the code section, after the user
+    /// functions: a closure function is found while a body is compiled.
     fn append_lambda_funcs(
         &mut self,
         func_sec: &mut FunctionSection,
         code_sec: &mut CodeSection,
     ) -> Result<(), CodegenError> {
-        // Clone lambda_fns to avoid borrow checker issues
-        let lambdas = self.lambda_fns.clone();
+        // The body of a lambda can hold a lambda: it joins the list while
+        // this loop runs. (The loop used to take a copy of the list first,
+        // so the module called a function that it did not have.)
+        let mut next = 0;
+        while let Some(lambda) = self.lambda_fns.get(next).cloned() {
+            next += 1;
+            func_sec.function(lambda.wasm_type_idx);
 
-        for lambda_info in lambdas {
-            // Register function type in function section
-            // Lambda functions take (env_ptr: i32, param: i32) -> i32
-            func_sec.function(lambda_info.wasm_type_idx);
-
-            // Two parameters: param 0 = env_ptr, param 1 = lambda parameter
-            let num_params: u32 = 2;
-
-            // --- Pass 1: count locals by doing a dry-run compile ----
-            self.locals = LocalTracker::new(num_params);
-            // param 0 = env_ptr (anonymous, used internally)
+            // Parameter 0 is the environment, parameter 1 is the
+            // parameter of the lambda.
+            self.locals = LocalTracker::new(2);
             self.locals.name_to_idx.insert("__env_ptr".to_string(), 0);
             self.locals
                 .name_to_type
                 .insert("__env_ptr".to_string(), ValType::I32);
-            // param 1 = lambda parameter
-            self.locals.name_to_idx.insert(lambda_info.param.clone(), 1);
-            self.locals.name_to_type.insert(
-                lambda_info.param.clone(),
-                ty_to_valtype(&lambda_info.param_ty),
-            );
-            if lambda_info.param_ty.is_linear() {
-                self.locals.linear_locals.insert(1, false);
-            }
-
-            // Bind captured variables as locals (loaded from env_ptr)
-            for (captured_name, (captured_type, _)) in lambda_info
-                .captured_vars
-                .iter()
-                .zip(&lambda_info.captured_layout)
-            {
-                self.locals.bind_typed(captured_name, false, *captured_type);
-            }
-
-            // Save data state so pass 1 string literals don't duplicate
-            let data_snapshot = (self.data_entries.len(), self.data_offset);
-
-            let mut dummy_func = Function::new(vec![(64, ValType::I32)]); // generous
-
-            // Emit captured var loads in dry run
-            for (i, (_, (captured_type, offset))) in lambda_info
-                .captured_vars
-                .iter()
-                .zip(&lambda_info.captured_layout)
-                .enumerate()
-            {
-                dummy_func.instruction(&Instruction::LocalGet(0)); // env_ptr
-                emit_typed_load(&mut dummy_func, *captured_type, *offset);
-                let local_idx = num_params + i as u32;
-                dummy_func.instruction(&Instruction::LocalSet(local_idx));
-            }
-
-            self.compile_expr(&mut dummy_func, &lambda_info.body);
-            let extra = self.locals.num_extra_locals();
-            let local_declarations = self.locals.wasm_local_declarations();
-
-            // Restore data state
-            self.data_entries.truncate(data_snapshot.0);
-            self.data_offset = data_snapshot.1;
-
-            // --- Pass 2: compile for real with correct local count --
-            self.locals = LocalTracker::new(num_params);
-            self.locals.name_to_idx.insert("__env_ptr".to_string(), 0);
+            self.locals.name_to_idx.insert(lambda.param.clone(), 1);
             self.locals
                 .name_to_type
-                .insert("__env_ptr".to_string(), ValType::I32);
-            self.locals.name_to_idx.insert(lambda_info.param.clone(), 1);
-            self.locals.name_to_type.insert(
-                lambda_info.param.clone(),
-                ty_to_valtype(&lambda_info.param_ty),
-            );
-            if lambda_info.param_ty.is_linear() {
+                .insert(lambda.param.clone(), ty_to_valtype(&lambda.param_ty));
+            if lambda.param_ty.is_linear() {
                 self.locals.linear_locals.insert(1, false);
             }
 
-            // Re-bind captured variables as locals
-            for (captured_name, (captured_type, _)) in lambda_info
-                .captured_vars
-                .iter()
-                .zip(&lambda_info.captured_layout)
-            {
-                self.locals.bind_typed(captured_name, false, *captured_type);
+            // Each captured variable is a local, loaded from the environment.
+            let mut scratch = Function::new(Vec::<(u32, ValType)>::new());
+            for (name, (ty, offset)) in lambda.captured_vars.iter().zip(&lambda.captured_layout) {
+                let local = self.locals.bind_typed(name, false, *ty);
+                scratch.instruction(&Instruction::LocalGet(0));
+                emit_typed_load(&mut scratch, *ty, *offset);
+                scratch.instruction(&Instruction::LocalSet(local));
             }
 
-            debug_assert_eq!(
-                extra,
-                local_declarations
-                    .iter()
-                    .map(|(count, _)| count)
-                    .copied()
-                    .sum::<u32>()
-            );
-            let mut func = Function::new(local_declarations);
-
-            // Load captured variables from env_ptr into local slots
-            for (i, (_, (captured_type, offset))) in lambda_info
-                .captured_vars
-                .iter()
-                .zip(&lambda_info.captured_layout)
-                .enumerate()
-            {
-                func.instruction(&Instruction::LocalGet(0)); // env_ptr (param 0)
-                emit_typed_load(&mut func, *captured_type, *offset);
-                let local_idx = num_params + i as u32;
-                func.instruction(&Instruction::LocalSet(local_idx));
-            }
-
-            self.compile_expr(&mut func, &lambda_info.body);
-            func.instruction(&Instruction::End);
-
-            code_sec.function(&func);
+            self.compile_expr(&mut scratch, &lambda.body);
+            scratch.instruction(&Instruction::End);
+            code_sec.function(&self.with_locals(scratch));
         }
         Ok(())
     }
@@ -2356,10 +2277,66 @@ impl Codegen {
             func.instruction(&Instruction::LocalGet(idx));
             // Mark linear local as consumed
             self.locals.mark_consumed(idx);
+        } else if self.callable_params.contains_key(name) {
+            self.compile_fn_value(func, name);
         } else {
             // Unknown variable -- should have been caught by type checker.
             func.instruction(&Instruction::Unreachable);
         }
+    }
+
+    /// A function of the module, or an extern function, used as a value
+    /// (`apply(inc, 41)`, `let f = add in ...`, `add(40)`). The value is a
+    /// closure cell for a closure function that takes the parameters one
+    /// at a time and then calls the function: `fn(a) -> fn(b) -> add(a, b)`.
+    /// The closure function is made at the first use of the name.
+    /// (Such a name had no value: the module was not valid.)
+    fn compile_fn_value(&mut self, func: &mut Function, name: &str) {
+        let slot = match self.fn_value_slots.get(name) {
+            Some(&slot) => slot,
+            None => {
+                let (param, param_ty, body) = self.eta_expansion(name);
+                let slot = self.register_lambda(&param, &param_ty, &body, Vec::new(), Vec::new());
+                self.fn_value_slots.insert(name.to_string(), slot);
+                slot
+            }
+        };
+        // The closure function captures nothing: it has no environment.
+        func.instruction(&Instruction::I32Const(0));
+        let env_local = self.locals.temp();
+        func.instruction(&Instruction::LocalSet(env_local));
+        self.emit_closure_cell(func, slot, env_local);
+    }
+
+    /// The function `name` as a lambda that takes its first parameter:
+    /// the parameter, its type and the body. For `add` with 2 parameters
+    /// the body is `fn(b) -> add(a, b)`. A function with no parameter has
+    /// the type `() -> T`: the lambda takes a unit, and its body is the
+    /// call `name()`.
+    fn eta_expansion(&self, name: &str) -> (String, Ty, Expr) {
+        let params = self.callable_params.get(name).cloned().unwrap_or_default();
+        let var = |name: &str| Expr::dummy(ExprKind::Var(name.into()));
+        // The names of the lambda parameters: no program can write them.
+        let param = |i: usize| format!("__arg{i}");
+        let app = |func: Expr, arg: Expr| {
+            Expr::dummy(ExprKind::App {
+                func: Box::new(func),
+                arg: Box::new(arg),
+            })
+        };
+        if params.is_empty() {
+            let unit = Expr::dummy(ExprKind::Lit(Literal::Unit));
+            return (param(0), Ty::Base(BaseTy::Unit), app(var(name), unit));
+        }
+        let call = (0..params.len()).fold(var(name), |call, i| app(call, var(&param(i))));
+        let body = (1..params.len()).rev().fold(call, |body, i| {
+            Expr::dummy(ExprKind::Lambda {
+                param: param(i).into(),
+                param_ty: params[i].clone(),
+                body: Box::new(body),
+            })
+        });
+        (param(0), params[0].clone(), body)
     }
 
     fn compile_string_new(&mut self, func: &mut Function, value: &str) {
@@ -2645,14 +2622,21 @@ impl Codegen {
     }
 
     fn compile_lambda(&mut self, func: &mut Function, param: &str, param_ty: &Ty, body: &Expr) {
-        // 1. Find free variables in the lambda body
+        // 1. The locals of this function that the body uses. A free name
+        // that is not a local is a function of the module: the body finds
+        // it by its name. (It used to be captured as a zero, which then
+        // hid the function in the body.)
         let mut bound_vars = std::collections::HashSet::new();
         bound_vars.insert(param.to_string());
-        let captured_vars = self.find_free_vars(body, &bound_vars);
+        let captured: Vec<(String, u32)> = self
+            .find_free_vars(body, &bound_vars)
+            .into_iter()
+            .filter_map(|name| self.locals.get(&name).map(|local| (name, local)))
+            .collect();
         let mut next_capture_offset = 0_u64;
-        let captured_layout: Vec<(ValType, u64)> = captured_vars
+        let captured_layout: Vec<(ValType, u64)> = captured
             .iter()
-            .map(|name| {
+            .map(|(name, _)| {
                 let ty = self.locals.get_type(name).unwrap_or(ValType::I32);
                 let (size, alignment, _) = valtype_storage(ty);
                 next_capture_offset = align_up(next_capture_offset, alignment);
@@ -2662,34 +2646,19 @@ impl Codegen {
             })
             .collect();
 
-        // 2. Lambda functions take (env_ptr, param) -> result
-        let lambda_type_idx = TYPE_CLOSURE_CALL;
+        // 2. Record the closure function for later emission.
+        let captured_vars = captured.iter().map(|(name, _)| name.clone()).collect();
+        let table_idx = self.register_lambda(
+            param,
+            param_ty,
+            body,
+            captured_vars,
+            captured_layout.clone(),
+        );
 
-        // 3. Calculate function index for this lambda. Lambdas live
-        // after the first user fn block, shifted forward by any
-        // dynamic imports (extern / FFI) registered earlier.
-        let lambda_fn_idx =
-            self.first_user_fn() + self.user_fns.len() as u32 + self.lambda_fns.len() as u32;
-
-        // 4. Table index: position in the function table (0-based)
-        let table_idx = self.user_fns.len() as u32 + self.lambda_fns.len() as u32;
-
-        // 5. Record this lambda for later emission
-        self.lambda_fns.push(LambdaInfo {
-            wasm_fn_idx: lambda_fn_idx,
-            wasm_type_idx: lambda_type_idx,
-            captured_vars: captured_vars.clone(),
-            captured_layout: captured_layout.clone(),
-            param: param.to_string(),
-            param_ty: param_ty.clone(),
-            body: body.clone(),
-        });
-
-        // 6. Allocate environment block for captured variables
-        //    Layout preserves each captured value's width and alignment.
+        // 3. Allocate the environment block for the captured variables.
+        //    The layout preserves the width and alignment of each value.
         let env_size = next_capture_offset.max(4);
-
-        // Allocate env block via bump allocator
         func.instruction(&Instruction::I32Const(env_size as i32));
         func.instruction(&Instruction::I32Const(0)); // alignment
         func.instruction(&Instruction::Call(self.fn_bump_alloc()));
@@ -2697,37 +2666,66 @@ impl Codegen {
         let env_local = self.locals.temp();
         func.instruction(&Instruction::LocalSet(env_local));
 
-        // Store each captured variable's current value into the env block
-        for (var_name, (captured_type, offset)) in captured_vars.iter().zip(&captured_layout) {
-            func.instruction(&Instruction::LocalGet(env_local)); // env_ptr (address)
-            if let Some(var_idx) = self.locals.get(var_name) {
-                func.instruction(&Instruction::LocalGet(var_idx)); // captured value
-            } else {
-                // Variable not in locals — could be a top-level function reference.
-                // Default to 0 (will be resolved by name during lambda body compilation).
-                emit_typed_zero(func, *captured_type);
-            }
+        // Store the current value of each captured variable in the block.
+        for ((_, local), (captured_type, offset)) in captured.iter().zip(&captured_layout) {
+            func.instruction(&Instruction::LocalGet(env_local));
+            func.instruction(&Instruction::LocalGet(*local));
             emit_typed_store(func, *captured_type, *offset);
         }
 
-        // 7. Allocate closure cell: (table_idx: i32, env_ptr: i32)
+        self.emit_closure_cell(func, table_idx, env_local);
+    }
+
+    /// Add a closure function to the module: `(env, param) -> body`.
+    /// Returns its index in the function table.
+    fn register_lambda(
+        &mut self,
+        param: &str,
+        param_ty: &Ty,
+        body: &Expr,
+        captured_vars: Vec<String>,
+        captured_layout: Vec<(ValType, u64)>,
+    ) -> u32 {
+        let wasm_type_idx = self.closure_type(ty_to_valtype(param_ty), self.valtype_of(body));
+        // The closure functions come after the user functions, in the
+        // function index space and in the table.
+        let table_idx = self.user_fns.len() as u32 + self.lambda_fns.len() as u32;
+        self.lambda_fns.push(LambdaInfo {
+            wasm_fn_idx: self.first_user_fn() + table_idx,
+            wasm_type_idx,
+            captured_vars,
+            captured_layout,
+            param: param.to_string(),
+            param_ty: param_ty.clone(),
+            body: body.clone(),
+        });
+        table_idx
+    }
+
+    /// The type of a closure function: `(env: i32, param) -> result`
+    /// (v2 plan rung E9). `call_indirect` checks it at each call, so a
+    /// closure with an I64, F32 or F64 parameter or result has its own
+    /// type. (Each closure had the one type `(i32, i32) -> i32`.)
+    fn closure_type(&mut self, param: ValType, result: ValType) -> u32 {
+        self.register_type(vec![ValType::I32, param], vec![result])
+    }
+
+    /// Allocate a closure cell `(table_idx: i32 @ 0, env_ptr: i32 @ 4)`
+    /// and leave its address on the stack.
+    fn emit_closure_cell(&mut self, func: &mut Function, table_idx: u32, env_local: u32) {
         func.instruction(&Instruction::I32Const(CLOSURE_SIZE as i32));
         func.instruction(&Instruction::I32Const(0)); // alignment
         func.instruction(&Instruction::Call(self.fn_bump_alloc()));
 
         let closure_local = self.locals.temp();
         func.instruction(&Instruction::LocalTee(closure_local));
-
-        // Store table index at offset 0
         func.instruction(&Instruction::I32Const(table_idx as i32));
         func.instruction(&Instruction::I32Store(mem_arg(0)));
 
-        // Store env_ptr at offset 4
         func.instruction(&Instruction::LocalGet(closure_local));
         func.instruction(&Instruction::LocalGet(env_local));
         func.instruction(&Instruction::I32Store(mem_arg(4)));
 
-        // Push closure cell pointer as result
         func.instruction(&Instruction::LocalGet(closure_local));
     }
 
@@ -2758,7 +2756,13 @@ impl Codegen {
         // arg. `effective_call_args` drops that placeholder so the args
         // pushed match the function's flat wasm signature (zero params),
         // rather than pushing a stray `()` and over-filling the stack.
-        if let Some((head, args)) = flatten_app_chain(fn_expr, arg) {
+        //
+        // A local hides a function of the same name (`fn apply(f: ...) =
+        // f(x)` with a top-level `f`): the call is then a closure call.
+        // (The call went to the top-level function.)
+        let head =
+            flatten_app_chain(fn_expr, arg).filter(|(head, _)| self.locals.get(head).is_none());
+        if let Some((head, args)) = head {
             if let Some(info) = self.user_fns.get(head).cloned() {
                 let arity = info.param_names.len();
                 if let Some(call_args) = effective_call_args(&args, arity) {
@@ -2800,25 +2804,31 @@ impl Codegen {
         // Indirect call via closure cell.
         //
         // Closure cell layout: (table_idx: i32 @ offset 0, env_ptr: i32 @ offset 4)
-        // Lambda function signature: (env_ptr: i32, param: i32) -> i32
+        // Closure function signature: (env_ptr: i32, param) -> result, with
+        // the wasm types of the parameter and of the result of the callee.
         //
         // Steps:
         // 1. Evaluate closure expression -> closure_ptr
         // 2. Load env_ptr from closure_ptr + 4
         // 3. Evaluate argument -> param value
         // 4. Load table_idx from closure_ptr + 0
-        // 5. call_indirect with TYPE_CLOSURE_CALL (i32, i32) -> i32
+        // 5. call_indirect with the type of the closure function
+        let (param, result) = self
+            .ty_of(fn_expr)
+            .and_then(fun_valtypes)
+            .unwrap_or((self.valtype_of(arg), ValType::I32));
+        let type_index = self.closure_type(param, result);
 
         // Evaluate closure to get closure cell pointer
         self.compile_expr(func, fn_expr);
         let closure_local = self.locals.temp();
         func.instruction(&Instruction::LocalSet(closure_local));
 
-        // Push env_ptr (first argument to lambda function)
+        // Push env_ptr (first argument to the closure function)
         func.instruction(&Instruction::LocalGet(closure_local));
         func.instruction(&Instruction::I32Load(mem_arg(4))); // env_ptr at offset 4
 
-        // Push param (second argument to lambda function)
+        // Push param (second argument to the closure function)
         self.compile_expr(func, arg);
 
         // Push table index (popped by call_indirect)
@@ -2827,7 +2837,7 @@ impl Codegen {
 
         // Indirect call: (env_ptr, param) -> result
         func.instruction(&Instruction::CallIndirect {
-            type_index: TYPE_CLOSURE_CALL,
+            type_index,
             table_index: 0,
         });
     }
@@ -4054,15 +4064,6 @@ fn typed_mem_arg(ty: ValType, offset: u64) -> wasm_encoder::MemArg {
     }
 }
 
-fn emit_typed_zero(func: &mut Function, ty: ValType) {
-    match ty {
-        ValType::I64 => func.instruction(&Instruction::I64Const(0)),
-        ValType::F32 => func.instruction(&Instruction::F32Const(0.0)),
-        ValType::F64 => func.instruction(&Instruction::F64Const(0.0)),
-        _ => func.instruction(&Instruction::I32Const(0)),
-    };
-}
-
 fn emit_typed_store(func: &mut Function, ty: ValType, offset: u64) {
     let arg = typed_mem_arg(ty, offset);
     match ty {
@@ -4099,6 +4100,18 @@ fn ty_to_valtype(ty: &Ty) -> ValType {
         Ty::Base(BaseTy::F64) => ValType::F64,
         // Everything else (I32, Bool, Unit, String handles, pointers) => i32
         _ => ValType::I32,
+    }
+}
+
+/// The wasm types of the parameter and of the result of a value of the
+/// function type `ty` (through a borrow).
+fn fun_valtypes(ty: &Ty) -> Option<(ValType, ValType)> {
+    match ty {
+        Ty::Fun { param, ret } | Ty::Effectful { param, ret, .. } => {
+            Some((ty_to_valtype(param), ty_to_valtype(ret)))
+        }
+        Ty::Borrow { inner, .. } | Ty::Ref { inner, .. } => fun_valtypes(inner),
+        _ => None,
     }
 }
 

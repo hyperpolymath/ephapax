@@ -40,6 +40,20 @@ struct Cli {
     /// Enable verbose output
     #[arg(short, long, global = true)]
     verbose: bool,
+
+    /// Accept the forms of the core language that the proofs do not cover
+    /// yet (v2 plan rung E9): a lambda with an I64, F32 or F64 parameter
+    /// or result. Applies to `run`, `check` and `compile`.
+    #[arg(long, global = true)]
+    unstable_core: bool,
+}
+
+/// The features that the command line asked for. `main` sets it one time.
+static FEATURES: std::sync::OnceLock<ephapax_driver::Features> = std::sync::OnceLock::new();
+
+/// The features that the command line asked for.
+fn features() -> ephapax_driver::Features {
+    FEATURES.get().copied().unwrap_or_default()
 }
 
 #[derive(Subcommand)]
@@ -196,6 +210,9 @@ enum PackageCommands {
 
 fn main() -> ExitCode {
     let cli = Cli::parse();
+    FEATURES.get_or_init(|| ephapax_driver::Features {
+        unstable_core: cli.unstable_core,
+    });
 
     let result = match cli.command {
         Some(Commands::Repl { preload }) => run_repl(preload, cli.verbose),
@@ -279,7 +296,8 @@ fn load_program(path: &Path, stdlib: Option<PathBuf>) -> Result<ephapax_driver::
         return Err(format!("--stdlib {}: not a directory", dir.display()));
     }
     let stdlib_dir = ephapax_driver::stdlib_dir(stdlib);
-    ephapax_driver::load_program(path, stdlib_dir.as_deref()).map_err(|e| report_load_error(&e))
+    ephapax_driver::load_program_with(path, stdlib_dir.as_deref(), features())
+        .map_err(|e| report_load_error(&e))
 }
 
 /// Describe a load failure. A type error is also printed to stderr with
@@ -446,7 +464,7 @@ fn check_files(files: &[PathBuf], mode: Option<&str>, verbose: bool) -> Result<(
     let mut checked = 0;
 
     for path in files {
-        match ephapax_driver::load_program(path, stdlib_dir.as_deref()) {
+        match ephapax_driver::load_program_with(path, stdlib_dir.as_deref(), features()) {
             Ok(program) => {
                 if verbose {
                     println!(

@@ -170,6 +170,11 @@ pub enum DriverError {
     /// The program type-checks but uses a construct with no wasm lowering.
     #[error("{}: Codegen error: {error}", path.display())]
     Unsupported { path: PathBuf, error: CodegenError },
+
+    /// The program type-checks but uses a form that is behind the flag
+    /// `--unstable-core`, and [`Features::unstable_core`] is off.
+    #[error("{}: {error}", path.display())]
+    UnstableCore { path: PathBuf, error: CodegenError },
 }
 
 /// Every parse error with its byte span, on one line.
@@ -250,10 +255,35 @@ pub fn parse_source(
     Ok(Program { modules })
 }
 
+/// The load error for a program that [`ephapax_wasm::validate_accepted`]
+/// refuses: a form behind the flag, or a construct with no wasm lowering.
+fn not_accepted(path: &Path, error: CodegenError) -> DriverError {
+    let path = path.to_path_buf();
+    if error.0.starts_with(ephapax_wasm::UNSTABLE_CORE_PREFIX) {
+        DriverError::UnstableCore { path, error }
+    } else {
+        DriverError::Unsupported { path, error }
+    }
+}
+
+/// The language forms that a program can use only on request.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct Features {
+    /// The flag `--unstable-core` (v2 plan rung E9): the forms of the
+    /// core language that the proofs do not cover yet.
+    pub unstable_core: bool,
+}
+
+/// [`check_program_with`] with no feature on request.
+pub fn check_program(program: &Program) -> Result<(), DriverError> {
+    check_program_with(program, Features::default())
+}
+
 /// Type-check every module (a single registry is chained so imports
 /// resolve), then run the same unsupported-construct validation codegen
-/// runs, so no tool accepts a program that `compile` must reject.
-pub fn check_program(program: &Program) -> Result<(), DriverError> {
+/// runs, so no tool accepts a program that `compile` must reject. A form
+/// that is behind a flag is an error unless `features` has that flag.
+pub fn check_program_with(program: &Program, features: Features) -> Result<(), DriverError> {
     let mut registry = ModuleRegistry::new();
     let mut types = Vec::with_capacity(program.modules.len());
     for m in &program.modules {
@@ -334,12 +364,8 @@ pub fn check_program(program: &Program) -> Result<(), DriverError> {
     // With the types, so a limit of the typed lowering (a `match` on a
     // 64-bit component) is an error here and not only in `compile`.
     for (m, types) in program.modules.iter().zip(&types) {
-        ephapax_wasm::validate_supported_typed(&m.core, types).map_err(|error| {
-            DriverError::Unsupported {
-                path: m.file_path.clone(),
-                error,
-            }
-        })?;
+        ephapax_wasm::validate_accepted(&m.core, types, features.unstable_core)
+            .map_err(|error| not_accepted(&m.file_path, error))?;
     }
     // A generic function is compiled as its monomorphic copies, so the
     // copies get the same check: a copy at a wide type can meet a limit
@@ -360,20 +386,25 @@ pub fn check_program(program: &Program) -> Result<(), DriverError> {
                 error: Box::new(error),
             }
         })?;
-        ephapax_wasm::validate_supported_typed(&merged, &types).map_err(|error| {
-            DriverError::Unsupported {
-                path: root.file_path.clone(),
-                error,
-            }
-        })?;
+        ephapax_wasm::validate_accepted(&merged, &types, features.unstable_core)
+            .map_err(|error| not_accepted(&root.file_path, error))?;
     }
     Ok(())
 }
 
 /// [`parse_program`] then [`check_program`].
 pub fn load_program(root: &Path, stdlib_dir: Option<&Path>) -> Result<Program, DriverError> {
+    load_program_with(root, stdlib_dir, Features::default())
+}
+
+/// [`parse_program`] then [`check_program_with`].
+pub fn load_program_with(
+    root: &Path,
+    stdlib_dir: Option<&Path>,
+    features: Features,
+) -> Result<Program, DriverError> {
     let program = parse_program(root, stdlib_dir)?;
-    check_program(&program)?;
+    check_program_with(&program, features)?;
     Ok(program)
 }
 
@@ -384,8 +415,19 @@ pub fn load_source(
     base_dir: Option<&Path>,
     stdlib_dir: Option<&Path>,
 ) -> Result<Program, DriverError> {
+    load_source_with(source, name, base_dir, stdlib_dir, Features::default())
+}
+
+/// [`parse_source`] then [`check_program_with`].
+pub fn load_source_with(
+    source: &str,
+    name: &str,
+    base_dir: Option<&Path>,
+    stdlib_dir: Option<&Path>,
+    features: Features,
+) -> Result<Program, DriverError> {
     let program = parse_source(source, name, base_dir, stdlib_dir)?;
-    check_program(&program)?;
+    check_program_with(&program, features)?;
     Ok(program)
 }
 

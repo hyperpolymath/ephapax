@@ -53,13 +53,14 @@ fn corpus(root: &Path) -> Vec<String> {
 }
 
 /// The text every CLI command prints for each way a program fails to load.
-const LOAD_ERRORS: [&str; 6] = [
+const LOAD_ERRORS: [&str; 7] = [
     "cannot read",
     "import cycle",
     "Parse error",
     "Desugar error",
     "Type error",
     "Codegen error",
+    "behind the flag",
 ];
 
 /// The text that the CLI prints for each kind of load error.
@@ -71,6 +72,7 @@ fn load_error_text(e: &DriverError) -> &'static str {
         DriverError::Desugar { .. } => LOAD_ERRORS[3],
         DriverError::Type { .. } => LOAD_ERRORS[4],
         DriverError::Unsupported { .. } => LOAD_ERRORS[5],
+        DriverError::UnstableCore { .. } => LOAD_ERRORS[6],
     }
 }
 
@@ -218,23 +220,22 @@ fn out_of_range_integer_literal_is_a_parse_error() {
 }
 
 /// A limit of the typed lowering is a load error too: `check` must not
-/// accept a program that `compile` refuses. Not lowered yet: a lambda
-/// with a parameter or result that is not 32 bits wide.
+/// accept a program that `compile` refuses. Not lowered yet: a literal
+/// pattern on a value that is not 32 bits wide. (A lambda with such a
+/// parameter or result was the other limit. It is lowered since rung E9:
+/// see `closures.rs`.)
 #[test]
 fn check_rejects_what_typed_codegen_cannot_lower() {
     let tmp = tempfile::tempdir().expect("tempdir");
-    // (result type, body, text the error names)
-    for (ty, body, what) in [
-        (
-            "F32",
-            "let f = fn(x: F32) -> x + 1.0f32\n  f(2.0f32)",
-            "lambda",
-        ),
-        ("F64", "let f = fn(x: I32) -> 1.5\n  f(1)", "lambda"),
-    ] {
+    // (payload type, payload)
+    for (ty, value) in [("I64", "5000000000"), ("F64", "1.5")] {
         std::fs::write(
             tmp.path().join("wide.eph"),
-            format!("module wide\n\nfn main(): {ty} =\n  {body}\n"),
+            format!(
+                "module wide\n\ndata Opt = None | Some({ty})\n\nfn main(): I32 =\n  \
+                 match Some({value}) of\n  | Some({value}) => 1\n  | Some(n) => 2\n  \
+                 | None => 0\n  end\n"
+            ),
         )
         .expect("write program");
         for args in [&["check", "wide.eph"][..], &["compile", "wide.eph"]] {
@@ -245,8 +246,10 @@ fn check_rejects_what_typed_codegen_cannot_lower() {
                 .expect("spawn ephapax");
             let stderr = String::from_utf8_lossy(&out.stderr);
             assert!(
-                !out.status.success() && stderr.contains("Codegen error") && stderr.contains(what),
-                "`{body}` under {args:?}: exit {:?}, stderr:\n{stderr}",
+                !out.status.success()
+                    && stderr.contains("Codegen error")
+                    && stderr.contains("`match` with a pattern that has no lowering"),
+                "a literal pattern on {ty} under {args:?}: exit {:?}, stderr:\n{stderr}",
                 out.status.code()
             );
         }

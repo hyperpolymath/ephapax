@@ -1159,13 +1159,11 @@ impl Desugarer {
         })
     }
 
-    /// The recursive type of the `data` type of the constructor `info`,
-    /// or `None` if that `data` type does not refer to itself. The type
-    /// parameters of the `data` type are type variables in the result.
-    fn recursive_ty(
-        &self,
-        info: &ConstructorInfo,
-    ) -> Result<Option<(Vec<SmolStr>, Ty)>, DesugarError> {
+    /// The type parameters of the `data` type of the constructor `info`,
+    /// and the type of that `data` type with them as type variables. The
+    /// type is a recursive type (`Ty::Mu`) if the `data` type refers to
+    /// itself.
+    fn data_ty(&self, info: &ConstructorInfo) -> Result<(Vec<SmolStr>, Ty), DesugarError> {
         let params = match self.registry.get_type(&info.home, &info.data_name) {
             Some(TypeInfo {
                 def: TypeDef::Data { params, .. },
@@ -1181,7 +1179,7 @@ impl Desugarer {
         let ty = self.in_scope(&info.home, |this| {
             this.desugar_named_type(&info.data_name, &args)
         })?;
-        Ok(matches!(ty, Ty::Mu { .. }).then_some((params, ty)))
+        Ok((params, ty))
     }
 
     /// Build the right-nested binary sum type for a list of constructors.
@@ -1258,27 +1256,28 @@ impl Desugarer {
 
         let ctors = self.ctors_of(&info)?;
 
-        // A value of a recursive type is folded (v2 plan rung E9). The
-        // type parameters of the `data` type are bound in each annotation:
-        // the type checker finds a type for each one at this constructor,
-        // and the fold makes the annotations of the injections agree.
-        let recursive = self.recursive_ty(&info)?;
-        let params: &[SmolStr] = recursive.as_ref().map_or(&[], |(params, _)| params);
+        // The type parameters of the `data` type are bound in each
+        // annotation: the type checker finds a type for each one from the
+        // use of the value. (An annotation had the parameter itself, which
+        // is no type at the constructor: `None` was not an `Option(I32)`.)
+        let (params, ty) = self.data_ty(&info)?;
 
         // Wrap in inl/inr chain based on index. The types of the other
         // constructors are names of the module that declares the type.
         let value = self.in_scope(&info.home, |this| {
-            this.wrap_injection(payload, info.index, &ctors, params, span)
+            this.wrap_injection(payload, info.index, &ctors, &params, span)
         })?;
-        Ok(match &recursive {
-            None => value,
-            Some((params, ty)) => Expr::new(
+        // A value of a recursive type is folded (v2 plan rung E9). The
+        // fold makes the annotations of the injections agree.
+        Ok(match ty {
+            Ty::Mu { .. } => Expr::new(
                 ExprKind::Fold {
-                    ty: quantify(ty.clone(), params),
+                    ty: quantify(ty, &params),
                     value: Box::new(value),
                 },
                 span,
             ),
+            _ => value,
         })
     }
 
@@ -1462,9 +1461,9 @@ impl Desugarer {
         let ctors = self.ctors_of(info)?;
         // A value of a recursive type is unfolded before its sum is read
         // (v2 plan rung E9).
-        let core_scrutinee = match self.recursive_ty(info)? {
-            Some(_) => Expr::new(ExprKind::Unfold(Box::new(core_scrutinee)), span),
-            None => core_scrutinee,
+        let core_scrutinee = match self.data_ty(info)?.1 {
+            Ty::Mu { .. } => Expr::new(ExprKind::Unfold(Box::new(core_scrutinee)), span),
+            _ => core_scrutinee,
         };
 
         // The constructor index of each arm; `None` for an arm that takes

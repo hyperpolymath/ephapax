@@ -1765,8 +1765,10 @@ impl TypeChecker {
 
     /// `inl[ty](value)`: `ty` is the type of the other side of the sum. A
     /// type parameter that the annotation binds (`forall a. T`, from a
-    /// constructor of a recursive `data` type) gets a type from the use
-    /// of the value: the `fold` around the injection.
+    /// constructor of a `data` type with type parameters) gets a type
+    /// from the use of the value. Each annotation gets its own: an
+    /// injection has each type on its other side. The `fold` of a
+    /// recursive type makes the annotations under it agree.
     fn check_inl(&mut self, _s: Span, ty: &Ty, value: &Expr) -> Result<Ty, SpannedTypeError> {
         let value_ty = self.check(value)?;
         let (ty, _) = self.instantiate(ty.clone());

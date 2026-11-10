@@ -32,8 +32,11 @@ use pest_meta::ast::{Expr, RuleType};
 
 use crate::{parse_module, parse_surface_module, EphapaxParser, ParseError, Rule};
 
+/// The text of the parser grammar.
 const PEST: &str = include_str!("ephapax.pest");
+/// The line before part 1 in the specification file.
 const BEGIN: &str = "(* BEGIN GENERATED: the parser grammar, from ephapax.pest. Do not edit. *)";
+/// The line after part 1 in the specification file.
 const END: &str = "(* END GENERATED *)";
 
 /// Rules that are not silent, and still never in a parse tree, with the
@@ -46,14 +49,18 @@ const NO_PAIR: &[(&str, &str)] = &[
     ("keyword_boundary", "only in the lookahead of `identifier`"),
 ];
 
+/// The root of the repository.
 fn repo() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../..")
 }
 
+/// The specification grammar file.
 fn ebnf_path() -> PathBuf {
     repo().join("spec/ephapax-v2-grammar.ebnf")
 }
 
+/// Each rule of `ephapax.pest`: its type (normal, silent, atomic) and
+/// its expression, by name.
 fn pest_rules() -> BTreeMap<String, (RuleType, Expr)> {
     let pairs = pest_meta::parser::parse(pest_meta::parser::Rule::grammar_rules, PEST)
         .expect("ephapax.pest parses");
@@ -390,6 +397,30 @@ fn valid_syntax_near_an_unimplemented_form_still_parses() {
              surface: {surface:?}\ncore: {core:?}"
         );
     }
+}
+
+/// The 2 entry points for one expression refuse unimplemented syntax by
+/// name too. The core parser used to read `1 ++ 2` as `1`: the code that
+/// builds the expression does not know the rule for `++`.
+#[test]
+fn an_expression_with_unimplemented_syntax_is_refused_by_name() {
+    for (source, production) in [
+        ("1 ++ 2", "concat_expr"),
+        ("f(*x)", "deref_expr"),
+        ("@type_desc_of(I32)", "type_desc_expr"),
+    ] {
+        assert_eq!(
+            refused_as(crate::parse(source)),
+            Some(production),
+            "core: {source}"
+        );
+        assert_eq!(
+            refused_as(crate::parse_surface_expr(source)),
+            Some(production),
+            "surface: {source}"
+        );
+    }
+    assert!(crate::parse("1 + 2").is_ok() && crate::parse_surface_expr("1 + 2").is_ok());
 }
 
 /// The production that a parser names when it refuses a program for

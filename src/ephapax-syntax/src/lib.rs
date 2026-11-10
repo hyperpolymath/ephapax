@@ -444,6 +444,7 @@ pub struct HandlerClause {
 pub struct ExprId(u64);
 
 impl ExprId {
+    /// An id that no other expression of this process has.
     fn fresh() -> Self {
         static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
         ExprId(NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed))
@@ -662,6 +663,8 @@ impl Expr {
         }
     }
 
+    /// An expression with no source position: for a test, and for code that
+    /// the compiler makes.
     pub fn dummy(kind: ExprKind) -> Self {
         Self::new(kind, Span::dummy())
     }

@@ -45,6 +45,7 @@ pub fn parse(source: &str) -> Result<Expr, Vec<ParseError>> {
             span: Span::dummy(),
         }]
     })?;
+    refuse_unimplemented(pairs.clone())?;
 
     let pair = pairs
         .into_iter()
@@ -190,8 +191,10 @@ fn unimplemented_production(rule: Rule) -> Option<&'static str> {
 
 /// Refuse a program that has syntax of the v2 design that is not
 /// implemented: the first such construct in the source gives
-/// [`ParseError::Unimplemented`] with the name of its production. The 2
-/// parsers call this on the parse tree before they build a module.
+/// [`ParseError::Unimplemented`] with the name of its production. Each
+/// entry point of the 2 parsers (a module, an expression) calls this on
+/// the parse tree before it builds from it: the code that builds does
+/// not know these rules.
 pub(crate) fn refuse_unimplemented(
     pairs: pest::iterators::Pairs<Rule>,
 ) -> Result<(), Vec<ParseError>> {

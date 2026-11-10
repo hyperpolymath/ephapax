@@ -14,6 +14,7 @@ use std::process::{Command, Output};
 
 use ephapax_syntax::Decl;
 
+/// Run the `ephapax` binary with `args`, in the directory `dir`.
 fn ephapax(dir: &Path, args: &[&str]) -> Output {
     Command::new(env!("CARGO_BIN_EXE_ephapax"))
         .current_dir(dir)
@@ -22,6 +23,7 @@ fn ephapax(dir: &Path, args: &[&str]) -> Output {
         .expect("spawn ephapax")
 }
 
+/// Write the program `text` to the file `name` in `dir`.
 fn write(dir: &Path, name: &str, text: &str) {
     std::fs::write(dir.join(name), text).expect("write program");
 }

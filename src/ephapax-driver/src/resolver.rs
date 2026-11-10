@@ -35,6 +35,7 @@ pub(crate) enum Parsed {
 }
 
 impl Parsed {
+    /// The imports of the module, from the parser that read it.
     fn imports(&self) -> &[Import] {
         match self {
             Parsed::Surface(m) => &m.imports,
@@ -43,6 +44,7 @@ impl Parsed {
     }
 }
 
+/// One module of a program, after the resolver read and parsed its file.
 pub(crate) struct ResolvedModule {
     /// Module path as written in the source (e.g. `hypatia/ui/gui`).
     pub logical_path: String,
@@ -101,6 +103,8 @@ pub(crate) fn resolve(
         .collect())
 }
 
+/// The state of one resolution: where to look for a module, and the
+/// modules found so far.
 struct Resolver<'a> {
     base_dir: Option<&'a Path>,
     stdlib_dir: Option<&'a Path>,
@@ -269,10 +273,14 @@ fn first_module_declaration(source: &str) -> Option<String> {
     ephapax_parser::declared_module_name(source).map(|name| normalise_path(&name))
 }
 
+/// A module path with `/` between its parts: `Foo.Bar` and `Foo/Bar` name
+/// one module.
 fn normalise_path(raw: &str) -> String {
     raw.replace('.', "/")
 }
 
+/// The file of the module `logical` below `base_dir`: `a/b` is
+/// `<base_dir>/a/b.eph`.
 fn logical_to_file_path(logical: &str, base_dir: &Path) -> PathBuf {
     let mut p = base_dir.to_path_buf();
     for seg in logical.split('/') {

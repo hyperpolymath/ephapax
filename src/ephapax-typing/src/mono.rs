@@ -39,6 +39,8 @@ pub(crate) fn substitute_fn(decl: &mut Decl, subst: &Subst) {
     substitute_expr(body, subst);
 }
 
+/// Replace type variables in the type annotations of `expr` and of each
+/// expression in it.
 fn substitute_expr(expr: &mut Expr, subst: &Subst) {
     substitute_node(expr, subst);
     for child in expr.children_mut() {
@@ -113,6 +115,8 @@ pub fn monomorphise(module: &Module) -> Result<Module, SpannedTypeError> {
     })
 }
 
+/// The state of one monomorphisation: the generic functions, the type
+/// arguments of each use, and the copies made so far.
 struct Mono<'a> {
     generic: HashMap<&'a Var, &'a Decl>,
     type_args: TypeArgs,

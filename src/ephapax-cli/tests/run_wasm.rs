@@ -13,6 +13,7 @@ use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 
+/// The root of the repository.
 fn repo_root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../..")
@@ -20,6 +21,7 @@ fn repo_root() -> PathBuf {
         .expect("repo root")
 }
 
+/// Run the `ephapax` binary with `args`, in the directory `dir`.
 fn ephapax(dir: &Path, args: &[&str]) -> Output {
     Command::new(env!("CARGO_BIN_EXE_ephapax"))
         .current_dir(dir)
@@ -305,6 +307,13 @@ fn the_interpreter_calls_and_borrows_as_wasm_does() {
             "region r {\n    let! s = String.new@r(\"hello\")\n    \
              let n = String.len(&s)\n    n + String.len(s)\n  }",
             "10",
+        ),
+        // A local name of the caller is not in scope in the function it
+        // calls: `g` in `f` is the function, not the `g` of `main`.
+        (
+            "fn g(): I32 = 7\n\nfn f(x: I32): I32 = g() + x\n",
+            "let g = 0 in f(1) + g",
+            "8",
         ),
     ] {
         std::fs::write(
@@ -643,7 +652,7 @@ fn a_false_guard_gives_the_value_to_the_next_arm() {
         ),
         (
             "match W(o) of | W(Some(x)) if x > 5 => 1 | _ => 0 end",
-            "cannot have the constructor pattern `Some` inside another pattern",
+            "the constructor pattern `Some` inside another pattern is not supported",
         ),
     ] {
         write(
@@ -658,6 +667,72 @@ fn a_false_guard_gives_the_value_to_the_next_arm() {
         assert!(
             !out.status.success() && stderr.contains(error),
             "{matched}: exit {:?}, stderr:\n{stderr}",
+            out.status.code()
+        );
+    }
+}
+
+/// A match with no guard honours a literal inside a constructor pattern.
+/// The desugarer used to take the pattern inside as a wildcard, and to
+/// keep only the last arm of a constructor: `Some(0)` matched each
+/// `Some`, or was lost. A constructor inside a constructor pattern has
+/// no lowering yet: it is refused by name, not taken as a wildcard.
+#[test]
+fn a_pattern_inside_a_constructor_pattern_is_not_a_wildcard() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let opt = "data Opt = None | Some(I32)\n\n";
+    // (declarations, `main` body, output)
+    for (decls, main, want) in [
+        (
+            format!(
+                "{opt}fn f(o: Opt): I32 = match o of | Some(0) => 1 | Some(n) => 2 | None => 3 end\n"
+            ),
+            "f(Some(0)) * 100 + f(Some(5)) * 10 + f(None)",
+            "123",
+        ),
+        (
+            "data P = MkP(I32, I32)\n\n\
+             fn f(p: P): I32 = match p of | MkP(0, y) => y | MkP(x, 0) => x | MkP(x, y) => x + y end\n"
+                .to_string(),
+            "f(MkP(0, 7)) * 100 + f(MkP(4, 0)) * 10 + f(MkP(2, 3))",
+            "745",
+        ),
+    ] {
+        std::fs::write(
+            tmp.path().join("inside.eph"),
+            format!("module inside\n\n{decls}\nfn main(): I32 = {main}\n"),
+        )
+        .expect("write program");
+        for args in [&["run", "inside.eph"][..], &["run", "--interp", "inside.eph"]] {
+            assert_eq!(stdout_of(tmp.path(), args), want, "{main} under {args:?}");
+        }
+    }
+
+    // (declarations and match, text of the error)
+    for (program, error) in [
+        // `Some(5)` has no arm.
+        (
+            format!("{opt}fn f(o: Opt): I32 = match o of | Some(0) => 1 | None => 3 end\n"),
+            "NonExhaustiveMatch",
+        ),
+        (
+            format!(
+                "{opt}data Wrap = W(Opt)\n\n\
+                 fn f(w: Wrap): I32 = match w of | W(Some(x)) => 1 | W(None) => 0 end\n"
+            ),
+            "the constructor pattern `Some` inside another pattern is not supported",
+        ),
+    ] {
+        std::fs::write(
+            tmp.path().join("bad.eph"),
+            format!("module bad\n\n{program}\nfn main(): I32 = 0\n"),
+        )
+        .expect("write program");
+        let out = ephapax(tmp.path(), &["compile", "bad.eph"]);
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        assert!(
+            !out.status.success() && stderr.contains(error),
+            "exit {:?}, stderr:\n{stderr}",
             out.status.code()
         );
     }

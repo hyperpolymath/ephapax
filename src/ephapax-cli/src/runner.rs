@@ -40,6 +40,7 @@ pub fn run_main(wasm: &[u8], argv: Argv) -> Result<Val, String> {
     Ok(results[0])
 }
 
+/// The linear memory that the module exports as `memory`.
 fn memory(caller: &mut Caller<'_, Argv>) -> wasmtime::Result<Memory> {
     caller
         .get_export("memory")
@@ -47,6 +48,8 @@ fn memory(caller: &mut Caller<'_, Argv>) -> wasmtime::Result<Memory> {
         .ok_or_else(|| Error::msg("module exports no `memory`"))
 }
 
+/// Define the host functions that a compiled program can import from the
+/// module `env`.
 fn define_host(linker: &mut Linker<Argv>) -> wasmtime::Result<()> {
     linker.func_wrap("env", "print_i32", |v: i32| println!("{v}"))?;
     linker.func_wrap(

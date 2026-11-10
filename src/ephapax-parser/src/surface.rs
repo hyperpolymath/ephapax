@@ -80,6 +80,7 @@ pub fn parse_surface_expr(source: &str) -> Result<SurfaceExpr, Vec<ParseError>> 
             span: Span::dummy(),
         }]
     })?;
+    crate::refuse_unimplemented(pairs.clone())?;
 
     let pair = pairs
         .into_iter()

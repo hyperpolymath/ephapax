@@ -123,12 +123,11 @@ pub enum DesugarError {
     #[error("type arguments need the name of a generic function before them, as in `id[I32](3)`")]
     TypeArgumentsOnExpression,
 
-    /// A `match` with a guard goes to the core `match`, which has no
-    /// form for a constructor inside another pattern.
-    #[error(
-        "a match with a guard cannot have the constructor pattern `{ctor}` inside another pattern"
-    )]
-    GuardWithNestedConstructor { ctor: String },
+    /// A constructor pattern inside another pattern (`W(Some(x))`). The
+    /// lowering has no code for it yet, and it does not take such a
+    /// pattern as a wildcard.
+    #[error("the constructor pattern `{ctor}` inside another pattern is not supported")]
+    NestedConstructorPattern { ctor: String },
 
     #[error("qualified access `{qualifier}.{member}`: `{qualifier}` is not an imported module (record field access is not yet supported)")]
     QualifiedAccessUnknownModule { qualifier: String, member: String },
@@ -1343,13 +1342,18 @@ impl Desugarer {
             indexed.push((index, arm));
         }
 
+        // An arm can refuse a value of its constructor: with a guard, or
+        // with a literal or a constructor inside its pattern. The arms
+        // are then tried in source order.
+        let ordered = guarded || arms.iter().any(|a| Self::can_refuse_payload(&a.pattern));
+
         // The arms that can take constructor `i`, in the order to try.
-        // With a guard in the match: each arm for `i`, in source order.
-        // With no guard, one arm: the last arm for `i`, or else the last
+        // When an arm can refuse a value: each arm for `i`, in source
+        // order. If not, one arm: the last arm for `i`, or else the last
         // arm for every constructor.
         let chains: Vec<Vec<&MatchArm>> = (0..ctors.len())
             .map(|i| {
-                if guarded {
+                if ordered {
                     return indexed
                         .iter()
                         .filter(|(index, _)| index.is_none_or(|n| n == i))
@@ -1439,6 +1443,20 @@ impl Desugarer {
         }
     }
 
+    /// If a constructor pattern has a literal or a constructor inside it:
+    /// the arm can then refuse a value of its own constructor.
+    fn can_refuse_payload(pattern: &Pattern) -> bool {
+        fn can_refuse(pattern: &Pattern) -> bool {
+            match pattern {
+                Pattern::Literal(_) | Pattern::Constructor { .. } => true,
+                Pattern::Pair(left, right) => can_refuse(left) || can_refuse(right),
+                Pattern::Tuple(parts) => parts.iter().any(can_refuse),
+                Pattern::Var(_) | Pattern::Wildcard | Pattern::Unit => false,
+            }
+        }
+        matches!(pattern, Pattern::Constructor { args, .. } if args.iter().any(can_refuse))
+    }
+
     /// The code for one constructor: `chain` has the arms to try on its
     /// payload, in order. A chain where each arm has a guard does not
     /// cover the constructor. For a longer chain, the type checker finds
@@ -1451,7 +1469,9 @@ impl Desugarer {
         span: Span,
     ) -> Result<Expr, DesugarError> {
         match chain {
-            [arm] if arm.guard.is_none() => self.build_arm_body_inner(payload, ctor, arm, span),
+            [arm] if arm.guard.is_none() && !Self::can_refuse_payload(&arm.pattern) => {
+                self.build_arm_body_inner(payload, ctor, arm, span)
+            }
             _ if chain.iter().any(|arm| arm.guard.is_none()) => {
                 // A pattern on the constructor is a pattern on its
                 // payload: `()`, the one field, or a right-nested pair.
@@ -1523,7 +1543,7 @@ impl Desugarer {
             ),
             Pattern::Tuple(elements) => CorePattern::Tuple(all(elements)?),
             Pattern::Constructor { ctor, .. } => {
-                return Err(DesugarError::GuardWithNestedConstructor {
+                return Err(DesugarError::NestedConstructorPattern {
                     ctor: ctor.to_string(),
                 })
             }

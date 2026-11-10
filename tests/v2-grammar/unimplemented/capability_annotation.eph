@@ -3,5 +3,4 @@
 // [UNIMPLEMENTED] in spec/ephapax-v2-grammar.ebnf, part 2.
 module m
 
-@capabilities(io)
-fn main(): I32 = 0
+fn main(): I32 = __ffi@capabilities(io)("host_add", 1)

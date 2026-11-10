@@ -392,6 +392,30 @@ fn valid_syntax_near_an_unimplemented_form_still_parses() {
     }
 }
 
+/// The 2 entry points for one expression refuse unimplemented syntax by
+/// name too. The core parser used to read `1 ++ 2` as `1`: the code that
+/// builds the expression does not know the rule for `++`.
+#[test]
+fn an_expression_with_unimplemented_syntax_is_refused_by_name() {
+    for (source, production) in [
+        ("1 ++ 2", "concat_expr"),
+        ("f(*x)", "deref_expr"),
+        ("@type_desc_of(I32)", "type_desc_expr"),
+    ] {
+        assert_eq!(
+            refused_as(crate::parse(source)),
+            Some(production),
+            "core: {source}"
+        );
+        assert_eq!(
+            refused_as(crate::parse_surface_expr(source)),
+            Some(production),
+            "surface: {source}"
+        );
+    }
+    assert!(crate::parse("1 + 2").is_ok() && crate::parse_surface_expr("1 + 2").is_ok());
+}
+
 /// The production that a parser names when it refuses a program for
 /// syntax that is not implemented.
 fn refused_as<T>(result: Result<T, Vec<ParseError>>) -> Option<&'static str> {

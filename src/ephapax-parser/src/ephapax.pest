@@ -74,7 +74,7 @@ unimplemented_capability_decl = {
     "capabilities" ~ ":" ~ "[" ~ identifier ~ ("," ~ identifier)* ~ "]"
 }
 
-// @capabilities(io)
+// __ffi@capabilities(io)("symbol", ...): the capabilities of one FFI call
 unimplemented_capability_annotation = { "@capabilities" ~ "(" ~ paren_body ~ ")" }
 
 // @name(args)
@@ -156,10 +156,7 @@ declaration = {
 // them. They exist so that downstream tools (hypatia's `@tail_recursive`,
 // future `@inline`, `@no_mangle`, etc.) can hang metadata off a decl
 // without breaking the parser today.
-annotation = {
-    unimplemented_capability_annotation
-    | "@" ~ identifier ~ unimplemented_annotation_args?
-}
+annotation = { "@" ~ identifier ~ unimplemented_annotation_args? }
 
 // ============================================================================
 // Extern Blocks
@@ -515,7 +512,7 @@ construct_expr = { constructor_name ~ (("(" ~ expr_list? ~ ")") | ("{" ~ record_
 // FFI call: __ffi("symbol_name", arg1, arg2, ...)
 // Calls a C ABI function from a linked shared library.
 ffi_expr = {
-    "__ffi" ~ "(" ~ string ~ ("," ~ expression)* ~ ")"
+    "__ffi" ~ unimplemented_capability_annotation? ~ "(" ~ string ~ ("," ~ expression)* ~ ")"
 }
 
 record_literal = { "{" ~ record_field_assign ~ ("," ~ record_field_assign)* ~ ","? ~ "}" }

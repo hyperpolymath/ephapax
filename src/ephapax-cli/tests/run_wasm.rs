@@ -306,6 +306,13 @@ fn the_interpreter_calls_and_borrows_as_wasm_does() {
              let n = String.len(&s)\n    n + String.len(s)\n  }",
             "10",
         ),
+        // A local name of the caller is not in scope in the function it
+        // calls: `g` in `f` is the function, not the `g` of `main`.
+        (
+            "fn g(): I32 = 7\n\nfn f(x: I32): I32 = g() + x\n",
+            "let g = 0 in f(1) + g",
+            "8",
+        ),
     ] {
         std::fs::write(
             tmp.path().join("calls.eph"),

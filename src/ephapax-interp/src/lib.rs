@@ -714,6 +714,9 @@ impl Interpreter {
     /// parameter, with a lambda in its body for each next parameter. So
     /// `f(a, b)`, which is `(f a) b`, gives each parameter its argument.
     /// A function with no parameter takes the unit argument of `f()`.
+    /// The closure starts from an empty environment: the body of a
+    /// top-level function sees its parameters and the top-level
+    /// functions, and no local name of the caller.
     fn function_value(&self, params: Vec<(Var, Ty)>, body: Expr) -> Value {
         let mut params = params.into_iter();
         let (param, param_ty) = params
@@ -732,7 +735,7 @@ impl Interpreter {
             param,
             param_ty,
             body,
-            env: self.env.clone(),
+            env: Environment::new(),
         }
     }
 

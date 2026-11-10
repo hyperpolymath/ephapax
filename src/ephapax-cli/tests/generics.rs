@@ -162,6 +162,43 @@ fn generic_programs_the_checker_refuses() {
     }
 }
 
+/// Only the `main` of the root module is the entry point. A generic
+/// `main` of an imported module is a function like any other; the same
+/// module as the root of a program is refused.
+#[test]
+fn a_generic_main_of_an_imported_module_is_not_an_entry_point() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    write(
+        tmp.path(),
+        "lib.eph",
+        "module lib\n\nfn main<a>(x: a): a = x\n\npub fn keep(n: I32): I32 = main(n)\n",
+    );
+    for input in ["7", "11"] {
+        write(
+            tmp.path(),
+            "app.eph",
+            &format!("module app\n\nimport lib\n\nfn main(): I32 = keep({input})\n"),
+        );
+        for args in [&["run", "app.eph"][..], &["run", "--interp", "app.eph"]] {
+            let out = ephapax(tmp.path(), args);
+            assert_eq!(
+                String::from_utf8_lossy(&out.stdout).trim(),
+                input,
+                "{args:?}:\n{}",
+                String::from_utf8_lossy(&out.stderr)
+            );
+        }
+    }
+
+    let out = ephapax(tmp.path(), &["check", "lib.eph"]);
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        !out.status.success() && stderr.contains("cannot have type parameters"),
+        "exit {:?}, stderr:\n{stderr}",
+        out.status.code()
+    );
+}
+
 /// A limit of the typed lowering that only a copy at a wide type shows
 /// (here a lambda with an F64 parameter) is a load error on `check` too.
 #[test]

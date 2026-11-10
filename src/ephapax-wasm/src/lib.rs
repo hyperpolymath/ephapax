@@ -2531,7 +2531,10 @@ impl Codegen {
         body: &Expr,
         is_linear: bool,
     ) {
+        // The annotation of a constructor binds type parameters
+        // (`forall`): the type table has the type of its value.
         let local_ty = ty
+            .filter(|ty| !matches!(ty, Ty::ForAll { .. }))
             .map(ty_to_valtype)
             .unwrap_or_else(|| self.valtype_of(value));
 

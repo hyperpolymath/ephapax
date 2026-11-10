@@ -624,6 +624,91 @@ fn a_constructor_gets_its_type_arguments_from_its_use() {
     );
 }
 
+/// A constructor of a `data` type that is not recursive has the type that
+/// the declaration gives. The check was missing: `MkBox(true)` passed for
+/// `data Box = MkBox(I32)` until a use of the value as a `Box`. (A
+/// constructor of a recursive type has the check from its `fold`.)
+#[test]
+fn a_constructor_checks_its_arguments_against_the_declaration() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let write =
+        |name: &str, text: &str| std::fs::write(tmp.path().join(name), text).expect("write module");
+    let p = "data P(a) = P2(a, a) | Q(a)\n\n";
+
+    // (declarations, `main` body, text of the error)
+    for (decls, main, want) in [
+        // 1 constructor: the value is the argument itself.
+        (
+            "data Box = MkBox(I32)\n\n",
+            "match MkBox(true) of | MkBox(x) => if x then 1 else 2 end",
+            "constructor `MkBox`: the declaration gives Base(I32), \
+             but the arguments give Base(Bool)",
+        ),
+        // 2 constructors: the argument of the first one.
+        (
+            "data T = A(I32) | B(Bool)\n\n",
+            "match A(true) of | A(x) => if x then 1 else 2 | B(y) => 3 end",
+            "constructor `A`",
+        ),
+        // 1 type parameter in 2 fields: the 2 arguments have 1 type.
+        (
+            p,
+            "match P2(1, true) of | P2(x, y) => x | Q(z) => 3 end",
+            "constructor `P2`",
+        ),
+        // The arguments of `P2` fix the type parameter for `Q` also.
+        (
+            p,
+            "match P2(1, 2) of | P2(x, y) => x | Q(z) => if z then 1 else 0 end",
+            "Type mismatch",
+        ),
+    ] {
+        write(
+            "bad.eph",
+            &format!("module bad\n\n{decls}fn main(): I32 = {main}\n"),
+        );
+        let out = ephapax(tmp.path(), &["check", "bad.eph"]);
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        assert!(
+            !out.status.success() && stderr.contains(want),
+            "{main}: exit {:?}, stderr:\n{stderr}",
+            out.status.code()
+        );
+    }
+
+    // Correct arguments run. (declarations, `main` type and body, output)
+    for (decls, main, want) in [
+        // A generic function whose type parameter has the name of the
+        // parameter of the `data` type, and a value that is 64 bits wide.
+        (
+            "data Opt(a) = No | Yes(a)\n\ndata W(a) = MkW(a)\n\n\
+             fn wrap<a>(x: a): Opt(a) = Yes(x)\n\n\
+             fn keep<a>(x: a): (a, Opt(I64)) = (x, No)\n\n\
+             fn get(o: Opt(I64)): I64 =\n  \
+             match o of | No => 5000000000 - 5000000000 | Yes(n) => n end\n\n",
+            "I64 =\n  let (b, o) = keep(true) in\n  \
+             match MkW(5000000000) of | MkW(v) => v + get(wrap(5000000000)) + get(o) end",
+            "10000000000i64",
+        ),
+        // A linear argument: the string is consumed 1 time.
+        (
+            "data SBox = MkS(String@r) | Empty\n\n\
+             fn len(b: SBox): I32 =\n  match b of\n  | Empty => 0\n  \
+             | MkS(s) => String.len(&s) + (let _ = drop(s) in 0)\n  end\n\n",
+            "I32 = region r { len(MkS(String.new@r(\"hello\"))) + len(Empty) }",
+            "5",
+        ),
+    ] {
+        write(
+            "app.eph",
+            &format!("module app\n\n{decls}fn main(): {main}\n"),
+        );
+        for args in [&["run", "app.eph"][..], &["run", "--interp", "app.eph"]] {
+            assert_eq!(stdout_of(tmp.path(), args), want, "{main} under {args:?}");
+        }
+    }
+}
+
 /// A `type` alias and an extern type follow the rule of data types (owner
 /// decision 2026-11-10): a module names one when it declares it, or when
 /// it imports the module that declares it. An alias must also be `pub`;

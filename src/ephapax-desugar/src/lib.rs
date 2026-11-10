@@ -1388,7 +1388,22 @@ impl Desugarer {
                 span,
             )
         } else {
-            value
+            // snip: an annotated `let` carries the check, because the core
+            // has no type ascription; upgrade to that core form when the
+            // calculus gets it (plan decision D14).
+            // The annotation is the declared type, so the type checker
+            // compares the arguments with the declaration. The binder
+            // names the constructor for the text of the error.
+            let name = SmolStr::new(format!("#{ctor}"));
+            Expr::new(
+                ExprKind::Let {
+                    name: name.clone(),
+                    ty: Some(quantify(ty, &params)),
+                    value: Box::new(value),
+                    body: Box::new(Expr::new(ExprKind::Var(name), span)),
+                },
+                span,
+            )
         })
     }
 
@@ -2140,6 +2155,22 @@ mod tests {
 
     // --- Constructor desugaring ---
 
+    /// The injections of the constructor `ctor`: the value of the `let`
+    /// that carries the declared type ([`Desugarer::desugar_construct`]).
+    fn injections<'a>(core: &'a Expr, ctor: &str) -> &'a ExprKind {
+        let ExprKind::Let {
+            name,
+            ty: Some(_),
+            value,
+            ..
+        } = &core.kind
+        else {
+            panic!("expected a `let` with a type, got {:?}", core.kind);
+        };
+        assert_eq!(name.as_str(), format!("#{ctor}"));
+        &value.kind
+    }
+
     #[test]
     fn desugar_none_constructor() {
         let mut ds = Desugarer::new();
@@ -2152,7 +2183,7 @@ mod tests {
 
         let core = ds.desugar_expr(&expr).unwrap();
         // None → inl(())
-        assert!(matches!(core.kind, ExprKind::Inl { .. }));
+        assert!(matches!(injections(&core, "None"), ExprKind::Inl { .. }));
     }
 
     #[test]
@@ -2167,7 +2198,7 @@ mod tests {
 
         let core = ds.desugar_expr(&expr).unwrap();
         // Some(42) → inr(42)
-        assert!(matches!(core.kind, ExprKind::Inr { .. }));
+        assert!(matches!(injections(&core, "Some"), ExprKind::Inr { .. }));
     }
 
     #[test]
@@ -2182,7 +2213,7 @@ mod tests {
 
         let core = ds.desugar_expr(&expr).unwrap();
         // Green → inr(inl(()))
-        if let ExprKind::Inr { value, .. } = &core.kind {
+        if let ExprKind::Inr { value, .. } = injections(&core, "Green") {
             assert!(matches!(value.kind, ExprKind::Inl { .. }));
         } else {
             panic!("expected inr");
@@ -2201,7 +2232,7 @@ mod tests {
 
         let core = ds.desugar_expr(&expr).unwrap();
         // Blue → inr(inr(()))
-        if let ExprKind::Inr { value, .. } = &core.kind {
+        if let ExprKind::Inr { value, .. } = injections(&core, "Blue") {
             if let ExprKind::Inr { .. } = &value.kind {
                 // Correct: inr(inr(...))
             } else {

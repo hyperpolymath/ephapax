@@ -1175,6 +1175,7 @@ Engineering tracks inside each wave run in parallel with the proof tracks. The o
 |D10 |W1 (T1a) |layout-profile note / E5 (W2), then E9, E8, E10, E18
 |D12 |W5 (T5g) |erasure notes / E16, P21 (W6)
 |D13 (added 2026-11-09) |W1 (T1a) |the 2026-11-09 classification ruling / P4 and every later P-rung
+|D14 (added 2026-11-10) |W1 (T1a), before P4 |the constructor check of 2026-11-10 (interim: annotated `let`) / P4
 |===
 
 A rung whose dependency has not completed (for example E8 while the typed-wasm fix is unmerged) carries over to the next wave together with every rung that depends on it (E9 completion, E10, E14, P18, the W5 gate-acceptance exit). It is never declared done against a missing dependency.
@@ -1561,6 +1562,42 @@ Follows the owner ruling of 2026-11-09 that the soundness statements are theory,
 |Unconventional: one shared statement in Dedukti/Lambdapi, proved in Coq and transported to Agda
 |4 |3
 |PROOF-POLICY §2 prefers transport. Coq → Dedukti → Agda is the reverse of the policy's direction and depends on exporters the estate has not pinned; worth an X-experiment before relying on it.
+|===
+
+=== D14 — A type ascription in the core (added 2026-11-10)
+
+A constructor of a `data` type that is not recursive left no core node that carries the declared type: `MkBox(true)` passed for `data Box = MkBox(I32)` until a use of the value as a `Box`. A constructor of a recursive type has the check from its `fold` (D7). This decision is the core form that carries the check for the other `data` types.
+
+*Interim (owner, 2026-11-10):* the desugarer emits `let #C: T = v in #C`. `T` is the declared type and binds the type parameters of the `data` type. The calculus has this term already (`ELet v (EVar 0)`; its `let` has no annotation), so no proof file changes. Gate: `a_constructor_checks_its_arguments_against_the_declaration` in `src/ephapax-cli/tests/run_wasm.rs`. The decision stays open until the owner decides the nominal or the bidirectional design. It is taken with the P4 core, where `TMu`, `fold` and `unfold` enter the calculus, so that the core is extended 1 time.
+
+An ascription `EAscribe T e` needs these parts in the P4 core:
+
+* 1 expression former, and 1 case in each function over expressions;
+* 2 step rules: `EAscribe T v` steps to `v`, and the congruence rule. The form is not a value, so each canonical forms lemma keeps 1 case for each type;
+* 1 typing rule with 1 premise, which passes the region environment and the context through. It has no sibling, so it needs no side condition;
+* 1 case in each proof by induction on an expression, a step or a typing derivation;
+* the instantiated type as the annotation, because the calculus has no type variables (`inl` and `inr` have this gap already);
+* the same former in the Agda source (D13) and in the Idris2 copy of the IR.
+
+[cols="3,1,1,4",options="header"]
+|===
+|Option |(a) |(b) |Comment
+
+|*Recommended:* an ascription former in the P4 core, added with `TMu`, `fold` and `unfold`
+|4 |4
+|The standard switch from type synthesis to type checking. It can later make the annotations of `inl` and `inr` unnecessary. It does not make `Box` different from `I32`.
+
+|Keep the annotated `let`
+|3 |5
+|No new former and no proof work. Each constructor costs 1 administrative step and 1 wasm local, and the name of the binder carries the name of the constructor.
+
+|An ascription in the Rust core only, removed before the calculus
+|3 |4
+|No extra step or local. The calculus does not change, and the Coq to Rust bridge gets 1 more erased form.
+
+|Unconventional: a nominal constructor form (each `data` type is a named type)
+|4 |4
+|Also closes the case that this decision leaves open: a value that no constructor made passes as the `data` type (`f(5)` for `fn f(b: Box)`). It is the nominal option of D7, which was not ratified, so it needs the branch table of D7.
 |===
 
 == Risks and kill criteria

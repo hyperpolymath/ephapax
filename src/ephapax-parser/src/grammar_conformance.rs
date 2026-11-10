@@ -1,6 +1,9 @@
 // SPDX-License-Identifier: MPL-2.0
 // Owner: Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk>
 //
+// hypatia: allow code_safety/panic_macro -- test-only module (`#[cfg(test)] mod grammar_conformance` in lib.rs): a panic with a message is how a test fails.
+// hypatia: allow code_safety/expect_in_hot_path -- test-only module, no hot path: `expect` reports a grammar file or a fixture that the test cannot read.
+//
 //! One normative grammar (v2 plan rung E7).
 //!
 //! `spec/ephapax-v2-grammar.ebnf` has 2 parts:

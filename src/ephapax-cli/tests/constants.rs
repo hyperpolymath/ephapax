@@ -56,6 +56,8 @@ fn check_refuses(dir: &Path, name: &str, text: &str, error: &str) {
     );
 }
 
+/// A constant gives its value to each function of its module, and to
+/// each constant after it.
 #[test]
 fn a_top_level_constant_runs() {
     let tmp = tempfile::tempdir().expect("tempdir");
@@ -186,6 +188,8 @@ fn a_constant_follows_the_flag() {
     );
 }
 
+/// Each constant that the checker cannot accept has an error that names
+/// the cause. A name that a module declares 2 times is one of them.
 #[test]
 fn a_constant_that_is_not_valid_is_refused_by_name() {
     let tmp = tempfile::tempdir().expect("tempdir");

@@ -708,6 +708,7 @@ fn format_ty(ty: &Ty) -> String {
         ),
         Ty::Var(name) => name.to_string(),
         Ty::ForAll { var, body } => format!("forall {}. {}", var, format_ty(body)),
+        Ty::Mu { var, body } => format!("mu {}. {}", var, format_ty(body)),
         Ty::Unif(id) => format!("?{}", id),
         Ty::List(inner) => format!("[{}]", format_ty(inner)),
         Ty::Tuple(elems) => {
@@ -900,6 +901,8 @@ fn find_let_binding_span(expr: &Expr, target: &str) -> Option<Span> {
         | ExprKind::Snd(inner)
         | ExprKind::Inl { value: inner, .. }
         | ExprKind::Inr { value: inner, .. }
+        | ExprKind::Fold { value: inner, .. }
+        | ExprKind::Unfold(inner)
         | ExprKind::Drop(inner)
         | ExprKind::Copy(inner)
         | ExprKind::Borrow { inner, .. }

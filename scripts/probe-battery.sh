@@ -34,7 +34,9 @@
 # Verdicts: ok | ok:<value> | error:<Kind> | crash:<exit>[-stack-overflow]
 #   | timeout | no-module | unavailable:no-wasmtime
 # Kinds: InvalidWasm AnnotationNotEnforced CodegenError DesugarError
-#   TypeError ParseError RuntimeError Other, and Trap:<message> (wasm-run)
+#   TypeError ParseError RuntimeError UnstableCore Other, and
+#   Trap:<message> (wasm-run). UnstableCore: a form that is behind the
+#   flag `--unstable-core` (v2 plan rung E9), which the battery does not give.
 #
 # Output: a TSV on stdout (or --out FILE), one line per row:
 #   file  command  exit  verdict  status  baseline  target  diagnostic
@@ -74,7 +76,7 @@ while [ $# -gt 0 ]; do
     --bin) bin="$2"; shift 2 ;;
     --out) out="$2"; shift 2 ;;
     --update) update=1; shift ;;
-    -h|--help) sed -n '2,59p' "$0"; exit 0 ;;
+    -h|--help) sed -n '2,62p' "$0"; exit 0 ;;
     *) echo "probe-battery: unknown argument $1" >&2; exit 3 ;;
   esac
 done
@@ -154,6 +156,7 @@ classify() {
   elif grep -q 'Type error' <<<"$text"; then kind=TypeError
   elif grep -qi 'parse error' <<<"$text"; then kind=ParseError
   elif grep -q 'Runtime error' <<<"$text"; then kind=RuntimeError
+  elif grep -q 'behind the flag `--unstable-core`' <<<"$text"; then kind=UnstableCore
   fi
   echo "error:$kind"
 }

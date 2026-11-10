@@ -135,12 +135,22 @@ pub enum DesugarError {
     #[error("member access on a non-module expression is not supported (only `Module.member` qualified access)")]
     FieldAccessOnNonModule,
 
-    /// A `data` declaration (or `type` alias) refers to itself. The core
-    /// has no recursive types: the binary-sum encoding expands every
-    /// named type structurally, so a self-reference would expand forever
-    /// (probe `rec1` used to abort with a stack overflow).
-    #[error("recursive type `{name}` is not supported: the core type language has no recursive types (expansion cycle: {cycle})")]
-    RecursiveType { name: String, cycle: String },
+    /// A `type` alias refers to itself, with no `data` type in the cycle.
+    /// A recursive type is folded at a constructor, and an alias has none.
+    /// (Probe `rec1` used to abort with a stack overflow.)
+    #[error("recursive type alias `{name}` is not supported: only a `data` type can refer to itself (expansion cycle: {cycle})")]
+    RecursiveAlias { name: String, cycle: String },
+
+    /// 2 or more `data` types refer to each other. A `data` type can
+    /// refer to itself (v2 plan rung E9); a cycle through another `data`
+    /// type has no lowering yet.
+    #[error("the `data` types {cycle} refer to each other, which is not supported yet: a recursive `data` type can refer only to itself (a `type` alias in the cycle is permitted)")]
+    MutualRecursion { cycle: String },
+
+    /// A `data` type refers to itself with other type arguments
+    /// (`data Grow(a) = More(Grow([a]))`): its expansion does not end.
+    #[error("recursive type `{name}` refers to itself with other type arguments, which is not supported (expansion cycle: {cycle})")]
+    NonRegularRecursion { name: String, cycle: String },
 }
 
 // =========================================================================
@@ -325,6 +335,39 @@ impl DataRegistry {
 // Desugarer
 // =========================================================================
 
+/// A named type whose body is being expanded by `desugar_named_type`.
+#[derive(Debug, Clone)]
+struct Expansion {
+    /// Key of the module that declares the type.
+    home: SmolStr,
+    name: SmolStr,
+    /// The type arguments of a `data` type, as core types. `None`: a
+    /// `type` alias.
+    args: Option<Vec<Ty>>,
+    /// The type of each type parameter of a `data` type: the type that a
+    /// type variable stands for in its body, at each depth.
+    params: HashMap<SmolStr, Ty>,
+    /// The body referred to the type itself: the type is recursive.
+    recursive: bool,
+}
+
+/// The variable of the recursive type of the `data` type `name`. A
+/// program cannot write this name, so it is not the name of a type
+/// parameter or of an extern type.
+fn mu_var(name: &str) -> SmolStr {
+    format!("#{name}").into()
+}
+
+/// `forall p1. .. forall pn. ty`: the annotation `ty` of a constructor,
+/// with the type parameters `params` of its `data` type bound. The type
+/// checker gives each bound parameter a type that it finds.
+fn quantify(ty: Ty, params: &[SmolStr]) -> Ty {
+    params.iter().rev().fold(ty, |ty, var| Ty::ForAll {
+        var: var.clone(),
+        body: Box::new(ty),
+    })
+}
+
 /// The desugaring pass.
 ///
 /// Call [`Desugarer::desugar_module`] to transform a complete surface module
@@ -338,9 +381,9 @@ pub struct Desugarer {
     /// [`Desugarer::desugar_module`].
     module_qualifiers: HashSet<SmolStr>,
     /// Named types currently being expanded by `desugar_named_type`,
-    /// innermost last, each with the key of the module that declares it.
-    /// Re-entering one is a recursive type.
-    expanding: RefCell<Vec<(SmolStr, SmolStr)>>,
+    /// innermost last. A `data` type that is entered again is a recursive
+    /// type (v2 plan rung E9).
+    expanding: RefCell<Vec<Expansion>>,
     /// Key of the module whose scope gives a name its meaning: the module
     /// being desugared, or, while the body of a named type expands, the
     /// module that declares that type.
@@ -891,7 +934,15 @@ impl Desugarer {
                 inner: Box::new(self.desugar_ty(inner)?),
                 mutable: *mutable,
             }),
-            SurfaceTy::Var(v) => Ok(Ty::Var(v.clone())),
+            // In the body of a `data` type, a type parameter of that type
+            // stands for its type argument. (Only a parameter that was a
+            // whole field got its argument: `Box((a, a))` kept `a`.)
+            SurfaceTy::Var(v) => Ok(self
+                .expanding
+                .borrow()
+                .last()
+                .and_then(|e| e.params.get(v).cloned())
+                .unwrap_or_else(|| Ty::Var(v.clone()))),
             SurfaceTy::List(inner) => Ok(Ty::List(Box::new(self.desugar_ty(inner)?))),
             SurfaceTy::Tuple(elements) => {
                 let desugared: Vec<_> = elements
@@ -978,7 +1029,7 @@ impl Desugarer {
                         got: args.len(),
                     });
                 }
-                return self.with_expansion(name, home, |this| this.desugar_ty(aliased));
+                return self.expand_alias(name, home, |this| this.desugar_ty(aliased));
             }
             TypeDef::Data { params, ctors } => (params, ctors),
         };
@@ -991,46 +1042,146 @@ impl Desugarer {
             });
         }
 
-        // Build substitution map: type param → concrete type
+        // The arguments are elaborated before the declaration is entered,
+        // so a finite nested application (`List(List(I32))`) is valid.
         let core_args = args
             .iter()
             .map(|arg| self.desugar_ty(arg))
             .collect::<Result<Vec<_>, _>>()?;
-        let subst: HashMap<&SmolStr, &Ty> = params.iter().zip(core_args.iter()).collect();
 
         // Build right-nested sum from constructor field types
-        self.with_expansion(name, home, |this| this.build_sum_type(ctors, &subst))
+        self.expand_data(name, home, params, core_args, |this| {
+            this.build_sum_type(ctors)
+        })
     }
 
-    /// Run `f` with the named type `name` of the module `home` pushed on
-    /// the expansion stack, and with the names of `home` in scope. Fails
-    /// with [`DesugarError::RecursiveType`] if the same declaration is
-    /// already being expanded, including non-regular recursion with
-    /// changing arguments. Arguments are elaborated before entering the
-    /// declaration, so finite nested applications remain valid. Errors
-    /// propagate after removing this expansion from the stack.
-    fn with_expansion<T>(
+    /// The names of the expansions from `start`, then `name`: the cycle
+    /// that an error shows.
+    fn cycle(stack: &[Expansion], start: usize, name: &str) -> String {
+        let mut names: Vec<&str> = stack[start..].iter().map(|e| e.name.as_str()).collect();
+        names.push(name);
+        names.join(" -> ")
+    }
+
+    /// Run `f`, which expands the body of the alias `name` of the module
+    /// `home`, with the names of `home` in scope. An alias that refers to
+    /// itself with no `data` type between is an error: only a `data` type
+    /// is recursive. With a `data` type between, the alias is expanded
+    /// again: the recursion is that of the `data` type, which ends it.
+    fn expand_alias(
         &self,
         name: &SmolStr,
         home: &SmolStr,
-        f: impl FnOnce(&Self) -> Result<T, DesugarError>,
-    ) -> Result<T, DesugarError> {
-        let key = (home.clone(), name.clone());
+        f: impl FnOnce(&Self) -> Result<Ty, DesugarError>,
+    ) -> Result<Ty, DesugarError> {
         {
             let stack = self.expanding.borrow();
-            if stack.contains(&key) {
-                let mut cycle: Vec<String> = stack.iter().map(|(_, n)| n.to_string()).collect();
-                cycle.push(name.to_string());
-                return Err(DesugarError::RecursiveType {
+            let seen = stack
+                .iter()
+                .rposition(|e| e.args.is_none() && e.home == *home && e.name == *name);
+            if let Some(seen) = seen.filter(|&i| stack[i..].iter().all(|e| e.args.is_none())) {
+                return Err(DesugarError::RecursiveAlias {
                     name: name.to_string(),
-                    cycle: cycle.join(" -> "),
+                    cycle: Self::cycle(&stack, seen, name),
                 });
             }
         }
-        self.expanding.borrow_mut().push(key);
+        self.expanding.borrow_mut().push(Expansion {
+            home: home.clone(),
+            name: name.clone(),
+            args: None,
+            params: HashMap::new(),
+            recursive: false,
+        });
         let result = self.in_scope(home, f);
         self.expanding.borrow_mut().pop();
         result
+    }
+
+    /// The type of the `data` type `name` of the module `home`, with the
+    /// type parameters `params`, at the type arguments `args`. `f` builds
+    /// the sum of its constructors, with the names of `home` in scope and
+    /// each type parameter as its argument.
+    ///
+    /// A reference to the type inside its own body, with the same
+    /// arguments, is the variable of a recursive type, and the result is
+    /// then `mu var. body` (v2 plan decision D7: iso-recursive). Not
+    /// supported, each with its own error: a cycle through another `data`
+    /// type, and a reference with other arguments.
+    fn expand_data(
+        &self,
+        name: &SmolStr,
+        home: &SmolStr,
+        params: &[SmolStr],
+        args: Vec<Ty>,
+        f: impl FnOnce(&Self) -> Result<Ty, DesugarError>,
+    ) -> Result<Ty, DesugarError> {
+        let is_data = |e: &Expansion| e.args.is_some();
+        {
+            let mut stack = self.expanding.borrow_mut();
+            let entered = stack
+                .iter()
+                .rposition(|e| is_data(e) && e.home == *home && e.name == *name);
+            if let Some(entered) = entered {
+                let cycle = Self::cycle(&stack, entered, name);
+                let name = name.to_string();
+                if stack[entered + 1..].iter().any(is_data) {
+                    return Err(DesugarError::MutualRecursion { cycle });
+                }
+                if stack[entered].args.as_ref() != Some(&args) {
+                    return Err(DesugarError::NonRegularRecursion { name, cycle });
+                }
+                stack[entered].recursive = true;
+                return Ok(Ty::Var(mu_var(&name)));
+            }
+            stack.push(Expansion {
+                home: home.clone(),
+                name: name.clone(),
+                params: params.iter().cloned().zip(args.iter().cloned()).collect(),
+                args: Some(args),
+                recursive: false,
+            });
+        }
+        let body = self.in_scope(home, f);
+        let recursive = self
+            .expanding
+            .borrow_mut()
+            .pop()
+            .is_some_and(|e| e.recursive);
+        let body = body?;
+        Ok(if recursive {
+            Ty::Mu {
+                var: mu_var(name),
+                body: Box::new(body),
+            }
+        } else {
+            body
+        })
+    }
+
+    /// The recursive type of the `data` type of the constructor `info`,
+    /// or `None` if that `data` type does not refer to itself. The type
+    /// parameters of the `data` type are type variables in the result.
+    fn recursive_ty(
+        &self,
+        info: &ConstructorInfo,
+    ) -> Result<Option<(Vec<SmolStr>, Ty)>, DesugarError> {
+        let params = match self.registry.get_type(&info.home, &info.data_name) {
+            Some(TypeInfo {
+                def: TypeDef::Data { params, .. },
+                ..
+            }) => params.clone(),
+            _ => {
+                return Err(DesugarError::UnknownType {
+                    name: info.data_name.to_string(),
+                })
+            }
+        };
+        let args: Vec<SurfaceTy> = params.iter().cloned().map(SurfaceTy::Var).collect();
+        let ty = self.in_scope(&info.home, |this| {
+            this.desugar_named_type(&info.data_name, &args)
+        })?;
+        Ok(matches!(ty, Ty::Mu { .. }).then_some((params, ty)))
     }
 
     /// Build the right-nested binary sum type for a list of constructors.
@@ -1040,22 +1191,18 @@ impl Desugarer {
     /// - Nullary: `()`
     /// - Single field: the field type
     /// - Multiple fields: product of field types
-    fn build_sum_type(
-        &self,
-        ctors: &[ConstructorDef],
-        subst: &HashMap<&SmolStr, &Ty>,
-    ) -> Result<Ty, DesugarError> {
+    fn build_sum_type(&self, ctors: &[ConstructorDef]) -> Result<Ty, DesugarError> {
         assert!(
             !ctors.is_empty(),
             "data type must have at least one constructor"
         );
 
         if ctors.len() == 1 {
-            return self.build_payload_type(&ctors[0].fields, subst);
+            return self.build_payload_type(&ctors[0].fields);
         }
 
-        let left = self.build_payload_type(&ctors[0].fields, subst)?;
-        let right = self.build_sum_type(&ctors[1..], subst)?;
+        let left = self.build_payload_type(&ctors[0].fields)?;
+        let right = self.build_sum_type(&ctors[1..])?;
 
         Ok(Ty::Sum {
             left: Box::new(left),
@@ -1068,41 +1215,14 @@ impl Desugarer {
     /// - No fields → `()`
     /// - One field → the field type
     /// - Multiple fields → right-nested product
-    fn build_payload_type(
-        &self,
-        fields: &[SurfaceTy],
-        subst: &HashMap<&SmolStr, &Ty>,
-    ) -> Result<Ty, DesugarError> {
-        match fields.len() {
-            0 => Ok(Ty::Base(BaseTy::Unit)),
-            1 => self.subst_and_desugar_ty(&fields[0], subst),
-            _ => {
-                let first = self.subst_and_desugar_ty(&fields[0], subst)?;
-                let rest_fields = &fields[1..];
-                let rest = self.build_payload_type(rest_fields, subst)?;
-                Ok(Ty::Prod {
-                    left: Box::new(first),
-                    right: Box::new(rest),
-                })
-            }
-        }
-    }
-
-    /// Apply type parameter substitution then desugar.
-    fn subst_and_desugar_ty(
-        &self,
-        ty: &SurfaceTy,
-        subst: &HashMap<&SmolStr, &Ty>,
-    ) -> Result<Ty, DesugarError> {
-        match ty {
-            SurfaceTy::Var(v) => {
-                if let Some(replacement) = subst.get(v) {
-                    Ok((*replacement).clone())
-                } else {
-                    Ok(Ty::Var(v.clone()))
-                }
-            }
-            other => self.desugar_ty(other),
+    fn build_payload_type(&self, fields: &[SurfaceTy]) -> Result<Ty, DesugarError> {
+        match fields {
+            [] => Ok(Ty::Base(BaseTy::Unit)),
+            [field] => self.desugar_ty(field),
+            [first, rest @ ..] => Ok(Ty::Prod {
+                left: Box::new(self.desugar_ty(first)?),
+                right: Box::new(self.build_payload_type(rest)?),
+            }),
         }
     }
 
@@ -1136,14 +1256,29 @@ impl Desugarer {
         // Build the payload expression
         let payload = self.build_payload_expr(args, span)?;
 
-        // Get the full sum type for the "other side" annotations
-        let empty_subst: HashMap<&SmolStr, &Ty> = HashMap::new();
         let ctors = self.ctors_of(&info)?;
+
+        // A value of a recursive type is folded (v2 plan rung E9). The
+        // type parameters of the `data` type are bound in each annotation:
+        // the type checker finds a type for each one at this constructor,
+        // and the fold makes the annotations of the injections agree.
+        let recursive = self.recursive_ty(&info)?;
+        let params: &[SmolStr] = recursive.as_ref().map_or(&[], |(params, _)| params);
 
         // Wrap in inl/inr chain based on index. The types of the other
         // constructors are names of the module that declares the type.
-        self.in_scope(&info.home, |this| {
-            this.wrap_injection(payload, info.index, &ctors, &empty_subst, span)
+        let value = self.in_scope(&info.home, |this| {
+            this.wrap_injection(payload, info.index, &ctors, params, span)
+        })?;
+        Ok(match &recursive {
+            None => value,
+            Some((params, ty)) => Expr::new(
+                ExprKind::Fold {
+                    ty: quantify(ty.clone(), params),
+                    value: Box::new(value),
+                },
+                span,
+            ),
         })
     }
 
@@ -1170,13 +1305,14 @@ impl Desugarer {
         }
     }
 
-    /// Wrap a payload in the appropriate chain of inl/inr.
+    /// Wrap a payload in the appropriate chain of inl/inr. Each annotation
+    /// binds the type parameters `params` ([`quantify`]).
     fn wrap_injection(
         &self,
         payload: Expr,
         index: usize,
         ctors: &[ConstructorDef],
-        subst: &HashMap<&SmolStr, &Ty>,
+        params: &[SmolStr],
         span: Span,
     ) -> Result<Expr, DesugarError> {
         let total = ctors.len();
@@ -1189,10 +1325,10 @@ impl Desugarer {
         if index == 0 {
             // First constructor: inl(payload)
             // The "right" type is the sum of remaining constructors
-            let right_ty = self.build_sum_type(&ctors[1..], subst)?;
+            let right_ty = self.build_sum_type(&ctors[1..])?;
             Ok(Expr::new(
                 ExprKind::Inl {
-                    ty: right_ty,
+                    ty: quantify(right_ty, params),
                     value: Box::new(payload),
                 },
                 span,
@@ -1200,22 +1336,22 @@ impl Desugarer {
         } else if index == total - 1 {
             // Last constructor: inr(inr(...inr(payload)...))
             // Need (total - 1) layers of inr, but we do it recursively
-            let left_ty = self.build_payload_type(&ctors[0].fields, subst)?;
-            let inner = self.wrap_injection(payload, index - 1, &ctors[1..], subst, span)?;
+            let left_ty = self.build_payload_type(&ctors[0].fields)?;
+            let inner = self.wrap_injection(payload, index - 1, &ctors[1..], params, span)?;
             Ok(Expr::new(
                 ExprKind::Inr {
-                    ty: left_ty,
+                    ty: quantify(left_ty, params),
                     value: Box::new(inner),
                 },
                 span,
             ))
         } else {
             // Middle constructor: inr(... inl(payload) ...)
-            let left_ty = self.build_payload_type(&ctors[0].fields, subst)?;
-            let inner = self.wrap_injection(payload, index - 1, &ctors[1..], subst, span)?;
+            let left_ty = self.build_payload_type(&ctors[0].fields)?;
+            let inner = self.wrap_injection(payload, index - 1, &ctors[1..], params, span)?;
             Ok(Expr::new(
                 ExprKind::Inr {
-                    ty: left_ty,
+                    ty: quantify(left_ty, params),
                     value: Box::new(inner),
                 },
                 span,
@@ -1322,7 +1458,14 @@ impl Desugarer {
                 _ => None,
             })
             .ok_or(DesugarError::EmptyMatch)?;
-        let ctors = self.ctors_of(self.ctor(first_ctor)?)?;
+        let info = self.ctor(first_ctor)?;
+        let ctors = self.ctors_of(info)?;
+        // A value of a recursive type is unfolded before its sum is read
+        // (v2 plan rung E9).
+        let core_scrutinee = match self.recursive_ty(info)? {
+            Some(_) => Expr::new(ExprKind::Unfold(Box::new(core_scrutinee)), span),
+            None => core_scrutinee,
+        };
 
         // The constructor index of each arm; `None` for an arm that takes
         // every constructor. A literal or a tuple pattern at the top of
@@ -2515,7 +2658,7 @@ mod expansion_regressions {
         };
         assert!(matches!(
             Desugarer::with_registry(registry).desugar_ty(&recursive),
-            Err(DesugarError::RecursiveType { .. })
+            Err(DesugarError::NonRegularRecursion { .. })
         ));
     }
     #[test]
@@ -2541,7 +2684,7 @@ mod expansion_regressions {
         registry.register_type_alias("", "A64".into(), named("A0"), false);
         assert!(matches!(
             Desugarer::with_registry(registry).desugar_ty(&named("A0")),
-            Err(DesugarError::RecursiveType { .. })
+            Err(DesugarError::RecursiveAlias { .. })
         ));
     }
 }

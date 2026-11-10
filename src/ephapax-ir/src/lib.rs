@@ -491,6 +491,14 @@ pub fn expr_to_sexpr(expr: &Expr) -> SExpr {
             ty_to_sexpr(ty),
             expr_to_sexpr(value),
         ]),
+        ExprKind::Fold { ty, value } => SExpr::List(vec![
+            SExpr::Atom("fold".into()),
+            ty_to_sexpr(ty),
+            expr_to_sexpr(value),
+        ]),
+        ExprKind::Unfold(inner) => {
+            SExpr::List(vec![SExpr::Atom("unfold".into()), expr_to_sexpr(inner)])
+        }
         ExprKind::Case {
             scrutinee,
             left_var,
@@ -720,6 +728,21 @@ pub fn decode_expr(expr: &SExpr) -> Result<Expr, SExprError> {
             ty: decode_ty(&list[1])?,
             value: Box::new(decode_expr(&list[2])?),
         },
+        "fold" => {
+            let [_, ty, value] = &list[..] else {
+                return Err(SExprError::Invalid("(fold ty e)".into()));
+            };
+            ExprKind::Fold {
+                ty: decode_ty(ty)?,
+                value: Box::new(decode_expr(value)?),
+            }
+        }
+        "unfold" => {
+            let [_, inner] = &list[..] else {
+                return Err(SExprError::Invalid("(unfold e)".into()));
+            };
+            ExprKind::Unfold(Box::new(decode_expr(inner)?))
+        }
         "case" => {
             if list.len() != 4 {
                 return Err(SExprError::Invalid("(case scr (x e1) (y e2))".into()));
@@ -894,6 +917,11 @@ fn ty_to_sexpr(ty: &Ty) -> SExpr {
             SExpr::Atom(escape_atom(var)),
             ty_to_sexpr(body),
         ]),
+        Ty::Mu { var, body } => SExpr::List(vec![
+            SExpr::Atom("mu".into()),
+            SExpr::Atom(escape_atom(var)),
+            ty_to_sexpr(body),
+        ]),
         Ty::Unif(id) => SExpr::List(vec![
             SExpr::Atom("unif".into()),
             SExpr::Atom(id.to_string()),
@@ -965,6 +993,20 @@ fn decode_ty(expr: &SExpr) -> Result<Ty, SExprError> {
             mutable: true,
         }),
         "var" => Ok(Ty::Var(SmolStr::new(atom_string(&list[1])?))),
+        // `(mu X ty)`, and `(forall a ty)`: the annotation of a
+        // constructor of a recursive `data` type binds the type
+        // parameters of that type.
+        "mu" | "forall" => {
+            let [_, var, body] = &list[..] else {
+                return Err(SExprError::Invalid("(mu X ty) or (forall a ty)".into()));
+            };
+            let var = SmolStr::new(atom_string(var)?);
+            let body = Box::new(decode_ty(body)?);
+            Ok(match tag.as_str() {
+                "mu" => Ty::Mu { var, body },
+                _ => Ty::ForAll { var, body },
+            })
+        }
         _ => Err(SExprError::Invalid("unknown type tag".into())),
     }
 }
@@ -1157,5 +1199,37 @@ mod tests {
 
         let no_name = SExpr::List(vec![SExpr::Atom("type-app".into())]);
         assert!(decode_expr(&no_name).is_err());
+    }
+
+    /// `fold` keeps its annotation, a recursive type with a bound type
+    /// parameter, and `unfold` keeps its operand (v2 plan rung E9).
+    #[test]
+    fn roundtrip_fold_and_unfold() {
+        // forall a. mu #List. () + (a * #List)
+        let list = Ty::ForAll {
+            var: SmolStr::new("a"),
+            body: Box::new(Ty::Mu {
+                var: SmolStr::new("#List"),
+                body: Box::new(Ty::Sum {
+                    left: Box::new(Ty::Base(BaseTy::Unit)),
+                    right: Box::new(Ty::Prod {
+                        left: Box::new(Ty::Var(SmolStr::new("a"))),
+                        right: Box::new(Ty::Var(SmolStr::new("#List"))),
+                    }),
+                }),
+            }),
+        };
+        let nil = ExprKind::Fold {
+            ty: list,
+            value: Box::new(Expr::dummy(ExprKind::Lit(Literal::Unit))),
+        };
+        let kind = ExprKind::Unfold(Box::new(Expr::dummy(nil)));
+        let sexpr = expr_to_sexpr(&Expr::dummy(kind.clone()));
+        assert_eq!(decode_expr(&sexpr).expect("decode").kind, kind);
+
+        for short in ["fold", "unfold"] {
+            let short = SExpr::List(vec![SExpr::Atom(short.into())]);
+            assert!(decode_expr(&short).is_err());
+        }
     }
 }

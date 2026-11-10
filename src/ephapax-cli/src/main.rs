@@ -42,8 +42,9 @@ struct Cli {
     verbose: bool,
 
     /// Accept the forms of the core language that the proofs do not cover
-    /// yet (v2 plan rung E9): a lambda with an I64, F32 or F64 parameter
-    /// or result. Applies to `run`, `check` and `compile`.
+    /// yet (v2 plan rung E9): a recursive `data` type, and a lambda with
+    /// an I64, F32 or F64 parameter or result. Applies to `run`, `check`
+    /// and `compile`.
     #[arg(long, global = true)]
     unstable_core: bool,
 }

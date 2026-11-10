@@ -179,7 +179,10 @@ impl AffineChecker {
                 self.walk_expr(inner);
             }
 
-            ExprKind::Inl { value, .. } | ExprKind::Inr { value, .. } => {
+            ExprKind::Inl { value, .. }
+            | ExprKind::Inr { value, .. }
+            | ExprKind::Fold { value, .. }
+            | ExprKind::Unfold(value) => {
                 self.walk_expr(value);
             }
 

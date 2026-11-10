@@ -118,6 +118,14 @@ pub enum Ty {
 
     /// Tuple type (T, U, ...)
     Tuple(Vec<Ty>),
+
+    /// Iso-recursive type `mu var. body` (v2 plan decision D7, rung E9).
+    /// `Var(var)` in `body` stands for the whole type. A value of this
+    /// type is made with `fold` and opened with `unfold`; the type is not
+    /// equal to its unfolding. The desugarer makes one for a `data` type
+    /// that refers to itself, and its `var` is not a name that a program
+    /// can write, so a type variable of the program cannot be captured.
+    Mu { var: SmolStr, body: Box<Ty> },
 }
 
 impl Ty {
@@ -142,7 +150,7 @@ impl Ty {
             Ty::Borrow { inner, .. } => inner.references_region(region),
             Ty::List(inner) => inner.references_region(region),
             Ty::Tuple(elements) => elements.iter().any(|t| t.references_region(region)),
-            Ty::ForAll { body, .. } => body.references_region(region),
+            Ty::ForAll { body, .. } | Ty::Mu { body, .. } => body.references_region(region),
             Ty::Effectful { param, ret, .. } => {
                 param.references_region(region) || ret.references_region(region)
             }
@@ -168,6 +176,12 @@ impl Ty {
     ///
     /// Type variables (`Var`, `Unif`) are conservatively non-linear.
     /// Phase 2 will add linearity bounds (`T: Lin`) for generic linear code.
+    ///
+    /// A recursive type `mu X. T` is linear when `T` is linear with `X`
+    /// not linear. This is the least fixed point that the v2 plan gives
+    /// for the grade of a recursive type: the first step of the iteration
+    /// reads `X` as not linear, and a second step cannot change a join.
+    /// So `mu X. () + (String * X)` is linear, as `String` is.
     pub fn is_linear(&self) -> bool {
         match self {
             Ty::String(_) => true,
@@ -176,7 +190,7 @@ impl Ty {
                 ..
             } => true,
             Ty::Region { inner, .. } => inner.is_linear(),
-            Ty::ForAll { body, .. } => body.is_linear(),
+            Ty::ForAll { body, .. } | Ty::Mu { body, .. } => body.is_linear(),
             Ty::Prod { left, right } | Ty::Sum { left, right } => {
                 left.is_linear() || right.is_linear()
             }
@@ -191,8 +205,12 @@ impl Ty {
         match self {
             Ty::Var(v) if v == var => replacement.clone(),
             Ty::Var(_) | Ty::Base(_) | Ty::Unif(_) => self.clone(),
-            Ty::ForAll { var: v, body } if v == var => self.clone(), // shadowed
+            Ty::ForAll { var: v, .. } | Ty::Mu { var: v, .. } if v == var => self.clone(), // shadowed
             Ty::ForAll { var: v, body } => Ty::ForAll {
+                var: v.clone(),
+                body: Box::new(body.subst_var(var, replacement)),
+            },
+            Ty::Mu { var: v, body } => Ty::Mu {
                 var: v.clone(),
                 body: Box::new(body.subst_var(var, replacement)),
             },
@@ -254,7 +272,8 @@ impl Ty {
             | Ty::Region { inner, .. }
             | Ty::Borrow { inner, .. }
             | Ty::List(inner)
-            | Ty::ForAll { body: inner, .. } => inner.contains_unif(id),
+            | Ty::ForAll { body: inner, .. }
+            | Ty::Mu { body: inner, .. } => inner.contains_unif(id),
             Ty::Effectful { param, ret, .. } => param.contains_unif(id) || ret.contains_unif(id),
             Ty::Tuple(elems) => elems.iter().any(|t| t.contains_unif(id)),
         }
@@ -299,6 +318,10 @@ impl Ty {
                 var: var.clone(),
                 body: Box::new(body.resolve(solutions)),
             },
+            Ty::Mu { var, body } => Ty::Mu {
+                var: var.clone(),
+                body: Box::new(body.resolve(solutions)),
+            },
             Ty::Effectful {
                 param,
                 ret,
@@ -310,6 +333,15 @@ impl Ty {
             },
             Ty::List(inner) => Ty::List(Box::new(inner.resolve(solutions))),
             Ty::Tuple(elems) => Ty::Tuple(elems.iter().map(|t| t.resolve(solutions)).collect()),
+        }
+    }
+
+    /// The type of `unfold e` for `e` of this type: `body` with the whole
+    /// type in the place of `var`. `None` if this is not a recursive type.
+    pub fn unfolded(&self) -> Option<Ty> {
+        match self {
+            Ty::Mu { var, body } => Some(body.subst_var(var, self)),
+            _ => None,
         }
     }
 }
@@ -652,6 +684,15 @@ pub enum ExprKind {
 
     /// Tuple field access tuple.N
     TupleIndex { tuple: Box<Expr>, index: usize },
+
+    // ===== Recursive types (v2 plan decision D7, rung E9) =====
+    /// `fold[ty](value)`: `value` has the unfolding of the recursive type
+    /// `ty`, and the result has the type `ty`.
+    Fold { ty: Ty, value: Box<Expr> },
+
+    /// `unfold(e)`: `e` has a recursive type, and the result has its
+    /// unfolding.
+    Unfold(Box<Expr>),
 }
 
 impl Expr {
@@ -693,9 +734,11 @@ impl Expr {
             | ExprKind::Snd(e)
             | ExprKind::Deref(e)
             | ExprKind::Drop(e)
-            | ExprKind::Copy(e) => vec![e],
+            | ExprKind::Copy(e)
+            | ExprKind::Unfold(e) => vec![e],
             ExprKind::Inl { value: e, .. }
             | ExprKind::Inr { value: e, .. }
+            | ExprKind::Fold { value: e, .. }
             | ExprKind::Lambda { body: e, .. }
             | ExprKind::Region { body: e, .. }
             | ExprKind::Borrow { inner: e, .. }

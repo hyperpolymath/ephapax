@@ -131,3 +131,112 @@ fn e2e_wasm_header_valid() {
     assert_eq!(&wasm[0..4], b"\x00asm", "bad WASM magic");
     assert_eq!(&wasm[4..8], &[1, 0, 0, 0], "bad WASM version");
 }
+
+// =========================================================================
+// Core `match` on a hand-built module: the result of `main` is checked
+// =========================================================================
+
+/// Compile a module whose only function is `main(): <ret_ty> = body`, run
+/// it, and return the result of `main`.
+fn run_main<R: wasmtime::WasmResults>(ret_ty: ephapax_syntax::Ty, body: ephapax_syntax::Expr) -> R {
+    use ephapax_syntax::{Decl, Module, Visibility};
+    let module = Module {
+        name: "t".into(),
+        imports: vec![],
+        decls: vec![Decl::Fn {
+            name: "main".into(),
+            visibility: Visibility::Private,
+            type_params: vec![],
+            params: vec![],
+            ret_ty,
+            body,
+        }],
+    };
+    let wasm = ephapax_wasm::compile_module(&module).expect("the module compiles");
+    wasmparser::validate(&wasm).expect("emitted wasm failed wasmparser validation");
+
+    let engine = wasmtime::Engine::default();
+    let module = wasmtime::Module::new(&engine, &wasm).expect("WASM module creation failed");
+    let mut store = wasmtime::Store::new(&engine, ());
+    let mut linker = wasmtime::Linker::new(&engine);
+    linker
+        .func_wrap("env", "print_i32", |_val: i32| {})
+        .expect("failed to define print_i32");
+    linker
+        .func_wrap("env", "print_string", |_ptr: i32, _len: i32| {})
+        .expect("failed to define print_string");
+    let instance = linker
+        .instantiate(&mut store, &module)
+        .expect("WASM instantiation failed");
+    instance
+        .get_typed_func::<(), R>(&mut store, "main")
+        .expect("main function not found")
+        .call(&mut store, ())
+        .expect("WASM execution trapped")
+}
+
+/// A tuple pattern reads the 8-byte slots of the tuple, each at its own
+/// type. It used to follow pair pointers, which a tuple does not have.
+#[test]
+fn e2e_tuple_pattern_reads_the_tuple_slots() {
+    use ephapax_syntax::{BaseTy, Expr, ExprKind, Literal, MatchArm, Pattern, Ty};
+    let lit = |l| Expr::dummy(ExprKind::Lit(l));
+    // match (1, 5000000000, 3) of | (a, b, c) => b end
+    let body = Expr::dummy(ExprKind::Match {
+        scrutinee: Box::new(Expr::dummy(ExprKind::TupleLit(vec![
+            lit(Literal::I32(1)),
+            lit(Literal::I64(5_000_000_000)),
+            lit(Literal::I32(3)),
+        ]))),
+        arms: vec![MatchArm {
+            pattern: Pattern::Tuple(vec![
+                Pattern::Var("a".into()),
+                Pattern::Var("b".into()),
+                Pattern::Var("c".into()),
+            ]),
+            guard: None,
+            body: Expr::dummy(ExprKind::Var("b".into())),
+        }],
+    });
+    let result: i64 = run_main(Ty::Base(BaseTy::I64), body);
+    assert_eq!(result, 5_000_000_000);
+}
+
+/// A name that one `match` arm binds is not in scope in the next arm.
+/// The next arm used to read the binder of the arm that did not match.
+#[test]
+fn e2e_match_arm_binder_ends_with_its_arm() {
+    use ephapax_syntax::{BaseTy, Expr, ExprKind, Literal, MatchArm, Pattern, Ty};
+    let lit = |n| Expr::dummy(ExprKind::Lit(Literal::I32(n)));
+    let var = |name: &str| Expr::dummy(ExprKind::Var(name.into()));
+    // let y = 5 in match (1, 2) of | (0, y) => y | _ => y end
+    let matched = Expr::dummy(ExprKind::Match {
+        scrutinee: Box::new(Expr::dummy(ExprKind::Pair {
+            left: Box::new(lit(1)),
+            right: Box::new(lit(2)),
+        })),
+        arms: vec![
+            MatchArm {
+                pattern: Pattern::Pair(
+                    Box::new(Pattern::Literal(Literal::I32(0))),
+                    Box::new(Pattern::Var("y".into())),
+                ),
+                guard: None,
+                body: var("y"),
+            },
+            MatchArm {
+                pattern: Pattern::Wildcard,
+                guard: None,
+                body: var("y"),
+            },
+        ],
+    });
+    let body = Expr::dummy(ExprKind::Let {
+        name: "y".into(),
+        ty: None,
+        value: Box::new(lit(5)),
+        body: Box::new(matched),
+    });
+    let result: i32 = run_main(Ty::Base(BaseTy::I32), body);
+    assert_eq!(result, 5);
+}

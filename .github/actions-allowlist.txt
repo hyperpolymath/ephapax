@@ -1,0 +1,41 @@
+# SPDX-License-Identifier: MPL-2.0
+# Owner: Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk>
+#
+# Reviewed copy of the Actions allow-list of this repository:
+# Settings > Actions > General > "Allow ... specified actions and reusable
+# workflows". GitHub does not read this file; the owner changes the setting
+# by hand. When a workflow needs a new action, add the entry here in the
+# same pull request, then update the setting.
+#
+# Also required on that page: "Allow actions created by GitHub"
+# (actions/*, github/codeql-action).
+#
+# Source of the entries: each `uses:` in .github/workflows/*.yml, and the
+# `uses` list of metadatastician/standards in .github/workflows/actions.lock
+# (what the reusable workflows use). To paste the list into the settings
+# page, take the lines that do not start with `#`.
+
+# This repository's own workflows.
+Swatinem/rust-cache@*,
+swatinem/rust-cache@*,
+dawidd6/action-send-mail@*,
+dtolnay/rust-toolchain@*,
+mlugg/setup-zig@*,
+peter-evans/repository-dispatch@*,
+
+# The reusable workflows of the standards repository, and what they use.
+metadatastician/standards/.github/workflows/*@*,
+denoland/setup-deno@*,
+editorconfig-checker/action-editorconfig-checker@*,
+erlef/setup-beam@*,
+goto-bus-stop/setup-zig@*,
+ossf/scorecard-action@*,
+oven-sh/setup-bun@*,
+webfactory/ssh-agent@*,
+
+# The owner's own repositories.
+hyperpolymath/*,
+
+# No workflow uses these yet. Kept by owner decision (2026-11-10).
+extractions/setup-just@*,
+ludeeus/action-shellcheck@*

@@ -51,13 +51,26 @@ fn module_key(name: &str) -> String {
 /// its names (they are the entry points of the program); after it, the
 /// first module that declares a name keeps it.
 pub(crate) fn qualify_functions(modules: &mut [LoadedModule]) {
-    let root = modules.len().saturating_sub(1);
+    let qualified = qualified_names(modules);
+    if qualified.iter().all(Renames::is_empty) {
+        return;
+    }
+    let scopes = scopes(modules, &qualified);
+    for (m, scope) in modules.iter_mut().zip(&scopes) {
+        if !scope.is_empty() {
+            m.core.decls.iter_mut().for_each(|d| rename_decl(d, scope));
+        }
+    }
+}
 
-    // The new name of each function that must change, by module.
+/// For each module, the new name of each of its functions that must
+/// change: `<module>::<function>`.
+fn qualified_names(modules: &[LoadedModule]) -> Vec<Renames> {
+    let root = modules.len().saturating_sub(1);
     let mut owner = HashMap::new();
     let mut qualified = vec![Renames::new(); modules.len()];
     for i in std::iter::once(root).chain(0..root) {
-        let Some(m) = modules.get(i) else { return };
+        let Some(m) = modules.get(i) else { break };
         for (name, _, function) in callables(&m.core) {
             if function && *owner.entry(name).or_insert(i) != i {
                 let new = format!("{}::{name}", m.logical_path);
@@ -65,19 +78,19 @@ pub(crate) fn qualify_functions(modules: &mut [LoadedModule]) {
             }
         }
     }
-    if qualified.iter().all(Renames::is_empty) {
-        return;
-    }
+    qualified
+}
 
-    // What each name means in each module, in the order the type checker
-    // brings names into scope: the imports in order (a later one shadows
-    // an earlier one), then the declarations of the module.
+/// For each module, what each renamed name means there, in the order the
+/// type checker brings names into scope: the imports in order (a later
+/// one shadows an earlier one), then the declarations of the module.
+fn scopes(modules: &[LoadedModule], qualified: &[Renames]) -> Vec<Renames> {
     let index: HashMap<String, usize> = modules
         .iter()
         .enumerate()
         .map(|(i, m)| (module_key(&m.core.name), i))
         .collect();
-    let scopes: Vec<Renames> = modules
+    modules
         .iter()
         .enumerate()
         .map(|(i, m)| {
@@ -103,25 +116,20 @@ pub(crate) fn qualify_functions(modules: &mut [LoadedModule]) {
             }
             scope
         })
-        .collect();
+        .collect()
+}
 
-    for (m, scope) in modules.iter_mut().zip(&scopes) {
-        if scope.is_empty() {
-            continue;
+fn rename_decl(decl: &mut Decl, scope: &Renames) {
+    match decl {
+        Decl::Fn {
+            name, params, body, ..
+        } => {
+            rename(name, scope);
+            params.iter_mut().for_each(|(p, _)| rename(p, scope));
+            rename_expr(body, scope);
         }
-        for decl in &mut m.core.decls {
-            match decl {
-                Decl::Fn {
-                    name, params, body, ..
-                } => {
-                    rename(name, scope);
-                    params.iter_mut().for_each(|(p, _)| rename(p, scope));
-                    rename_expr(body, scope);
-                }
-                Decl::Const { value, .. } => rename_expr(value, scope),
-                Decl::Type { .. } | Decl::Extern { .. } | Decl::Data { .. } => {}
-            }
-        }
+        Decl::Const { value, .. } => rename_expr(value, scope),
+        Decl::Type { .. } | Decl::Extern { .. } | Decl::Data { .. } => {}
     }
 }
 

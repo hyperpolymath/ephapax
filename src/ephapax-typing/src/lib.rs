@@ -141,6 +141,12 @@ pub enum TypeError {
     )]
     PolymorphicRecursion(Var),
 
+    /// The guard of a match arm consumes a binding that can be used one
+    /// time. A false guard gives the value to the next arm, so the
+    /// binding would be used 2 times.
+    #[error("The guard of a match arm consumes `{0}`, which can be used one time. A guard can read or borrow it: a false guard gives the value to the next arm")]
+    GuardConsumesLinear(Var),
+
     /// Type arguments on a name that is not a generic function.
     #[error("`{0}` is not a generic function and cannot take type arguments")]
     NotGeneric(Var),
@@ -363,6 +369,24 @@ impl Context {
     /// Create a snapshot of the current context for branch checking.
     pub fn snapshot(&self) -> Self {
         self.clone()
+    }
+
+    /// A binding that can be used one time, and that is used here but
+    /// was not used in `before` (the first one by name, if there are 2).
+    fn consumed_since(&self, before: &Context) -> Option<Var> {
+        let unused_before = |name: &Var, entry: &CtxEntry| {
+            before
+                .vars
+                .get(name)
+                .is_some_and(|old| old.id == entry.id && !old.used)
+        };
+        self.vars
+            .iter()
+            .filter(|(name, entry)| {
+                entry.forbids_reuse() && entry.used && unused_before(name, entry)
+            })
+            .map(|(name, _)| name.clone())
+            .min()
     }
 
     /// Check that two contexts agree on linear variable usage.
@@ -1823,8 +1847,16 @@ impl TypeChecker {
             }
 
             if let Some(guard) = &arm.guard {
+                // A false guard gives the value to the next arm, and that
+                // arm is checked from the state after the scrutinee. So
+                // the guard must leave each use-once binding as it found
+                // it: it can read or borrow one, not consume it.
+                let before = self.ctx.snapshot();
                 let guard_ty = self.check(guard)?;
                 self.unify(guard.span, &Ty::Base(BaseTy::Bool), &guard_ty)?;
+                if let Some(name) = self.ctx.consumed_since(&before) {
+                    return Err(self.at(guard.span, TypeError::GuardConsumesLinear(name)));
+                }
             }
 
             let body_ty = self.check(&arm.body)?;

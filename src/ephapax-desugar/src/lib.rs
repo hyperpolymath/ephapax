@@ -214,9 +214,11 @@ pub struct DataRegistry {
     /// form so `desugar_named_type` can recursively expand them on
     /// demand. The stored value is whatever the parser produced for the
     /// alias body (record/sum decls already pre-lowered to `Prod`/`Sum`/
-    /// `Tuple` by `parse_type_decl`), and the key of the module that
-    /// declares the alias: the body expands in the scope of that module.
-    type_aliases: HashMap<SmolStr, (SurfaceTy, SmolStr)>,
+    /// `Tuple` by `parse_type_decl`). An alias is visible in each module.
+    /// Each entry has the key of the module that declares the alias: the
+    /// body expands in the scope of that module, and a module that
+    /// declares an alias of the same name gets its own.
+    type_aliases: HashMap<SmolStr, Vec<(SmolStr, SurfaceTy)>>,
 }
 
 impl DataRegistry {
@@ -292,11 +294,20 @@ impl DataRegistry {
     /// form. Lookups in `desugar_named_type` find the entry and
     /// recursively desugar it.
     pub fn register_type_alias(&mut self, home: &str, name: SmolStr, ty: SurfaceTy) {
-        self.type_aliases.insert(name, (ty, home.into()));
+        let entries = self.type_aliases.entry(name).or_default();
+        entries.retain(|(module, _)| module != home);
+        entries.push((home.into(), ty));
     }
 
-    fn lookup_type_alias(&self, name: &str) -> Option<&(SurfaceTy, SmolStr)> {
-        self.type_aliases.get(name)
+    /// The alias `name` as the module `scope` sees it, with the key of
+    /// the module that declares it: the alias of `scope`, or else the
+    /// alias that was registered last.
+    fn lookup_type_alias(&self, scope: &str, name: &str) -> Option<&(SmolStr, SurfaceTy)> {
+        let entries = self.type_aliases.get(name)?;
+        entries
+            .iter()
+            .find(|(module, _)| module == scope)
+            .or(entries.last())
     }
 
     /// Look up a constructor by its name in the module `scope`.
@@ -939,7 +950,11 @@ impl Desugarer {
         // `type Foo = T` aliases — recursively desugar the stored surface
         // form. Aliases are monomorphic here (parameterised aliases would
         // carry their args via the body).
-        if let Some((aliased, home)) = self.registry.lookup_type_alias(name.as_str()).cloned() {
+        let alias = self
+            .registry
+            .lookup_type_alias(&self.scope.borrow(), name.as_str())
+            .cloned();
+        if let Some((home, aliased)) = alias {
             if !args.is_empty() {
                 return Err(DesugarError::TypeArityMismatch {
                     name: name.to_string(),

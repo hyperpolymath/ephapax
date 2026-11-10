@@ -2758,12 +2758,6 @@ fn type_check_module_inner(tc: &mut TypeChecker, module: &Module) -> Result<(), 
         if type_params.is_empty() {
             continue;
         }
-        if name == "main" {
-            return Err(SpannedTypeError {
-                error: TypeError::GenericMain,
-                span: body.span,
-            });
-        }
         // A type parameter can stand for a linear type. The check above
         // took each type parameter as an opaque type, so the body uses
         // such a value only in ways that every type allows. Check the

@@ -25,7 +25,7 @@ use std::path::{Path, PathBuf};
 use ephapax_desugar::{DataRegistry, DesugarError, Desugarer};
 use ephapax_parser::ParseError;
 use ephapax_syntax::{Decl, ExternItem, Module};
-use ephapax_typing::{module_expr_types, ModuleRegistry, SpannedTypeError};
+use ephapax_typing::{module_expr_types, ModuleRegistry, SpannedTypeError, TypeError};
 use ephapax_wasm::CodegenError;
 
 /// One module of a loaded program, desugared to core.
@@ -265,6 +265,30 @@ pub fn check_program(program: &Program) -> Result<(), DriverError> {
             }
         })?);
     }
+    // Only the `main` of the root module is the entry point of the
+    // program, and no call gives an entry point its type arguments. A
+    // generic `main` of an imported module is a function like any other.
+    let root = program.root();
+    let generic_main = root.core.decls.iter().find_map(|decl| match decl {
+        Decl::Fn {
+            name,
+            type_params,
+            body,
+            ..
+        } if name == "main" && !type_params.is_empty() => Some(body.span),
+        _ => None,
+    });
+    if let Some(span) = generic_main {
+        return Err(DriverError::Type {
+            module: root.core.name.to_string(),
+            path: root.file_path.clone(),
+            source_text: root.source.clone(),
+            error: Box::new(SpannedTypeError {
+                error: TypeError::GenericMain,
+                span,
+            }),
+        });
+    }
     // A program is one wasm module, and codegen finds a callee by its
     // bare name. Two functions of the same name get module-qualified names
     // in the merge (`qualify`). An extern function cannot: its name is the
@@ -326,7 +350,6 @@ pub fn check_program(program: &Program) -> Result<(), DriverError> {
         .iter()
         .any(|m| m.core.decls.iter().any(generic))
     {
-        let root = program.root();
         let merged = program.clone().into_merged()?;
         let types = module_expr_types(&merged, &mut ModuleRegistry::new()).map_err(|error| {
             DriverError::Type {

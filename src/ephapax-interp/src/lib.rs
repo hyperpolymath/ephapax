@@ -407,7 +407,9 @@ impl Interpreter {
     pub fn eval(&mut self, expr: &Expr) -> Result<Value, RuntimeError> {
         match &expr.kind {
             ExprKind::Lit(lit) => self.eval_lit(lit),
-            ExprKind::Var(name) => self.eval_var(name),
+            // The interpreter runs a generic function as it is: the type
+            // arguments select no code.
+            ExprKind::Var(name) | ExprKind::TypeApp { name, .. } => self.eval_var(name),
             ExprKind::StringNew { region, value } => self.eval_string_new(region, value),
             ExprKind::StringConcat { left, right } => self.eval_string_concat(left, right),
             ExprKind::StringLen(inner) => self.eval_string_len(inner),

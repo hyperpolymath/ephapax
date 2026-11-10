@@ -120,6 +120,9 @@ pub enum DesugarError {
     #[error("empty match expression")]
     EmptyMatch,
 
+    #[error("type arguments need the name of a generic function before them, as in `id[I32](3)`")]
+    TypeArgumentsOnExpression,
+
     /// A `match` with a guard goes to the core `match`, which has no
     /// form for a constructor inside another pattern.
     #[error(
@@ -580,6 +583,28 @@ impl Desugarer {
                 list: Box::new(self.desugar_expr(list)?),
                 index: Box::new(self.desugar_expr(index)?),
             },
+            SurfaceExprKind::TypeApp { func, type_args } => {
+                let func = self.desugar_expr(func)?;
+                match (&type_args[..], func.kind) {
+                    // `xs[i](3)`: a lower-case name is a type only as a
+                    // type parameter of this function. Any other name
+                    // is a variable, and the brackets are an index.
+                    ([SurfaceTy::Var(v)], list) if !self.fn_type_params.contains(v) => {
+                        ExprKind::ListIndex {
+                            list: Box::new(Expr::new(list, func.span)),
+                            index: Box::new(Expr::new(ExprKind::Var(v.clone()), span)),
+                        }
+                    }
+                    (_, ExprKind::Var(name)) => ExprKind::TypeApp {
+                        name,
+                        type_args: type_args
+                            .iter()
+                            .map(|ty| self.desugar_ty(ty))
+                            .collect::<Result<_, _>>()?,
+                    },
+                    _ => return Err(DesugarError::TypeArgumentsOnExpression),
+                }
+            }
             SurfaceExprKind::TupleLit(elements) => {
                 let desugared: Vec<_> = elements
                     .iter()

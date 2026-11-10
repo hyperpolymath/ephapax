@@ -53,7 +53,9 @@ impl EscapeAnalysis {
 
     fn analyze_expr(expr: &Expr, escaping: &mut HashSet<SmolStr>, in_escaping_context: bool) {
         match &expr.kind {
-            ExprKind::Var(name) => {
+            // A generic function at explicit type arguments is a use of the
+            // function, as a variable is.
+            ExprKind::Var(name) | ExprKind::TypeApp { name, .. } => {
                 if in_escaping_context {
                     escaping.insert(name.clone());
                 }

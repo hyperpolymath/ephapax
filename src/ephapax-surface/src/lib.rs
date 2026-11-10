@@ -363,6 +363,13 @@ pub enum SurfaceExprKind {
         index: usize,
     },
 
+    /// Explicit type arguments of a generic function: `id[I32]` in
+    /// `id[I32](3)`.
+    TypeApp {
+        func: Box<SurfaceExpr>,
+        type_args: Vec<SurfaceTy>,
+    },
+
     // === Surface-only nodes ===
     /// Named constructor application: `Some(x)`, `None`, `Ok(value)`
     ///

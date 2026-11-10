@@ -483,6 +483,12 @@ pub enum ExprKind {
     /// Variable reference
     Var(Var),
 
+    /// A generic function with explicit type arguments: `id[I32]` (v2
+    /// plan rung E7). The checker takes the type arguments from here
+    /// and not from the call; monomorphisation replaces the node with
+    /// the name of the copy.
+    TypeApp { name: Var, type_args: Vec<Ty> },
+
     // ===== String operations =====
     /// String allocation: String.new@r("...")
     StringNew { region: RegionName, value: String },
@@ -670,7 +676,10 @@ impl Expr {
     pub fn children_mut(&mut self) -> Vec<&mut Expr> {
         // No `_` arm: a new expression form must list its children.
         let children: Vec<&mut Expr> = match &mut self.kind {
-            ExprKind::Lit(_) | ExprKind::Var(_) | ExprKind::StringNew { .. } => vec![],
+            ExprKind::Lit(_)
+            | ExprKind::Var(_)
+            | ExprKind::TypeApp { .. }
+            | ExprKind::StringNew { .. } => vec![],
             ExprKind::StringConcat { left, right }
             | ExprKind::Pair { left, right }
             | ExprKind::BinOp { left, right, .. } => vec![left, right],

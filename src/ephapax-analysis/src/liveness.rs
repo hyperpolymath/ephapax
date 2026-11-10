@@ -62,7 +62,9 @@ impl LivenessAnalysis {
 
     fn compute(expr: &Expr, live: &mut HashSet<SmolStr>) {
         match &expr.kind {
-            ExprKind::Var(name) => {
+            // A generic function at explicit type arguments is a use of the
+            // function, as a variable is.
+            ExprKind::Var(name) | ExprKind::TypeApp { name, .. } => {
                 live.insert(name.clone());
             }
 

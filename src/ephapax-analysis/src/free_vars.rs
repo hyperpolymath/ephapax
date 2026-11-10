@@ -57,7 +57,9 @@ impl FreeVarAnalysis {
 
     fn collect(expr: &Expr, free: &mut HashSet<SmolStr>, bound: &mut HashSet<SmolStr>) {
         match &expr.kind {
-            ExprKind::Var(name) => {
+            // A generic function at explicit type arguments is a use of the
+            // function, as a variable is.
+            ExprKind::Var(name) | ExprKind::TypeApp { name, .. } => {
                 if !bound.contains(name) {
                     free.insert(name.clone());
                 }

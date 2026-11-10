@@ -422,6 +422,14 @@ pub fn expr_to_sexpr(expr: &Expr) -> SExpr {
             SExpr::Atom("var".into()),
             SExpr::Atom(escape_atom(name)),
         ]),
+        ExprKind::TypeApp { name, type_args } => {
+            let mut items = vec![
+                SExpr::Atom("type-app".into()),
+                SExpr::Atom(escape_atom(name)),
+            ];
+            items.extend(type_args.iter().map(ty_to_sexpr));
+            SExpr::List(items)
+        }
         ExprKind::StringNew { region, value } => SExpr::List(vec![
             SExpr::Atom("string-new".into()),
             SExpr::Atom(escape_atom(region)),
@@ -654,6 +662,15 @@ pub fn decode_expr(expr: &SExpr) -> Result<Expr, SExprError> {
             ExprKind::Lit(decode_lit(&list[1])?)
         }
         "var" => ExprKind::Var(SmolStr::new(atom_string(&list[1])?)),
+        "type-app" => {
+            let [_, name, type_args @ ..] = &list[..] else {
+                return Err(SExprError::Invalid("(type-app f ty ...)".into()));
+            };
+            ExprKind::TypeApp {
+                name: SmolStr::new(atom_string(name)?),
+                type_args: type_args.iter().map(decode_ty).collect::<Result<_, _>>()?,
+            }
+        }
         "string-new" => {
             if list.len() != 3 {
                 return Err(SExprError::Invalid("(string-new r \"s\")".into()));
@@ -1125,5 +1142,20 @@ mod tests {
         let sexpr = module_to_sexpr(&module);
         let parsed = module_from_sexpr(&sexpr).expect("parse");
         assert_eq!(module, parsed);
+    }
+
+    /// A generic function at explicit type arguments keeps its name and
+    /// its type arguments; a `type-app` with no name is refused.
+    #[test]
+    fn roundtrip_type_app() {
+        let kind = ExprKind::TypeApp {
+            name: SmolStr::new("id"),
+            type_args: vec![Ty::Base(BaseTy::I32), Ty::Var(SmolStr::new("a"))],
+        };
+        let sexpr = expr_to_sexpr(&Expr::dummy(kind.clone()));
+        assert_eq!(decode_expr(&sexpr).expect("decode").kind, kind);
+
+        let no_name = SExpr::List(vec![SExpr::Atom("type-app".into())]);
+        assert!(decode_expr(&no_name).is_err());
     }
 }

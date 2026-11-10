@@ -1339,6 +1339,21 @@ fn parse_postfix_expr(pair: pest::iterators::Pair<Rule>) -> Result<SurfaceExpr, 
                         }
                     }
                 }
+                Rule::type_app_op => {
+                    let type_args = op_inner
+                        .into_inner()
+                        .flat_map(|list| list.into_inner())
+                        .filter(|p| p.as_rule() == Rule::ty)
+                        .map(parse_type)
+                        .collect::<Result<_, _>>()?;
+                    result = SurfaceExpr::new(
+                        SurfaceExprKind::TypeApp {
+                            func: Box::new(result),
+                            type_args,
+                        },
+                        span,
+                    );
+                }
                 Rule::index_op => {
                     let idx_pair = op_inner
                         .into_inner()

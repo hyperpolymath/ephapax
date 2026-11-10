@@ -267,7 +267,10 @@ fn first_unsupported_in(expr: &Expr, types: Option<&ExprTypes>) -> Option<Codege
         return here;
     }
     let children: Vec<&Expr> = match &expr.kind {
-        ExprKind::Lit(_) | ExprKind::Var(_) | ExprKind::StringNew { .. } => vec![],
+        ExprKind::Lit(_)
+        | ExprKind::Var(_)
+        | ExprKind::TypeApp { .. }
+        | ExprKind::StringNew { .. } => vec![],
         ExprKind::StringConcat { left, right }
         | ExprKind::Pair { left, right }
         | ExprKind::BinOp { left, right, .. } => vec![left, right],
@@ -2230,7 +2233,10 @@ impl Codegen {
 
         match &expr.kind {
             ExprKind::Lit(lit) => self.compile_lit(func, lit),
-            ExprKind::Var(name) => self.compile_var(func, name),
+            // Monomorphisation replaces a `TypeApp` with the name of the
+            // copy. In a module that was not monomorphised it is a use of
+            // the name, as a variable is.
+            ExprKind::Var(name) | ExprKind::TypeApp { name, .. } => self.compile_var(func, name),
             ExprKind::StringNew { region: _, value } => self.compile_string_new(func, value),
             ExprKind::StringConcat { left, right } => self.compile_string_concat(func, left, right),
             ExprKind::StringLen(inner) => self.compile_string_len(func, inner),
@@ -2487,7 +2493,7 @@ impl Codegen {
             seen: &mut HashSet<String>,
         ) {
             match &expr.kind {
-                ExprKind::Var(name) => {
+                ExprKind::Var(name) | ExprKind::TypeApp { name, .. } => {
                     if !bound.contains(name.as_str()) && !seen.contains(name.as_str()) {
                         free.push(name.to_string());
                         seen.insert(name.to_string());

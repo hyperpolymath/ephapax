@@ -54,6 +54,11 @@ fn substitute_node(expr: &mut Expr, subst: &Subst) {
         | ExprKind::Lambda { param_ty: ty, .. }
         | ExprKind::Inl { ty, .. }
         | ExprKind::Inr { ty, .. } => *ty = subst_tys(ty, subst),
+        ExprKind::TypeApp { type_args, .. } => {
+            for ty in type_args {
+                *ty = subst_tys(ty, subst);
+            }
+        }
         _ => {}
     }
 }
@@ -123,9 +128,12 @@ impl Mono<'_> {
     fn rewrite(&mut self, expr: &mut Expr, subst: &Subst) {
         // The table has the id that the node had when it was checked.
         let args = self.type_args.get(&expr.id).cloned();
-        if let (ExprKind::Var(name), Some(args)) = (&mut expr.kind, args) {
+        if let (ExprKind::Var(name) | ExprKind::TypeApp { name, .. }, Some(args)) =
+            (&expr.kind, args)
+        {
             let args = args.iter().map(|t| subst_tys(t, subst)).collect();
-            *name = self.instance(name, args);
+            // The copy has no type parameter: explicit type arguments end here.
+            expr.kind = ExprKind::Var(self.instance(name, args));
         }
         if !subst.is_empty() {
             substitute_node(expr, subst);

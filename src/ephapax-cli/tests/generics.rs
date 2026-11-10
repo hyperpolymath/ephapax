@@ -89,6 +89,94 @@ fn a_generic_function_runs_at_each_type_it_is_used_with() {
     }
 }
 
+/// A call can give its type arguments: `id[I32](3)`. The checker takes
+/// them from the brackets, so a type parameter that no argument fixes
+/// has a value.
+#[test]
+fn a_call_can_give_its_type_arguments() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let id = "fn id<a>(x: a): a = x\n\n";
+    // (declarations, type and body of `main`, output)
+    for (decls, ty, main, want) in [
+        (id, "I32", "id[I32](3)", "3"),
+        (id, "I32", "id[I32](41)", "41"),
+        (id, "F64", "id[F64](2.5)", "2.5"),
+        // Two type parameters.
+        (
+            "fn pair<a, b>(p: (a, b)): (a, b) = p\n\n",
+            "I64",
+            "snd(pair[I32, I64]((1, 6000000000)))",
+            "6000000000i64",
+        ),
+        // A type parameter of the caller as a type argument, in lower
+        // case and in upper case. In `g`, `a` is a variable too.
+        (
+            "fn id<a>(x: a): a = x\n\nfn g<a>(a: a): a = id[a](a)\n\n\
+             fn wrap<T>(x: T): T = id[T](x)\n\n",
+            "I32",
+            "g(8) * 10 + wrap[I32](5)",
+            "85",
+        ),
+        // A region type as a type argument.
+        (
+            id,
+            "I32",
+            "region r {\n    let! s = String.new@r(\"hello\")\n    String.len(id[String@r](s))\n  }",
+            "5",
+        ),
+        // Brackets with one name that is not a type parameter are an
+        // index, as before: the call is a call of the list element.
+        (
+            "",
+            "I32",
+            "let fs = [fn(x: I32) -> x + 1, fn(x: I32) -> x + 2] in\n  let i = 1 in\n  fs[i](3)",
+            "5",
+        ),
+    ] {
+        write(
+            tmp.path(),
+            "app.eph",
+            &format!("module app\n\n{decls}fn main(): {ty} =\n  {main}\n"),
+        );
+        for args in [&["run", "app.eph"][..], &["run", "--interp", "app.eph"]] {
+            let out = ephapax(tmp.path(), args);
+            assert_eq!(
+                String::from_utf8_lossy(&out.stdout).trim(),
+                want,
+                "{main} under {args:?}:\n{}",
+                String::from_utf8_lossy(&out.stderr)
+            );
+        }
+    }
+
+    // No argument fixes `a`: the brackets do. Wasm only: the interpreter
+    // cannot call a function with no parameter by its name.
+    write(
+        tmp.path(),
+        "zero.eph",
+        "module zero\n\nfn zero<a>(): I32 = 7\n\nfn main(): I32 = zero[I64]()\n",
+    );
+    let out = ephapax(tmp.path(), &["run", "zero.eph"]);
+    assert_eq!(String::from_utf8_lossy(&out.stdout).trim(), "7");
+
+    // A type argument of a function of another module, with and without
+    // the module qualifier.
+    write(
+        tmp.path(),
+        "lib.eph",
+        "module lib\n\npub fn id<a>(x: a): a = x\n",
+    );
+    write(
+        tmp.path(),
+        "use.eph",
+        "module use\n\nimport lib\n\nfn main(): I32 = lib.id[I32](4) + id[I32](5)\n",
+    );
+    for args in [&["run", "use.eph"][..], &["run", "--interp", "use.eph"]] {
+        let out = ephapax(tmp.path(), args);
+        assert_eq!(String::from_utf8_lossy(&out.stdout).trim(), "9", "{args:?}");
+    }
+}
+
 /// The merged program has one monomorphic function for each set of type
 /// arguments, and no generic function.
 #[test]
@@ -142,6 +230,20 @@ fn generic_programs_the_checker_refuses() {
         (
             "fn zero<a>(): I32 = 0\n\nfn main(): I32 = zero()\n",
             "Cannot infer a type argument of the generic function `zero`",
+        ),
+        // Explicit type arguments: the wrong type, a function that is not
+        // generic, the wrong number.
+        (
+            "fn id<a>(x: a): a = x\n\nfn main(): I32 = id[I64](3)\n",
+            "Type mismatch: expected Base(I64), found Base(I32)",
+        ),
+        (
+            "fn inc(x: I32): I32 = x + 1\n\nfn main(): I32 = inc[I32](3)\n",
+            "`inc` is not a generic function and cannot take type arguments",
+        ),
+        (
+            "fn id<a>(x: a): a = x\n\nfn main(): I32 = id[I32, I64](3)\n",
+            "The generic function `id` has 1 type parameter(s), but the call gives 2 type argument(s)",
         ),
         // No call gives the entry point its type arguments.
         (

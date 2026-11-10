@@ -574,9 +574,13 @@ the per-crate breakdown). Key test categories:
 
 == Design Documents
 
-* `spec/ephapax-v2-grammar.ebnf` — complete v2 grammar (modules,
-  generics, effects, traits, comptime, contracts) — work in flight
-  on `feat/v2-grammar-*` branches
+* `spec/ephapax-v2-grammar.ebnf` - the v2 grammar in 2 parts. Part 1
+  is the parser grammar: a test of `ephapax-parser`
+  (`grammar_conformance`) makes it from `ephapax.pest`, so the 2 files
+  are one grammar. Part 2 keeps the v2 design productions that the
+  parser does not have (traits, effect declarations, comptime,
+  contracts), each with the mark `[ALIAS rule]` or `[UNIMPLEMENTED]`;
+  the parser refuses the fixture of each `[UNIMPLEMENTED]` production
 * `docs/specs/DESIGN-DECISIONS.adoc` — 17 ADRs with rationale
 * `docs/specs/LANGUAGE-COMPARISON.adoc` — comparison against 10 languages
 * `docs/vision/EPHAPAX-VISION.adoc` — design rationale, why dyadic +

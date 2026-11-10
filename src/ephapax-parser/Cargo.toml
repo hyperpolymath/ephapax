@@ -24,6 +24,9 @@ pest = "2.7"
 pest_derive = "2.7"
 
 [dev-dependencies]
+# The grammar conformance test reads ephapax.pest with the parser that
+# pest_derive uses (already in the lock file, same version).
+pest_meta = "2.7"
 ephapax-desugar = { path = "../ephapax-desugar" }
 ephapax-typing = { path = "../ephapax-typing" }
 criterion = { workspace = true }

@@ -279,6 +279,8 @@ fn a_module_names_a_data_type_only_through_a_pub_import() {
         "lib.eph",
         "module lib\n\ndata Inner = I(I32)\n\npub data Outer = O(Inner)\n\n\
          pub data Box = MkBox(I32)\n\ndata Secret = Hidden(I32)\n\n\
+         type Count = I32\n\npub data Tally = T(Count)\n\n\
+         pub fn total(t: Tally): I32 = match t of | T(n) => n end\n\n\
          pub fn mk(n: I32): Outer = O(I(n))\n\n\
          pub fn get(o: Outer): I32 = match o of | O(i) => match i of | I(n) => n end end\n\n\
          pub fn unbox(b: Box): I32 = match b of | MkBox(v) => v end\n\n\
@@ -319,6 +321,13 @@ fn a_module_names_a_data_type_only_through_a_pub_import() {
             "import lib\n\ndata Inner = Wrap(Outer)\n",
             "match Wrap(mk(6)) of | Wrap(o) => get(o) end",
             "6",
+        ),
+        // `Tally` has the `Count` of `lib` in its field, also in a module
+        // that has its own alias `Count`.
+        (
+            "import lib\n\ntype Count = Bool\n\nfn yes(c: Count): Count = c\n",
+            "if yes(true) then total(T(7)) else 0",
+            "7",
         ),
         // A declaration of the module shadows an imported one.
         (
@@ -487,6 +496,35 @@ fn a_false_guard_gives_the_value_to_the_next_arm() {
         ] {
             assert_eq!(stdout_of(tmp.path(), args), want, "k = {k} under {args:?}");
         }
+    }
+
+    // A guard that consumes a linear value: a false guard gives the value
+    // to the next arm, which would use it a second time. `s` is from
+    // outside the match; `n` is a part of the scrutinee.
+    for (scrutinee, guard, name) in [
+        ("Named(t, 3)", "eat(s)", "s"),
+        ("Named(s, 3)", "eat(n)", "n"),
+    ] {
+        write(
+            "consume.eph",
+            &format!(
+                "module consume\n\ndata Entry = Empty | Named(String@r, I32)\n\n\
+                 fn eat(s: String@r): Bool = let n = String.len(s) in n > 100\n\n\
+                 fn main(): I32 =\n  region r {{\n    let! s = String.new@r(\"hello\")\n    \
+                 let! t = String.new@r(\"other\")\n    match {scrutinee} of\n    \
+                 | Named(n, k) if {guard} => String.len(n)\n    \
+                 | Named(n, k) => String.len(n) + String.len(s) + String.len(t)\n    \
+                 | Empty => 0\n    end\n  }}\n"
+            ),
+        );
+        let out = ephapax(tmp.path(), &["check", "consume.eph"]);
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        assert!(
+            !out.status.success()
+                && stderr.contains(&format!("The guard of a match arm consumes `{name}`")),
+            "{guard}: exit {:?}, stderr:\n{stderr}",
+            out.status.code()
+        );
     }
 
     // (match, text of the load error)

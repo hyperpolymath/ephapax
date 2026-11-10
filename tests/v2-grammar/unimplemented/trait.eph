@@ -1,0 +1,8 @@
+// SPDX-License-Identifier: MPL-2.0
+// Not implemented: the parser must refuse this file. See the mark
+// [UNIMPLEMENTED] in spec/ephapax-v2-grammar.ebnf, part 2.
+module m
+
+trait Show(a) =
+  fn show(x: a): I32
+end

@@ -1,0 +1,9 @@
+// SPDX-License-Identifier: MPL-2.0
+// Not implemented: the parser must refuse this file. See the mark
+// [UNIMPLEMENTED] in spec/ephapax-v2-grammar.ebnf, part 2.
+module m
+
+@comptime {
+  fn size(t: Type): I32 = 0
+  let n = 1
+}

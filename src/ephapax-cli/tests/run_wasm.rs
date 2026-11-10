@@ -211,6 +211,66 @@ fn each_module_calls_its_own_function_of_a_shared_name() {
     }
 }
 
+/// `let (a, b, c) = e` binds the 3 parts of a tuple. The parser used to
+/// make a chain of pair patterns for 3 or more names, which no tuple
+/// value has as its type: a type error.
+#[test]
+fn a_binder_with_3_or_more_names_binds_a_tuple() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    // (declarations, type and body of `main`, output)
+    for (decls, ty, main, want) in [
+        ("", "I32", "let (a, b, c) = (1, 2, 3) in\n  a + b * c", "7"),
+        ("", "I32", "let (a, b, c) = (5, 4, 3) in\n  a - b - c", "-2"),
+        (
+            "fn three(): (I32, I32, I32) = (1, 2, 3)\n",
+            "I32",
+            "let (a, b, c) = three()\n  a + b * c",
+            "7",
+        ),
+        // 4 parts, each at its own type; `_` for a part that is not linear.
+        (
+            "fn four(): (I32, I64, F64, I32) = (1, 6000000000, 2.5, 4)\n",
+            "I64",
+            "let (a, b, _, d) = four()\n  b",
+            "6000000000i64",
+        ),
+        // A linear part is bound, and consumed one time.
+        (
+            "",
+            "I32",
+            "region r {\n    let! s = String.new@r(\"hello\")\n    \
+             let (a, t, c) = (1, s, 3)\n    a + String.len(t) + c\n  }",
+            "9",
+        ),
+        // 2 names are a pair, as before.
+        ("", "I32", "let (a, b) = (1, 2) in\n  a + b", "3"),
+    ] {
+        std::fs::write(
+            tmp.path().join("tuple.eph"),
+            format!("module tuple\n\n{decls}\nfn main(): {ty} =\n  {main}\n"),
+        )
+        .expect("write program");
+        for args in [&["run", "tuple.eph"][..], &["run", "--interp", "tuple.eph"]] {
+            assert_eq!(stdout_of(tmp.path(), args), want, "{main} under {args:?}");
+        }
+    }
+
+    // `_` over a linear part is a discard of a linear value.
+    std::fs::write(
+        tmp.path().join("discard.eph"),
+        "module discard\n\nfn main(): I32 =\n  region r {\n    \
+         let! s = String.new@r(\"hello\")\n    let (a, _, c) = (1, s, 3)\n    a + c\n  }\n",
+    )
+    .expect("write program");
+    let out = ephapax(tmp.path(), &["check", "discard.eph"]);
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        !out.status.success() && stderr.contains("Type error"),
+        "exit {:?}, stderr:\n{stderr}",
+        out.status.code()
+    );
+}
+
 /// The interpreter calls a function with 0, 2 or 3 parameters by its
 /// name, a parameter shadows a function of the same name, and a borrow of
 /// a string is not a use. It used to stop on each of these programs

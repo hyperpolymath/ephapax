@@ -1661,6 +1661,22 @@ impl Desugarer {
                 let inner = self.bind_single_pattern(&snd, r, body, span)?;
                 self.bind_single_pattern(&fst, l, inner, span)
             }
+            // A tuple pattern of variables, wildcards and pairs of them
+            // lowers to a one-arm core `match` on a tuple pattern, as a
+            // pair pattern does: the scrutinee is consumed one time.
+            Pattern::Tuple(elements) if elements.iter().all(Self::is_irrefutable_pair_pattern) => {
+                Ok(Expr::new(
+                    ExprKind::Match {
+                        scrutinee: Box::new(value.clone()),
+                        arms: vec![ephapax_syntax::MatchArm {
+                            pattern: Self::core_pattern(pattern)?,
+                            guard: None,
+                            body,
+                        }],
+                    },
+                    span,
+                ))
+            }
             Pattern::Tuple(elements) => {
                 let as_fields: Vec<SurfaceTy> = vec![]; // placeholder
                 self.bind_pattern_vars(value, elements, &as_fields, body, span)

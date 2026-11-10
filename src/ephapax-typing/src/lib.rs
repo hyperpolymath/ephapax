@@ -46,6 +46,9 @@ pub enum TypeError {
     #[error("Type mismatch: expected {expected:?}, found {found:?}")]
     TypeMismatch { expected: Ty, found: Ty },
 
+    #[error("`==` and `!=` are not defined on type {0:?}: only the scalar types and String have equality")]
+    EqualityNotSupported(Ty),
+
     #[error("Cannot copy linear type {0:?}")]
     CannotCopyLinear(Ty),
 
@@ -2000,9 +2003,28 @@ impl TypeChecker {
                     },
                 )),
             },
-            BinOp::Lt | BinOp::Le | BinOp::Gt | BinOp::Ge | BinOp::Eq | BinOp::Ne => {
-                Ok(Ty::Base(BaseTy::Bool))
-            }
+            // Ordering is defined on the numeric types only. (It used to
+            // accept any two operands of one type; the interpreter then
+            // failed at run time and the wasm compared handles.)
+            BinOp::Lt | BinOp::Le | BinOp::Gt | BinOp::Ge => match &left_ty {
+                Ty::Base(BaseTy::I32)
+                | Ty::Base(BaseTy::I64)
+                | Ty::Base(BaseTy::F32)
+                | Ty::Base(BaseTy::F64) => Ok(Ty::Base(BaseTy::Bool)),
+                _ => Err(self.at(
+                    s,
+                    TypeError::TypeMismatch {
+                        expected: Ty::Base(BaseTy::I32),
+                        found: left_ty,
+                    },
+                )),
+            },
+            // Equality is defined on the scalar types and on strings (by
+            // content). A pair, sum, list or function has no equality.
+            BinOp::Eq | BinOp::Ne => match &left_ty {
+                Ty::Base(_) | Ty::String(_) => Ok(Ty::Base(BaseTy::Bool)),
+                _ => Err(self.at(s, TypeError::EqualityNotSupported(left_ty))),
+            },
             BinOp::And | BinOp::Or => {
                 if left_ty != Ty::Base(BaseTy::Bool) {
                     return Err(self.at(

@@ -124,9 +124,11 @@ const OFFSET_REGION_EXIT: u32 = 6;
 const OFFSET_LIST_NEW: u32 = 7;
 const OFFSET_LIST_APPEND: u32 = 8;
 const OFFSET_LIST_GET: u32 = 9;
+const OFFSET_STRING_EQ: u32 = 10;
+const OFFSET_FMOD: u32 = 11;
 
 /// Number of runtime helper functions emitted in the code section.
-const NUM_RUNTIME_FNS: u32 = 10;
+const NUM_RUNTIME_FNS: u32 = 12;
 
 // ---------------------------------------------------------------------------
 // Well-known WASM type indices
@@ -151,8 +153,19 @@ const TYPE_I32_TO_I32: u32 = 6;
 /// Same signature as TYPE_I32_I32_I32 (type 3), aliased for clarity.
 const TYPE_CLOSURE_CALL: u32 = TYPE_I32_I32_I32;
 
+/// Type 7: `(i32, i64) -> i32`   (list_append: handle + element slot)
+const TYPE_LIST_APPEND: u32 = 7;
+/// Type 8: `(i32, i32) -> i64`   (list_get: handle + index -> element slot)
+const TYPE_LIST_GET: u32 = 8;
+/// Type 9: `(f64, f64) -> f64`   (fmod)
+const TYPE_F64_F64_F64: u32 = 9;
+
 /// Number of fixed type entries in the type section.
-const NUM_FIXED_TYPES: u32 = 7;
+const NUM_FIXED_TYPES: u32 = 10;
+
+/// Bytes per list element. A slot holds the i64 bit pattern of any scalar
+/// or handle, so one pair of runtime helpers serves every element type.
+const LIST_SLOT: i32 = 8;
 
 // ---------------------------------------------------------------------------
 // (Mode removed — dyadic property is per-binding, not a global switch)
@@ -386,11 +399,16 @@ impl LocalTracker {
         idx
     }
 
-    /// Allocate an anonymous temporary.
+    /// Allocate an anonymous i32 temporary.
     fn temp(&mut self) -> u32 {
+        self.temp_typed(ValType::I32)
+    }
+
+    /// Allocate an anonymous temporary of the given wasm type.
+    fn temp_typed(&mut self, ty: ValType) -> u32 {
         let idx = self.next_idx;
         self.next_idx += 1;
-        self.extra_local_types.push(ValType::I32);
+        self.extra_local_types.push(ty);
         idx
     }
 
@@ -449,6 +467,12 @@ pub struct Codegen {
     /// The checker's type for each expression (v2 plan rung E5). Typed
     /// instruction selection and layouts read it through [`Self::ty_of`].
     types: ExprTypes,
+
+    /// The first construct met while lowering that has no correct
+    /// lowering yet. `compile_expr` cannot return an error, so it is
+    /// recorded here and the public entry points fail with it instead of
+    /// returning a module that computes a wrong value.
+    unsupported: Option<CodegenError>,
 
     // -- Module-level bookkeeping -------------------------------------------
     /// String literal data section entries: (offset, bytes)
@@ -571,6 +595,7 @@ impl Codegen {
             module: WasmModule::new(),
             locals: LocalTracker::default(),
             types: ExprTypes::new(),
+            unsupported: None,
             data_entries: Vec::new(),
             data_offset: 1024, // Start string data after metadata area
             user_fns: HashMap::new(),
@@ -663,6 +688,12 @@ impl Codegen {
     }
     fn fn_list_get(&self) -> u32 {
         self.import_count() + OFFSET_LIST_GET
+    }
+    fn fn_string_eq(&self) -> u32 {
+        self.import_count() + OFFSET_STRING_EQ
+    }
+    fn fn_fmod(&self) -> u32 {
+        self.import_count() + OFFSET_FMOD
     }
 
     /// First user-defined fn index, after imports and runtime helpers.
@@ -781,6 +812,9 @@ impl Codegen {
         self.emit_ownership_section();
         self.emit_carrier_sections();
         self.emit_debug_sections();
+        if let Some(err) = self.unsupported.take() {
+            return Err(err);
+        }
         Ok(self.module.clone().finish())
     }
 
@@ -851,6 +885,9 @@ impl Codegen {
         // was called (`compile --debug`).
         self.emit_debug_sections();
 
+        if let Some(err) = self.unsupported.take() {
+            return Err(err);
+        }
         Ok(self.module.clone().finish())
     }
 
@@ -1033,6 +1070,18 @@ impl Codegen {
         );
         // Type 6: (i32) -> i32
         types.ty().function(vec![ValType::I32], vec![ValType::I32]);
+        // Type 7: (i32, i64) -> i32
+        types
+            .ty()
+            .function(vec![ValType::I32, ValType::I64], vec![ValType::I32]);
+        // Type 8: (i32, i32) -> i64
+        types
+            .ty()
+            .function(vec![ValType::I32, ValType::I32], vec![ValType::I64]);
+        // Type 9: (f64, f64) -> f64
+        types
+            .ty()
+            .function(vec![ValType::F64, ValType::F64], vec![ValType::F64]);
 
         // Dynamic extra types
         for (params, results) in &self.extra_types {
@@ -1233,13 +1282,23 @@ impl Codegen {
         func_sec.function(TYPE_I32_TO_I32);
         code_sec.function(&self.gen_list_new());
 
-        // 10: list_append  (i32, i32) -> i32
-        func_sec.function(TYPE_I32_I32_I32);
+        // 10: list_append  (i32, i64) -> i32
+        func_sec.function(TYPE_LIST_APPEND);
         code_sec.function(&self.gen_list_append());
 
-        // 11: list_get  (i32, i32) -> i32
-        func_sec.function(TYPE_I32_I32_I32);
+        // 11: list_get  (i32, i32) -> i64
+        func_sec.function(TYPE_LIST_GET);
         code_sec.function(&self.gen_list_get());
+
+        // 12: string_eq  (i32, i32) -> i32
+        func_sec.function(TYPE_I32_I32_I32);
+        let (f, sites) = self.gen_string_eq();
+        code_sec.function(&f);
+        self.record_access_sites(self.fn_string_eq(), &sites);
+
+        // 13: fmod  (f64, f64) -> f64
+        func_sec.function(TYPE_F64_F64_F64);
+        code_sec.function(&gen_fmod());
     }
 
     /// Append user-defined functions from the AST.
@@ -1875,9 +1934,9 @@ impl Codegen {
     fn gen_list_new(&self) -> Function {
         let mut f = Function::new(vec![(1, ValType::I32)]); // local for handle
 
-        // Calculate size: 8 (header) + capacity * 4 (elements)
+        // Calculate size: 8 (header) + capacity * LIST_SLOT (elements)
         f.instruction(&Instruction::LocalGet(0)); // capacity
-        f.instruction(&Instruction::I32Const(4));
+        f.instruction(&Instruction::I32Const(LIST_SLOT));
         f.instruction(&Instruction::I32Mul);
         f.instruction(&Instruction::I32Const(8));
         f.instruction(&Instruction::I32Add);
@@ -1903,7 +1962,7 @@ impl Codegen {
         f
     }
 
-    /// Append element to list: `(handle: i32, value: i32) -> handle: i32`
+    /// Append element to list: `(handle: i32, value: i64) -> handle: i32`
     /// May return same handle or new handle if resize needed
     fn gen_list_append(&self) -> Function {
         let mut f = Function::new(vec![
@@ -1938,7 +1997,7 @@ impl Codegen {
         // Uses memory.copy (bulk memory operations) when available,
         // falls back to element-by-element copy loop.
         // Source: old_handle + 8 (skip header), Dest: new_handle + 8
-        // Length: old_length * 4 bytes (i32 elements)
+        // Length: old_length * LIST_SLOT bytes
         f.instruction(&Instruction::LocalGet(4)); // dest = new_handle
         f.instruction(&Instruction::I32Const(8));
         f.instruction(&Instruction::I32Add); // dest + 8
@@ -1946,8 +2005,8 @@ impl Codegen {
         f.instruction(&Instruction::I32Const(8));
         f.instruction(&Instruction::I32Add); // src + 8
         f.instruction(&Instruction::LocalGet(3)); // length
-        f.instruction(&Instruction::I32Const(4));
-        f.instruction(&Instruction::I32Mul); // length * 4 = byte count
+        f.instruction(&Instruction::I32Const(LIST_SLOT));
+        f.instruction(&Instruction::I32Mul); // byte count
         f.instruction(&Instruction::MemoryCopy {
             src_mem: 0,
             dst_mem: 0,
@@ -1960,16 +2019,16 @@ impl Codegen {
         // No resize needed, use existing handle
         f.instruction(&Instruction::End);
 
-        // Append element at handle + 8 + length*4
+        // Append element at handle + 8 + length * LIST_SLOT
         f.instruction(&Instruction::LocalGet(0)); // handle
         f.instruction(&Instruction::I32Const(8));
         f.instruction(&Instruction::I32Add);
         f.instruction(&Instruction::LocalGet(3)); // length
-        f.instruction(&Instruction::I32Const(4));
+        f.instruction(&Instruction::I32Const(LIST_SLOT));
         f.instruction(&Instruction::I32Mul);
-        f.instruction(&Instruction::I32Add); // address = handle + 8 + length*4
+        f.instruction(&Instruction::I32Add);
         f.instruction(&Instruction::LocalGet(1)); // value
-        f.instruction(&Instruction::I32Store(mem_arg(0)));
+        f.instruction(&Instruction::I64Store(typed_mem_arg(ValType::I64, 0)));
 
         // Increment length
         f.instruction(&Instruction::LocalGet(0)); // handle
@@ -1984,23 +2043,101 @@ impl Codegen {
         f
     }
 
-    /// Get element from list: `(handle: i32, index: i32) -> element: i32`
+    /// Get element from list: `(handle: i32, index: i32) -> element: i64`.
+    /// Traps when the index is negative or not below the length.
     fn gen_list_get(&self) -> Function {
         let mut f = Function::new(vec![]);
 
-        // Calculate address: handle + 8 + index*4
+        // Bounds check, unsigned, so a negative index is out of range too.
+        f.instruction(&Instruction::LocalGet(1)); // index
+        f.instruction(&Instruction::LocalGet(0));
+        f.instruction(&Instruction::I32Load(mem_arg(4))); // length
+        f.instruction(&Instruction::I32GeU);
+        f.instruction(&Instruction::If(wasm_encoder::BlockType::Empty));
+        f.instruction(&Instruction::Unreachable);
+        f.instruction(&Instruction::End);
+
+        // Address: handle + 8 + index * LIST_SLOT
         f.instruction(&Instruction::LocalGet(0)); // handle
         f.instruction(&Instruction::I32Const(8));
         f.instruction(&Instruction::I32Add);
         f.instruction(&Instruction::LocalGet(1)); // index
-        f.instruction(&Instruction::I32Const(4));
+        f.instruction(&Instruction::I32Const(LIST_SLOT));
         f.instruction(&Instruction::I32Mul);
         f.instruction(&Instruction::I32Add);
 
         // Load element
-        f.instruction(&Instruction::I32Load(mem_arg(0)));
+        f.instruction(&Instruction::I64Load(typed_mem_arg(ValType::I64, 0)));
         f.instruction(&Instruction::End);
         f
+    }
+
+    /// String equality by content: `(a: i32, b: i32) -> i32` (1 or 0).
+    fn gen_string_eq(&self) -> (Function, Vec<(u32, u32)>) {
+        use wasm_encoder::BlockType::Empty;
+        // locals: 2 = len, 3 = bytes of a, 4 = bytes of b, 5 = i
+        let mut f = Function::new(vec![(4, ValType::I32)]);
+        let mut sites = Vec::new();
+        let byte = wasm_encoder::MemArg {
+            offset: 0,
+            align: 0,
+            memory_index: 0,
+        };
+
+        // Different lengths: not equal.
+        f.instruction(&Instruction::LocalGet(0));
+        sites.push((carriers::FIELD_LEN, f.byte_len() as u32));
+        f.instruction(&Instruction::I32Load(mem_arg(4)));
+        f.instruction(&Instruction::LocalTee(2));
+        f.instruction(&Instruction::LocalGet(1));
+        sites.push((carriers::FIELD_LEN, f.byte_len() as u32));
+        f.instruction(&Instruction::I32Load(mem_arg(4)));
+        f.instruction(&Instruction::I32Ne);
+        f.instruction(&Instruction::If(Empty));
+        f.instruction(&Instruction::I32Const(0));
+        f.instruction(&Instruction::Return);
+        f.instruction(&Instruction::End);
+
+        f.instruction(&Instruction::LocalGet(0));
+        sites.push((carriers::FIELD_PTR, f.byte_len() as u32));
+        f.instruction(&Instruction::I32Load(mem_arg(0)));
+        f.instruction(&Instruction::LocalSet(3));
+        f.instruction(&Instruction::LocalGet(1));
+        sites.push((carriers::FIELD_PTR, f.byte_len() as u32));
+        f.instruction(&Instruction::I32Load(mem_arg(0)));
+        f.instruction(&Instruction::LocalSet(4));
+
+        // Compare byte by byte.
+        f.instruction(&Instruction::Loop(Empty));
+        f.instruction(&Instruction::LocalGet(5));
+        f.instruction(&Instruction::LocalGet(2));
+        f.instruction(&Instruction::I32Eq);
+        f.instruction(&Instruction::If(Empty));
+        f.instruction(&Instruction::I32Const(1));
+        f.instruction(&Instruction::Return);
+        f.instruction(&Instruction::End);
+        f.instruction(&Instruction::LocalGet(3));
+        f.instruction(&Instruction::LocalGet(5));
+        f.instruction(&Instruction::I32Add);
+        f.instruction(&Instruction::I32Load8U(byte));
+        f.instruction(&Instruction::LocalGet(4));
+        f.instruction(&Instruction::LocalGet(5));
+        f.instruction(&Instruction::I32Add);
+        f.instruction(&Instruction::I32Load8U(byte));
+        f.instruction(&Instruction::I32Ne);
+        f.instruction(&Instruction::If(Empty));
+        f.instruction(&Instruction::I32Const(0));
+        f.instruction(&Instruction::Return);
+        f.instruction(&Instruction::End);
+        f.instruction(&Instruction::LocalGet(5));
+        f.instruction(&Instruction::I32Const(1));
+        f.instruction(&Instruction::I32Add);
+        f.instruction(&Instruction::LocalSet(5));
+        f.instruction(&Instruction::Br(0));
+        f.instruction(&Instruction::End);
+        f.instruction(&Instruction::Unreachable);
+        f.instruction(&Instruction::End);
+        (f, sites)
     }
 
     // -----------------------------------------------------------------------
@@ -2633,77 +2770,101 @@ impl Codegen {
         });
     }
 
-    fn compile_pair(&mut self, func: &mut Function, left: &Expr, right: &Expr) {
-        // Allocate 8 bytes for pair (2 x i32)
-        func.instruction(&Instruction::I32Const(8));
+    /// Wasm types of the two components of the pair `expr` evaluates to
+    /// (through a borrow). `(i32, i32)` when the type table has no pair
+    /// type for it.
+    fn pair_fields(&self, expr: &Expr) -> (ValType, ValType) {
+        fn of(ty: &Ty) -> Option<(ValType, ValType)> {
+            match ty {
+                Ty::Prod { left, right } => Some((ty_to_valtype(left), ty_to_valtype(right))),
+                Ty::Borrow { inner, .. } | Ty::Ref { inner, .. } => of(inner),
+                _ => None,
+            }
+        }
+        self.ty_of(expr)
+            .and_then(of)
+            .unwrap_or((ValType::I32, ValType::I32))
+    }
+
+    /// Wasm types of the left and right payloads of the sum `expr`
+    /// evaluates to (through a borrow); i32 where the table has none.
+    fn sum_payloads(&self, expr: &Expr) -> (ValType, ValType) {
+        fn of(ty: &Ty) -> Option<(ValType, ValType)> {
+            match ty {
+                Ty::Sum { left, right } => Some((ty_to_valtype(left), ty_to_valtype(right))),
+                Ty::Borrow { inner, .. } | Ty::Ref { inner, .. } => of(inner),
+                _ => None,
+            }
+        }
+        self.ty_of(expr)
+            .and_then(of)
+            .unwrap_or((ValType::I32, ValType::I32))
+    }
+
+    /// Allocate `size` bytes and leave the pointer in a fresh local.
+    fn alloc_to_local(&mut self, func: &mut Function, size: u64) -> u32 {
+        func.instruction(&Instruction::I32Const(size as i32));
         func.instruction(&Instruction::I32Const(0));
         func.instruction(&Instruction::Call(self.fn_bump_alloc()));
+        let local = self.locals.temp();
+        func.instruction(&Instruction::LocalSet(local));
+        local
+    }
 
-        let pair_local = self.locals.temp();
-        func.instruction(&Instruction::LocalTee(pair_local));
+    /// A pair is a pointer to its two components, each at its natural
+    /// alignment: `[left @ 0][right @ pair_layout]`.
+    fn compile_pair(&mut self, func: &mut Function, left: &Expr, right: &Expr) {
+        let (left_ty, right_ty) = (self.valtype_of(left), self.valtype_of(right));
+        let (right_offset, size) = pair_layout(left_ty, right_ty);
+        let pair_local = self.alloc_to_local(func, size);
 
-        // Store left at offset 0
+        func.instruction(&Instruction::LocalGet(pair_local));
         self.compile_expr(func, left);
-        func.instruction(&Instruction::I32Store(mem_arg(0)));
+        emit_typed_store(func, left_ty, 0);
 
-        // Store right at offset 4
         func.instruction(&Instruction::LocalGet(pair_local));
         self.compile_expr(func, right);
-        func.instruction(&Instruction::I32Store(mem_arg(4)));
+        emit_typed_store(func, right_ty, right_offset);
 
-        // Return pair pointer
         func.instruction(&Instruction::LocalGet(pair_local));
     }
 
     fn compile_fst(&mut self, func: &mut Function, inner: &Expr) {
+        let (left_ty, _) = self.pair_fields(inner);
         self.compile_expr(func, inner);
-        func.instruction(&Instruction::I32Load(mem_arg(0)));
+        emit_typed_load(func, left_ty, 0);
     }
 
     fn compile_snd(&mut self, func: &mut Function, inner: &Expr) {
+        let (left_ty, right_ty) = self.pair_fields(inner);
         self.compile_expr(func, inner);
-        func.instruction(&Instruction::I32Load(mem_arg(4)));
+        emit_typed_load(func, right_ty, pair_layout(left_ty, right_ty).0);
+    }
+
+    /// A sum is a pointer to `[tag: i32 @ 0][payload @ sum_payload_offset]`;
+    /// tag 0 is left, tag 1 is right.
+    fn compile_injection(&mut self, func: &mut Function, tag: i32, value: &Expr) {
+        let payload_ty = self.valtype_of(value);
+        let offset = sum_payload_offset(payload_ty);
+        let sum_local = self.alloc_to_local(func, offset + valtype_storage(payload_ty).0);
+
+        func.instruction(&Instruction::LocalGet(sum_local));
+        func.instruction(&Instruction::I32Const(tag));
+        func.instruction(&Instruction::I32Store(mem_arg(0)));
+
+        func.instruction(&Instruction::LocalGet(sum_local));
+        self.compile_expr(func, value);
+        emit_typed_store(func, payload_ty, offset);
+
+        func.instruction(&Instruction::LocalGet(sum_local));
     }
 
     fn compile_inl(&mut self, func: &mut Function, value: &Expr) {
-        // Sum types: tag (i32) + value (i32) = 8 bytes
-        func.instruction(&Instruction::I32Const(8));
-        func.instruction(&Instruction::I32Const(0));
-        func.instruction(&Instruction::Call(self.fn_bump_alloc()));
-
-        let sum_local = self.locals.temp();
-        func.instruction(&Instruction::LocalTee(sum_local));
-
-        // Store tag 0 (left)
-        func.instruction(&Instruction::I32Const(0));
-        func.instruction(&Instruction::I32Store(mem_arg(0)));
-
-        // Store value at offset 4
-        func.instruction(&Instruction::LocalGet(sum_local));
-        self.compile_expr(func, value);
-        func.instruction(&Instruction::I32Store(mem_arg(4)));
-
-        func.instruction(&Instruction::LocalGet(sum_local));
+        self.compile_injection(func, 0, value);
     }
 
     fn compile_inr(&mut self, func: &mut Function, value: &Expr) {
-        func.instruction(&Instruction::I32Const(8));
-        func.instruction(&Instruction::I32Const(0));
-        func.instruction(&Instruction::Call(self.fn_bump_alloc()));
-
-        let sum_local = self.locals.temp();
-        func.instruction(&Instruction::LocalTee(sum_local));
-
-        // Store tag 1 (right)
-        func.instruction(&Instruction::I32Const(1));
-        func.instruction(&Instruction::I32Store(mem_arg(0)));
-
-        // Store value at offset 4
-        func.instruction(&Instruction::LocalGet(sum_local));
-        self.compile_expr(func, value);
-        func.instruction(&Instruction::I32Store(mem_arg(4)));
-
-        func.instruction(&Instruction::LocalGet(sum_local));
+        self.compile_injection(func, 1, value);
     }
 
     fn compile_case(
@@ -2715,6 +2876,7 @@ impl Codegen {
         right_var: &str,
         right_body: &Expr,
     ) {
+        let (left_ty, right_ty) = self.sum_payloads(scrutinee);
         self.compile_expr(func, scrutinee);
 
         let scrutinee_local = self.locals.temp();
@@ -2730,8 +2892,8 @@ impl Codegen {
 
         // Right branch (tag == 1)
         func.instruction(&Instruction::LocalGet(scrutinee_local));
-        func.instruction(&Instruction::I32Load(mem_arg(4)));
-        let right_local = self.locals.bind(right_var, false);
+        emit_typed_load(func, right_ty, sum_payload_offset(right_ty));
+        let right_local = self.locals.bind_typed(right_var, false, right_ty);
         func.instruction(&Instruction::LocalSet(right_local));
         self.compile_expr(func, right_body);
 
@@ -2739,8 +2901,8 @@ impl Codegen {
 
         // Left branch (tag == 0)
         func.instruction(&Instruction::LocalGet(scrutinee_local));
-        func.instruction(&Instruction::I32Load(mem_arg(4)));
-        let left_local = self.locals.bind(left_var, false);
+        emit_typed_load(func, left_ty, sum_payload_offset(left_ty));
+        let left_local = self.locals.bind_typed(left_var, false, left_ty);
         func.instruction(&Instruction::LocalSet(left_local));
         self.compile_expr(func, left_body);
 
@@ -2786,6 +2948,23 @@ impl Codegen {
     /// through on inner refutation (needed once #66 admits patterns
     /// like `Some(Some(_))` + `Some(None)` + `None`).
     fn compile_match(&mut self, func: &mut Function, scrutinee: &Expr, arms: &[MatchArm]) {
+        // Patterns read every component as an i32 at the i32 layout. A
+        // scrutinee with an I64, F32 or F64 component would be read at
+        // the wrong offset and width, so it is refused, not miscompiled.
+        let wide = self
+            .ty_of(scrutinee)
+            .filter(|ty| has_non_i32_component(ty))
+            .cloned();
+        if let Some(ty) = wide {
+            self.unsupported.get_or_insert_with(|| {
+                CodegenError(format!(
+                    "{UNSUPPORTED_PREFIX}: `match` (or a destructuring `let`) on a value \
+                     with an I64, F32 or F64 component (type {ty:?}); read the \
+                     component with `fst`, `snd`, `.N` or `case`"
+                ))
+            });
+        }
+
         use wasm_encoder::BlockType;
 
         // Recover data type info from the first constructor pattern (if any).
@@ -3113,30 +3292,20 @@ impl Codegen {
         func.instruction(&Instruction::Call(self.fn_region_exit()));
     }
 
+    /// `copy(e)` is the pair `(e, e)`.
     fn compile_copy(&mut self, func: &mut Function, inner: &Expr) {
-        let tmp = self.locals.temp();
+        let ty = self.valtype_of(inner);
+        let (second_offset, size) = pair_layout(ty, ty);
+        let value = self.locals.temp_typed(ty);
         self.compile_expr(func, inner);
-        func.instruction(&Instruction::LocalSet(tmp)); // save value, consume from stack
+        func.instruction(&Instruction::LocalSet(value));
 
-        // Allocate pair (8 bytes) and store value twice
-        func.instruction(&Instruction::I32Const(8));
-        func.instruction(&Instruction::I32Const(0));
-        func.instruction(&Instruction::Call(self.fn_bump_alloc()));
-
-        let pair_local = self.locals.temp();
-        func.instruction(&Instruction::LocalSet(pair_local)); // save pair ptr
-
-        // Store value at pair+0
-        func.instruction(&Instruction::LocalGet(pair_local));
-        func.instruction(&Instruction::LocalGet(tmp));
-        func.instruction(&Instruction::I32Store(mem_arg(0)));
-
-        // Store value at pair+4
-        func.instruction(&Instruction::LocalGet(pair_local));
-        func.instruction(&Instruction::LocalGet(tmp));
-        func.instruction(&Instruction::I32Store(mem_arg(4)));
-
-        // Return pair pointer
+        let pair_local = self.alloc_to_local(func, size);
+        for offset in [0, second_offset] {
+            func.instruction(&Instruction::LocalGet(pair_local));
+            func.instruction(&Instruction::LocalGet(value));
+            emit_typed_store(func, ty, offset);
+        }
         func.instruction(&Instruction::LocalGet(pair_local));
     }
 
@@ -3158,9 +3327,39 @@ impl Codegen {
         // The checker unifies the two operand types, so the left one
         // selects the instruction.
         let operand = self.valtype_of(left);
-        self.compile_expr(func, left);
-        self.compile_expr(func, right);
-        func.instruction(&binop_instruction(op, operand));
+        let on_strings = matches!(self.ty_of(left), Some(Ty::String(_)));
+        match (op, operand) {
+            // Strings are equal when their contents are.
+            (BinOp::Eq | BinOp::Ne, _) if on_strings => {
+                self.compile_expr(func, left);
+                self.compile_expr(func, right);
+                func.instruction(&Instruction::Call(self.fn_string_eq()));
+                if op == BinOp::Ne {
+                    func.instruction(&Instruction::I32Eqz);
+                }
+            }
+            // Wasm has no float remainder: call the exact `fmod` helper.
+            // An F32 remainder taken in F64 is exact, so it is demoted
+            // without a second rounding.
+            (BinOp::Mod, ValType::F32) => {
+                self.compile_expr(func, left);
+                func.instruction(&Instruction::F64PromoteF32);
+                self.compile_expr(func, right);
+                func.instruction(&Instruction::F64PromoteF32);
+                func.instruction(&Instruction::Call(self.fn_fmod()));
+                func.instruction(&Instruction::F32DemoteF64);
+            }
+            (BinOp::Mod, ValType::F64) => {
+                self.compile_expr(func, left);
+                self.compile_expr(func, right);
+                func.instruction(&Instruction::Call(self.fn_fmod()));
+            }
+            _ => {
+                self.compile_expr(func, left);
+                self.compile_expr(func, right);
+                func.instruction(&binop_instruction(op, operand));
+            }
+        }
     }
 
     fn compile_unaryop(&mut self, func: &mut Function, op: UnaryOp, operand: &Expr) {
@@ -3192,38 +3391,28 @@ impl Codegen {
     }
 
     fn compile_list_lit(&mut self, func: &mut Function, elements: &[Expr]) {
-        // Create list with capacity = length
-        let capacity = elements.len() as i32;
-        func.instruction(&Instruction::I32Const(capacity));
+        // Create the list with capacity = length; the handle stays on the
+        // stack. Each append takes the handle and the element (widened to
+        // a slot) and leaves the handle.
+        func.instruction(&Instruction::I32Const(elements.len() as i32));
         func.instruction(&Instruction::Call(self.fn_list_new()));
-
-        // list_new returns handle on stack
-        // For each element: dup handle, append element, drop status, keep new handle
         for elem in elements {
-            // Duplicate handle for append call
-            func.instruction(&Instruction::LocalTee(self.locals.temp()));
-
-            // Compile element
             self.compile_expr(func, elem);
-
-            // Call list_append (consumes handle + element, returns new handle)
+            emit_to_slot(func, self.valtype_of(elem));
             func.instruction(&Instruction::Call(self.fn_list_append()));
-
-            // list_append returns new handle on stack
         }
-
-        // Final handle is on stack
     }
 
     fn compile_list_index(&mut self, func: &mut Function, list: &Expr, index: &Expr) {
-        // Compile list expression
+        let elem = match self.ty_of(list) {
+            Some(Ty::List(elem)) => ty_to_valtype(elem),
+            _ => ValType::I32,
+        };
         self.compile_expr(func, list);
-
-        // Compile index expression
         self.compile_expr(func, index);
-
-        // Call list_get(handle, idx) -> element
+        // list_get(handle, idx) -> slot; traps when idx is out of range.
         func.instruction(&Instruction::Call(self.fn_list_get()));
+        emit_from_slot(func, elem);
     }
 
     fn compile_tuple_lit(&mut self, func: &mut Function, elements: &[Expr]) {
@@ -3353,7 +3542,7 @@ fn binop_instruction(op: BinOp, ty: ValType) -> Instruction<'static> {
         (BinOp::Div, V::F64) => I::F64Div,
         (BinOp::Div, _) => I::I32DivS,
         (BinOp::Mod, V::I64) => I::I64RemS,
-        // TODO(E5 fmod): float remainder
+        // Float remainder is a call to the `fmod` helper (`compile_binop`).
         (BinOp::Mod, V::F32 | V::F64) => I::Unreachable,
         (BinOp::Mod, _) => I::I32RemS,
         (BinOp::Lt, V::I64) => I::I64LtS,
@@ -3382,6 +3571,318 @@ fn binop_instruction(op: BinOp, ty: ValType) -> Instruction<'static> {
         (BinOp::Ne, _) => I::I32Ne,
         (BinOp::And, _) => I::I32And,
         (BinOp::Or, _) => I::I32Or,
+    }
+}
+
+/// Widen the value of wasm type `ty` on the stack to a list slot (i64).
+fn emit_to_slot(func: &mut Function, ty: ValType) {
+    match ty {
+        ValType::I64 => {}
+        ValType::F64 => {
+            func.instruction(&Instruction::I64ReinterpretF64);
+        }
+        ValType::F32 => {
+            func.instruction(&Instruction::I32ReinterpretF32);
+            func.instruction(&Instruction::I64ExtendI32U);
+        }
+        _ => {
+            func.instruction(&Instruction::I64ExtendI32S);
+        }
+    }
+}
+
+/// Narrow the list slot (i64) on the stack back to wasm type `ty`.
+fn emit_from_slot(func: &mut Function, ty: ValType) {
+    match ty {
+        ValType::I64 => {}
+        ValType::F64 => {
+            func.instruction(&Instruction::F64ReinterpretI64);
+        }
+        ValType::F32 => {
+            func.instruction(&Instruction::I32WrapI64);
+            func.instruction(&Instruction::F32ReinterpretI32);
+        }
+        _ => {
+            func.instruction(&Instruction::I32WrapI64);
+        }
+    }
+}
+
+/// `fmod(x: f64, y: f64) -> f64`: the exact IEEE remainder with the sign
+/// of `x`, as Rust's `%` (and C's `fmod`) compute it. `x - trunc(x / y) * y`
+/// is not exact, so this is the bit-level algorithm (after musl's `fmod`):
+/// align the two significands by exponent and subtract-and-shift.
+fn gen_fmod() -> Function {
+    use wasm_encoder::BlockType::Empty;
+    use Instruction as I;
+    // params: 0 = x, 1 = y (f64)
+    // locals: 2 = ux, 3 = uy (bits), 4 = ex, 5 = ey (exponents, signed),
+    //         6 = t (scratch), 7 = sx (sign bit of x)
+    const UX: u32 = 2;
+    const UY: u32 = 3;
+    const EX: u32 = 4;
+    const EY: u32 = 5;
+    const T: u32 = 6;
+    const SX: u32 = 7;
+    let mut f = Function::new(vec![(6, ValType::I64)]);
+    let mut emit = |ins: &[I<'static>]| {
+        for i in ins {
+            f.instruction(i);
+        }
+    };
+    // `0.0 * x`: a zero with the sign of x.
+    let zero_like_x = [I::F64Const(0.0), I::LocalGet(0), I::F64Mul, I::Return];
+
+    emit(&[
+        I::LocalGet(0),
+        I::I64ReinterpretF64,
+        I::LocalSet(UX),
+        I::LocalGet(1),
+        I::I64ReinterpretF64,
+        I::LocalSet(UY),
+        // ex = (ux >> 52) & 0x7ff
+        I::LocalGet(UX),
+        I::I64Const(52),
+        I::I64ShrU,
+        I::I64Const(0x7ff),
+        I::I64And,
+        I::LocalSet(EX),
+        I::LocalGet(UY),
+        I::I64Const(52),
+        I::I64ShrU,
+        I::I64Const(0x7ff),
+        I::I64And,
+        I::LocalSet(EY),
+        I::LocalGet(UX),
+        I::I64Const(63),
+        I::I64ShrU,
+        I::LocalSet(SX),
+        // y is zero, y is NaN, or x is infinite or NaN: the result is NaN.
+        I::LocalGet(UY),
+        I::I64Const(1),
+        I::I64Shl,
+        I::I64Eqz,
+        I::LocalGet(1),
+        I::LocalGet(1),
+        I::F64Ne,
+        I::I32Or,
+        I::LocalGet(EX),
+        I::I64Const(0x7ff),
+        I::I64Eq,
+        I::I32Or,
+        I::If(Empty),
+        I::LocalGet(0),
+        I::LocalGet(1),
+        I::F64Mul,
+        I::LocalGet(0),
+        I::LocalGet(1),
+        I::F64Mul,
+        I::F64Div,
+        I::Return,
+        I::End,
+        // |x| <= |y|: the result is x, or a signed zero when they are equal.
+        I::LocalGet(UX),
+        I::I64Const(1),
+        I::I64Shl,
+        I::LocalGet(UY),
+        I::I64Const(1),
+        I::I64Shl,
+        I::I64LeU,
+        I::If(Empty),
+        I::LocalGet(UX),
+        I::I64Const(1),
+        I::I64Shl,
+        I::LocalGet(UY),
+        I::I64Const(1),
+        I::I64Shl,
+        I::I64Eq,
+        I::If(Empty),
+    ]);
+    emit(&zero_like_x);
+    emit(&[I::End, I::LocalGet(0), I::Return, I::End]);
+
+    // Normalise one operand: leave its significand with the implicit bit
+    // at position 52, and its exponent in `e` (below 1 for a subnormal).
+    let normalise = |u: u32, e: u32| -> Vec<I<'static>> {
+        vec![
+            I::LocalGet(e),
+            I::I64Eqz,
+            I::If(Empty),
+            // Subnormal: count the leading zeros of the significand.
+            I::LocalGet(u),
+            I::I64Const(12),
+            I::I64Shl,
+            I::LocalSet(T),
+            I::Block(Empty),
+            I::Loop(Empty),
+            I::LocalGet(T),
+            I::I64Const(63),
+            I::I64ShrU,
+            I::I32WrapI64,
+            I::BrIf(1),
+            I::LocalGet(e),
+            I::I64Const(1),
+            I::I64Sub,
+            I::LocalSet(e),
+            I::LocalGet(T),
+            I::I64Const(1),
+            I::I64Shl,
+            I::LocalSet(T),
+            I::Br(0),
+            I::End,
+            I::End,
+            // u <<= 1 - e
+            I::LocalGet(u),
+            I::I64Const(1),
+            I::LocalGet(e),
+            I::I64Sub,
+            I::I64Shl,
+            I::LocalSet(u),
+            I::Else,
+            // Normal: keep the 52 significand bits, set the implicit bit.
+            I::LocalGet(u),
+            I::I64Const(0x000f_ffff_ffff_ffff),
+            I::I64And,
+            I::I64Const(1 << 52),
+            I::I64Or,
+            I::LocalSet(u),
+            I::End,
+        ]
+    };
+    emit(&normalise(UX, EX));
+    emit(&normalise(UY, EY));
+
+    // One subtract step: t = ux - uy; when t >= 0, ux = t (and a zero t
+    // ends the whole computation with a signed zero).
+    let subtract_step: Vec<I<'static>> = [
+        vec![
+            I::LocalGet(UX),
+            I::LocalGet(UY),
+            I::I64Sub,
+            I::LocalTee(T),
+            I::I64Const(63),
+            I::I64ShrU,
+            I::I64Eqz,
+            I::If(Empty),
+            I::LocalGet(T),
+            I::I64Eqz,
+            I::If(Empty),
+        ],
+        zero_like_x.to_vec(),
+        vec![I::End, I::LocalGet(T), I::LocalSet(UX), I::End],
+    ]
+    .concat();
+
+    // for (; ex > ey; ex--) { subtract step; ux <<= 1 }
+    emit(&[
+        I::Block(Empty),
+        I::Loop(Empty),
+        I::LocalGet(EX),
+        I::LocalGet(EY),
+        I::I64LeS,
+        I::BrIf(1),
+    ]);
+    emit(&subtract_step);
+    emit(&[
+        I::LocalGet(UX),
+        I::I64Const(1),
+        I::I64Shl,
+        I::LocalSet(UX),
+        I::LocalGet(EX),
+        I::I64Const(1),
+        I::I64Sub,
+        I::LocalSet(EX),
+        I::Br(0),
+        I::End,
+        I::End,
+    ]);
+    emit(&subtract_step);
+
+    emit(&[
+        // for (; ux >> 52 == 0; ux <<= 1, ex--);
+        I::Block(Empty),
+        I::Loop(Empty),
+        I::LocalGet(UX),
+        I::I64Const(52),
+        I::I64ShrU,
+        I::I64Eqz,
+        I::I32Eqz,
+        I::BrIf(1),
+        I::LocalGet(UX),
+        I::I64Const(1),
+        I::I64Shl,
+        I::LocalSet(UX),
+        I::LocalGet(EX),
+        I::I64Const(1),
+        I::I64Sub,
+        I::LocalSet(EX),
+        I::Br(0),
+        I::End,
+        I::End,
+        // Scale the result back.
+        I::LocalGet(EX),
+        I::I64Const(0),
+        I::I64GtS,
+        I::If(Empty),
+        // Normal: drop the implicit bit, put the exponent back.
+        I::LocalGet(UX),
+        I::I64Const(1 << 52),
+        I::I64Sub,
+        I::LocalGet(EX),
+        I::I64Const(52),
+        I::I64Shl,
+        I::I64Or,
+        I::LocalSet(UX),
+        I::Else,
+        // Subnormal: ux >>= 1 - ex
+        I::LocalGet(UX),
+        I::I64Const(1),
+        I::LocalGet(EX),
+        I::I64Sub,
+        I::I64ShrU,
+        I::LocalSet(UX),
+        I::End,
+        // Sign of x.
+        I::LocalGet(UX),
+        I::LocalGet(SX),
+        I::I64Const(63),
+        I::I64Shl,
+        I::I64Or,
+        I::F64ReinterpretI64,
+        I::End,
+    ]);
+    f
+}
+
+/// Layout of a pair: the offset of the second component and the total
+/// size, with each component at its natural alignment. `(i32, i32)` is
+/// `(4, 8)`.
+fn pair_layout(first: ValType, second: ValType) -> (u64, u64) {
+    let (first_size, _, _) = valtype_storage(first);
+    let (second_size, second_align, _) = valtype_storage(second);
+    let offset = align_up(first_size, second_align);
+    (offset, offset + second_size)
+}
+
+/// Offset of the payload of a sum cell, after its i32 tag: 4, or 8 for
+/// an 8-byte payload.
+fn sum_payload_offset(payload: ValType) -> u64 {
+    align_up(4, valtype_storage(payload).1)
+}
+
+/// True when a value of type `ty` has a component that is not an i32 at
+/// run time (an I64, F32 or F64 inside a pair, sum, tuple or list, or
+/// the value itself).
+fn has_non_i32_component(ty: &Ty) -> bool {
+    match ty {
+        Ty::Base(BaseTy::I64 | BaseTy::F32 | BaseTy::F64) => true,
+        Ty::Prod { left, right } | Ty::Sum { left, right } => {
+            has_non_i32_component(left) || has_non_i32_component(right)
+        }
+        Ty::Tuple(elems) => elems.iter().any(has_non_i32_component),
+        Ty::List(elem) => has_non_i32_component(elem),
+        Ty::Borrow { inner, .. } | Ty::Ref { inner, .. } => has_non_i32_component(inner),
+        _ => false,
     }
 }
 
@@ -5375,8 +5876,8 @@ mod tests {
         let entries =
             carriers::parse_access_sites_payload(&payload).expect("access-sites payload parses");
         // string_new (2 stores) + string_len (1 load) + string_concat
-        // (4 loads + 2 stores) = 9 typed accesses.
-        assert_eq!(entries.len(), 9);
+        // (4 loads + 2 stores) + string_eq (4 loads) = 13 typed accesses.
+        assert_eq!(entries.len(), 13);
 
         // Collect function bodies in index order + the import count so
         // entry.func_idx (imports-included space) maps to a body.

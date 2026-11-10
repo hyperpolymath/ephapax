@@ -162,13 +162,15 @@ impl Resolver<'_> {
         };
 
         // Surface grammar first. A file it rejects may still be a
-        // core-syntax file, so fall back to the core parser and report
-        // that parser's errors if both fail.
+        // core-syntax file, so fall back to the core parser. If both
+        // fail, report the surface parser's errors: the surface grammar
+        // is the language, and the core parser's complaint about a
+        // surface-only construct would hide the real error.
         let parsed = match parse_surface_module(&source, logical) {
             Ok(m) => Parsed::Surface(m),
-            Err(_) => match parse_module(&source, logical) {
+            Err(errors) => match parse_module(&source, logical) {
                 Ok(m) => Parsed::Core(m),
-                Err(errors) => {
+                Err(_) => {
                     return Err(DriverError::Parse {
                         path: file_path,
                         errors,

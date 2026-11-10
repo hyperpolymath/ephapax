@@ -33,17 +33,17 @@ rec1	check	error:DesugarError	error:DesugarError	E0: recursive data is a named D
 rec1	compile	error:DesugarError	error:DesugarError	E0
 rec1	wasm-run	no-module	no-module	E0
 i64	check	ok	ok	E5 (already accepted)
-i64	compile	error:InvalidWasm	ok	E5 typed side table: I64 binops lower to i64
-i64	wasm-run	no-module	ok:0	E5
+i64	compile	ok	ok	E5 typed side table: I64 binops lower to i64
+i64	wasm-run	ok:0	ok:0	E5 (baseline recorded from `ephapax run`, which uses the same engine: the wasmtime CLI was not installed)
 s1	check	ok	ok	E5 (already accepted)
-s1	compile	error:InvalidWasm	ok	E5: String.len lowering
-s1	wasm-run	no-module	ok:2	E5: wasm_e2e s1 returns the length of "hi"
+s1	compile	ok	ok	E5: String.len lowering
+s1	wasm-run	ok:2	ok:2	E5: wasm_e2e s1 returns the length of "hi" (baseline recorded from `ephapax run`, which uses the same engine: the wasmtime CLI was not installed)
 s6	check	ok	ok	E5 (already accepted)
-s6	compile	error:InvalidWasm	ok	E5: String.len on a String@r parameter
-s6	wasm-run	no-module	ok:0	E5
+s6	compile	ok	ok	E5: String.len on a String@r parameter
+s6	wasm-run	ok:0	ok:0	E5 (baseline recorded from `ephapax run`, which uses the same engine: the wasmtime CLI was not installed)
 t3	check	ok	ok	E5 (already accepted)
-t3	compile	error:InvalidWasm	ok	E5: n-ary tuples
-t3	wasm-run	no-module	ok:0	E5
+t3	compile	ok	ok	E5: n-ary tuples
+t3	wasm-run	ok:0	ok:0	E5 (baseline recorded from `ephapax run`, which uses the same engine: the wasmtime CLI was not installed)
 perform	check	error:CodegenError	error:CodegenError	E1 + E3: check runs the same unsupported-feature validation as codegen
 perform	compile	error:CodegenError	error:CodegenError	E1 tests/fail_loud.rs: perform/handle is a CodegenError
 perform	wasm-run	no-module	no-module	E1

@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: MPL-2.0
 // Owner: Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk>
 // SPDX-FileCopyrightText: 2025 Jonathan D.A. Jewell
-// hypatia: allow code_safety/unwrap_dangerous_default -- the two float-literal `parse().unwrap_or(0.0)` sites cannot take the default: grammar `float = ASCII_DIGIT+ "." ASCII_DIGIT+` (ephapax.pest) always parses as f64.
+// hypatia: allow code_safety/unwrap_dangerous_default -- the float-literal `parse().unwrap_or(0.0)` sites cannot take the default: grammar `float = ASCII_DIGIT+ "." ASCII_DIGIT+` (and `float32`, the same with an `f32` suffix that is trimmed first; ephapax.pest) always parses.
 
 //! Ephapax Parser
 //!
@@ -121,6 +121,12 @@ pub(crate) fn integer_literal(
     let n =
         i64::try_from(if negative { -magnitude } else { magnitude }).map_err(|_| out_of_range())?;
     Ok(i32::try_from(n).map_or(Literal::I64(n), Literal::I32))
+}
+
+/// An F32 literal, `<digits>.<digits>f32`: the decimal rounded once to F32.
+pub(crate) fn float32_literal(text: &str) -> Literal {
+    // Grammar `float32` (ephapax.pest): the digits always parse.
+    Literal::F32(text.trim_end_matches("f32").parse().unwrap_or(0.0))
 }
 
 /// The operand of a unary `-` when it is an integer literal with nothing
@@ -1004,6 +1010,7 @@ fn parse_literal_value_core(pair: pest::iterators::Pair<Rule>) -> Result<Literal
         Rule::unit_literal => Literal::Unit,
         Rule::boolean => Literal::Bool(pair.as_str() == "true"),
         Rule::float => Literal::F64(pair.as_str().parse().unwrap_or(0.0)),
+        Rule::float32 => float32_literal(pair.as_str()),
         Rule::integer => integer_literal(pair.as_str(), false, span_from_pair(&pair))?,
         Rule::string => {
             let s = pair.as_str();
@@ -2034,6 +2041,7 @@ fn parse_literal(pair: pest::iterators::Pair<Rule>) -> Result<Expr, ParseError> 
             let n: f64 = inner.as_str().parse().unwrap_or(0.0);
             Literal::F64(n)
         }
+        Rule::float32 => float32_literal(inner.as_str()),
         Rule::integer => integer_literal(inner.as_str(), false, span_from_pair(&inner))?,
         Rule::string => {
             let s = inner.as_str();

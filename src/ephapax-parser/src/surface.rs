@@ -1540,6 +1540,26 @@ fn parse_atom_expr(pair: pest::iterators::Pair<Rule>) -> Result<SurfaceExpr, Par
             ))
         }
 
+        // `fst(e)` / `snd(e)`. (The surface parser had no arm for them,
+        // so a program using one fell back to the core parser.)
+        Rule::fst_expr | Rule::snd_expr => {
+            let is_fst = inner.as_rule() == Rule::fst_expr;
+            let operand = Box::new(parse_expression(
+                inner
+                    .into_inner()
+                    .next()
+                    .ok_or_else(|| ParseError::missing("pair"))?,
+            )?);
+            Ok(SurfaceExpr::new(
+                if is_fst {
+                    SurfaceExprKind::Fst(operand)
+                } else {
+                    SurfaceExprKind::Snd(operand)
+                },
+                span,
+            ))
+        }
+
         Rule::drop_expr => {
             let inner_expr = parse_expression(
                 inner
@@ -1725,6 +1745,7 @@ fn parse_literal_value(pair: pest::iterators::Pair<Rule>) -> Result<Literal, Par
             }),
         },
         Rule::integer => crate::integer_literal(pair.as_str(), false, span_from_pair(&pair)),
+        Rule::float32 => Ok(crate::float32_literal(pair.as_str())),
         Rule::float => {
             let f: f64 = pair.as_str().parse().map_err(|_| ParseError::Syntax {
                 message: format!("Invalid float: {}", pair.as_str()),

@@ -521,7 +521,7 @@ expr_list    = expr , { "," , expr } ;
 
 variable     = IDENT ;
 
-literal      = "()" | BOOLEAN | FLOAT | INTEGER | STRING ;
+literal      = "()" | BOOLEAN | FLOAT32 | FLOAT | INTEGER | STRING ;
 
 (* ================================================================ *)
 (* 13. COMPTIME EXPRESSIONS (META PLANE)                             *)
@@ -603,6 +603,10 @@ CTOR_IDENT   = UPPER_ALPHA , { ALPHA_NUM | "_" } ;
 
 INTEGER      = DIGIT , { DIGIT } ;
 FLOAT        = DIGIT , { DIGIT } , "." , DIGIT , { DIGIT } ;
+(* An F32 literal carries the `f32` suffix: 1.5f32. An unsuffixed float
+   literal is F64. An INTEGER is I32 when it fits, else I64; a `-` written
+   directly on the digits is part of the literal. *)
+FLOAT32      = FLOAT , "f32" ;
 BOOLEAN      = "true" | "false" ;
 STRING       = '"' , { CHAR } , '"' ;
 

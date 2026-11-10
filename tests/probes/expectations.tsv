@@ -50,10 +50,10 @@ perform	wasm-run	no-module	no-module	E1
 g5	check	error:TypeError	error:*	E1: raw variadic __ffi rejected with a named error (kind name set by E1)
 g5	compile	error:TypeError	error:*	E1: named raw-FFI error, not an invalid module
 g5	wasm-run	no-module	no-module	E1
-gen_angle	check	error:TypeError	ok	E7 generics: id<a> instantiated at I32
-gen_angle	compile	error:TypeError	ok	E7
-gen_angle	run	error:TypeError	ok:3	E7 (since E3, run loads through ephapax-driver and rejects what check rejects; before E3 the interpreter path printed 3)
-gen_angle	wasm-run	no-module	ok:3	E7
+gen_angle	check	ok	ok	E7 generics: id<a> instantiated at I32
+gen_angle	compile	ok	ok	E7
+gen_angle	run	ok:3	ok:3	E7
+gen_angle	wasm-run	ok:3	ok:3	E7 (baseline recorded from `ephapax run`, same engine; no wasmtime CLI in that session)
 qa/app2	check	error:DesugarError	ok	E7: qualified M.Ctor(x) across modules
 qa/app2	compile	error:DesugarError	ok	E7
 qa/app2	run	error:DesugarError	ok:9	E7 + E3 (run goes through ephapax-driver::load_program)

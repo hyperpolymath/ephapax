@@ -18,6 +18,9 @@
 //! See [`discipline`] module for the complete rules reference.
 
 pub mod discipline;
+mod mono;
+
+pub use mono::monomorphise;
 
 use ephapax_syntax::{
     BaseTy, BinOp, Decl, Expr, ExprId, ExprKind, ExternItem, Literal, MatchArm, Module, Pattern,
@@ -123,6 +126,25 @@ pub enum TypeError {
     /// shadow the first, hiding its consumption obligation.
     #[error("Parameter `{0}` is declared more than once in the same function")]
     DuplicateParameter(Var),
+
+    /// A call of a generic function leaves one of its type parameters
+    /// with no type (nothing in the call fixes it).
+    #[error("Cannot infer a type argument of the generic function `{0}` at this call")]
+    CannotInferTypeArgument(Var),
+
+    /// A generic function reaches itself with other type arguments than
+    /// its own type parameters. Each generic function becomes one copy
+    /// for each set of type arguments, and this needs copies without end.
+    #[error(
+        "Polymorphic recursion: the generic function `{0}` reaches itself with \
+         type arguments that are not its own type parameters"
+    )]
+    PolymorphicRecursion(Var),
+
+    /// `main` is the entry point: no call gives it type arguments, so no
+    /// monomorphic copy of it would exist.
+    #[error("`main` is the entry point of a program and cannot have type parameters")]
+    GenericMain,
 
     /// A projection (`t.i` or `xs[i]`) would consume the container and
     /// return one component, discarding unselected linear components.
@@ -864,10 +886,33 @@ fn is_useful(
 /// instructions and layouts (v2 plan rung E5).
 pub type ExprTypes = HashMap<ExprId, Ty>;
 
+/// For each use of a generic function (the [`ExprId`] of the variable
+/// node), its type arguments in the order of the type parameters. Inside
+/// a generic function they can name its own type parameters.
+pub type TypeArgs = HashMap<ExprId, Vec<Ty>>;
+
+/// A use of a generic function in the function body being checked.
+#[derive(Clone)]
+struct Instantiation {
+    id: ExprId,
+    span: Span,
+    callee: Var,
+    /// Fresh unification variables until the body is checked.
+    args: Vec<Ty>,
+}
+
+#[derive(Clone)]
 pub struct TypeChecker {
     ctx: Context,
     /// Type of each checked expression; see [`TypeChecker::expr_types`].
     expr_types: ExprTypes,
+    /// Uses of generic functions in the body being checked.
+    instantiations: Vec<Instantiation>,
+    /// The resolved type arguments of every use; see [`TypeArgs`].
+    type_args: TypeArgs,
+    /// (generic caller, generic callee, type arguments, span of the call):
+    /// the input of the polymorphic-recursion check.
+    generic_calls: Vec<(Var, Var, Vec<Ty>, Span)>,
     /// Next fresh unification variable ID.
     next_unif: u32,
     wildcard_obligations: Vec<(Span, Ty)>,
@@ -885,6 +930,9 @@ impl TypeChecker {
         Self {
             ctx: Context::new(),
             expr_types: ExprTypes::new(),
+            instantiations: Vec::new(),
+            type_args: TypeArgs::new(),
+            generic_calls: Vec::new(),
             next_unif: 0,
             wildcard_obligations: Vec::new(),
             unif_solutions: HashMap::new(),
@@ -912,16 +960,16 @@ impl TypeChecker {
     }
 
     /// Instantiate a ForAll type by replacing bound variables with fresh
-    /// unification variables. Non-ForAll types pass through unchanged.
-    fn instantiate(&mut self, ty: Ty) -> Ty {
-        match ty {
-            Ty::ForAll { var, body } => {
-                let fresh = self.fresh_unif();
-                let instantiated = body.subst_var(&var, &fresh);
-                self.instantiate(instantiated)
-            }
-            other => other,
+    /// unification variables, which are also returned, outermost first.
+    /// Non-ForAll types pass through unchanged.
+    fn instantiate(&mut self, mut ty: Ty) -> (Ty, Vec<Ty>) {
+        let mut args = Vec::new();
+        while let Ty::ForAll { var, body } = ty {
+            let fresh = self.fresh_unif();
+            ty = body.subst_var(&var, &fresh);
+            args.push(fresh);
         }
+        (ty, args)
     }
 
     /// Resolve a type by chasing unification variable solutions.
@@ -1092,7 +1140,7 @@ impl TypeChecker {
         let s = expr.span;
         match &expr.kind {
             ExprKind::Lit(lit) => self.check_lit(s, lit),
-            ExprKind::Var(name) => self.check_var(s, name),
+            ExprKind::Var(name) => self.check_var(s, expr.id, name),
             ExprKind::StringNew { region, .. } => self.check_string_new(s, region),
             ExprKind::StringConcat { left, right } => self.check_string_concat(s, left, right),
             ExprKind::Let {
@@ -1164,7 +1212,7 @@ impl TypeChecker {
         })
     }
 
-    fn check_var(&mut self, s: Span, name: &Var) -> Result<Ty, SpannedTypeError> {
+    fn check_var(&mut self, s: Span, id: ExprId, name: &Var) -> Result<Ty, SpannedTypeError> {
         let ty = self
             .ctx
             .lookup(name)
@@ -1175,7 +1223,16 @@ impl TypeChecker {
 
         // Instantiate ForAll types with fresh unification variables.
         // E.g. `identity : forall T. T -> T` becomes `?0 -> ?0`.
-        Ok(self.instantiate(ty))
+        let (ty, args) = self.instantiate(ty);
+        if !args.is_empty() {
+            self.instantiations.push(Instantiation {
+                id,
+                span: s,
+                callee: name.clone(),
+                args,
+            });
+        }
+        Ok(ty)
     }
 
     fn check_string_new(&self, s: Span, region: &RegionName) -> Result<Ty, SpannedTypeError> {
@@ -2550,6 +2607,15 @@ pub fn module_expr_types(
     module: &Module,
     registry: &mut ModuleRegistry,
 ) -> Result<ExprTypes, SpannedTypeError> {
+    module_types_and_args(module, registry).map(|(types, _)| types)
+}
+
+/// [`module_expr_types`], and the type arguments of every use of a
+/// generic function ([`TypeArgs`]).
+pub fn module_types_and_args(
+    module: &Module,
+    registry: &mut ModuleRegistry,
+) -> Result<(ExprTypes, TypeArgs), SpannedTypeError> {
     let mut tc = TypeChecker::new();
 
     // Resolve imports: bring imported names into scope
@@ -2584,7 +2650,7 @@ pub fn module_expr_types(
     // Register this module's declarations for dependents
     registry.register(module);
 
-    Ok(tc.expr_types())
+    Ok((tc.expr_types(), tc.type_args))
 }
 
 /// Internal module checking logic shared by single-module and registry paths.
@@ -2673,69 +2739,189 @@ fn type_check_module_inner(tc: &mut TypeChecker, module: &Module) -> Result<(), 
 
     // Second pass: type check each function body
     for decl in &module.decls {
-        match decl {
-            Decl::Fn {
-                name: _,
-                type_params: _,
-                visibility: _,
-                params,
-                ret_ty,
-                body,
-            } => {
-                let saved_ctx = tc.ctx.clone();
-                let saved_unif = tc.next_unif;
+        let Decl::Fn {
+            name,
+            type_params,
+            params,
+            ret_ty,
+            body,
+            ..
+        } = decl
+        else {
+            // A constant is handled in module registration. An extern
+            // signature is registered in the first pass, and an extern
+            // type is opaque. Data constructors go through
+            // `DataCtorRegistry`. None of them has a body to check here.
+            continue;
+        };
+        check_fn(tc, name, type_params, params, ret_ty, body)?;
+        if type_params.is_empty() {
+            continue;
+        }
+        if name == "main" {
+            return Err(SpannedTypeError {
+                error: TypeError::GenericMain,
+                span: body.span,
+            });
+        }
+        // A type parameter can stand for a linear type. The check above
+        // took each type parameter as an opaque type, so the body uses
+        // such a value only in ways that every type allows. Check the
+        // body one more time with each type parameter as a linear type:
+        // now only the linear discipline can fail (a value used two times,
+        // or not consumed). Until grades exist (E13), an unconstrained
+        // type parameter is linear (v2 plan E7).
+        let linear = type_params
+            .iter()
+            .map(|p| (p.clone(), Ty::String("_".into())))
+            .collect();
+        let mut copy = decl.clone();
+        mono::substitute_fn(&mut copy, &linear);
+        if let Decl::Fn {
+            params,
+            ret_ty,
+            body,
+            ..
+        } = &copy
+        {
+            // On a scratch checker: this check records nothing.
+            check_fn(&mut tc.clone(), name, &[], params, ret_ty, body)?;
+        }
+    }
+    check_polymorphic_recursion(tc, module)
+}
 
-                // A repeated parameter name would shadow the earlier
-                // parameter for the whole body, so a linear earlier
-                // parameter could never be consumed or checked.
-                let mut seen_params: HashSet<&Var> = HashSet::new();
-                for (param_name, _) in params {
-                    if !seen_params.insert(param_name) {
-                        return Err(SpannedTypeError {
-                            error: TypeError::DuplicateParameter(param_name.clone()),
-                            span: body.span,
-                        });
-                    }
-                }
+/// Check the body of one function against its signature.
+fn check_fn(
+    tc: &mut TypeChecker,
+    name: &Var,
+    type_params: &[SmolStr],
+    params: &[(Var, Ty)],
+    ret_ty: &Ty,
+    body: &Expr,
+) -> Result<(), SpannedTypeError> {
+    let saved_ctx = tc.ctx.clone();
+    let saved_unif = tc.next_unif;
 
-                for (param_name, param_ty) in params {
-                    tc.ctx
-                        .extend(param_name.clone(), param_ty.clone(), BindingForm::Param);
-                }
-
-                let body_ty = tc.check(body)?;
-
-                tc.unify(body.span, ret_ty, &body_ty)?;
-
-                for (param_name, _param_ty) in params {
-                    if let Some(entry) = tc.ctx.vars.get(param_name) {
-                        if entry.demands_consumption() && !entry.used {
-                            return Err(SpannedTypeError {
-                                error: TypeError::LinearVariableNotConsumed(param_name.clone()),
-                                span: body.span,
-                            });
-                        }
-                    }
-                }
-
-                tc.ctx = saved_ctx;
-                tc.next_unif = saved_unif;
-                tc.unif_solutions.clear();
-                tc.wildcard_obligations.clear();
-            }
-            Decl::Type { .. } => {}
-            Decl::Const { .. } => {} // Constants are handled in module registration
-            // Extern fn signatures are registered earlier in the
-            // signature-collection pass; the body-checking pass has
-            // nothing more to do. Extern types are opaque.
-            Decl::Extern { .. } => {}
-            // Data ctor signatures flow through `DataCtorRegistry`
-            // (populated pre-pass); pattern-checking dispatches via the
-            // registry, so there is no per-decl body to walk here.
-            Decl::Data { .. } => {}
+    // A repeated parameter name would shadow the earlier
+    // parameter for the whole body, so a linear earlier
+    // parameter could never be consumed or checked.
+    let mut seen_params: HashSet<&Var> = HashSet::new();
+    for (param_name, _) in params {
+        if !seen_params.insert(param_name) {
+            return Err(SpannedTypeError {
+                error: TypeError::DuplicateParameter(param_name.clone()),
+                span: body.span,
+            });
         }
     }
 
+    for (param_name, param_ty) in params {
+        tc.ctx
+            .extend(param_name.clone(), param_ty.clone(), BindingForm::Param);
+    }
+
+    let body_ty = tc.check(body)?;
+
+    tc.unify(body.span, ret_ty, &body_ty)?;
+
+    for (param_name, _param_ty) in params {
+        if let Some(entry) = tc.ctx.vars.get(param_name) {
+            if entry.demands_consumption() && !entry.used {
+                return Err(SpannedTypeError {
+                    error: TypeError::LinearVariableNotConsumed(param_name.clone()),
+                    span: body.span,
+                });
+            }
+        }
+    }
+
+    // The body is checked, so the type arguments of each use of a generic
+    // function in it are known. Inside a generic function they can name
+    // its type parameters.
+    for use_ in std::mem::take(&mut tc.instantiations) {
+        let args: Vec<Ty> = use_.args.iter().map(|t| tc.resolve(t)).collect();
+        if args.iter().any(has_unif) {
+            return Err(SpannedTypeError {
+                error: TypeError::CannotInferTypeArgument(use_.callee),
+                span: use_.span,
+            });
+        }
+        if !type_params.is_empty() {
+            tc.generic_calls
+                .push((name.clone(), use_.callee, args.clone(), use_.span));
+        }
+        tc.type_args.insert(use_.id, args);
+    }
+
+    tc.ctx = saved_ctx;
+    tc.next_unif = saved_unif;
+    tc.unif_solutions.clear();
+    tc.wildcard_obligations.clear();
+    Ok(())
+}
+
+/// True when `ty` has a unification variable with no solution.
+fn has_unif(ty: &Ty) -> bool {
+    match ty {
+        Ty::Unif(_) => true,
+        Ty::Base(_) | Ty::String(_) | Ty::Var(_) => false,
+        Ty::Ref { inner, .. }
+        | Ty::Region { inner, .. }
+        | Ty::Borrow { inner, .. }
+        | Ty::ForAll { body: inner, .. }
+        | Ty::List(inner) => has_unif(inner),
+        Ty::Fun { param, ret } | Ty::Effectful { param, ret, .. } => {
+            has_unif(param) || has_unif(ret)
+        }
+        Ty::Prod { left, right } | Ty::Sum { left, right } => has_unif(left) || has_unif(right),
+        Ty::Tuple(elems) => elems.iter().any(has_unif),
+    }
+}
+
+/// Reject a generic function that reaches itself, through calls between
+/// generic functions of this module, with a type argument that is not one
+/// of the type parameters of the caller. Monomorphisation makes one copy
+/// of a generic function for each set of type arguments; with this rule
+/// every such cycle uses a finite set of types, so the copies end.
+/// (A cycle cannot leave the module: imports have no cycle.)
+fn check_polymorphic_recursion(tc: &TypeChecker, module: &Module) -> Result<(), SpannedTypeError> {
+    let generic: HashMap<&Var, &Vec<SmolStr>> = module
+        .decls
+        .iter()
+        .filter_map(|decl| match decl {
+            Decl::Fn {
+                name, type_params, ..
+            } if !type_params.is_empty() => Some((name, type_params)),
+            _ => None,
+        })
+        .collect();
+    let calls: Vec<_> = tc
+        .generic_calls
+        .iter()
+        .filter(|(_, callee, ..)| generic.contains_key(callee))
+        .collect();
+    let reaches = |from: &Var, to: &Var| {
+        let (mut stack, mut seen) = (vec![from], HashSet::new());
+        while let Some(f) = stack.pop() {
+            if f == to {
+                return true;
+            }
+            if seen.insert(f) {
+                stack.extend(calls.iter().filter(|c| &c.0 == f).map(|c| &c.1));
+            }
+        }
+        false
+    };
+    for (caller, callee, args, span) in &calls {
+        let own = |arg: &Ty| matches!(arg, Ty::Var(v) if generic[caller].contains(v));
+        if !args.iter().all(own) && reaches(callee, caller) {
+            return Err(SpannedTypeError {
+                error: TypeError::PolymorphicRecursion(caller.clone()),
+                span: *span,
+            });
+        }
+    }
     Ok(())
 }
 
@@ -3541,45 +3727,72 @@ mod tests {
 
     #[test]
     fn test_generic_two_params() {
-        // fn const_fn<A, B>(x: A, y: B) : A = x
-        // fn main() : I32 = const_fn(42, true)
-        let module = Module {
+        // fn pair<A, B>(x: A, y: B) : (A, B) = (x, y)
+        // fn main() : I32 = fst(pair(42, true))
+        let generic = |name: &str, ret_ty: Ty, body: Expr| Decl::Fn {
+            name: name.into(),
+            visibility: Visibility::Private,
+            type_params: vec!["A".into(), "B".into()],
+            params: vec![
+                ("x".into(), Ty::Var("A".into())),
+                ("y".into(), Ty::Var("B".into())),
+            ],
+            ret_ty,
+            body,
+        };
+        let var = |name: &str| dummy_expr(ExprKind::Var(name.into()));
+        // callee(42)(true) — curried application
+        let call = |callee: &str| {
+            dummy_expr(ExprKind::App {
+                func: Box::new(dummy_expr(ExprKind::App {
+                    func: Box::new(var(callee)),
+                    arg: Box::new(dummy_expr(ExprKind::Lit(Literal::I32(42)))),
+                })),
+                arg: Box::new(dummy_expr(ExprKind::Lit(Literal::Bool(true)))),
+            })
+        };
+        let main = |body: Expr| Decl::Fn {
+            name: "main".into(),
+            visibility: Visibility::Private,
+            type_params: vec![],
+            params: vec![],
+            ret_ty: Ty::Base(BaseTy::I32),
+            body,
+        };
+        let module = |decls| Module {
             name: "test".into(),
             imports: vec![],
-            decls: vec![
-                Decl::Fn {
-                    name: "const_fn".into(),
-                    visibility: Visibility::Private,
-                    type_params: vec!["A".into(), "B".into()],
-                    params: vec![
-                        ("x".into(), Ty::Var("A".into())),
-                        ("y".into(), Ty::Var("B".into())),
-                    ],
-                    ret_ty: Ty::Var("A".into()),
-                    // const_fn is curried: fn(x: A) -> fn(y: B) -> x
-                    // But our module checker expects multi-param.
-                    // Actually module checker expects the body to be checked
-                    // with all params in scope, so just return x.
-                    body: dummy_expr(ExprKind::Var("x".into())),
-                },
-                Decl::Fn {
-                    name: "main".into(),
-                    visibility: Visibility::Private,
-                    type_params: vec![],
-                    params: vec![],
-                    ret_ty: Ty::Base(BaseTy::I32),
-                    // const_fn(42)(true) — curried application
-                    body: dummy_expr(ExprKind::App {
-                        func: Box::new(dummy_expr(ExprKind::App {
-                            func: Box::new(dummy_expr(ExprKind::Var("const_fn".into()))),
-                            arg: Box::new(dummy_expr(ExprKind::Lit(Literal::I32(42)))),
-                        })),
-                        arg: Box::new(dummy_expr(ExprKind::Lit(Literal::Bool(true)))),
-                    }),
-                },
-            ],
+            decls,
         };
-        assert!(type_check_module(&module).is_ok());
+
+        let pair_ty = Ty::Prod {
+            left: Box::new(Ty::Var("A".into())),
+            right: Box::new(Ty::Var("B".into())),
+        };
+        let pair_body = dummy_expr(ExprKind::Pair {
+            left: Box::new(var("x")),
+            right: Box::new(var("y")),
+        });
+        let ok = module(vec![
+            generic("pair", pair_ty, pair_body),
+            main(dummy_expr(ExprKind::Fst(Box::new(call("pair"))))),
+        ]);
+        assert!(type_check_module(&ok).is_ok());
+
+        // fn const_fn<A, B>(x: A, y: B) : A = x
+        // `y` can have a linear type in a use of `const_fn`, so the body
+        // must consume it (v2 plan E7: a type parameter is linear).
+        let discards = module(vec![
+            generic("const_fn", Ty::Var("A".into()), var("x")),
+            main(call("const_fn")),
+        ]);
+        assert!(matches!(
+            type_check_module(&discards),
+            Err(SpannedTypeError {
+                error: TypeError::LinearVariableNotConsumed(name),
+                ..
+            }) if name == "y"
+        ));
     }
 
     #[test]
@@ -3671,7 +3884,7 @@ mod tests {
                 ret: Box::new(Ty::Var("T".into())),
             }),
         };
-        let instantiated = tc.instantiate(forall_ty);
+        let (instantiated, _) = tc.instantiate(forall_ty);
 
         // Should be Fun { param: Unif(0), ret: Unif(0) }
         match &instantiated {

@@ -359,7 +359,9 @@ impl Repl {
     fn load_declarations(&mut self, source: &str) -> Result<(), DriverError> {
         let stdlib = ephapax_driver::stdlib_dir(None);
         let program = ephapax_driver::parse_source(source, "repl", None, stdlib.as_deref())?;
-        self.interpreter.load_module(&program.into_merged());
+        // Not monomorphised (that needs a type check): the interpreter
+        // runs a generic function as it is.
+        self.interpreter.load_module(&program.merge());
         Ok(())
     }
 
@@ -367,7 +369,10 @@ impl Repl {
         &mut self,
         program: Result<ephapax_driver::Program, DriverError>,
     ) -> Result<usize, ReplError> {
-        let module = program.map_err(ReplError::Load)?.into_merged();
+        // The driver checked the program. It is loaded without
+        // monomorphisation, as a prompt declaration is: a generic function
+        // of the file stays callable from the prompt by its own name.
+        let module = program.map_err(ReplError::Load)?.merge();
         self.interpreter.load_module(&module);
         Ok(module.decls.len())
     }
@@ -493,6 +498,20 @@ mod tests {
             .call("g", vec![Value::I32(0)])
             .expect("g runs");
         assert!(matches!(result, Value::I32(42)));
+    }
+
+    /// A generic function of a loaded file is callable from the prompt,
+    /// also when the file itself does not use it.
+    #[test]
+    fn loaded_generic_function_is_callable_from_the_prompt() {
+        let mut repl = Repl::new().expect("REPL should initialize");
+        repl.load_module("fn id<a>(x: a): a = x\n", "lib")
+            .expect("the module loads");
+        let result = repl
+            .interpreter
+            .call("id", vec![Value::I32(7)])
+            .expect("id runs");
+        assert!(matches!(result, Value::I32(7)));
     }
 
     #[test]

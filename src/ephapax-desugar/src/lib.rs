@@ -258,6 +258,10 @@ pub struct Desugarer {
     /// Named types currently being expanded by `desugar_named_type`,
     /// innermost last. Re-entering one is a recursive type.
     expanding: RefCell<Vec<SmolStr>>,
+    /// The type parameters of the function being desugared. In its
+    /// signature and body such a name is a type variable, also when it
+    /// starts with an upper-case letter (`fn id<T>(x: T): T`).
+    fn_type_params: Vec<SmolStr>,
 }
 
 impl Desugarer {
@@ -267,6 +271,7 @@ impl Desugarer {
             registry: DataRegistry::new(),
             module_qualifiers: HashSet::new(),
             expanding: RefCell::new(Vec::new()),
+            fn_type_params: Vec::new(),
         }
     }
 
@@ -276,6 +281,7 @@ impl Desugarer {
             registry,
             module_qualifiers: HashSet::new(),
             expanding: RefCell::new(Vec::new()),
+            fn_type_params: Vec::new(),
         }
     }
 
@@ -320,20 +326,23 @@ impl Desugarer {
                 SurfaceDecl::Fn {
                     name,
                     visibility,
+                    type_params,
                     params,
                     ret_ty,
                     body,
                 } => {
+                    self.fn_type_params.clone_from(type_params);
                     let core_params: Vec<_> = params
                         .iter()
                         .map(|(n, t)| Ok((n.clone(), self.desugar_ty(t)?)))
                         .collect::<Result<_, DesugarError>>()?;
                     let core_ret = self.desugar_ty(ret_ty)?;
                     let core_body = self.desugar_expr(body)?;
+                    self.fn_type_params.clear();
                     core_decls.push(Decl::Fn {
                         name: name.clone(),
                         visibility: lower_visibility(*visibility),
-                        type_params: vec![],
+                        type_params: type_params.clone(),
                         params: core_params,
                         ret_ty: core_ret,
                         body: core_body,
@@ -684,6 +693,18 @@ impl Desugarer {
     /// codegen). Two distinct extern types `Window` and `IpcChannel`
     /// produce two distinct `Ty::Var` rigids that never unify.
     fn desugar_named_type(&self, name: &SmolStr, args: &[SurfaceTy]) -> Result<Ty, DesugarError> {
+        // A type parameter of the enclosing function shadows every other
+        // meaning of the name.
+        if self.fn_type_params.contains(name) {
+            if !args.is_empty() {
+                return Err(DesugarError::TypeArityMismatch {
+                    name: name.to_string(),
+                    expected: 0,
+                    got: args.len(),
+                });
+            }
+            return Ok(Ty::Var(name.clone()));
+        }
         // Built-in type aliases that aren't (yet) keywords in the lexer.
         // `Unit` is the type-position spelling of the literal `()`;
         // bridge.eph and other ML-adjacent corpora write it freely.
@@ -1795,6 +1816,7 @@ mod tests {
                 SurfaceDecl::Fn {
                     name: "unwrap_or".into(),
                     visibility: SurfaceVisibility::Private,
+                    type_params: vec![],
                     params: vec![
                         (
                             "opt".into(),
@@ -1879,6 +1901,7 @@ mod tests {
                 SurfaceDecl::Fn {
                     name: "test".into(),
                     visibility: SurfaceVisibility::Private,
+                    type_params: vec![],
                     params: vec![(
                         "opt".into(),
                         SurfaceTy::Named {
@@ -1944,6 +1967,7 @@ mod tests {
                 SurfaceDecl::Fn {
                     name: "test".into(),
                     visibility: SurfaceVisibility::Private,
+                    type_params: vec![],
                     params: vec![(
                         "opt".into(),
                         SurfaceTy::Named {

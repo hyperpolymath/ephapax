@@ -275,6 +275,7 @@ fn load(src: &str) -> ephapax_syntax::Module {
     ephapax_driver::load_source(src, "matrix", None, stdlib.as_deref())
         .unwrap_or_else(|e| panic!("the matrix module must load: {e}"))
         .into_merged()
+        .expect("the matrix module merges")
 }
 
 fn linker(engine: &Engine) -> Linker<()> {

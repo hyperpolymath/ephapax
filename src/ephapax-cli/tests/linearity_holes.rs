@@ -104,6 +104,28 @@ fn main(): I32 =
   }
 ";
 
+/// Projection from a three-element tuple goes through `check_tuple_index`
+/// (a two-element tuple is a pair): `.2` would lose the linear `s`.
+const TUPLEIDX3: &str = "\
+fn main(): I32 =
+  region r {
+    let s = String.new@r(\"a\") in
+    let t = (s, 1, 2) in
+    t.2
+  }
+";
+
+/// Pair destructuring whose body is an `I64` extern call: the lowered
+/// core `match` must carry an `i64` result, not the default `i32`.
+const DESTRUCT_I64: &str = "\
+extern \"c\" {
+  fn clock_gettime(): I64
+}
+fn f(p: (I32, I32)): I64 =
+  let (a, b) = p in clock_gettime()
+fn main(): I32 = 0
+";
+
 /// List index from a list of linear strings: the other elements would
 /// be lost.
 const LISTIDX: &str = "\
@@ -380,6 +402,15 @@ fn tuple_projection_from_linear_tuple_rejected() {
 }
 
 #[test]
+fn three_element_tuple_projection_from_linear_tuple_rejected() {
+    assert!(matches!(
+        type_error(TUPLEIDX3),
+        TypeError::LinearProjectionDiscard(Ty::Tuple(_))
+    ));
+    assert_cli_rejects("tupleidx3", TUPLEIDX3);
+}
+
+#[test]
 fn list_index_from_linear_list_rejected() {
     assert!(matches!(
         type_error(LISTIDX),
@@ -466,12 +497,31 @@ fn pair_destructuring_lowering_computes_correct_value() {
 }
 
 #[test]
-fn multi_field_constructor_destructuring_checks() {
-    // Type-level only. The wasm for a nested pair payload is wrong on
-    // the base commit too (`fst((1, (2, 3)))` evaluates to 521 with the
-    // pre-E0 compiler), a codegen defect outside E0, so this gate does
-    // not assert the runtime value of a three-field payload.
+fn multi_field_constructor_destructuring_computes_correct_value() {
+    // A three-field payload is a nested pair. Before the bump pointer was
+    // initialised, the first heap cell overwrote it and this read back
+    // corrupted fields (`fst((1, (2, 3)))` gave 521).
     pipeline(DESTRUCT3).expect("three-field constructor destructuring type-checks");
+    assert_eq!(compile_and_run("destruct3", DESTRUCT3), 321);
+}
+
+#[test]
+fn pair_destructuring_keeps_an_i64_result_type() {
+    pipeline(DESTRUCT_I64).expect("type-checks");
+    let dir = tempfile::tempdir().expect("tempdir");
+    let path = write_probe(dir.path(), "destruct_i64", DESTRUCT_I64);
+    let out = Command::new(ephapax_bin())
+        .arg("compile")
+        .arg(&path)
+        .arg("-o")
+        .arg(dir.path().join("destruct_i64.wasm"))
+        .output()
+        .expect("run ephapax compile");
+    assert!(
+        out.status.success(),
+        "an I64 arm body must give valid wasm:\n{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
 }
 
 // ---------------------------------------------------------------------

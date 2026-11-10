@@ -55,7 +55,8 @@ Re-wiring the seam through `extern` is rung E10.
 zig build-lib -dynamic -O ReleaseSafe \
     tools/coproc/ephapax_coproc.zig -femit-bin=libephapax_coproc.so
 
-# Run an ephapax program that uses Coproc, with the seam linked:
+# HISTORICAL (pre-E1, raw `__ffi` only). This no longer reaches the shim;
+# do not use it to test typed Coproc dispatch until rung E10:
 ephapax run myprog.eph -L libephapax_coproc.so
 ----
 

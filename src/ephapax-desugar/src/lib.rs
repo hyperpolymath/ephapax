@@ -379,8 +379,21 @@ impl Desugarer {
         }
     }
 
-    /// The constructor `name` in the current scope.
+    /// The constructor `name` in the current scope. A pattern can name
+    /// it as `M.Ctor`: `M` must be an imported module, and the
+    /// constructor then resolves as `Ctor` (as `M.Ctor(x)` does in an
+    /// expression).
     fn ctor(&self, name: &str) -> Result<&ConstructorInfo, DesugarError> {
+        let name = match name.split_once('.') {
+            Some((qualifier, member)) if self.module_qualifiers.contains(qualifier) => member,
+            Some((qualifier, member)) => {
+                return Err(DesugarError::QualifiedAccessUnknownModule {
+                    qualifier: qualifier.to_string(),
+                    member: member.to_string(),
+                })
+            }
+            None => name,
+        };
         self.registry
             .get_ctor(&self.scope.borrow(), name)
             .ok_or_else(|| DesugarError::UnknownConstructor {
@@ -1660,6 +1673,22 @@ impl Desugarer {
                 let snd = Expr::new(ExprKind::Snd(Box::new(value.clone())), span);
                 let inner = self.bind_single_pattern(&snd, r, body, span)?;
                 self.bind_single_pattern(&fst, l, inner, span)
+            }
+            // A tuple pattern of variables, wildcards and pairs of them
+            // lowers to a one-arm core `match` on a tuple pattern, as a
+            // pair pattern does: the scrutinee is consumed one time.
+            Pattern::Tuple(elements) if elements.iter().all(Self::is_irrefutable_pair_pattern) => {
+                Ok(Expr::new(
+                    ExprKind::Match {
+                        scrutinee: Box::new(value.clone()),
+                        arms: vec![ephapax_syntax::MatchArm {
+                            pattern: Self::core_pattern(pattern)?,
+                            guard: None,
+                            body,
+                        }],
+                    },
+                    span,
+                ))
             }
             Pattern::Tuple(elements) => {
                 let as_fields: Vec<SurfaceTy> = vec![]; // placeholder

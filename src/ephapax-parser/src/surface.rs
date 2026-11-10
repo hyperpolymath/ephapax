@@ -37,6 +37,7 @@ pub fn parse_surface_module(source: &str, name: &str) -> Result<SurfaceModule, V
             span: Span::dummy(),
         }]
     })?;
+    crate::refuse_unimplemented(pairs.clone())?;
 
     let pair = pairs
         .into_iter()
@@ -704,16 +705,16 @@ fn parse_let_binder(pair: pest::iterators::Pair<Rule>) -> Result<LetBinder, Pars
 }
 
 /// Build a 1-arm `match scrutinee of | (a, b, ...) => body end` from a
-/// tuple-binder lowering. For N=2 the pattern is `Pattern::Pair`; for N>2
-/// it becomes a right-nested chain of `Pattern::Pair`s to match ephapax's
-/// existing binary-product encoding.
+/// tuple-binder lowering. For N=2 the pattern is `Pattern::Pair`, as the
+/// value `(x, y)` is a pair. For N>2 it is `Pattern::Tuple`, as the value
+/// `(x, y, z)` is a tuple (it was a chain of pairs, which no tuple value
+/// has as its type).
 fn match_arm_from_tuple_binder(
     binders: Vec<ephapax_surface::Var>,
     scrutinee: SurfaceExpr,
     body: SurfaceExpr,
     span: Span,
 ) -> SurfaceExpr {
-    // Build the pair pattern from the right: (a, b, c) → Pair(a, Pair(b, c)).
     // A `_` binder is a wildcard, not a variable named `_`: it binds
     // nothing, so the checker can see (and reject) a discarded linear
     // component instead of reporting an unconsumed variable `_`.
@@ -724,12 +725,14 @@ fn match_arm_from_tuple_binder(
             Pattern::Var(name)
         }
     };
-    let mut iter = binders.into_iter().rev();
-    let last = iter.next().expect("at least 2 binders");
-    let mut pat = binder(last);
-    for name in iter {
-        pat = Pattern::Pair(Box::new(binder(name)), Box::new(pat));
-    }
+    let mut parts: Vec<Pattern> = binders.into_iter().map(binder).collect();
+    let pat = if parts.len() == 2 {
+        let right = parts.pop().expect("2 binders");
+        let left = parts.pop().expect("2 binders");
+        Pattern::Pair(Box::new(left), Box::new(right))
+    } else {
+        Pattern::Tuple(parts)
+    };
     SurfaceExpr::new(
         SurfaceExprKind::Match {
             scrutinee: Box::new(scrutinee),
@@ -1038,13 +1041,22 @@ fn parse_pattern(pair: pest::iterators::Pair<Rule>) -> Result<Pattern, ParseErro
 }
 
 fn parse_constructor_pattern(pair: pest::iterators::Pair<Rule>) -> Result<Pattern, ParseError> {
-    let mut inner = pair.into_inner();
+    let mut inner = pair.into_inner().peekable();
 
+    // `M.Ctor`: the name keeps the qualifier, as `M.Ctor`. The desugarer
+    // knows the imports: it checks `M` and finds `Ctor`.
+    let qualifier = inner
+        .next_if(|p| p.as_rule() == Rule::pattern_qualifier)
+        .map(|p| p.as_str().to_string());
     let ctor = parse_constructor_name(
         inner
             .next()
             .ok_or_else(|| ParseError::missing("constructor name"))?,
     );
+    let ctor = match qualifier {
+        Some(qualifier) => format!("{qualifier}.{ctor}").into(),
+        None => ctor,
+    };
 
     let mut args = Vec::new();
     for item in inner {

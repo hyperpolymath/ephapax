@@ -7,14 +7,18 @@
 // ============================================================================
 
 // Top-level rules
-module = { SOI ~ module_decl? ~ (import_decl | declaration)* ~ EOI }
+module = {
+    SOI ~ module_decl?
+    ~ (unimplemented_reexport | unimplemented_import | import_decl | declaration)*
+    ~ EOI
+}
 expression_only = { SOI ~ expression ~ EOI }
 
 // ============================================================================
 // Module Declaration
 // ============================================================================
 
-module_decl = { "module" ~ qualified_name }
+module_decl = { "module" ~ qualified_name ~ unimplemented_capability_decl? }
 
 // Only the header, for `declared_module_name`.
 module_header = { SOI ~ module_decl }
@@ -35,10 +39,116 @@ import_decl = {
 }
 
 // ============================================================================
+// Syntax of the v2 design that is not implemented
+// ============================================================================
+//
+// A rule with the name `unimplemented_<production>` is in this grammar
+// for one purpose: the parser finds the syntax and refuses the program
+// with an error that names `<production>` (`ParseError::Unimplemented`).
+// The production is in part 2 of spec/ephapax-v2-grammar.ebnf with the
+// mark [UNIMPLEMENTED]. Each rule stands only where no valid program can
+// have its first token, so it changes no program that parsed before.
+
+// The body of `( ... )` when its contents have no grammar yet.
+paren_body = _{ (string | "(" ~ paren_body ~ ")" | !("(" | ")") ~ ANY)* }
+
+// A word of the v2 design, as a full word (`where`, not the start of
+// `wherever`). Atomic: white space cannot stand before the check.
+design_word = @{
+    ("where" | "requires" | "ensures" | "invariant" | "trait" | "impl" | "effect" | "handler" | "with")
+    ~ !(ASCII_ALPHANUMERIC | "_")
+}
+
+// import Foo from "foo" / import { a, b } from "foo" / import * as Foo from "foo"
+unimplemented_import = {
+    "import"
+    ~ (identifier | "{" ~ identifier ~ ("," ~ identifier)* ~ "}" | "*" ~ "as" ~ identifier)
+    ~ "from" ~ string
+}
+
+// pub import ...
+unimplemented_reexport = { visibility ~ (unimplemented_import | import_decl) }
+
+// module m capabilities: [io, network]
+unimplemented_capability_decl = {
+    "capabilities" ~ ":" ~ "[" ~ identifier ~ ("," ~ identifier)* ~ "]"
+}
+
+// @capabilities(io)
+unimplemented_capability_annotation = { "@capabilities" ~ "(" ~ paren_body ~ ")" }
+
+// @name(args)
+unimplemented_annotation_args = { "(" ~ paren_body ~ ")" }
+
+// @comptime { ... }, and the 4 declarations with an `end`: the rule takes
+// the rest of the file, because the bodies have no grammar yet.
+unimplemented_comptime_decl = { "@comptime" ~ "{" ~ ANY* }
+unimplemented_trait_decl = { visibility? ~ &"trait" ~ design_word ~ ANY* }
+unimplemented_impl_decl = { visibility? ~ &"impl" ~ design_word ~ ANY* }
+unimplemented_effect_decl = { visibility? ~ &"effect" ~ design_word ~ ANY* }
+unimplemented_handler_decl = { visibility? ~ &"handler" ~ design_word ~ ANY* }
+
+// fn show<a: Show + Eq>(...)
+unimplemented_type_param = { ":" ~ constructor_name ~ ("+" ~ constructor_name)* }
+
+// fn f(...): T where a: Show, b: Eq = ...
+unimplemented_where_clause = {
+    &"where" ~ design_word
+    ~ identifier ~ unimplemented_type_param ~ ("," ~ identifier ~ unimplemented_type_param)*
+}
+
+// fn f(...): T requires e ensures e invariant e = ...
+unimplemented_contract_clause = {
+    &("requires" | "ensures" | "invariant") ~ design_word ~ expression
+}
+
+// T with IO + State(I32)
+unimplemented_effect_ty = {
+    &"with" ~ design_word
+    ~ (constructor_name ~ ("(" ~ ty_list ~ ")")? | identifier)
+    ~ ("+" ~ (constructor_name ~ ("(" ~ ty_list ~ ")")? | identifier))*
+}
+
+// A * B
+unimplemented_prod_ty = { "*" }
+
+// (a, b, c) as a pattern, and &p
+unimplemented_tuple_pattern = { "(" ~ pattern ~ "," ~ pattern ~ ("," ~ pattern)+ ~ ")" }
+unimplemented_borrow_pattern = { "&" ~ pattern }
+
+// handle shallow e with ...: `shallow`, white space, then the start of a
+// name, a number or a string. `handle shallow(x) with` is a call.
+unimplemented_handle_mode = @{
+    "shallow" ~ (" " | "\t" | "\n" | "\r")+ ~ &(ASCII_ALPHANUMERIC | "_" | "\"")
+}
+
+// handle e with h end
+unimplemented_handler_ref = { identifier ~ &"end" }
+
+// | finally => e
+unimplemented_finally_clause = { "finally" ~ "=>" ~ expression }
+
+// | op(x), resume => e
+unimplemented_inline_op_clause = { "," ~ resume_param }
+
+// a ++ b, *e, @splice(...), @type_desc_of(T)
+unimplemented_concat_expr = { "++" }
+unimplemented_deref_expr = { "*" ~ unary_expr }
+unimplemented_comptime_splice = { "@splice" ~ "(" ~ paren_body ~ ")" }
+unimplemented_type_desc_expr = { "@type_desc_of" ~ "(" ~ ty ~ ")" }
+
+// ============================================================================
 // Declarations
 // ============================================================================
 
-declaration = { annotation* ~ (extern_block | data_decl | fn_decl | type_decl | const_decl) }
+declaration = {
+    unimplemented_comptime_decl
+    | annotation* ~ (
+        extern_block | data_decl | fn_decl | type_decl | const_decl
+        | unimplemented_trait_decl | unimplemented_impl_decl
+        | unimplemented_effect_decl | unimplemented_handler_decl
+    )
+}
 
 // `@identifier` decorators attached to top-level declarations. Currently
 // parser-only — annotations are parsed and stored on the surface AST so
@@ -46,7 +156,10 @@ declaration = { annotation* ~ (extern_block | data_decl | fn_decl | type_decl | 
 // them. They exist so that downstream tools (hypatia's `@tail_recursive`,
 // future `@inline`, `@no_mangle`, etc.) can hang metadata off a decl
 // without breaking the parser today.
-annotation = { "@" ~ identifier }
+annotation = {
+    unimplemented_capability_annotation
+    | "@" ~ identifier ~ unimplemented_annotation_args?
+}
 
 // ============================================================================
 // Extern Blocks
@@ -74,10 +187,15 @@ const_decl = { "let" ~ identifier ~ (":" ~ ty)? ~ "=" ~ expression }
 visibility = { "pub" }
 
 // Optional generic type parameters: <T>, <T, U>
-fn_type_params = { "<" ~ identifier ~ ("," ~ identifier)* ~ ">" }
+fn_type_params = {
+    "<" ~ identifier ~ unimplemented_type_param?
+    ~ ("," ~ identifier ~ unimplemented_type_param?)* ~ ">"
+}
 
 fn_decl = {
-    visibility? ~ "fn" ~ identifier ~ fn_type_params? ~ "(" ~ param_list? ~ ")" ~ (":" | "->") ~ ty ~ "=" ~ expression
+    visibility? ~ "fn" ~ identifier ~ fn_type_params? ~ "(" ~ param_list? ~ ")" ~ (":" | "->") ~ ty
+    ~ (unimplemented_where_clause | unimplemented_contract_clause)*
+    ~ "=" ~ expression
 }
 
 param_list = { param ~ ("," ~ param)* }
@@ -117,9 +235,9 @@ record_field = { identifier ~ ":" ~ ty }
 // Types
 // ============================================================================
 
-ty = { sum_ty ~ ("->" ~ ty)? }
+ty = { sum_ty ~ ("->" ~ ty)? ~ unimplemented_effect_ty? }
 
-sum_ty = { type_atom ~ ("+" ~ type_atom)* }
+sum_ty = { type_atom ~ (("+" | unimplemented_prod_ty) ~ type_atom)* }
 
 type_atom = {
     base_ty
@@ -224,12 +342,17 @@ match_arm = { pattern ~ ("if" ~ expression)? ~ "=>" ~ expression }
 pattern = {
     constructor_pattern
     | pair_pattern
+    | unimplemented_tuple_pattern
     | wildcard_pattern
     | literal_pattern
+    | unimplemented_borrow_pattern
     | var_pattern
 }
 
-constructor_pattern = { constructor_name ~ ("(" ~ pattern_list? ~ ")")? }
+// `Some(x)`, `None`, and with the module that declares the type:
+// `shapes.Rect(w, h)`. The module must be an import of this module.
+constructor_pattern = { (pattern_qualifier ~ ".")? ~ constructor_name ~ ("(" ~ pattern_list? ~ ")")? }
+pattern_qualifier = { identifier }
 pair_pattern = { "(" ~ pattern ~ "," ~ pattern ~ ")" }
 wildcard_pattern = { "_" }
 literal_pattern = { literal }
@@ -277,13 +400,14 @@ case_expr = {
 
 // Effect handling: handle expr with { return(x) => e | Op(args, resume) => e } end
 handle_expr = {
-    "handle" ~ expression ~ "with"
-    ~ "|"? ~ handler_clause ~ ("|" ~ handler_clause)*
+    "handle" ~ (unimplemented_handle_mode ~ expression | expression) ~ "with"
+    ~ (unimplemented_handler_ref | "|"? ~ handler_clause ~ ("|" ~ handler_clause)*)
     ~ "end"
 }
 
 handler_clause = {
     handler_return_clause
+    | unimplemented_finally_clause
     | handler_op_clause
 }
 
@@ -295,7 +419,7 @@ handler_return_clause = {
 // Op(param1, param2, resume) => expr
 // resume may optionally have a mode: resume(once) or resume(multi)
 handler_op_clause = {
-    identifier ~ "(" ~ handler_param_list? ~ ")" ~ "=>" ~ expression
+    identifier ~ "(" ~ handler_param_list? ~ ")" ~ unimplemented_inline_op_clause? ~ "=>" ~ expression
 }
 
 handler_param_list = { handler_param ~ ("," ~ handler_param)* }
@@ -321,7 +445,7 @@ eq_op = { "==" | "!=" }
 cmp_expr = { add_expr ~ (cmp_op ~ add_expr)* }
 cmp_op = { "<=" | ">=" | "<" | ">" }
 
-add_expr = { mul_expr ~ (add_op ~ mul_expr)* }
+add_expr = { mul_expr ~ ((unimplemented_concat_expr | add_op) ~ mul_expr)* }
 add_op = { "+" | "-" }
 
 mul_expr = { unary_expr ~ (mul_op ~ unary_expr)* }
@@ -334,6 +458,7 @@ mul_op = { "*" | "/" | "%" }
 unary_expr = {
     "!" ~ unary_expr
     | "-" ~ unary_expr
+    | unimplemented_deref_expr
     | postfix_expr
 }
 
@@ -361,7 +486,9 @@ member_op = { "." ~ (integer | identifier | constructor_name) }
 // ============================================================================
 
 atom_expr = {
-    perform_expr
+    unimplemented_comptime_splice
+    | unimplemented_type_desc_expr
+    | perform_expr
     | ffi_expr
     | string_method
     | inl_expr

@@ -710,21 +710,39 @@ impl Interpreter {
         })
     }
 
+    /// A top-level function as a value: a closure for its first
+    /// parameter, with a lambda in its body for each next parameter. So
+    /// `f(a, b)`, which is `(f a) b`, gives each parameter its argument.
+    /// A function with no parameter takes the unit argument of `f()`.
+    fn function_value(&self, params: Vec<(Var, Ty)>, body: Expr) -> Value {
+        let mut params = params.into_iter();
+        let (param, param_ty) = params
+            .next()
+            .unwrap_or_else(|| ("_".into(), Ty::Base(BaseTy::Unit)));
+        let body = params.rev().fold(body, |body, (param, param_ty)| {
+            let span = body.span;
+            let lambda = ExprKind::Lambda {
+                param,
+                param_ty,
+                body: Box::new(body),
+            };
+            Expr::new(lambda, span)
+        });
+        Value::Closure {
+            param,
+            param_ty,
+            body,
+            env: self.env.clone(),
+        }
+    }
+
     fn eval_var(&mut self, name: &Var) -> Result<Value, RuntimeError> {
-        // Check if it's a function
-        if let Some((params, _ret_ty, body)) = self.functions.get(name).cloned() {
-            if params.is_empty() {
-                // Nullary function - evaluate body
-                return self.eval(&body);
-            } else {
-                // Create closure for first parameter
-                let (first_param, first_ty) = params[0].clone();
-                return Ok(Value::Closure {
-                    param: first_param,
-                    param_ty: first_ty,
-                    body: body.clone(),
-                    env: self.env.clone(),
-                });
+        // A parameter or a `let` of this name shadows a top-level
+        // function, also after its value was consumed.
+        let local = self.env.get(name).is_some() || self.env.is_consumed(name);
+        if !local {
+            if let Some((params, _ret_ty, body)) = self.functions.get(name).cloned() {
+                return Ok(self.function_value(params, body));
             }
         }
 
@@ -1159,6 +1177,16 @@ impl Interpreter {
     }
 
     fn eval_borrow(&mut self, inner: &Expr) -> Result<Value, RuntimeError> {
+        // A borrow of a variable reads the value and leaves it in place:
+        // `&s` is not a use of `s`.
+        if let ExprKind::Var(name) = &inner.kind {
+            if self.env.is_consumed(name) {
+                return Err(RuntimeError::LinearValueConsumed);
+            }
+            if let Some(value) = self.env.get(name) {
+                return Ok(Value::Borrow(Box::new(value.clone())));
+            }
+        }
         let val = self.eval(inner)?;
         Ok(Value::Borrow(Box::new(val)))
     }

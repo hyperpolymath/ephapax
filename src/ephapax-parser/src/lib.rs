@@ -66,6 +66,7 @@ pub fn parse_module(source: &str, name: &str) -> Result<Module, Vec<ParseError>>
             span: Span::dummy(),
         }]
     })?;
+    refuse_unimplemented(pairs.clone())?;
 
     let pair = pairs
         .into_iter()
@@ -151,6 +152,58 @@ pub(crate) fn negated_integer_digits<'a>(
 ) -> Option<&'a str> {
     let text = operand.as_str().trim();
     (!text.is_empty() && text.bytes().all(|b| b.is_ascii_digit())).then_some(text)
+}
+
+/// The production of the v2 design that `rule` stands for, when the
+/// grammar has the rule only to refuse its syntax by name (the rules
+/// `unimplemented_<production>` of ephapax.pest).
+fn unimplemented_production(rule: Rule) -> Option<&'static str> {
+    Some(match rule {
+        Rule::unimplemented_import => "import",
+        Rule::unimplemented_reexport => "reexport",
+        Rule::unimplemented_capability_decl => "capability_decl",
+        Rule::unimplemented_capability_annotation => "capability_annotation",
+        Rule::unimplemented_annotation_args => "annotation_args",
+        Rule::unimplemented_comptime_decl => "comptime_decl",
+        Rule::unimplemented_trait_decl => "trait_decl",
+        Rule::unimplemented_impl_decl => "impl_decl",
+        Rule::unimplemented_effect_decl => "effect_decl",
+        Rule::unimplemented_handler_decl => "handler_decl",
+        Rule::unimplemented_type_param => "type_param",
+        Rule::unimplemented_where_clause => "where_clause",
+        Rule::unimplemented_contract_clause => "contract_clause",
+        Rule::unimplemented_effect_ty => "effect_ty",
+        Rule::unimplemented_prod_ty => "prod_ty",
+        Rule::unimplemented_tuple_pattern => "tuple_pattern",
+        Rule::unimplemented_borrow_pattern => "borrow_pattern",
+        Rule::unimplemented_handle_mode => "handle_mode",
+        Rule::unimplemented_handler_ref => "handler_ref",
+        Rule::unimplemented_finally_clause => "finally_clause",
+        Rule::unimplemented_inline_op_clause => "inline_op_clause",
+        Rule::unimplemented_concat_expr => "concat_expr",
+        Rule::unimplemented_deref_expr => "deref_expr",
+        Rule::unimplemented_comptime_splice => "comptime_splice",
+        Rule::unimplemented_type_desc_expr => "type_desc_expr",
+        _ => return None,
+    })
+}
+
+/// Refuse a program that has syntax of the v2 design that is not
+/// implemented: the first such construct in the source gives
+/// [`ParseError::Unimplemented`] with the name of its production. The 2
+/// parsers call this on the parse tree before they build a module.
+pub(crate) fn refuse_unimplemented(
+    pairs: pest::iterators::Pairs<Rule>,
+) -> Result<(), Vec<ParseError>> {
+    for pair in pairs.flatten() {
+        if let Some(production) = unimplemented_production(pair.as_rule()) {
+            return Err(vec![ParseError::Unimplemented {
+                production,
+                span: span_from_pair(&pair),
+            }]);
+        }
+    }
+    Ok(())
 }
 
 fn span_from_pair(pair: &pest::iterators::Pair<Rule>) -> Span {
@@ -987,7 +1040,12 @@ fn parse_pattern_core(pair: pest::iterators::Pair<Rule>) -> Result<Pattern, Pars
 fn parse_constructor_pattern_core(
     pair: pest::iterators::Pair<Rule>,
 ) -> Result<Pattern, ParseError> {
-    let mut inner = pair.into_inner();
+    // snip: this parser has no list of imports, so it does not check the
+    // module of `M.Ctor`; the constructor resolves as `Ctor`, as `M.f`
+    // does. The surface parser path checks the module.
+    let mut inner = pair
+        .into_inner()
+        .filter(|p| p.as_rule() != Rule::pattern_qualifier);
 
     let ctor = SmolStr::new(
         inner

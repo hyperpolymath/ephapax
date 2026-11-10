@@ -149,15 +149,16 @@ fn a_call_can_give_its_type_arguments() {
         }
     }
 
-    // No argument fixes `a`: the brackets do. Wasm only: the interpreter
-    // cannot call a function with no parameter by its name.
+    // No argument fixes `a`: the brackets do.
     write(
         tmp.path(),
         "zero.eph",
         "module zero\n\nfn zero<a>(): I32 = 7\n\nfn main(): I32 = zero[I64]()\n",
     );
-    let out = ephapax(tmp.path(), &["run", "zero.eph"]);
-    assert_eq!(String::from_utf8_lossy(&out.stdout).trim(), "7");
+    for args in [&["run", "zero.eph"][..], &["run", "--interp", "zero.eph"]] {
+        let out = ephapax(tmp.path(), args);
+        assert_eq!(String::from_utf8_lossy(&out.stdout).trim(), "7", "{args:?}");
+    }
 
     // A type argument of a function of another module, with and without
     // the module qualifier.

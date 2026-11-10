@@ -201,14 +201,121 @@ fn each_module_calls_its_own_function_of_a_shared_name() {
 
     // `shadow` in `deep` has a parameter with the name of the function
     // that the merge renames; the parameter still shadows the function.
-    // Wasm only: the interpreter reads a parameter that has the name of a
-    // function as that function, also in a program of one module.
     write(
         "param.eph",
         "module param\n\nimport deep\n\nfn helper(n: I32): I32 = n\n\n\
          fn main(): I32 = shadow(0)\n",
     );
-    assert_eq!(stdout_of(tmp.path(), &["run", "param.eph"]), "1000");
+    for args in [&["run", "param.eph"][..], &["run", "--interp", "param.eph"]] {
+        assert_eq!(stdout_of(tmp.path(), args), "1000", "{args:?}");
+    }
+}
+
+/// `let (a, b, c) = e` binds the 3 parts of a tuple. The parser used to
+/// make a chain of pair patterns for 3 or more names, which no tuple
+/// value has as its type: a type error.
+#[test]
+fn a_binder_with_3_or_more_names_binds_a_tuple() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    // (declarations, type and body of `main`, output)
+    for (decls, ty, main, want) in [
+        ("", "I32", "let (a, b, c) = (1, 2, 3) in\n  a + b * c", "7"),
+        ("", "I32", "let (a, b, c) = (5, 4, 3) in\n  a - b - c", "-2"),
+        (
+            "fn three(): (I32, I32, I32) = (1, 2, 3)\n",
+            "I32",
+            "let (a, b, c) = three()\n  a + b * c",
+            "7",
+        ),
+        // 4 parts, each at its own type; `_` for a part that is not linear.
+        (
+            "fn four(): (I32, I64, F64, I32) = (1, 6000000000, 2.5, 4)\n",
+            "I64",
+            "let (a, b, _, d) = four()\n  b",
+            "6000000000i64",
+        ),
+        // A linear part is bound, and consumed one time.
+        (
+            "",
+            "I32",
+            "region r {\n    let! s = String.new@r(\"hello\")\n    \
+             let (a, t, c) = (1, s, 3)\n    a + String.len(t) + c\n  }",
+            "9",
+        ),
+        // 2 names are a pair, as before.
+        ("", "I32", "let (a, b) = (1, 2) in\n  a + b", "3"),
+    ] {
+        std::fs::write(
+            tmp.path().join("tuple.eph"),
+            format!("module tuple\n\n{decls}\nfn main(): {ty} =\n  {main}\n"),
+        )
+        .expect("write program");
+        for args in [&["run", "tuple.eph"][..], &["run", "--interp", "tuple.eph"]] {
+            assert_eq!(stdout_of(tmp.path(), args), want, "{main} under {args:?}");
+        }
+    }
+
+    // `_` over a linear part is a discard of a linear value.
+    std::fs::write(
+        tmp.path().join("discard.eph"),
+        "module discard\n\nfn main(): I32 =\n  region r {\n    \
+         let! s = String.new@r(\"hello\")\n    let (a, _, c) = (1, s, 3)\n    a + c\n  }\n",
+    )
+    .expect("write program");
+    let out = ephapax(tmp.path(), &["check", "discard.eph"]);
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        !out.status.success() && stderr.contains("Type error"),
+        "exit {:?}, stderr:\n{stderr}",
+        out.status.code()
+    );
+}
+
+/// The interpreter calls a function with 0, 2 or 3 parameters by its
+/// name, a parameter shadows a function of the same name, and a borrow of
+/// a string is not a use. It used to stop on each of these programs
+/// ("Not a function", "Unbound variable", "Linear value used after
+/// consumption"); wasm ran them.
+#[test]
+fn the_interpreter_calls_and_borrows_as_wasm_does() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    // (declarations, `main` body, output)
+    for (decls, main, want) in [
+        ("fn seven(): I32 = 7\n", "seven() + seven()", "14"),
+        ("fn add(a: I32, b: I32): I32 = a + b\n", "add(3, 4)", "7"),
+        (
+            "fn add(a: I32, b: I32): I32 = a + b\n",
+            "add(add(1, 2), 30)",
+            "33",
+        ),
+        (
+            "fn add3(a: I32, b: I32, c: I32): I32 = a + b * c\n",
+            "add3(1, 2, 3)",
+            "7",
+        ),
+        // The order of the parameters: 10 - 3, not 3 - 10.
+        ("fn sub(a: I32, b: I32): I32 = a - b\n", "sub(10, 3)", "7"),
+        (
+            "fn helper(n: I32): I32 = n + 100\n\nfn use_it(helper: I32): I32 = helper + 1\n",
+            "use_it(5) + helper(0)",
+            "106",
+        ),
+        (
+            "",
+            "region r {\n    let! s = String.new@r(\"hello\")\n    \
+             let n = String.len(&s)\n    n + String.len(s)\n  }",
+            "10",
+        ),
+    ] {
+        std::fs::write(
+            tmp.path().join("calls.eph"),
+            format!("module calls\n\n{decls}\nfn main(): I32 =\n  {main}\n"),
+        )
+        .expect("write program");
+        for args in [&["run", "calls.eph"][..], &["run", "--interp", "calls.eph"]] {
+            assert_eq!(stdout_of(tmp.path(), args), want, "{main} under {args:?}");
+        }
+    }
 }
 
 /// `M.Ctor(args)` builds a value of a data type of the imported module
@@ -551,6 +658,68 @@ fn a_false_guard_gives_the_value_to_the_next_arm() {
         assert!(
             !out.status.success() && stderr.contains(error),
             "{matched}: exit {:?}, stderr:\n{stderr}",
+            out.status.code()
+        );
+    }
+}
+
+/// A pattern can name a constructor with its module: `shapes.Rect(w, h)`,
+/// as an expression can since `a_qualified_constructor_takes_its_arguments`.
+/// The module must be an import, and the type must be `pub`.
+#[test]
+fn a_pattern_can_name_a_constructor_with_its_module() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let write =
+        |name: &str, text: &str| std::fs::write(tmp.path().join(name), text).expect("write module");
+    write(
+        "shapes.eph",
+        "module shapes\n\npub data Shape = Dot | Seg(I32) | Rect(I32, I32)\n\n\
+         data Hidden = H(I32)\n",
+    );
+    // (function body, `main` body, output)
+    for (body, main, want) in [
+        (
+            "match s of | shapes.Dot => 1 | shapes.Seg(n) => n | shapes.Rect(w, h) => w * h end",
+            "area(shapes.Rect(3, 4)) * 100 + area(Seg(5)) * 10 + area(shapes.Dot)",
+            "1251",
+        ),
+        // With a guard, and next to a pattern with no module.
+        (
+            "match s of | shapes.Seg(n) if n > 3 => 1 | Seg(n) => 2 | _ => 0 end",
+            "area(Seg(5)) * 100 + area(Seg(1)) * 10 + area(Dot)",
+            "120",
+        ),
+    ] {
+        write(
+            "app.eph",
+            &format!(
+                "module app\n\nimport shapes\n\nfn area(s: Shape): I32 =\n  {body}\n\n\
+                 fn main(): I32 = {main}\n"
+            ),
+        );
+        for args in [&["run", "app.eph"][..], &["run", "--interp", "app.eph"]] {
+            assert_eq!(stdout_of(tmp.path(), args), want, "{body} under {args:?}");
+        }
+    }
+
+    // (pattern, text of the load error)
+    for (pattern, error) in [
+        ("other.Dot", "`other` is not an imported module"),
+        ("shapes.H(v)", "unknown constructor `H`"),
+    ] {
+        write(
+            "bad.eph",
+            &format!(
+                "module bad\n\nimport shapes\n\n\
+                 fn f(s: Shape): I32 = match s of | {pattern} => 1 | _ => 0 end\n\n\
+                 fn main(): I32 = f(Dot)\n"
+            ),
+        );
+        let out = ephapax(tmp.path(), &["compile", "bad.eph"]);
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        assert!(
+            !out.status.success() && stderr.contains(error),
+            "{pattern}: exit {:?}, stderr:\n{stderr}",
             out.status.code()
         );
     }

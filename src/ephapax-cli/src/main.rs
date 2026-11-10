@@ -321,13 +321,9 @@ fn run_file(
     if verbose {
         println!("{} Type check passed", "✓".green());
     }
-    let module = program.into_merged();
-
-    if interp {
-        return run_interp(&module, ffi_libs, verbose);
-    }
-
-    let main = module.decls.iter().find_map(|d| match d {
+    // The entry point is the `main` of the module that was asked for,
+    // never the `main` of a module it imports.
+    let main = program.root().core.decls.iter().find_map(|d| match d {
         Decl::Fn {
             name,
             params,
@@ -336,12 +332,18 @@ fn run_file(
         } if name == "main" => Some((params.len(), ret_ty.clone())),
         _ => None,
     });
+    let module = program.into_merged();
     let Some((n_params, ret_ty)) = main else {
         if verbose {
             println!("{} Module loaded (no main function)", "✓".green());
         }
         return Ok(());
     };
+
+    if interp {
+        return run_interp(&module, ffi_libs, verbose);
+    }
+
     if n_params != 0 {
         return Err(format!(
             "`main` takes {n_params} parameter(s); `ephapax run` calls `main` with none"
@@ -397,21 +399,13 @@ fn run_interp(
 
     interp.load_module(module);
 
-    // Look for main function and run it
-    if interp.has_function("main") {
-        match interp.call_main() {
-            Ok(result) => {
-                println!("{}", result);
-                Ok(())
-            }
-            Err(e) => Err(format!("Runtime error: {}", e)),
+    // The caller has checked that the root module has a `main`.
+    match interp.call_main() {
+        Ok(result) => {
+            println!("{}", result);
+            Ok(())
         }
-    } else {
-        // No main, just report success
-        if verbose {
-            println!("{} Module loaded (no main function)", "✓".green());
-        }
-        Ok(())
+        Err(e) => Err(format!("Runtime error: {}", e)),
     }
 }
 

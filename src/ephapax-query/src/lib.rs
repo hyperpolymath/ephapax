@@ -36,8 +36,9 @@
 //! threaded by hand rather than tracked through a general query trait. A
 //! production engine would: (a) track an arbitrary dependency DAG (needed
 //! for the multi-module `import` case: `parsed` resolves imports through
-//! `ephapax-driver`, but an imported file is not an input here, so an edit
-//! to it does not invalidate the importer's memos), (b) return
+//! `ephapax-driver`, but an imported file is not an input here, so a
+//! program with imports is re-read from disk on every demand and never
+//! served from the parse memo), (b) return
 //! `Arc<T>`/references instead of cloning memoised values, and (c)
 //! optionally persist memos through a `QueryStore` backing (the disabled
 //! `ephapax-vram-cache` is a natural candidate once `ephapax-proven`
@@ -144,7 +145,13 @@ impl QueryDb {
         let dep = self.input_changed_at(id);
         let rev = self.revision;
         if let Some(m) = self.parsed.get_mut(id) {
-            if dep <= m.verified_at {
+            // A program with imports also depends on files that are not
+            // inputs of this database, and a failed load may be due to
+            // one of them. Only a successful, import-free result is
+            // served from the memo; anything else is loaded again.
+            // (Downstream memos still skip when the result is unchanged.)
+            let self_contained = matches!(&m.value, Ok(p) if p.modules.len() == 1);
+            if dep <= m.verified_at && self_contained {
                 let value = m.value.clone();
                 m.verified_at = rev;
                 return value;
@@ -159,6 +166,14 @@ impl QueryDb {
         let stdlib = ephapax_driver::stdlib_dir(None);
         let new = parse_source(&text, id, base_dir, stdlib.as_deref());
         self.recomputes += 1;
+        // The result changed although the input did not: an imported file
+        // changed on disk. That is a new revision, so that the queries
+        // that depend on this one recompute.
+        if matches!(self.parsed.get(id), Some(old)
+            if dep <= old.verified_at && !parsed_equiv(&old.value, &new))
+        {
+            self.revision.0 += 1;
+        }
         let rev = self.revision;
         let changed_at = match self.parsed.get(id) {
             Some(old) if parsed_equiv(&old.value, &new) => old.changed_at,

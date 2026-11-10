@@ -201,6 +201,17 @@ pub const NOT_WELL_TYPED: &str = "not well-typed";
 /// effect `perform` / `handle` (no lowering until E17) and raw variadic
 /// `__ffi` (no sound lowering at all; typed `extern` is the FFI path).
 pub fn first_unsupported(expr: &Expr) -> Option<CodegenError> {
+    first_unsupported_in(expr, None)
+}
+
+/// [`first_unsupported`], plus the constructs whose lowering depends on a
+/// type: with the checker's table, a `match` on a value that has an I64,
+/// F32 or F64 component (patterns read every component as an i32).
+pub fn first_unsupported_typed(expr: &Expr, types: &ExprTypes) -> Option<CodegenError> {
+    first_unsupported_in(expr, Some(types))
+}
+
+fn first_unsupported_in(expr: &Expr, types: Option<&ExprTypes>) -> Option<CodegenError> {
     fn unsupported(what: &str, span: ephapax_syntax::Span) -> CodegenError {
         CodegenError(format!(
             "{UNSUPPORTED_PREFIX}: {what} (at byte {}..{})",
@@ -222,6 +233,19 @@ pub fn first_unsupported(expr: &Expr) -> Option<CodegenError> {
             ),
             expr.span,
         )),
+        ExprKind::Match { scrutinee, .. } => types
+            .and_then(|t| t.get(&scrutinee.id))
+            .filter(|ty| has_non_i32_component(ty))
+            .map(|ty| {
+                unsupported(
+                    &format!(
+                        "`match` (or a destructuring `let`) on a value with an I64, F32 \
+                         or F64 component (type {ty:?}); read the component with `fst`, \
+                         `snd`, `.N` or `case`"
+                    ),
+                    expr.span,
+                )
+            }),
         _ => None,
     };
     if here.is_some() {
@@ -277,7 +301,9 @@ pub fn first_unsupported(expr: &Expr) -> Option<CodegenError> {
         ExprKind::ListIndex { list, index } => vec![list, index],
         ExprKind::TupleIndex { tuple, .. } => vec![tuple],
     };
-    children.into_iter().find_map(first_unsupported)
+    children
+        .into_iter()
+        .find_map(|child| first_unsupported_in(child, types))
 }
 
 /// Check every function body using [`first_unsupported`].
@@ -285,13 +311,27 @@ pub fn first_unsupported(expr: &Expr) -> Option<CodegenError> {
 /// Returns the first unsupported-construct error in declaration order, with
 /// the function name added. Non-function declarations are ignored.
 pub fn validate_supported(module: &AstModule) -> Result<(), CodegenError> {
+    validate_supported_in(module, None)
+}
+
+/// [`validate_supported`] with the checker's type table, so the
+/// type-dependent limits ([`first_unsupported_typed`]) are checked too.
+/// The driver runs this, so `check` rejects what `compile` must reject.
+pub fn validate_supported_typed(module: &AstModule, types: &ExprTypes) -> Result<(), CodegenError> {
+    validate_supported_in(module, Some(types))
+}
+
+fn validate_supported_in(
+    module: &AstModule,
+    types: Option<&ExprTypes>,
+) -> Result<(), CodegenError> {
     for decl in &module.decls {
         let (name, expr, kind) = match decl {
             Decl::Fn { name, body, .. } => (name, body, "function"),
             Decl::Const { name, value, .. } => (name, value, "constant"),
             _ => continue,
         };
-        if let Some(CodegenError(msg)) = first_unsupported(expr) {
+        if let Some(CodegenError(msg)) = first_unsupported_in(expr, types) {
             return Err(CodegenError(format!("{msg} in {kind} `{name}`")));
         }
     }
@@ -468,12 +508,6 @@ pub struct Codegen {
     /// instruction selection and layouts read it through [`Self::ty_of`].
     types: ExprTypes,
 
-    /// The first construct met while lowering that has no correct
-    /// lowering yet. `compile_expr` cannot return an error, so it is
-    /// recorded here and the public entry points fail with it instead of
-    /// returning a module that computes a wrong value.
-    unsupported: Option<CodegenError>,
-
     // -- Module-level bookkeeping -------------------------------------------
     /// String literal data section entries: (offset, bytes)
     data_entries: Vec<(u32, Vec<u8>)>,
@@ -595,7 +629,6 @@ impl Codegen {
             module: WasmModule::new(),
             locals: LocalTracker::default(),
             types: ExprTypes::new(),
-            unsupported: None,
             data_entries: Vec::new(),
             data_offset: 1024, // Start string data after metadata area
             user_fns: HashMap::new(),
@@ -762,6 +795,9 @@ impl Codegen {
             .check(main_expr)
             .map_err(|e| CodegenError(format!("{NOT_WELL_TYPED}: {e}")))?;
         self.types = checker.expr_types();
+        if let Some(err) = first_unsupported_typed(main_expr, &self.types) {
+            return Err(err);
+        }
         self.emit_types();
         self.emit_imports();
 
@@ -785,12 +821,7 @@ impl Codegen {
 
         // Main function (index self.first_user_fn())
         func_sec.function(TYPE_VOID_VOID);
-        self.locals = LocalTracker::new(0);
-        let mut main_func = Function::new(vec![(16, ValType::I32)]);
-        self.compile_expr(&mut main_func, main_expr);
-        main_func.instruction(&Instruction::Drop);
-        main_func.instruction(&Instruction::End);
-        code_sec.function(&main_func);
+        code_sec.function(&self.compile_standalone_body(main_expr));
 
         // Lambda functions discovered during expression compilation
         let _ = self.append_lambda_funcs(&mut func_sec, &mut code_sec);
@@ -812,10 +843,28 @@ impl Codegen {
         self.emit_ownership_section();
         self.emit_carrier_sections();
         self.emit_debug_sections();
-        if let Some(err) = self.unsupported.take() {
-            return Err(err);
-        }
         Ok(self.module.clone().finish())
+    }
+
+    /// Compile `body` as the body of a parameterless function whose value
+    /// is dropped, declaring each local at the type it turned out to need.
+    ///
+    /// The locals are known only once the body is compiled, but they are
+    /// encoded before it. So the body is compiled into a function with no
+    /// locals, and its instructions are copied behind the declarations.
+    /// (This path declared 16 i32 locals, so an I64, F32 or F64 binding
+    /// gave an invalid module.)
+    fn compile_standalone_body(&mut self, body: &Expr) -> Function {
+        self.locals = LocalTracker::new(0);
+        let mut scratch = Function::new(Vec::<(u32, ValType)>::new());
+        self.compile_expr(&mut scratch, body);
+        scratch.instruction(&Instruction::Drop);
+        scratch.instruction(&Instruction::End);
+        let raw = scratch.into_raw_body();
+        let mut func = Function::new(self.locals.wasm_local_declarations());
+        // Skip the empty locals vector: one zero byte.
+        func.raw(raw[1..].iter().copied());
+        func
     }
 
     /// Compile a module encoded as an S-expression string.
@@ -844,6 +893,7 @@ impl Codegen {
         self.types =
             ephapax_typing::module_expr_types(ast, &mut ephapax_typing::ModuleRegistry::new())
                 .map_err(|e| CodegenError(format!("{NOT_WELL_TYPED}: {e}")))?;
+        validate_supported_typed(ast, &self.types)?;
 
         // ----- Phase 1: collect function metadata --------------------------
         // Extern imports MUST be collected first so the import_count
@@ -885,9 +935,6 @@ impl Codegen {
         // was called (`compile --debug`).
         self.emit_debug_sections();
 
-        if let Some(err) = self.unsupported.take() {
-            return Err(err);
-        }
         Ok(self.module.clone().finish())
     }
 
@@ -925,12 +972,7 @@ impl Codegen {
         // Main function (index self.first_user_fn())
         func_sec.function(TYPE_VOID_VOID);
 
-        self.locals = LocalTracker::new(0);
-        let mut main_func = Function::new(vec![(16, ValType::I32)]);
-        self.compile_expr(&mut main_func, main_body);
-        main_func.instruction(&Instruction::Drop);
-        main_func.instruction(&Instruction::End);
-        code_sec.function(&main_func);
+        code_sec.function(&self.compile_standalone_body(main_body));
 
         // Lambda functions discovered during expression compilation
         let _ = self.append_lambda_funcs(&mut func_sec, &mut code_sec);
@@ -2949,22 +2991,8 @@ impl Codegen {
     /// like `Some(Some(_))` + `Some(None)` + `None`).
     fn compile_match(&mut self, func: &mut Function, scrutinee: &Expr, arms: &[MatchArm]) {
         // Patterns read every component as an i32 at the i32 layout. A
-        // scrutinee with an I64, F32 or F64 component would be read at
-        // the wrong offset and width, so it is refused, not miscompiled.
-        let wide = self
-            .ty_of(scrutinee)
-            .filter(|ty| has_non_i32_component(ty))
-            .cloned();
-        if let Some(ty) = wide {
-            self.unsupported.get_or_insert_with(|| {
-                CodegenError(format!(
-                    "{UNSUPPORTED_PREFIX}: `match` (or a destructuring `let`) on a value \
-                     with an I64, F32 or F64 component (type {ty:?}); read the \
-                     component with `fst`, `snd`, `.N` or `case`"
-                ))
-            });
-        }
-
+        // scrutinee with an I64, F32 or F64 component never gets here:
+        // `first_unsupported_typed` refuses it before any code is emitted.
         use wasm_encoder::BlockType;
 
         // Recover data type info from the first constructor pattern (if any).
@@ -4908,6 +4936,26 @@ mod tests {
         let wasm = codegen.compile_program(&expr).unwrap();
         assert_wasm_header(&wasm);
         validate_wasm(&wasm);
+    }
+
+    /// The single-expression path declares each local at its own type.
+    /// (It declared 16 i32 locals, so this module did not validate.)
+    #[test]
+    fn compile_program_declares_typed_locals() {
+        for value in [
+            Literal::F64(1.5),
+            Literal::I64(5_000_000_000),
+            Literal::F32(1.5),
+        ] {
+            let expr = e(ExprKind::Let {
+                name: "x".into(),
+                ty: None,
+                value: Box::new(e(ExprKind::Lit(value))),
+                body: Box::new(e(ExprKind::Var("x".into()))),
+            });
+            let wasm = Codegen::new().compile_program(&expr).unwrap();
+            validate_wasm(&wasm);
+        }
     }
 
     #[test]

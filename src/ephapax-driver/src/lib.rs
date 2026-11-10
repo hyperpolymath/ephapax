@@ -24,7 +24,7 @@ use std::path::{Path, PathBuf};
 use ephapax_desugar::{DataRegistry, DesugarError, Desugarer};
 use ephapax_parser::ParseError;
 use ephapax_syntax::{Decl, ExternItem, Module};
-use ephapax_typing::{type_check_module_with_registry, ModuleRegistry, SpannedTypeError};
+use ephapax_typing::{module_expr_types, ModuleRegistry, SpannedTypeError};
 use ephapax_wasm::CodegenError;
 
 /// One module of a loaded program, desugared to core.
@@ -76,6 +76,10 @@ impl Program {
             .pop()
             .expect("a program has at least its root module")
             .core;
+        // The merged module is the whole program: nothing is left to
+        // import. Codegen type-checks it on its own, and a kept
+        // `import lib(inc)` would not resolve there.
+        merged.imports.clear();
         let mut seen = std::collections::HashSet::new();
         for decl in &merged.decls {
             match decl {
@@ -225,20 +229,25 @@ pub fn parse_source(
 /// runs, so no tool accepts a program that `compile` must reject.
 pub fn check_program(program: &Program) -> Result<(), DriverError> {
     let mut registry = ModuleRegistry::new();
+    let mut types = Vec::with_capacity(program.modules.len());
     for m in &program.modules {
-        type_check_module_with_registry(&m.core, &mut registry).map_err(|error| {
+        types.push(module_expr_types(&m.core, &mut registry).map_err(|error| {
             DriverError::Type {
                 module: m.core.name.to_string(),
                 path: m.file_path.clone(),
                 source_text: m.source.clone(),
                 error: Box::new(error),
             }
-        })?;
+        })?);
     }
-    for m in &program.modules {
-        ephapax_wasm::validate_supported(&m.core).map_err(|error| DriverError::Unsupported {
-            path: m.file_path.clone(),
-            error,
+    // With the types, so a limit of the typed lowering (a `match` on a
+    // 64-bit component) is an error here and not only in `compile`.
+    for (m, types) in program.modules.iter().zip(&types) {
+        ephapax_wasm::validate_supported_typed(&m.core, types).map_err(|error| {
+            DriverError::Unsupported {
+                path: m.file_path.clone(),
+                error,
+            }
         })?;
     }
     Ok(())

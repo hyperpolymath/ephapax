@@ -70,6 +70,10 @@ enum DeclKind {
 struct Backend {
     client: Client,
     documents: Mutex<HashMap<Url, DocumentState>>,
+    /// Number of the latest analysis started for each document. An
+    /// analysis runs on the blocking pool, so an older one can finish
+    /// after a newer one; only the latest may commit its result.
+    generations: Mutex<HashMap<Url, u64>>,
 }
 
 impl Backend {
@@ -77,11 +81,20 @@ impl Backend {
         Self {
             client,
             documents: Mutex::new(HashMap::new()),
+            generations: Mutex::new(HashMap::new()),
         }
     }
 
-    /// Parse, type-check, and cache analysis for a document.
-    async fn analyze_document(&self, uri: &Url, text: &str) -> Vec<Diagnostic> {
+    /// Parse, type-check, and cache analysis for a document. `None`: a
+    /// newer analysis of the same document started meanwhile, so this
+    /// result is stale and nothing was cached; do not publish it.
+    async fn analyze_document(&self, uri: &Url, text: &str) -> Option<Vec<Diagnostic>> {
+        let generation = {
+            let mut generations = self.generations.lock().ok()?;
+            let latest = generations.entry(uri.clone()).or_insert(0);
+            *latest += 1;
+            *latest
+        };
         // The analysis reads imported files from disk, so it runs on the
         // blocking pool, not on the async worker that serves requests.
         let (owned_uri, owned_text) = (uri.clone(), text.to_string());
@@ -98,6 +111,9 @@ impl Backend {
                     None,
                 ),
             };
+        if self.generations.lock().ok()?.get(uri) != Some(&generation) {
+            return None;
+        }
         let declarations = module_opt
             .as_ref()
             .map(|m| extract_declarations(m, text))
@@ -115,7 +131,7 @@ impl Backend {
             );
         }
 
-        diagnostics
+        Some(diagnostics)
     }
 
     /// Find the declaration at a given position (for go-to-definition).
@@ -319,30 +335,34 @@ impl LanguageServer for Backend {
         let uri = params.text_document.uri;
         let text = params.text_document.text;
 
-        let diagnostics = self.analyze_document(&uri, &text).await;
-        self.client
-            .publish_diagnostics(uri, diagnostics, None)
-            .await;
+        if let Some(diagnostics) = self.analyze_document(&uri, &text).await {
+            self.client
+                .publish_diagnostics(uri, diagnostics, None)
+                .await;
+        }
     }
 
     async fn did_change(&self, params: DidChangeTextDocumentParams) {
         let uri = params.text_document.uri;
         let text = &params.content_changes[0].text;
 
-        let diagnostics = self.analyze_document(&uri, text).await;
-        self.client
-            .publish_diagnostics(uri, diagnostics, None)
-            .await;
+        if let Some(diagnostics) = self.analyze_document(&uri, text).await {
+            self.client
+                .publish_diagnostics(uri, diagnostics, None)
+                .await;
+        }
     }
 
     async fn did_save(&self, params: DidSaveTextDocumentParams) {
         if let Some(text) = params.text {
-            let diagnostics = self
+            if let Some(diagnostics) = self
                 .analyze_document(&params.text_document.uri, &text)
-                .await;
-            self.client
-                .publish_diagnostics(params.text_document.uri, diagnostics, None)
-                .await;
+                .await
+            {
+                self.client
+                    .publish_diagnostics(params.text_document.uri, diagnostics, None)
+                    .await;
+            }
         }
     }
 

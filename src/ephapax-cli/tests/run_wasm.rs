@@ -116,3 +116,42 @@ fn interpreter_and_wasm_agree_except_known_failures() {
         "interpreter/wasm disagreements differ from tests/interp-known-failures.txt"
     );
 }
+
+/// A selective import (`import lib(inc)`) compiles and runs. Codegen
+/// type-checks the merged module on its own; the import used to be kept
+/// there and did not resolve.
+#[test]
+fn selective_import_runs() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    std::fs::write(
+        tmp.path().join("lib.eph"),
+        "module lib\n\npub fn inc(n: I32): I32 = n + 1\n",
+    )
+    .expect("write lib");
+    std::fs::write(
+        tmp.path().join("app.eph"),
+        "module app\n\nimport lib(inc)\n\nfn main(): I32 = inc(41)\n",
+    )
+    .expect("write app");
+    assert_eq!(stdout_of(tmp.path(), &["run", "app.eph"]), "42");
+}
+
+/// The entry point is the `main` of the module that was asked for. A
+/// `main` in an imported module is not run.
+#[test]
+fn run_does_not_execute_the_main_of_an_imported_module() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    std::fs::write(
+        tmp.path().join("lib.eph"),
+        "module lib\n\npub fn inc(n: I32): I32 = n + 1\n\nfn main(): I32 = 99\n",
+    )
+    .expect("write lib");
+    std::fs::write(
+        tmp.path().join("app.eph"),
+        "module app\n\nimport lib\n\nfn twice(n: I32): I32 = inc(inc(n))\n",
+    )
+    .expect("write app");
+    for args in [&["run", "app.eph"][..], &["run", "--interp", "app.eph"]] {
+        assert_eq!(stdout_of(tmp.path(), args), "", "{args:?}");
+    }
+}

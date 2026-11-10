@@ -81,6 +81,19 @@ done
 die() { echo "probe-battery: $*" >&2; exit 3; }
 
 [ -f "$EXPECT" ] || die "missing $EXPECT"
+# GNU timeout reports expiry as 124. BusyBox reports it as 143, the same
+# status as a genuine SIGTERM, so a timeout would read as `crash:143`.
+timeout --version 2>/dev/null | grep -q GNU || die "GNU coreutils timeout is required"
+
+# timed CMD...: run under PROBE_TIMEOUT. A command that ignores SIGTERM is
+# killed 5 s later; that escalated kill (137 after the deadline) is still a
+# timeout, so report it as 124.
+timed() {
+  local start=$SECONDS rc
+  timeout -k 5 "$PROBE_TIMEOUT" "$@"; rc=$?
+  if [[ "$rc" -eq 137 && $((SECONDS - start)) -ge "$PROBE_TIMEOUT" ]]; then rc=124; fi
+  return "$rc"
+}
 [ -f "$ENV_WAT" ] || die "missing $ENV_WAT"
 
 if [ -z "$bin" ]; then
@@ -171,11 +184,11 @@ run_row() { # PROBE COMMAND -> sets CODE TEXT VERDICT
   mkdir -p "$stage/out"
   case "$cmd" in
     check|run)
-      TEXT="$(cd "$dir" && timeout "$PROBE_TIMEOUT" "$bin" "$cmd" "$base" 2>&1)"
+      TEXT="$(cd "$dir" && timed "$bin" "$cmd" "$base" 2>&1)"
       CODE=$?
       ;;
     compile)
-      TEXT="$(cd "$dir" && timeout "$PROBE_TIMEOUT" "$bin" compile "$base" -o "$wasm" 2>&1)"
+      TEXT="$(cd "$dir" && timed "$bin" compile "$base" -o "$wasm" 2>&1)"
       CODE=$?
       ;;
     wasm-run)
@@ -183,7 +196,7 @@ run_row() { # PROBE COMMAND -> sets CODE TEXT VERDICT
       # error means there is no module to run (`no-module`); a compile
       # that times out or dies by a signal is reported as such (`timeout`,
       # `crash:<exit>`), so it cannot pass as SAME against a no-module row.
-      TEXT="$(cd "$dir" && timeout "$PROBE_TIMEOUT" "$bin" compile "$base" -o "$wasm" 2>&1)"
+      TEXT="$(cd "$dir" && timed "$bin" compile "$base" -o "$wasm" 2>&1)"
       CODE=$?
       if [[ "$CODE" -ne 0 ]]; then
         if [[ "$CODE" -eq 126 || "$CODE" -eq 127 ]]; then
@@ -200,7 +213,7 @@ run_row() { # PROBE COMMAND -> sets CODE TEXT VERDICT
       if [[ -z "$wasmtime_bin" ]]; then
         CODE=0; TEXT="wasmtime CLI not found"; VERDICT="unavailable:no-wasmtime"; return
       fi
-      TEXT="$(timeout "$PROBE_TIMEOUT" "$wasmtime_bin" run --preload "env=$ENV_WAT" --invoke main "$wasm" 2>&1)"
+      TEXT="$(timed "$wasmtime_bin" run --preload "env=$ENV_WAT" --invoke main "$wasm" 2>&1)"
       CODE=$?
       ;;
     *) die "unknown command '$cmd' in $EXPECT" ;;

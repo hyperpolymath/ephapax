@@ -287,6 +287,8 @@ pub fn validate_supported(module: &AstModule) -> Result<(), CodegenError> {
 /// - `Ty::Borrow { mutable: false, .. }` → `SharedBorrow`
 /// - `Ty::Ref { linearity: Linear, .. }`, `Ty::String(_)` → `Linear`
 /// - `Ty::Region { inner, .. }`, `Ty::ForAll { body, .. }` → recurse
+/// - any other type that `Ty::is_linear` accepts (a product, sum, tuple or
+///   list with a linear component) → `Linear`
 /// - everything else → `Unrestricted`
 fn ty_to_ownership_kind(ty: &Ty) -> ownership::OwnershipKind {
     match ty {
@@ -299,6 +301,9 @@ fn ty_to_ownership_kind(ty: &Ty) -> ownership::OwnershipKind {
         Ty::String(_) => ownership::OwnershipKind::Linear,
         Ty::Region { inner, .. } => ty_to_ownership_kind(inner),
         Ty::ForAll { body, .. } => ty_to_ownership_kind(body),
+        // A product, sum, tuple or list holding a linear component is
+        // linear in the checker (`Ty::is_linear` join); keep them in step.
+        _ if ty.is_linear() => ownership::OwnershipKind::Linear,
         _ => ownership::OwnershipKind::Unrestricted,
     }
 }
@@ -673,7 +678,9 @@ impl Codegen {
 
     /// Enable debug information generation
     pub fn enable_debug(&mut self, file_path: String) {
-        let mode_str = "linear".to_string();
+        // Discipline is per binding (`let` affine, `let!` linear); there is
+        // no module-wide mode, so the section must not claim one.
+        let mode_str = "per-binding".to_string();
 
         self.debug_info = Some(DebugInfo {
             file_path,
@@ -1512,10 +1519,17 @@ impl Codegen {
     }
 
     fn emit_data_section(&mut self) {
-        if self.data_entries.is_empty() {
-            return;
-        }
         let mut data = wasm_encoder::DataSection::new();
+        // The bump pointer lives at `mem[0]`. Start it past the metadata
+        // area and the string data; left at 0, the first heap cell would
+        // be allocated over the bump pointer itself (nested pairs read back
+        // corrupted fields, e.g. `fst((1, (2, 3)))`).
+        let heap_start = self.data_offset.max(1024).next_multiple_of(8);
+        data.active(
+            0,
+            &wasm_encoder::ConstExpr::i32_const(0),
+            heap_start.to_le_bytes(),
+        );
         for (offset, bytes) in &self.data_entries {
             data.active(
                 0,
@@ -2177,6 +2191,9 @@ impl Codegen {
                 ValType::I32
             }
             ExprKind::If { then_branch, .. } => self.infer_expr_valtype(then_branch),
+            ExprKind::Match { arms, .. } => arms
+                .first()
+                .map_or(ValType::I32, |arm| self.infer_expr_valtype(&arm.body)),
             ExprKind::Region { body, .. } | ExprKind::Copy(body) | ExprKind::Deref(body) => {
                 self.infer_expr_valtype(body)
             }
@@ -2785,8 +2802,13 @@ impl Codegen {
             func.instruction(&Instruction::LocalSet(payload_local));
         }
 
-        // Linear arm dispatch.
-        func.instruction(&Instruction::Block(BlockType::Result(ValType::I32)));
+        // Linear arm dispatch. The `$done` block carries the arms' result
+        // type: every arm has the same type, so the first arm decides it
+        // (an `I64` extern call in a pair destructuring, for example).
+        let result_ty = arms
+            .first()
+            .map_or(ValType::I32, |arm| self.infer_expr_valtype(&arm.body));
+        func.instruction(&Instruction::Block(BlockType::Result(result_ty)));
 
         for arm in arms.iter() {
             // Open $arm_i_fail block. Inside, depth 0 = $arm_i_fail,
@@ -2828,7 +2850,7 @@ impl Codegen {
 
         // No arm matched at runtime — the typechecker rejects non-
         // exhaustive matches, so this is dead code for well-typed
-        // programs. Required to satisfy the $done block's i32 result.
+        // programs. Required to satisfy the $done block's result type.
         func.instruction(&Instruction::Unreachable);
         func.instruction(&Instruction::End); // close $done
     }
@@ -5362,6 +5384,28 @@ mod tests {
             vec![ownership::OwnershipKind::Linear]
         );
         assert_eq!(entries[0].ret_kind, ownership::OwnershipKind::Unrestricted);
+    }
+
+    #[test]
+    fn ownership_kind_follows_compound_linearity() {
+        // A pair holding a linear string is linear in the checker, so the
+        // ownership section must not call it Unrestricted.
+        let linear_pair = Ty::Prod {
+            left: Box::new(Ty::String("r".into())),
+            right: Box::new(Ty::Base(BaseTy::I32)),
+        };
+        assert_eq!(
+            ty_to_ownership_kind(&linear_pair),
+            ownership::OwnershipKind::Linear
+        );
+        let plain_pair = Ty::Prod {
+            left: Box::new(Ty::Base(BaseTy::I32)),
+            right: Box::new(Ty::Base(BaseTy::I32)),
+        };
+        assert_eq!(
+            ty_to_ownership_kind(&plain_pair),
+            ownership::OwnershipKind::Unrestricted
+        );
     }
 
     #[test]

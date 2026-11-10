@@ -228,6 +228,39 @@ fn codegen_refuses_raw_ffi_in_unchecked_module() {
     );
 }
 
+/// The scan must reach raw FFI below a supported node (here a `let`
+/// value), not only at the top of a function body.
+#[test]
+fn codegen_refuses_raw_ffi_nested_in_a_let_value() {
+    let ffi = Expr::dummy(ExprKind::FFI {
+        symbol: "foo".into(),
+        args: vec![],
+    });
+    let module = Module {
+        name: "nested".into(),
+        imports: vec![],
+        decls: vec![Decl::Fn {
+            name: "t".into(),
+            visibility: Visibility::Private,
+            type_params: vec![],
+            params: vec![],
+            ret_ty: Ty::Base(ephapax_syntax::BaseTy::I32),
+            body: Expr::dummy(ExprKind::Let {
+                name: "x".into(),
+                ty: None,
+                value: Box::new(ffi),
+                body: Box::new(Expr::dummy(ExprKind::Lit(Literal::I32(0)))),
+            }),
+        }],
+    };
+    let err = compile_module(&module).expect_err("nested raw FFI must not lower");
+    assert!(
+        err.0.starts_with(UNSUPPORTED_PREFIX) && err.0.contains("__ffi"),
+        "{}",
+        err.0
+    );
+}
+
 #[test]
 fn g5_extern_rewrite_has_contiguous_imports_and_validates() {
     let dir = tempfile::tempdir().expect("tempdir");

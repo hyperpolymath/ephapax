@@ -35,7 +35,8 @@ pub struct DebugInfo {
     /// Source file path
     pub file_path: String,
 
-    /// Compilation mode (affine or linear)
+    /// Module-level mode label. The compiler writes `per-binding`: each
+    /// binding's own discipline is in `variables`.
     pub mode: String,
 
     /// Mapping from WASM instruction offset to source span

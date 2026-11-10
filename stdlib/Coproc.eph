@@ -18,10 +18,13 @@
 // them. ephapax reaches them through the typed `extern "ephapax_coproc"`
 // block below. Raw variadic `__ffi(...)` is rejected since v2 plan rung E1:
 // a typed `extern` declaration is the only FFI path. This is a minimal
-// migration that restates the old call sites (the capability tag stays I32
-// and is widened to the shim's i64 at the boundary, as before). The full
-// port, including the linearity annotation on `CoprocBuf`, the wire types
-// and a host binding for the `ephapax_coproc` import module, is rung E10.
+// migration that restates the old call sites. The capability tag stays I32
+// because the language has no I64 literal or I32-to-I64 conversion yet, but
+// the shim exports `cap_tag: i64`. Nothing widens it today: a host that
+// registers the Zig exports directly fails at instantiation on these two
+// imports. The full port, including the tag width (or a widening host
+// adapter), the linearity annotation on `CoprocBuf`, the wire types and a
+// host binding for the `ephapax_coproc` import module, is rung E10.
 // The interpreter's `-L` / `[ffi:stub]` path served only raw `__ffi`, so
 // it no longer reaches this seam.
 
@@ -68,9 +71,9 @@ pub data CoprocBuf =
 // The stable i64 tag for the shim's dispatch switch. Kept explicit (not
 // reliant on the runtime's sum-discriminant encoding) so the wire contract
 // survives any change to how nullary variants are represented: Audio=0 ..
-// Fpga=9. (Returns I32 — integer literals default to I32; the extern
-// declarations take the tag as I32, widened to the i64 C ABI at the
-// boundary.)
+// Fpga=9. (Returns I32: integer literals are I32 and there is no I64
+// literal yet. The extern declarations therefore take the tag as I32,
+// which does NOT match the shim's i64 parameter; see the header, rung E10.)
 fn cap_tag(c: Capability): I32 =
   match c of
     | Audio => 0

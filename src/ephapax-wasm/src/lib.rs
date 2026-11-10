@@ -249,16 +249,14 @@ fn first_unsupported_in(expr: &Expr, types: Option<&ExprTypes>) -> Option<Codege
         }
         ExprKind::Match { scrutinee, arms } => types
             .and_then(|t| t.get(&scrutinee.id))
-            .filter(|ty| {
-                arms.iter()
-                    .any(|arm| pattern_reads_wide_as_i32(&arm.pattern, ty))
-            })
+            .filter(|ty| arms.iter().any(|arm| pattern_not_lowered(&arm.pattern, ty)))
             .map(|ty| {
                 unsupported(
                     &format!(
-                        "`match` with a tuple, constructor or literal pattern on a value \
-                         with an I64, F32 or F64 component (type {ty:?}); use a pair \
-                         pattern, `fst`, `snd`, `.N` or `case`"
+                        "`match` with a pattern that has no lowering at its type: a \
+                         constructor or literal pattern on a value with an I64, F32 or \
+                         F64 component, or a tuple pattern inside a constructor pattern \
+                         (type {ty:?}); use a pair pattern, `fst`, `snd`, `.N` or `case`"
                     ),
                     expr.span,
                 )
@@ -454,6 +452,27 @@ impl LocalTracker {
             self.linear_locals.insert(idx, false); // false = not yet consumed
         }
         idx
+    }
+
+    /// The binding of `name`, for [`Self::restore`] when a scope that
+    /// shadows it ends.
+    fn binding(&self, name: &str) -> (Option<u32>, Option<ValType>) {
+        (
+            self.name_to_idx.get(name).copied(),
+            self.name_to_type.get(name).copied(),
+        )
+    }
+
+    /// End a scope of `name`: put back the binding that it shadowed.
+    fn restore(&mut self, name: &str, (idx, ty): (Option<u32>, Option<ValType>)) {
+        match idx {
+            Some(idx) => self.name_to_idx.insert(name.to_string(), idx),
+            None => self.name_to_idx.remove(name),
+        };
+        match ty {
+            Some(ty) => self.name_to_type.insert(name.to_string(), ty),
+            None => self.name_to_type.remove(name),
+        };
     }
 
     /// Allocate an anonymous i32 temporary.
@@ -976,8 +995,12 @@ impl Codegen {
             return Err(err);
         }
         // Try full module compilation first; fall back to expression mode.
-        if let Ok(bytes) = self.compile_ast_module(module) {
-            return Ok(bytes);
+        // An unsupported construct that only the types show (a wide
+        // lambda) is a hard error too.
+        match self.compile_ast_module(module) {
+            Ok(bytes) => return Ok(bytes),
+            Err(e) if e.0.starts_with(UNSUPPORTED_PREFIX) => return Err(e),
+            Err(_) => {}
         }
 
         // Fallback: the main body as a standalone expression, checked
@@ -2427,22 +2450,14 @@ impl Codegen {
         self.compile_expr(func, value);
 
         // Bind it to a local
-        let outer_idx = self.locals.name_to_idx.get(name).copied();
-        let outer_ty = self.locals.name_to_type.get(name).copied();
+        let outer = self.locals.binding(name);
         let local_idx = self.locals.bind_typed(name, is_linear, local_ty);
         func.instruction(&Instruction::LocalSet(local_idx));
 
         // Compile the body
         self.compile_expr(func, body);
 
-        self.locals.name_to_idx.remove(name);
-        self.locals.name_to_type.remove(name);
-        if let Some(idx) = outer_idx {
-            self.locals.name_to_idx.insert(name.to_string(), idx);
-        }
-        if let Some(ty) = outer_ty {
-            self.locals.name_to_type.insert(name.to_string(), ty);
-        }
+        self.locals.restore(name, outer);
 
         // Handle unconsumed linear locals (mode-aware):
         // - Linear mode: Type checker already validated consumption, no action needed
@@ -2929,18 +2944,23 @@ impl Codegen {
         // Right branch (tag == 1)
         func.instruction(&Instruction::LocalGet(scrutinee_local));
         emit_typed_load(func, right_ty, sum_payload_offset(right_ty));
+        // Each binder is in scope in its own arm only.
+        let outer = self.locals.binding(right_var);
         let right_local = self.locals.bind_typed(right_var, false, right_ty);
         func.instruction(&Instruction::LocalSet(right_local));
         self.compile_expr(func, right_body);
+        self.locals.restore(right_var, outer);
 
         func.instruction(&Instruction::Else);
 
         // Left branch (tag == 0)
         func.instruction(&Instruction::LocalGet(scrutinee_local));
         emit_typed_load(func, left_ty, sum_payload_offset(left_ty));
+        let outer = self.locals.binding(left_var);
         let left_local = self.locals.bind_typed(left_var, false, left_ty);
         func.instruction(&Instruction::LocalSet(left_local));
         self.compile_expr(func, left_body);
+        self.locals.restore(left_var, outer);
 
         func.instruction(&Instruction::End);
     }
@@ -2984,10 +3004,11 @@ impl Codegen {
     /// through on inner refutation (needed once #66 admits patterns
     /// like `Some(Some(_))` + `Some(None)` + `None`).
     fn compile_match(&mut self, func: &mut Function, scrutinee: &Expr, arms: &[MatchArm]) {
-        // A variable, a wildcard and a pair pattern are lowered at the type
-        // of the value. A tuple, constructor or literal pattern reads i32
-        // values only; on a value with an I64, F32 or F64 component it
-        // never gets here: `first_unsupported_typed` refuses it.
+        // A variable, a wildcard, a pair pattern and a tuple pattern are
+        // lowered at the type of the value. A constructor or literal
+        // pattern reads i32 values only; on a value with an I64, F32 or F64
+        // component it never gets here: `first_unsupported_typed` refuses
+        // it (`pattern_not_lowered`).
         use wasm_encoder::BlockType;
         let scrut_ty = self.ty_of(scrutinee).cloned();
         let scrut_valtype = self.valtype_of(scrutinee);
@@ -3034,6 +3055,11 @@ impl Codegen {
         func.instruction(&Instruction::Block(BlockType::Result(result)));
 
         for arm in arms.iter() {
+            // The names that the pattern binds are in scope in this arm
+            // only.
+            let bound = arm.pattern.bound_vars();
+            let outer: Vec<_> = bound.iter().map(|v| self.locals.binding(v)).collect();
+
             // Open $arm_i_fail block. Inside, depth 0 = $arm_i_fail,
             // depth 1 = $done.
             func.instruction(&Instruction::Block(BlockType::Empty));
@@ -3075,6 +3101,9 @@ impl Codegen {
             func.instruction(&Instruction::Br(1));
 
             func.instruction(&Instruction::End); // close $arm_i_fail
+            for (name, outer) in bound.iter().zip(outer) {
+                self.locals.restore(name, outer);
+            }
         }
 
         // No arm matched at runtime — the typechecker rejects non-
@@ -3184,9 +3213,23 @@ impl Codegen {
                 self.compile_sub_pattern(func, left, left_local, left_ty, fail_depth);
                 self.compile_sub_pattern(func, right, right_local, right_ty, fail_depth);
             }
-            Pattern::Tuple(parts) => {
-                self.destructure_payload(func, parts, value_local, fail_depth);
-            }
+            Pattern::Tuple(parts) => match ty.map(peel_borrows) {
+                // A tuple is a pointer to one 8-byte slot for each
+                // element, stored at its own type (`compile_tuple_lit`).
+                Some(Ty::Tuple(elems)) if elems.len() == parts.len() => {
+                    for (i, (part, elem)) in parts.iter().zip(elems).enumerate() {
+                        let valtype = ty_to_valtype(elem);
+                        let local = self.locals.temp_typed(valtype);
+                        func.instruction(&Instruction::LocalGet(value_local));
+                        emit_typed_load(func, valtype, i as u64 * TUPLE_SLOT as u64);
+                        func.instruction(&Instruction::LocalSet(local));
+                        self.compile_sub_pattern(func, part, local, Some(elem), fail_depth);
+                    }
+                }
+                // No type (below a constructor pattern): `pattern_not_lowered`
+                // refuses a tuple pattern there.
+                _ => self.destructure_payload(func, parts, value_local, fail_depth),
+            },
             Pattern::Constructor { ctor, args } => {
                 let Some(ci) = self.data_ctors.get(ctor.as_str()).cloned() else {
                     // Unknown ctor — typechecker should have rejected.
@@ -3919,17 +3962,34 @@ fn peel_borrows(ty: &Ty) -> &Ty {
     }
 }
 
-/// True when the lowering of `pattern` against a value of type `ty`
-/// would read an I64, F32 or F64 component as an i32. A variable, a
-/// wildcard and a pair pattern are lowered at the type of the value; a
-/// tuple, constructor or literal pattern reads i32 values only.
-fn pattern_reads_wide_as_i32(pattern: &Pattern, ty: &Ty) -> bool {
+/// True when codegen has no correct lowering of `pattern` against a value
+/// of type `ty`. A variable, a wildcard, a pair pattern and a tuple
+/// pattern are lowered at the type of the value. A constructor or literal
+/// pattern reads i32 values. Below a constructor pattern the lowering has
+/// no types, so a tuple pattern there has no lowering.
+fn pattern_not_lowered(pattern: &Pattern, ty: &Ty) -> bool {
     match (pattern, peel_borrows(ty)) {
         (Pattern::Wildcard | Pattern::Var(_) | Pattern::Unit, _) => false,
         (Pattern::Pair(l, r), Ty::Prod { left, right }) => {
-            pattern_reads_wide_as_i32(l, left) || pattern_reads_wide_as_i32(r, right)
+            pattern_not_lowered(l, left) || pattern_not_lowered(r, right)
         }
-        _ => has_non_i32_component(ty),
+        (Pattern::Tuple(parts), Ty::Tuple(elems)) if parts.len() == elems.len() => parts
+            .iter()
+            .zip(elems)
+            .any(|(part, elem)| pattern_not_lowered(part, elem)),
+        (Pattern::Constructor { args, .. }, ty) => {
+            has_non_i32_component(ty) || args.iter().any(has_tuple_pattern)
+        }
+        (_, ty) => has_non_i32_component(ty),
+    }
+}
+
+fn has_tuple_pattern(pattern: &Pattern) -> bool {
+    match pattern {
+        Pattern::Tuple(_) => true,
+        Pattern::Pair(l, r) => has_tuple_pattern(l) || has_tuple_pattern(r),
+        Pattern::Constructor { args, .. } => args.iter().any(has_tuple_pattern),
+        Pattern::Wildcard | Pattern::Var(_) | Pattern::Unit | Pattern::Literal(_) => false,
     }
 }
 
@@ -4812,6 +4872,61 @@ mod tests {
             .compile_module_with_main(&module, &main_body)
             .expect("the main body compiles on its own");
         validate_wasm(&wasm);
+
+        // A module that is well typed but has a construct with no lowering
+        // is an error, not a reason to take the fallback.
+        // fn f(): I32 = match 5000000000 of | 5000000000 => 1 | _ => 0 end
+        let arm = |pattern, n| MatchArm {
+            pattern,
+            guard: None,
+            body: e(ExprKind::Lit(Literal::I32(n))),
+        };
+        let unsupported = AstModule {
+            name: "test".into(),
+            imports: vec![],
+            decls: vec![Decl::Fn {
+                name: "f".into(),
+                visibility: Visibility::Private,
+                type_params: vec![],
+                params: vec![],
+                ret_ty: Ty::Base(BaseTy::I32),
+                body: e(ExprKind::Match {
+                    scrutinee: Box::new(e(ExprKind::Lit(Literal::I64(5_000_000_000)))),
+                    arms: vec![
+                        arm(P::Literal(Literal::I64(5_000_000_000)), 1),
+                        arm(P::Wildcard, 0),
+                    ],
+                }),
+            }],
+        };
+        let err = Codegen::new()
+            .compile_module_with_main(&unsupported, &main_body)
+            .expect_err("no fallback");
+        assert!(err.0.starts_with(UNSUPPORTED_PREFIX), "{}", err.0);
+    }
+
+    /// The patterns that codegen lowers at the type of the value, and the
+    /// ones that it refuses.
+    #[test]
+    fn pattern_lowering_coverage() {
+        let i32_ty = || Ty::Base(BaseTy::I32);
+        let i64_ty = || Ty::Base(BaseTy::I64);
+        let vars = |n: usize| vec![P::Wildcard; n];
+        let tuple_ty = Ty::Tuple(vec![i32_ty(), i64_ty(), i32_ty()]);
+        // A tuple pattern is typed, also with a wide element.
+        assert!(!pattern_not_lowered(&P::Tuple(vars(3)), &tuple_ty));
+        // Below a constructor pattern there are no types.
+        let ctor = |args| P::Constructor {
+            ctor: "C".into(),
+            args,
+        };
+        assert!(pattern_not_lowered(
+            &ctor(vec![P::Tuple(vars(3))]),
+            &i32_ty()
+        ));
+        assert!(!pattern_not_lowered(&ctor(vars(1)), &i32_ty()));
+        // A literal pattern reads an i32.
+        assert!(pattern_not_lowered(&P::Literal(Literal::I64(1)), &i64_ty()));
     }
 
     #[test]

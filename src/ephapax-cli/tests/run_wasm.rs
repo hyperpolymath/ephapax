@@ -248,3 +248,33 @@ fn pair_patterns_bind_each_component_at_its_type() {
         }
     }
 }
+
+/// The binder of a `case` arm is in scope in that arm only. It used to
+/// stay bound after the `case`, so a later use of an outer variable of
+/// the same name read the binder.
+#[test]
+fn an_arm_binder_does_not_replace_an_outer_variable() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    for (payload, value, arm, want) in [
+        ("I32", "7", "x", "12"),
+        // The binder has another wasm type than the outer variable.
+        ("I64", "7000000000", "1", "6"),
+    ] {
+        std::fs::write(
+            tmp.path().join("scope.eph"),
+            format!(
+                "module scope\n\ndata Opt = Yes({payload}) | No\n\nfn main(): I32 =\n  \
+                 let x = 5\n  let r = match Yes({value}) of\n    | Yes(x) => {arm}\n    \
+                 | No => 0\n    end\n  r + x\n"
+            ),
+        )
+        .expect("write program");
+        for args in [&["run", "scope.eph"][..], &["run", "--interp", "scope.eph"]] {
+            assert_eq!(
+                stdout_of(tmp.path(), args),
+                want,
+                "{payload} under {args:?}"
+            );
+        }
+    }
+}

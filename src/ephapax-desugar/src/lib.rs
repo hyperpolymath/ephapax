@@ -120,6 +120,13 @@ pub enum DesugarError {
     #[error("empty match expression")]
     EmptyMatch,
 
+    /// A `match` with a guard goes to the core `match`, which has no
+    /// form for a constructor inside another pattern.
+    #[error(
+        "a match with a guard cannot have the constructor pattern `{ctor}` inside another pattern"
+    )]
+    GuardWithNestedConstructor { ctor: String },
+
     #[error("qualified access `{qualifier}.{member}`: `{qualifier}` is not an imported module (record field access is not yet supported)")]
     QualifiedAccessUnknownModule { qualifier: String, member: String },
 
@@ -1085,6 +1092,18 @@ impl Desugarer {
             return self.bind_single_pattern(&core_scrutinee, &arms[0].pattern, body, span);
         }
 
+        // A guard, and no constructor pattern at the top of an arm: the
+        // core `match` tries the arms in order and honours each guard.
+        let guarded = arms.iter().any(|a| a.guard.is_some());
+        if guarded
+            && !arms
+                .iter()
+                .any(|a| matches!(a.pattern, Pattern::Constructor { .. }))
+        {
+            let patterns = arms.iter().map(|a| a.pattern.clone()).collect();
+            return self.guarded_match(core_scrutinee, arms.iter(), patterns, span);
+        }
+
         // Match on a literal-typed scrutinee (`match n of | 0 => a | 1 =>
         // b | _ => c end`). All arms are Literal / Wildcard / Var, no
         // constructor — desugar to nested `if scrutinee == lit then arm
@@ -1141,33 +1160,51 @@ impl Desugarer {
             })?;
         let ctors = ctor_defs.clone();
 
-        // Build an ordered map: constructor index → (pattern bindings, body)
-        let mut arm_map: HashMap<usize, &MatchArm> = HashMap::new();
-        let mut wildcard_arm: Option<&MatchArm> = None;
-
+        // The constructor index of each arm; `None` for an arm that takes
+        // every constructor. A literal or a tuple pattern at the top of
+        // a match on a data type is taken as a wildcard.
+        let mut indexed: Vec<(Option<usize>, &MatchArm)> = Vec::with_capacity(arms.len());
         for arm in arms {
-            match &arm.pattern {
-                Pattern::Constructor { ctor, .. } => {
-                    let info = self.registry.get_ctor(ctor.as_str()).ok_or_else(|| {
-                        DesugarError::UnknownConstructor {
+            let index = match &arm.pattern {
+                Pattern::Constructor { ctor, .. } => Some(
+                    self.registry
+                        .get_ctor(ctor.as_str())
+                        .ok_or_else(|| DesugarError::UnknownConstructor {
                             ctor: ctor.to_string(),
-                        }
-                    })?;
-                    arm_map.insert(info.index, arm);
-                }
-                Pattern::Wildcard | Pattern::Var(_) => {
-                    wildcard_arm = Some(arm);
-                }
-                _ => {
-                    // Literal or tuple patterns at top level of match on ADT —
-                    // treat as wildcard for now
-                    wildcard_arm = Some(arm);
-                }
-            }
+                        })?
+                        .index,
+                ),
+                _ => None,
+            };
+            indexed.push((index, arm));
         }
 
+        // The arms that can take constructor `i`, in the order to try.
+        // With a guard in the match: each arm for `i`, in source order.
+        // With no guard, one arm: the last arm for `i`, or else the last
+        // arm for every constructor.
+        let chains: Vec<Vec<&MatchArm>> = (0..ctors.len())
+            .map(|i| {
+                if guarded {
+                    return indexed
+                        .iter()
+                        .filter(|(index, _)| index.is_none_or(|n| n == i))
+                        .map(|(_, arm)| *arm)
+                        .collect();
+                }
+                let last = |want: Option<usize>| {
+                    indexed
+                        .iter()
+                        .rev()
+                        .find(|(index, _)| *index == want)
+                        .map(|(_, arm)| *arm)
+                };
+                last(Some(i)).or_else(|| last(None)).into_iter().collect()
+            })
+            .collect();
+
         // Generate the nested case tree
-        self.build_case_tree(&core_scrutinee, &ctors, &arm_map, wildcard_arm, 0, span)
+        self.build_case_tree(&core_scrutinee, &ctors, &chains, 0, span)
     }
 
     /// Find which data type is being matched by examining constructor patterns.
@@ -1203,41 +1240,32 @@ impl Desugarer {
         &self,
         scrutinee: &Expr,
         ctors: &[ConstructorDef],
-        arm_map: &HashMap<usize, &MatchArm>,
-        wildcard: Option<&MatchArm>,
+        chains: &[Vec<&MatchArm>],
         base_index: usize,
         span: Span,
     ) -> Result<Expr, DesugarError> {
+        let chain = &chains[base_index];
         match ctors.len() {
             0 => unreachable!("empty constructor list"),
 
-            // Last (or only) constructor — no case needed, just bind
-            1 => {
-                let arm = arm_map
-                    .get(&base_index)
-                    .or(wildcard.as_ref())
-                    .ok_or_else(|| DesugarError::NonExhaustive {
-                        ctor: ctors[0].name.to_string(),
-                    })?;
-
-                self.build_arm_body(scrutinee, &ctors[0], arm, span)
-            }
+            // Last (or only) constructor: no case needed, the scrutinee
+            // is the payload (no inl/inr wrapper).
+            1 => self.build_arm_chain(scrutinee, &ctors[0], chain, span),
 
             // Two or more constructors — generate case
             _ => {
-                let left_arm = arm_map
-                    .get(&base_index)
-                    .or(wildcard.as_ref())
-                    .ok_or_else(|| DesugarError::NonExhaustive {
-                        ctor: ctors[0].name.to_string(),
-                    })?;
-
-                // Variable name for the left (inl) payload
-                let left_var = self.fresh_var_for_arm(left_arm, &ctors[0]);
-                let left_body = self.build_arm_body_inner(
+                // Variable name for the left (inl) payload. More than one
+                // arm can read it, so it does not take the name of a
+                // variable of one arm: that name would hide an outer
+                // variable in the other arms.
+                let left_var = match chain[..] {
+                    [arm] => self.fresh_var_for_arm(arm, &ctors[0]),
+                    _ => format!("__{}", ctors[0].name.to_lowercase()).into(),
+                };
+                let left_body = self.build_arm_chain(
                     &Expr::new(ExprKind::Var(left_var.clone()), span),
                     &ctors[0],
-                    left_arm,
+                    chain,
                     span,
                 )?;
 
@@ -1247,8 +1275,7 @@ impl Desugarer {
                 let right_body = self.build_case_tree(
                     &rest_scrutinee,
                     &ctors[1..],
-                    arm_map,
-                    wildcard,
+                    chains,
                     base_index + 1,
                     span,
                 )?;
@@ -1267,16 +1294,95 @@ impl Desugarer {
         }
     }
 
-    /// Build the body for a match arm (single constructor, no more case needed).
-    fn build_arm_body(
+    /// The code for one constructor: `chain` has the arms to try on its
+    /// payload, in order. A chain where each arm has a guard does not
+    /// cover the constructor. For a longer chain, the type checker finds
+    /// if the patterns cover the payload.
+    fn build_arm_chain(
         &self,
-        scrutinee: &Expr,
+        payload: &Expr,
         ctor: &ConstructorDef,
-        arm: &MatchArm,
+        chain: &[&MatchArm],
         span: Span,
     ) -> Result<Expr, DesugarError> {
-        // For the last constructor, scrutinee IS the payload (no inl/inr wrapper)
-        self.build_arm_body_inner(scrutinee, ctor, arm, span)
+        match chain {
+            [arm] if arm.guard.is_none() => self.build_arm_body_inner(payload, ctor, arm, span),
+            _ if chain.iter().any(|arm| arm.guard.is_none()) => {
+                // A pattern on the constructor is a pattern on its
+                // payload: `()`, the one field, or a right-nested pair.
+                let patterns = chain
+                    .iter()
+                    .map(|arm| match &arm.pattern {
+                        Pattern::Constructor { args, .. } => args
+                            .iter()
+                            .rev()
+                            .cloned()
+                            .reduce(|rest, p| Pattern::Pair(Box::new(p), Box::new(rest)))
+                            .unwrap_or(Pattern::Unit),
+                        Pattern::Var(v) => Pattern::Var(v.clone()),
+                        _ => Pattern::Wildcard,
+                    })
+                    .collect();
+                self.guarded_match(payload.clone(), chain.iter().copied(), patterns, span)
+            }
+            _ => Err(DesugarError::NonExhaustive {
+                ctor: ctor.name.to_string(),
+            }),
+        }
+    }
+
+    /// A core `match` with one arm for each of `arms`, on `patterns`
+    /// (one for each arm). The core `match` tries the arms in order, and
+    /// an arm with a false guard gives the value to the next arm.
+    fn guarded_match<'a>(
+        &self,
+        scrutinee: Expr,
+        arms: impl Iterator<Item = &'a MatchArm>,
+        patterns: Vec<Pattern>,
+        span: Span,
+    ) -> Result<Expr, DesugarError> {
+        let arms = arms
+            .zip(&patterns)
+            .map(|(arm, pattern)| {
+                Ok(ephapax_syntax::MatchArm {
+                    pattern: Self::core_pattern(pattern)?,
+                    guard: match &arm.guard {
+                        Some(guard) => Some(Box::new(self.desugar_expr(guard)?)),
+                        None => None,
+                    },
+                    body: self.desugar_expr(&arm.body)?,
+                })
+            })
+            .collect::<Result<_, DesugarError>>()?;
+        Ok(Expr::new(
+            ExprKind::Match {
+                scrutinee: Box::new(scrutinee),
+                arms,
+            },
+            span,
+        ))
+    }
+
+    /// The core form of a pattern that has no constructor pattern in it.
+    fn core_pattern(pattern: &Pattern) -> Result<ephapax_syntax::Pattern, DesugarError> {
+        use ephapax_syntax::Pattern as CorePattern;
+        let all = |ps: &[Pattern]| ps.iter().map(Self::core_pattern).collect::<Result<_, _>>();
+        Ok(match pattern {
+            Pattern::Wildcard => CorePattern::Wildcard,
+            Pattern::Var(v) => CorePattern::Var(v.clone()),
+            Pattern::Unit => CorePattern::Unit,
+            Pattern::Literal(lit) => CorePattern::Literal(lit.clone()),
+            Pattern::Pair(l, r) => CorePattern::Pair(
+                Box::new(Self::core_pattern(l)?),
+                Box::new(Self::core_pattern(r)?),
+            ),
+            Pattern::Tuple(elements) => CorePattern::Tuple(all(elements)?),
+            Pattern::Constructor { ctor, .. } => {
+                return Err(DesugarError::GuardWithNestedConstructor {
+                    ctor: ctor.to_string(),
+                })
+            }
+        })
     }
 
     /// Build the arm body, binding pattern variables to the payload.
@@ -1410,7 +1516,7 @@ impl Desugarer {
                 ExprKind::Match {
                     scrutinee: Box::new(value.clone()),
                     arms: vec![ephapax_syntax::MatchArm {
-                        pattern: Self::core_pair_pattern(pattern),
+                        pattern: Self::core_pattern(pattern)?,
                         guard: None,
                         body,
                     }],
@@ -1450,22 +1556,6 @@ impl Desugarer {
                 Self::is_irrefutable_pair_pattern(l) && Self::is_irrefutable_pair_pattern(r)
             }
             Pattern::Tuple(_) | Pattern::Constructor { .. } | Pattern::Literal(_) => false,
-        }
-    }
-
-    /// Convert a pattern accepted by [`Self::is_irrefutable_pair_pattern`]
-    /// to the core pattern type.
-    fn core_pair_pattern(pattern: &Pattern) -> ephapax_syntax::Pattern {
-        use ephapax_syntax::Pattern as CorePattern;
-        match pattern {
-            Pattern::Var(v) => CorePattern::Var(v.clone()),
-            Pattern::Unit => CorePattern::Unit,
-            Pattern::Pair(l, r) => CorePattern::Pair(
-                Box::new(Self::core_pair_pattern(l)),
-                Box::new(Self::core_pair_pattern(r)),
-            ),
-            // Only reachable for `Wildcard` (the guard excludes the rest).
-            _ => CorePattern::Wildcard,
         }
     }
 

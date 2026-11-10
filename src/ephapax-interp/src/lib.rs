@@ -631,9 +631,8 @@ enum Frame {
     /// names go out of scope.
     Unbind(Vec<Saved>),
     /// The body of a closure or the value of a constant: the evaluation
-    /// goes back to the environment `saved`. `on_error` is set for a
-    /// constant, which also goes back when its value is an error.
-    Env { saved: Environment, on_error: bool },
+    /// goes back to this environment.
+    Env(Environment),
     /// The body of a region: the region ends.
     Region(RegionName),
 }
@@ -755,17 +754,19 @@ impl Interpreter {
             state = match step {
                 Ok(state) if stack.len() <= MAX_FRAMES => state,
                 step => {
-                    // An error leaves the environment as it is at the
-                    // error. The one exception is the value of a
-                    // constant, which gives the environment back to the
-                    // code that used the constant.
+                    // An error ends each frame, the top one first: the
+                    // names, the environment and the regions are as they
+                    // were before the evaluation. So a caller that keeps
+                    // the interpreter after an error (the REPL) does not
+                    // see the names of the call that failed.
                     for frame in stack.into_iter().rev() {
-                        if let Frame::Env {
-                            saved,
-                            on_error: true,
-                        } = frame
-                        {
-                            self.env = saved;
+                        match frame {
+                            Frame::Env(saved) => self.env = saved,
+                            Frame::Unbind(saved) | Frame::Guard { saved, .. } => self.unbind(saved),
+                            Frame::Region(_) => {
+                                self.regions.pop();
+                            }
+                            _ => {}
                         }
                     }
                     return Err(step.err().unwrap_or(RuntimeError::StackOverflow));
@@ -951,7 +952,7 @@ impl Interpreter {
                 self.unbind(saved);
                 return Ok(State::Value(value));
             }
-            Frame::Env { saved, .. } => {
+            Frame::Env(saved) => {
                 self.env = saved;
                 return Ok(State::Value(value));
             }
@@ -1109,10 +1110,7 @@ impl Interpreter {
                     let mut callee = env;
                     callee.extend(param, right);
                     let caller = std::mem::replace(&mut self.env, callee);
-                    stack.push(Frame::Env {
-                        saved: caller,
-                        on_error: false,
-                    });
+                    stack.push(Frame::Env(caller));
                     return Ok(State::Eval(body.0));
                 }
                 _ => return Err(RuntimeError::NotAFunction),
@@ -1312,10 +1310,7 @@ impl Interpreter {
             // A constant: its value, from an empty environment, at each
             // use of the name (as wasm, which calls a function).
             if let Some(value) = self.constants.get(name).cloned() {
-                stack.push(Frame::Env {
-                    saved: std::mem::take(&mut self.env),
-                    on_error: true,
-                });
+                stack.push(Frame::Env(std::mem::take(&mut self.env)));
                 return Ok(State::Eval(value));
             }
         }
@@ -1581,12 +1576,12 @@ impl Interpreter {
         }
 
         // Evaluate body
-        let result = self.run(body)?;
+        let result = self.run(body);
 
         // Restore previous environment
         self.env = saved_env;
 
-        Ok(result)
+        result
     }
 }
 
@@ -2215,6 +2210,17 @@ mod tests {
             matches!(result, Err(RuntimeError::StackOverflow)),
             "{result:?}"
         );
+        // The error ends the calls: the parameter of `f` is not bound.
+        assert!(interp.get_binding("n").is_none());
+        let call = dummy_expr(ExprKind::App {
+            func: Box::new(dummy_expr(ExprKind::Var("f".into()))),
+            arg: Box::new(lit_i32_expr(1)),
+        });
+        assert!(matches!(
+            interp.eval(&call),
+            Err(RuntimeError::StackOverflow)
+        ));
+        assert!(interp.get_binding("n").is_none());
     }
 
     /// An error in the value of a constant gives the environment back to

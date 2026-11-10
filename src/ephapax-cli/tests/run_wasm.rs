@@ -508,6 +508,107 @@ fn a_module_names_a_data_type_only_through_a_pub_import() {
     }
 }
 
+/// A constructor of a `data` type with type parameters gets its type
+/// arguments from the use of the value. The annotation of the injection
+/// had the type parameter itself, which is no type at the constructor:
+/// `None` was not an `Option(I32)`, and `L(1)` was not an
+/// `Either(I32, Bool)`.
+#[test]
+fn a_constructor_gets_its_type_arguments_from_its_use() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let write =
+        |name: &str, text: &str| std::fs::write(tmp.path().join(name), text).expect("write module");
+    let option = "data Option(a) = None | Some(a)\n\n";
+    let either = "data Either(a, b) = L(a) | R(b)\n\n";
+    let three = "data T(a) = A(a) | B(a) | C(a)\n\n";
+    let or = "fn or(o: Option(I32), d: I32): I32 = match o of | None => d | Some(n) => n end\n\n";
+
+    // (declarations, `main` type, `main` body, output)
+    for (decls, ty, main, want) in [
+        // As a result, as an argument, and with no annotation.
+        (
+            format!("{option}{or}fn none(): Option(I32) = None\n\n"),
+            "I32",
+            "or(none(), 40) + or(None, 2)",
+            "42",
+        ),
+        (
+            option.to_string(),
+            "I32",
+            "let o = None in match o of | None => 42 | Some(n) => n end",
+            "42",
+        ),
+        // The 2 branches of an `if` give the 2 sides of the sum.
+        (
+            format!("{option}{or}"),
+            "I32",
+            "or(if true then None else Some(1), 42)",
+            "42",
+        ),
+        // In a generic function, with a type parameter of another name.
+        (
+            format!(
+                "{option}{or}fn none<T>(): Option(T) = None\n\n\
+                 fn is(o: Option(Bool)): Bool = match o of | None => true | Some(b) => b end\n\n"
+            ),
+            "I32",
+            "if is(none()) then or(none(), 42) else 0",
+            "42",
+        ),
+        // A constructor in a constructor.
+        (
+            format!(
+                "{option}fn deep(o: Option(Option(I32))): I32 =\n  match o of\n  | None => 1\n  \
+                 | Some(i) => match i of | None => 2 | Some(n) => n end\n  end\n\n"
+            ),
+            "I32",
+            "deep(None) + deep(Some(None)) + deep(Some(Some(39)))",
+            "42",
+        ),
+        // 2 type parameters, each side at its width.
+        (
+            format!(
+                "{either}fn pick(e: Either(I64, F64)): I64 =\n  \
+                 match e of | L(n) => n | R(x) => 5000000000 - 4999999999 end\n\n"
+            ),
+            "I64",
+            "pick(L(5000000000)) + pick(R(1.5))",
+            "5000000001i64",
+        ),
+        // 3 constructors: each annotation of the chain.
+        (
+            format!(
+                "{three}fn f(t: T(I32)): I32 =\n  \
+                 match t of | A(n) => n | B(n) => n + 1 | C(n) => n + 2 end\n\n"
+            ),
+            "I32",
+            "f(A(10)) + f(B(10)) + f(C(9))",
+            "32",
+        ),
+    ] {
+        write(
+            "app.eph",
+            &format!("module app\n\n{decls}fn main(): {ty} = {main}\n"),
+        );
+        for args in [&["run", "app.eph"][..], &["run", "--interp", "app.eph"]] {
+            assert_eq!(stdout_of(tmp.path(), args), want, "{main} under {args:?}");
+        }
+    }
+
+    // A use at another type is a type error, as before.
+    write(
+        "bad.eph",
+        &format!("module bad\n\n{three}fn g(t: T(Bool)): I32 = 0\n\nfn main(): I32 = g(B(1))\n"),
+    );
+    let out = ephapax(tmp.path(), &["check", "bad.eph"]);
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        !out.status.success() && stderr.contains("Type mismatch"),
+        "exit {:?}, stderr:\n{stderr}",
+        out.status.code()
+    );
+}
+
 /// A `type` alias and an extern type follow the rule of data types (owner
 /// decision 2026-11-10): a module names one when it declares it, or when
 /// it imports the module that declares it. An alias must also be `pub`;

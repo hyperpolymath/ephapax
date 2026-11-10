@@ -4,6 +4,33 @@ All notable changes to Ephapax are documented here.
 
 === https://github.com/hyperpolymath/ephapax/compare/v0.8.0...HEAD[Unreleased]
 
+==== v2 plan rungs E0 + E1 in the Rust implementation (2026-11-09)
+
+* *E0, holes first* (gate `+src/ephapax-cli/tests/linearity_holes.rs+`):
+a `+let!+` of any type, and any linear-typed binding, may not be used
+twice; `+Ty::is_linear+` takes the join over products, sums, tuples and
+lists (a deliberate, conservative divergence from Coq `+is_linear_ty+`,
+recorded in `+docs/coq-rust-bridge/is_linear_ty.adoc+`); a closure may
+not consume a captured linear value; a borrow of a linear value may not
+be dereferenced into an owned value; a pattern wildcard over a linear
+component and a duplicate pattern binder are rejected; tuple/list
+projection that would discard a linear component is rejected; recursive
+`+data+` is the named `+DesugarError::RecursiveType+` instead of a stack
+overflow. Pair destructuring now lowers to a core `+match+`.
+* *E1, fail loudly* (gate `+src/ephapax-cli/tests/fail_loud.rs+`):
+`+perform+`/`+handle+` are a `+CodegenError+` (no module is written, and
+`+check+` reports the same error); raw variadic `+__ffi+` is rejected
+(`+RawFfiNotSupported+`), so typed `+extern+` is the only FFI path and
+the import index space is contiguous. The interpreter does not bind typed
+`+extern+` declarations: calling one fails with an unbound-variable error
+even with `+-L+`; `+@total+`, `+@pure+` and
+`+@comptime+` are a parse error (`+AnnotationNotEnforced+`); `+-O+` above 0
+and `+--mode+` are rejected; `+--debug+` now adds the `+ephapax.debug.mode+`
+section as well as writing the source map. `+stdlib/Coproc.eph+` and
+`+conformance/valid/ffi_basic.eph+` were migrated to typed `+extern+`
+blocks; the interpreter's `+-L+` FFI loader no longer has a reachable
+caller.
+
 ==== Governance, CI & security-scan infrastructure (2026-06-24)
 
 * *Governance model formalised* (PR #314): added `+.github/CODEOWNERS+`

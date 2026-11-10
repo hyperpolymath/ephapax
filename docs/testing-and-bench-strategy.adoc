@@ -31,7 +31,7 @@ benches:: not a level — a cross-cutting measurement family hung off each aspec
 
 *How to read the matrix.* The matrix (§2) is the index: each cell names the 2–3 highest-value obligations. The per-aspect sections (§3) expand a cell across all levels and list its benches. Three transverse sections then consolidate the cross-aspect story: *Interoperability* (§4), *Risk transfer* (§5 — the load-bearing section), and *Today vs blocked* (§6). §7 is the prioritised rollout.
 
-*Honesty preamble (non-negotiable).* The formal evidence is partially open and one piece is *deliberately false*: `formal/Semantics.v`'s legacy `Theorem preservation` is `Admitted` and `formal/Counterexample.v` *Qed-proves it false*. The four-layer redesign (L1–L4) is mid-build with 4 outer L1 admits. The suite must (a) carry the weight the open/false proofs cannot yet bear, and (b) *pin the proof-debt state itself* as a tested invariant. No test or doc may claim soundness coverage the proofs do not provide. Per CLAUDE.md fences: do not close legacy preservation or patch admits with proof tricks.
+*Honesty preamble (non-negotiable).* The formal evidence is partially open and one piece is *deliberately false*: `formal/Semantics.v`'s legacy preservation is false: it is retired to `preservation_stmt : Prop` and `formal/Counterexample.v` *Qed-proves it false* (`preservation_false`). The unrestricted L1 statements are refuted the same way, and `formal/` has no `Admitted` (D0/D0b, 2026-11-05). The four-layer redesign (L1–L4) is mid-build. The suite must (a) carry the weight the open/false proofs cannot yet bear, and (b) *pin the proof-debt state itself* as a tested invariant. No test or doc may claim soundness coverage the proofs do not provide. Per CLAUDE.md fences: do not prove a refuted statement or reintroduce `Admitted`.
 
 == 2. The matrix
 
@@ -61,7 +61,7 @@ a| • P59 codec retraction
 • cap-tag agreement (all 10)
 • Idris2 `compileResultRoundTrip`
 a| • (!) `must-spdx-headers` `head -20` bug
-• status-gate admit-count = 4 (not 0)
+• status-gate admit-count = 0 + no-False gate
 • (!) licence single-source contradiction
 
 | *P2P*
@@ -166,15 +166,15 @@ A "right result" must be right at L1 (regions), L2 (modality), L3 (echo residue)
 
 === 3.3 Dependability — tests + proofs, honestly
 
-The joint claim: the compiler never crashes on input it accepts or rejects; the resource discipline is real (linear = exactly-once, region = no-escape); emitted bytes are valid wasm the sibling agrees on; it degrades gracefully. The honesty constraint dominates: `Counterexample.v` Qed-proves the legacy `preservation` *false* (5 Qed lemmas); `Semantics_L1.v` has 7 `Admitted` / 4 outer admits (48 Qed) with 4 proof-debt classes (L1.B list-vs-multiset *tractable*, L1.D-StringConcat *tractable*, L1.D-App and L1.D-Pair *genuine soundness gaps*, L1.C region-liveness); L3 (`Echo.v`, ~20 Qed) is forward-looking and *not wired into* `has_type_l1`.
+The joint claim: the compiler never crashes on input it accepts or rejects; the resource discipline is real (linear = exactly-once, region = no-escape); emitted bytes are valid wasm the sibling agrees on; it degrades gracefully. The honesty constraint dominates: `Counterexample.v` Qed-proves the legacy preservation *false* (6 Qed lemmas, incl. `preservation_false`); `Semantics_L1.v` has no `Admitted`: its unrestricted `step_pop_disjoint_from_type_l1` and `preservation_l1` are retired to `…_stmt : Prop` and refuted by `Counterexample_StepPop.v` and `Counterexample_PreservationL1.v`, so the open L1 work is a judgment/step redesign (see `PROOF-NEEDS.adoc`), not admits; L3 (`Echo.v`, ~20 Qed) is forward-looking and *not wired into* `has_type_l1`.
 
-*unit.* Parser/typechecker crash-freedom (`parse_fuzzer`/`typecheck_fuzzer`, un-run in CI — promote to a gated `cargo-fuzz` job with a committed corpus seeded from the 14 conformance files + regression dir). Ownership codec lenient-decode safety (proptest over arbitrary `&[u8]` 0..4096, never panic, never index past buf — bounds guards at `ownership.rs:148,157` are safety-critical). Discipline soundness witnesses (every `valid/` yields 0 violations, every `invalid/` ≥1). Interpreter graceful degradation (`__ffi` with no library returns `Ok(I64(0))` + `[ffi:stub]` line, not trap; `DivisionByZero` returns `RuntimeError` not panic). *The proof-debt ledger pin*: a host test re-deriving the admit/axiom census from the `.v` files that *fails if the false legacy theorem gets "fixed" or an admit silently appears/disappears* — making the honest-gap state itself a tested, version-controlled invariant.
+*unit.* Parser/typechecker crash-freedom (`parse_fuzzer`/`typecheck_fuzzer`, un-run in CI — promote to a gated `cargo-fuzz` job with a committed corpus seeded from the 14 conformance files + regression dir). Ownership codec lenient-decode safety (proptest over arbitrary `&[u8]` 0..4096, never panic, never index past buf — bounds guards at `ownership.rs:148,157` are safety-critical). Discipline soundness witnesses (every `valid/` yields 0 violations, every `invalid/` ≥1). Interpreter graceful degradation (`__ffi` with no library returns `Ok(I64(0))` + `[ffi:stub]` line, not trap; `DivisionByZero` returns `RuntimeError` not panic). *The proof-debt ledger pin*: a host test re-deriving the admit/axiom census from the `.v` files that *fails if a refuted statement is turned back into a `Theorem` or any `Admitted`/`Axiom` appears* (the baseline is zero; `formal/scripts/no-false-gate.sh` already enforces it in CI) — making the honest-gap state itself a tested, version-controlled invariant.
 
 *P2P.* parser→typechecker fault propagation (malformed-but-parseable ⟹ typecheck-phase `Err` + non-empty diagnostic, never panic); codec↔codec + a *fault-injection variant* (flip one byte in a tw-built payload, assert `LenientReader` degrades deterministically); interp↔wasm differential (the interpreter *is* the reference for the literal/let/if/arith subset).
 
 *E2E.* Full-pipeline no-trap over *all* `conformance/valid` + supported `examples` (the open gap `TEST-NEEDS.md` flags: "compile and run all 98 `.eph` — not automated"); negative E2E (every `invalid/` rejected pre-codegen with non-empty diagnostic); graceful-degradation pair (`[ffi:stub]→0` with no shim; `dispatch(_,_,20,22)==42` with the shim); crash-resistance on 10k-nested inputs (exit error code, not SIGSEGV).
 
-*endpoint.* CLI exit-code stability; emitted-wasm validity (external engines instantiate without error); the `OWNERSHIP_SECTION_NAME` constant as a CI invariant; Idris2 ABI seam *with E1/E5 honestly marked OWED* (erased 0-quantity postulates citing the Coq `Admitted` — the contract is they remain stated-as-owed, never silently asserted proven).
+*endpoint.* CLI exit-code stability; emitted-wasm validity (external engines instantiate without error); the `OWNERSHIP_SECTION_NAME` constant as a CI invariant; Idris2 ABI seam *with E1/E5 honestly marked OWED* (erased 0-quantity postulates citing the Coq refutation `Counterexample.preservation_false` — the contract is they remain stated-as-owed, never silently asserted proven).
 
 *benches.* Fuzz throughput + crash-yield (0 new crashes / 24h before claiming CRG-A coverage); codec decode-safety throughput (constant memory on a forged `u32` count); parser/typechecker latency under depth; E2E compile+validate budget (+20% gate); `coqc` proof-check wall-clock (a runaway proof build is an evidence regression); `idris2 --check` ABI budget.
 
@@ -182,7 +182,7 @@ The joint claim: the compiler never crashes on input it accepts or rejects; the 
 
 Security is the claim that the substructural type system mechanically eliminates whole memory-error classes *before codegen* (`ephapax-linear` forbids contraction = double-free, weakening = leak, use-after-consume = UAF, region-escape), plus the integrity of three trust boundaries where the guarantee can leak: the FFI/dlopen path (transmute onto *any* symbol, no arity/signature/null check), the ownership-section seam, and the wasm sandbox. The trusted base is real and testable: `#![forbid(unsafe_code)]` on `ephapax-linear` + `ephapax-wasm`, and `Print Assumptions` seals in `TypingL2.v` asserting `weaken_modality`/`linear_to_affine` close with *zero axioms*.
 
-*unit.* LinearChecker negative corpus, one focused test per `DisciplineViolation` asserting the *exact* enum (not merely non-empty) and that no false-negative path returns `Ok`. AffineChecker parity (double-use still `Contraction`; unconsumed binding allowed — pins the L2-modality boundary so affine relaxation can never re-admit contraction). Branch-agreement merge soundness (property test over N-arm `match`: the arm[0]-vs-arm[i] formulation must not miss a disagreement that exists only between arm[2] and arm[3]). The *axiom-budget unit*: `Print Assumptions weaken_modality`/`linear_to_affine` print NO axioms, and `preservation_l1` lists *exactly* the known admits and no NEW axiom name — turning the no-new-axioms directive into a diffable artifact.
+*unit.* LinearChecker negative corpus, one focused test per `DisciplineViolation` asserting the *exact* enum (not merely non-empty) and that no false-negative path returns `Ok`. AffineChecker parity (double-use still `Contraction`; unconsumed binding allowed — pins the L2-modality boundary so affine relaxation can never re-admit contraction). Branch-agreement merge soundness (property test over N-arm `match`: the arm[0]-vs-arm[i] formulation must not miss a disagreement that exists only between arm[2] and arm[3]). The *axiom-budget unit*: `Print Assumptions weaken_modality`/`linear_to_affine` print NO axioms, and every named result prints "Closed under the global context" (the no-False gate census), so any NEW axiom name — turning the no-new-axioms directive into a diffable artifact.
 
 *P2P.* typecheck→codegen ownership lowering (P60: a Linear param surfaces as `OwnershipKind::Linear` in the artifact, not erased); codec↔codec cross-seam + `OWNERSHIP_SECTION_NAME` byte-identical across crates; interp→dlopen seam reaches the real shim (`dispatch(_,_,20,22)==42`) *and* a non-existent symbol hits the stub returning 0 without UB.
 
@@ -190,7 +190,7 @@ Security is the claim that the substructural type system mechanically eliminates
 
 *endpoint.* `ephapax compile --verify-ownership` (clean → exit 0; feature off → warn+skip, no false "clean"; corrupted section → reject non-zero); `#![forbid(unsafe_code)]` as a grep/compile gate that can never be removed; cap-tag byte-match `.eph` ↔ Zig enum (a mismatch routes a buffer to the *wrong* coprocessor — a security-relevant misdispatch); *supply-chain*: `cargo-deny`/`cargo-audit` (currently *no such job* — highest-value add given the `libloading` unsafe surface), `#![forbid]` invariant, commit-signature verification.
 
-*benches.* Checker rejection latency (linear in AST, no quadratic blowup from per-branch HashMap snapshot/restore clone); snapshot/restore cost under branch nesting; ownership-codec throughput; wasm-validation gate cost; fuzz coverage/throughput (coverage must not drop release-to-release; add an ownership-section fuzz target); *proof-check wall-time + axiom COUNT* (the security-load-bearing number: `weaken_modality=0`, `linear_to_affine=0`, `preservation_l1` axiom set frozen to the 3 known admits).
+*benches.* Checker rejection latency (linear in AST, no quadratic blowup from per-branch HashMap snapshot/restore clone); snapshot/restore cost under branch nesting; ownership-codec throughput; wasm-validation gate cost; fuzz coverage/throughput (coverage must not drop release-to-release; add an ownership-section fuzz target); *proof-check wall-time + axiom COUNT* (the security-load-bearing number: `weaken_modality=0`, `linear_to_affine=0`, every named result closed: zero axioms, zero admits).
 
 === 3.5 Accessibility — the picturable error UX
 
@@ -214,7 +214,7 @@ Consolidated in the dedicated Interoperability section below.
 
 This layer keeps the four-layer-proof / dyadic-grammar / typed-wasm-seam machine honest as it gestates. Several gates are *currently false-green or broken*, so the suite's first job is to make the gates themselves trustworthy.
 
-*unit.* status-gate drift logic (`scripts/status-gate.sh`): assert the admit grep returns the *expected 4* (not 0) and does *not* count the deliberately-false `Theorem preservation` as closeable; a fixture with 5 Admitted must FAIL when `PROOF-NEEDS.md` claims 4. *(!) `must-spdx-headers` is structurally broken* — it pipes through `head -20`, scanning only the first 20 files; a missing-header file ranked ≥21 passes silently, and it never scans `.eph`/`.idr`/`.v`. Replace with a full-corpus check; a fixture where file #25 lacks a header must FAIL. SPDX comment-leader correctness (`guix.scm`/`pixi.toml`/`stapeln.toml` carry C-style `// Owner:` which is *wrong for Scheme/TOML* and a genuine `guix shell -f` parse hazard). Licence single-source: `guix/pixi/stapeln` say PMPL-1.0-or-later, 255 headers say MPL-2.0, only `LICENSES/MPL-2.0.txt` exists — a 3-way contradiction the test must *report* (any FIX is owner-manual, file-by-file; the test must not auto-edit).
+*unit.* status-gate drift logic (`scripts/status-gate.sh`): assert the admit grep returns the *expected 0* and that the refuted statements stay `Prop` definitions (`preservation_stmt`, `step_pop_disjoint_from_type_l1_stmt`, `preservation_l1_stmt`), not closeable theorems; a fixture with 1 `Admitted` must FAIL when `PROOF-NEEDS.adoc` claims 0. *(!) `must-spdx-headers` is structurally broken* — it pipes through `head -20`, scanning only the first 20 files; a missing-header file ranked ≥21 passes silently, and it never scans `.eph`/`.idr`/`.v`. Replace with a full-corpus check; a fixture where file #25 lacks a header must FAIL. SPDX comment-leader correctness (`guix.scm`/`pixi.toml`/`stapeln.toml` carry C-style `// Owner:` which is *wrong for Scheme/TOML* and a genuine `guix shell -f` parse hazard). Licence single-source: `guix/pixi/stapeln` say PMPL-1.0-or-later, 255 headers say MPL-2.0, only `LICENSES/MPL-2.0.txt` exists — a 3-way contradiction the test must *report* (any FIX is owner-manual, file-by-file; the test must not auto-edit).
 
 *P2P.* contractile source → `contractile.just` byte-equality (catches generator/source drift); status-gate ↔ live `cargo test --list` + Coq admit grep ↔ `TEST-NEEDS.md`/`PROOF-NEEDS.md`; `pixi` tasks ↔ Justfile recipes (flag the lint asymmetry: pixi runs `clippy -D warnings`, Justfile has none); `reuse lint` ↔ LICENSES/ tree (would FAIL today: PMPL referenced but no `LICENSES/PMPL-*.txt`).
 
@@ -222,7 +222,7 @@ This layer keeps the four-layer-proof / dyadic-grammar / typed-wasm-seam machine
 
 *endpoint.* `reuse lint` exit code (SBOM-consumable attestation); scorecard MIN_SCORE=5 (*but the SARIF score-parse currently defaults to 0 via a `// 0` fallback — a false sense of coverage the test must expose*); status-gate markers exactly-one occurrence; Containerfile pinning contract; `boj-build` trigger payload (currently *malformed JSON*, unbalanced quotes/braces, `continue-on-error: true` swallows failures).
 
-*benches.* Gate latency (`status-gate` list-only path < 30s on warm cache, must not trigger a full rebuild); cold reproducible-build time (+20% gate); validate-wasm corpus throughput (count of `[valid]` fixtures should *monotonically rise*); SPDX/REUSE coverage ratio (hard number: `.rs` 68/68, `.idr` 20/20, `.v` 12/12, `.eph` 113/117 — 4 missing); admit/drift ledger (declared vs actual `Admitted.`, should trend *down*, never silently up); pinned-action freshness.
+*benches.* Gate latency (`status-gate` list-only path < 30s on warm cache, must not trigger a full rebuild); cold reproducible-build time (+20% gate); validate-wasm corpus throughput (count of `[valid]` fixtures should *monotonically rise*); SPDX/REUSE coverage ratio (hard number: `.rs` 68/68, `.idr` 20/20, `.v` 12/12, `.eph` 113/117 — 4 missing); admit/drift ledger (declared vs actual `Admitted.`, pinned at 0, never silently up); pinned-action freshness.
 
 == 4. Interoperability (consolidated)
 
@@ -250,7 +250,7 @@ Interop is where ephapax's one load-bearing feature — substructural ownership 
 
 | (5) Idris2 ABI contract
 | `src/abi/Ephapax/ABI/{Types,Foreign,Invariants}.idr` re-states the Rust boundary types, proves `compileResultRoundTrip` (Qed) and *OWES* `compileOkImpliesWasmTyped` (declared `0`-erased, no witness — PROOF-NEEDS E5). Exists so a SPARK/Ada consumer sees the obligation interface — "Rust is never the ABI".
-| *Round-trip proven; correctness OWED.* `idris2 --build` gate keeps the result-code bijection from rotting to `believe_me`. The honesty discipline travels the seam: E1/E5 cite the Coq `Admitted` rather than asserting preservation, so no downstream consumer is misled.
+| *Round-trip proven; correctness OWED.* `idris2 --build` gate keeps the result-code bijection from rotting to `believe_me`. The honesty discipline travels the seam: E1 cites the Coq refutation `Counterexample.preservation_false` and E5 is marked OWED rather than asserting preservation, so no downstream consumer is misled.
 |===
 
 *Portability invariants.* The wire format is endian-pinned LE + byte-aligned specifically so a SPARK/Ada/browser/node consumer can read it without the Rust crate. Seam-name agreement is a CI invariant. The accessibility seams are *protocol* seams (LSP/DAP JSON-RPC, tested black-box over the wire so any client interoperates; keep the LSP keyword list and `tree-sitter` `highlights.scm` in sync). Docs interop is with the open web (WCAG 2.1 AA via pa11y/axe-core — independently checkable, not self-asserted). `NO_COLOR` is the cross-tool knob for terminal/screen-reader/CI-log degradation. A perf number is only meaningful for a module that *validates and runs* on a standard engine — emitted-wasm validity is a prerequisite of every E2E/endpoint bench.
@@ -273,13 +273,13 @@ Each artifact *moves* a class of failure from a late/expensive boundary to an ea
 | "tested on examples" → "proven" — *for the closed layers only*
 | ⚠ partial
 
-| `Counterexample.v` (5 Qed)
-| *false security* from trusting `Semantics.v`'s `Admitted` theorem
+| `Counterexample.v` (6 Qed)
+| *false security* from trusting the legacy preservation in `Semantics.v` (now `preservation_stmt : Prop`)
 | silent false-confidence → *proven-false* (load-bearing negative knowledge)
 | ✅
 
 | Proof-debt ledger pin test
-| regression on the *evidence* (a silently-closed admit or "fixed" false theorem)
+| regression on the *evidence* (a new admit or axiom, or a refuted statement turned back into a theorem)
 | invisible drift → loud CI break
 | ✅ (new — build this)
 
@@ -296,7 +296,7 @@ Each artifact *moves* a class of failure from a late/expensive boundary to an ea
 | Region free-cost bench + L1 region-liveness proof
 | unbounded GC-pause latency; leak
 | tail-risk to monitor → measured+regression-gated (bench) → impossible (proof)
-| ⚠ bench ✅, proof OWED (L1.C admit)
+| ⚠ bench ✅, proof OWED (L1 redesign; no admit)
 
 | `recompute_count` integer assertions (`ephapax-query`)
 | interactive latency regression
@@ -394,7 +394,7 @@ Three toolchain keystones gate large swaths of the suite. Naming them once:
 | FFI-over-wasm E2E (K3); idiomatic coproc-over-imports (K1); linearity-in-signature contract (K2/G1); real Axiom.jl dispatch parity (stub backend).
 
 | *Maint/Supply/Compliance*
-| Fix + test `must-spdx-headers` (`head -20` bug); status-gate admit-count pin; contractile byte-equality; `reuse lint` *reporting* (fix owner-manual); validate-wasm floor.
+| Fix + test `must-spdx-headers` (`head -20` bug); status-gate admit-count pin (0); contractile byte-equality; `reuse lint` *reporting* (fix owner-manual); validate-wasm floor.
 | Hermetic guix build (`source #f`); language-wide codegen repro (K3); package-graph multi-module repro (K1); CI execution itself (estate Actions *billing wall* — owner-only; bag-of-actions escape, but `boj-build` payload is malformed); SBOM (no job); READINESS.md (absent → CRG badge vacuously `X`).
 |===
 
@@ -402,7 +402,7 @@ Three toolchain keystones gate large swaths of the suite. Naming them once:
 
 Sequence honours the estate directive *truth → fix → only then build*: make false-green gates trustworthy first, then build the one oracle that carries the most transferred risk, then widen.
 
-. *Tier 0 — make the gates honest (do first, days).* These currently lie. (a) Fix `must-spdx-headers` `head -20`; (b) pin the status-gate admit-count to the *exact* expected (4 L1 admits + the 1 deliberately-false legacy = documented total, *not zero*); (c) build the proof-debt ledger pin test; (d) expose the scorecard SARIF `// 0` score-parse so the supply-chain gate stops passing vacuously. *Why first:* §5 shows two of these are illusory transfers — they must fire before anything downstream trusts them.
+. *Tier 0 — make the gates honest (do first, days).* These currently lie. (a) Fix `must-spdx-headers` `head -20`; (b) pin the status-gate admit-count to the *exact* expected total, which is *zero* since D0/D0b (2026-11-05); the refuted statements are `Prop` definitions, not admits, and `formal/scripts/no-false-gate.sh` fails on any `Admitted`/`Axiom`; (c) build the proof-debt ledger pin test; (d) expose the scorecard SARIF `// 0` score-parse so the supply-chain gate stops passing vacuously. *Why first:* §5 shows two of these are illusory transfers — they must fire before anything downstream trusts them.
 
 . *Tier 1 — the differential interp-vs-wasm oracle (the keystone test).* Both backends exist; blocked on nothing. This single E2E (Functionality/E2E) carries the most-transferred functional risk: it converts codegen-miscompilation from a silent wrong-answer into a CI failure. *Directly serves codegen-audit task #12* — it is the executable definition of "does codegen compute the right value", not just "does it validate". Pair with upgrading `wasm_e2e.rs` from no-trap to value-correctness.
 
@@ -416,4 +416,4 @@ Sequence honours the estate directive *truth → fix → only then build*: make 
 
 . *Tier 6 — blocked-but-specced.* Park behind K1/K2/K3: idiomatic coproc-over-imports, linearity-in-signature contracts, FFI-over-wasm E2E, DAP endpoints, `ephapax-doc` WCAG gate, hermetic guix. Keep each as an `#[ignore]`d test with a "blocked: <keystone>" note so the gap is visible and un-claimable.
 
-*Guardrails.* No automated licence/SPDX edits — every compliance test is *report-only*; the PMPL-vs-MPL contradiction is surfaced, never auto-resolved (owner-manual, file-by-file). The proof-debt boundary (admits + the deliberately-false theorem) is a *tested, version-controlled invariant* — do not "fix" the false theorem or patch admits with proof tricks.
+*Guardrails.* No automated licence/SPDX edits — every compliance test is *report-only*; the PMPL-vs-MPL contradiction is surfaced, never auto-resolved (owner-manual, file-by-file). The proof-debt boundary (zero admits; the refuted statements kept as `Prop` with their pinned refutations) is a *tested, version-controlled invariant* — do not prove or restate a refuted statement, and do not reintroduce `Admitted` or `Axiom`.

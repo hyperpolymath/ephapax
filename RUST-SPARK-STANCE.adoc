@@ -41,10 +41,10 @@ backend (lowering to a different operational model), and the Zig FFI
 
 | Type preservation
 | `well_typed t T && t ⇒ t' → well_typed t' T`
-| `formal/Semantics.v::preservation` (currently **`Admitted`** —
-  earlier in-file comment claiming "Qed, closed 2026-04-27" was
-  unsubstantiated; `coqc` rejects the proof script with remaining
-  open goals — see ephapax#92).
+| `formal/Semantics.v::preservation_stmt` — a `Prop`, not a theorem: the
+  legacy statement is false, refuted by `Counterexample.preservation_false`
+  (retired from `Admitted` by D0/D0b, 2026-11-05). A sound replacement
+  preservation theorem is OWED; none exists yet.
 
 | Linear consumption
 | Every linear binding used exactly once across a context split
@@ -90,7 +90,8 @@ backend (lowering to a different operational model), and the Zig FFI
   DISCHARGED** at `Ephapax.Formal.Qualifier.splitLinearCoverage`
   (cited). **E3 narrow-form is DISCHARGED** at
   `Ephapax.Formal.RegionLinear.noEscapeTheorem` (cited). E1
-  (preservation) is OWED on the Coq side and remains `Admitted`.
+  (preservation) is OWED on the Coq side: the legacy statement is refuted
+  (`Counterexample.preservation_false`) and no replacement theorem exists yet.
   E2 control-flow generalisation, E3 operational form, E4
   (no-runtime-GC), E5 (WASM compilation), E6 (IR lowering) are stated
   as erased postulates so the obligations are explicit and discoverable.
@@ -147,14 +148,13 @@ Rust project.
 
 == Honest gaps
 
-* `formal/Semantics.v::preservation` is **`Admitted`** — the proof
-  script at L3215–L3326 leaves residual open goals (`coqc` 8.18.0
-  rejects `Qed.` with "Attempt to save an incomplete proof"). PR#87
-  (earlier today) propagated an in-file comment's "Qed, closed
-  2026-04-27" claim into ROADMAP + PROOF-NEEDS without running the
-  build; **the comment was the lie**. ephapax#92 (open) reverts that
-  doc drift and marks the source `Admitted.` honestly so the Coq CI
-  goes green.
+* No type-preservation theorem exists. The legacy
+  `formal/Semantics.v` statement is false (`Counterexample.preservation_false`)
+  and was retired to `preservation_stmt : Prop` (D0/D0b, 2026-11-05); the
+  unrestricted L1 statement is refuted too. A sound replacement theorem,
+  with an explicit boundary, is owed. (History: an in-file "Qed, closed
+  2026-04-27" claim was false; ephapax#92 marked it `Admitted`, which D0
+  then retired.)
 * `src/formal/Ephapax/Formal/RegionLinear.idr::regionSafetyExtract`
   and `noGCExtract` are **vacuous wrappers** — body is the input
   unchanged (`= ne`, `= (ne, lc)`). The proofs are sound (no escape
@@ -179,5 +179,5 @@ Rust project.
 * standards#134 — estate proof-debt sub-issue tracking ephapax
 * ephapax#85 — `splitLinearCoverage` discharge (MERGED 2026-05-19)
 * ephapax#88 — `idris2/src/*.idr` SPDX headers (OPEN)
-* ephapax#92 — `Qed.` → `Admitted.` on `preservation` (OPEN — companion
-  to this PR; the doc-honesty fix this stance doc cites)
+* ephapax#92 — `Qed.` → `Admitted.` on `preservation` (historical; the
+  `Admitted` was later retired to `preservation_stmt : Prop` by D0/D0b)

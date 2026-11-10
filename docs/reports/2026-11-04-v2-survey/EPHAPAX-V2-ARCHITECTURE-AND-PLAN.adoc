@@ -17,6 +17,17 @@ The survey ran the following toolchains:
 
 Idris2, Lean, Isabelle, zig, julia, z3 and the wasmtime CLI are not installed. Every claim that depends on them is marked *UNVERIFIED*.
 
+[NOTE]
+.Re-check, 2026-11-09 (toolchains installed in a later session)
+====
+* *P2 landed (T0c).* EscapeCex, L2Comp and LetCheck were re-created against the current judgment and land with F2–F6 in `formal/regress/` (in `_CoqProject`): 446 of 446 named results in `formal/` (theorem-class results plus every `Definition`, `Fixpoint` and `CoFixpoint`; 299 of them theorem-class) are closed under the global context. The re-created statements differ from the reported ones in two places. EscapeCex is a *progress* failure: `S_Region_Exit`'s guard catches the captured `ELoc`, so the typed configuration is stuck rather than stepping to an untypable one (`escaped_value_untypable_at_type` shows the unguarded exit would be untypable at the original type). LetCheck is broader than reported: every `ELet` whose bound type is non-linear is untypable, in both `has_type_l1` and the legacy `has_type`.
+* *Idris2 0.8.0.* `ephapax-abi.ipkg` and `ephapax-formal.ipkg` build (exit 0). The ABI's 12 clause-less `0 name : …` declarations are postulates (Idris2 accepts them under `%default total`); they are jointly consistent and assert nothing about Ephapax (`docs/proof-debt.adoc`). `idris2/ephapax-affine.ipkg` needs the `proven` package, which is not installed: still UNVERIFIED.
+* *Zig.* `zig test tools/coproc/ephapax_coproc.zig`: 2/2 pass (Zig 0.14.0). typed-wasm `ffi/zig`: 7/7 pass with Zig 0.15.1, the version its CI uses (it does not build with 0.14).
+* *wasmtime CLI 36.0.2.* `p1.wasm` (959 B) validates; with stub `env.print_i32`/`env.print_string` imports, `main` returns 162.
+* *z3 4.8.12.* absolute-zero `OND_checks.smt2` reproduces sat/unsat/sat; its OND-3 dir 2 block was vacuous and is fixed in hyperpolymath/absolute-zero#198.
+* *Still UNVERIFIED here:* Lean (elan installs, but the toolchain download is refused by the network proxy), Isabelle, julia and Creusot.
+====
+
 Nothing in this document proposes closing or extending `formal/Semantics.v` or `formal/Typing.v`. The legacy `Theorem preservation` is false (`formal/Counterexample.v`). It stayed `Admitted.` by owner directive until the owner ratified D0b (2026-11-05): P0 now retires it to a `Prop` statement, which the owner applies, rather than closing it. Because an `Admitted` statement is an axiom, the legacy theorem together with `Counterexample.v` also derives `False` (`evidence/SurveyCounterexamples.v`, F0). It therefore must never appear in the `Print Assumptions` of any headline theorem; see P0/P1 and D0b.
 
 Throughout, *ephapax-affine* means the internal sublanguage. It is not AffineScript. The two projects share only the compile target, typed-wasm.
@@ -306,8 +317,10 @@ Sources: the scratch builds and probes recorded in the dossier, plus spot checks
  ephapax-parser (pest) --> ephapax-surface AST (type params, mode decls, echo/observe/drop!, @comptime island)
      |  S2 desugar    [O2: golden + metamorphic desugar tests; formal/v2/Desugar.v match_desugar_correct
      |                     (data/match -> right-nested sums); surface sugar (traits, contracts) = pure desugar]
+     |  S2b elaborate [infer type arguments, check generic bodies once (type variables linear), then
+     |                     monomorphise; polymorphic recursion rejected]
      v
- ephapax-desugar --> CORE v2 AST (src/ephapax-syntax mirrors formal/v2/SyntaxV2.v constructor-for-constructor)
+ ephapax-desugar + elaborate --> CORE v2 AST (src/ephapax-syntax mirrors formal/v2/SyntaxV2.v constructor-for-constructor)
      |        \______ ephapax-ir S-expr codec --> core->SyntaxV2 translator --> tools/ephapax-oracle
      |                                                                 (extracted check_v2 + step_v2_fn)
  ephapax-driver::load_program (import resolver + package tier + surface + desugar)
@@ -724,9 +737,9 @@ Items marked "*(external)*" in the Home column live outside `hyperpolymath/ephap
 * distinct echo forms;
 * `S_Observe`;
 * a typed foreign-signature environment Φ for `extern` declarations (stdlib `Argv.eph` and others), with a host-call step rule over a host *function* (total and deterministic by construction, so `step_v2_deterministic` survives). The host function also receives an immutable host input fixed for the whole run, which carries the argument vector: the program path as element 0 followed by `Run.args`, matching `stdlib/Argv.eph`'s contract that `argv_count()` includes `argv[0]` (a finite list of byte strings, well-formed when every entry is valid UTF-8 and the list length fits in I32), so `env::argv_count`, `argv_arg_len` and `argv_arg_get` are deterministic functions of it and are covered by P9 and P10. The metatheory takes `host_wf` as a *hypothesis*, never as an `Axiom`: a host call returns a value of the declared type, touches only the buffers passed to it, and preserves `store_typed`, region tags and ownership, and the rest of `config_wf`: it never frees or retags a passed location, and its result refers to no freed region. Each signature in Φ carries its own instance of these conditions. P9 and P10 are stated for every `host_wf` host;
-* an explicit trap configuration: integer division or remainder by zero, and `MIN / -1`, step to `Trap`, while `MIN % -1` evaluates to 0 as Wasm `rem_s` does (matching the interpreter's `DivisionByZero` and the Wasm trap), and `progress_v2` reads "a value, a step, or `Trap`";
+* an explicit trap configuration: integer division or remainder by zero, and `MIN / -1`, step to `Trap`, while `MIN % -1` evaluates to 0 as Wasm `rem_s` does (matching the interpreter's `DivisionByZero` and the Wasm trap), and `progress_v2` reads "a value, a step, or `Trap`". `Trap` is a terminal configuration with no `has_type_v2` judgment, so `preservation_v2` concludes "a typed successor or `Trap`" (P10), and `type_safety_v2` reads "never stuck: a value, `Trap`, or a further step";
 * a global Σ for recursion, with a `sigma_wf` judgment (every definition checked against its declared type under the whole recursive Σ) that `config_wf` requires and that P9 and P10 take as a hypothesis;
-* the recursive-type form D7 selected (ratified in W1, before P4), so P7–P13 are proved against the full core: iso-recursive `TMu` with fold/unfold under the recommended option; nominal named types with unfold at `match` under the nominal option; no recursive type former under the no-core-recursion option, in which case P8 drops `mu`, P17 becomes the encoding-alignment rung, and E9/E10 use the bounded encodings;
+* the recursive-type form D7 selected (ratified in W1, before P4), so P7–P13 are proved against the full core: iso-recursive `TMu` with fold/unfold under the recommended option; nominal named types with unfold at `match` under the nominal option; no recursive type former under the no-core-recursion option, in which case P8 drops `mu`, P17 becomes the encoding-alignment rung, and E9/E10 use the bounded encodings. Grades of recursive types are defined, not left to unfolding: the grade of `TMu X. T` is the least fixed point of `g ↦ grade(T[X := g])` over the finite lattice {0,1,ω}, computed by Kleene iteration from 0, which stabilises after at most three steps per bound variable, so it is decidable and needs no unfolding (for example `μX. 1 + (String × X)` gets the grade of `String`). Under the nominal option each named type carries the same fixed point, checked against any declared grade annotation. P4 defines this `grade_of`, P8 and P10 use it, and the E9/E13 checker computes the same function, with a fixture that agrees with the extracted `grade_of` on every recursive type in the corpus;
 * store coherence in `config_wf`.
 
 Includes `step_v2_deterministic`.
@@ -759,13 +772,13 @@ Includes `step_v2_deterministic`.
 |S–M
 
 |P9 `progress_v2`
-|For closed well-formed configurations: every one is a value, steps, or is `Trap` (P4's trap configuration for integer division and remainder). EscapeCex and the stuck `EObserve` are already ruled out at P5.
+|For closed configurations that are well formed (`config_wf`) *and* well typed (`has_type_v2` of the expression under the configuration's store typing and Σ): every one is a value, steps, or is `Trap`. Well-formedness alone does not suffice: a closed well-formed configuration such as an integer applied as a function is neither a value, nor `Trap`, nor able to step. (`Trap` is P4's trap configuration for integer division and remainder.) EscapeCex and the stuck `EObserve` are already ruled out at P5.
 |CLOSED
 |P7, P8
 |M
 
 |P10 `preservation_v2` (L1 + L2 folded)
-|All step cases, including an unconditional effect-typed beta. This discharges what #240–#242 were working toward. Corollary `type_safety_v2`. Sub-agents work by case family: region, drop, app/beta, let/case/pair, ref/borrow, echo/observe.
+|All step cases, including an unconditional effect-typed beta. The conclusion is "the successor is typed at the same type, or it is `Trap`" (P4); the division and remainder steps to `Trap` take the second disjunct. This discharges what #240–#242 were working toward. It also proves `config_wf_preserved_v2`: every successor of a closed, well-typed, well-formed configuration that is not `Trap` satisfies the *whole* of `config_wf`, not only typing. That covers the `next_r` freshness bound, `sigma_wf` (no step changes Σ), store coherence, agreement between runtime `EFrame`s and the region environment, and closedness of the expression. P7's per-component lemmas (`frames_unique`, `frames_fresh_at_enter`, store coherence) are its inputs. Without it P9 applies only to the first step, so the corollary `type_safety_v2`, stated over multi-step runs, uses it. Sub-agents work by case family: region, drop, app/beta, let/case/pair, ref/borrow, echo/observe.
 |CLOSED; allowlist unchanged
 |P7, P8, P9
 |L–XL
@@ -789,7 +802,7 @@ Includes `step_v2_deterministic`.
 |L
 
 |P14 Meta plane
-|`MetaPlane.v`: `comptime_normalises` (structural Fixpoint) and `comptime_ignores_runtime`.
+|Branches on D8, like E15. Recommended option (halting island): `MetaPlane.v` with `comptime_normalises` (structural Fixpoint) and `comptime_ignores_runtime`. Fuel-bounded option: `comptime_normalises_or_fuel_exhausted` (every evaluation returns a normal form or the named fuel-exhausted outcome, never anything else) and `comptime_ignores_runtime`. 2LTT option: a typed-staging normalisation argument (`stage_normalises`: every well-typed meta-level term normalises, by a logical relation over the meta-level types) and `comptime_ignores_runtime`. Drop option: P14 is not scheduled, and E15's UNIMPLEMENTED diagnostics stand.
 |CLOSED
 |E15 grammar (parallel)
 |M
@@ -854,14 +867,14 @@ These are kept off the critical path.
 |Rung |Deliverable |Gate |Depends |Size
 
 |E0 Holes first
-|`mark_used` routes through `demands_consumption` (lib.rs:191). `check_lambda` rejects consuming a captured linear value. `Ty::is_linear` takes the join over Prod/Sum/Tuple/List (conservative *reject*, D5-independent; D5 in W1 may relax it). Recursive `data` gives a `DesugarError`, not an overflow. Dereferencing a borrow of a linear value may not consume ownership (today `check_deref` returns the owned inner type, `ephapax-typing/src/lib.rs:1739`, and borrows are not loan-tracked). A pattern may not discard a linear payload: a wildcard over a linear component, or a duplicate binder, is rejected (today a wildcard binds nothing, `lib.rs:1592`).
-|`tests/linearity_holes.rs`: dup2, dup4, pairdup, lamcap, sum-, tuple- and list-of-linear duplication probes, a double-borrow-then-drop probe, and a `(_, y)` match over a linear pair are each rejected with a named `TypeError` kind; rec1 fails with the named `DesugarError` and the compiler's normal error exit, never a crash or abort; `cargo test --workspace` green (≥ 507)
+|`mark_used` routes through `demands_consumption` (lib.rs:191). `check_lambda` rejects consuming a captured linear value. `Ty::is_linear` takes the join over Prod/Sum/Tuple/List (conservative *reject*, D5-independent; D5 in W1 may relax it). Recursive `data` gives a `DesugarError`, not an overflow. Dereferencing a borrow of a linear value may not consume ownership (today `check_deref` returns the owned inner type, `ephapax-typing/src/lib.rs:1739`, and borrows are not loan-tracked). A pattern may not discard a linear payload: a wildcard over a linear component, or a duplicate binder, is rejected (today a wildcard binds nothing, `lib.rs:1592`). Projection may not discard one either: `check_tuple_index` and `check_list_index` reject a projection from a container whose unselected fields or elements are linear (today they consume the container and return one element, so the rest are lost), as `check_fst`/`check_snd` already do; such containers must be destructured.
+|`src/ephapax-cli/tests/linearity_holes.rs`: dup2, dup4, pairdup, lamcap, sum-, tuple- and list-of-linear duplication probes, a double-borrow-then-drop probe, a `(_, y)` match over a linear pair, a tuple projection `t.0` from a tuple of two linear strings and a list index from a list of linear strings are each rejected with a named `TypeError` kind; rec1 fails with the named `DesugarError` and the compiler's normal error exit, never a crash or abort; `cargo test --workspace` green (≥ 507)
 |none (escalation note for pairdup)
 |S–M
 
 |E1 Fail loudly
 |Perform/Handle give a `CodegenError`. `@total`, `@pure` and `@comptime` give an "annotation not enforced" error. Raw variadic `__ffi` (probe g5) is rejected with a named error; typed `extern` declarations are the only FFI path, since only they have a formal-core representation (Φ). The import-index bug (lib.rs:478, 579) is fixed for `extern`. `-O`, `--debug` and `check --mode` take effect or are rejected.
-|`tests/fail_loud.rs`: the perform/handle probes return `CodegenError` without producing a module. g5 fails with the named raw-FFI error; an `extern`-based rewrite of g5 compiles to a module whose imports are contiguous and which passes structural validation. The `@total` loop, an `@pure` function with an effect and an `@comptime` declaration are each rejected with the "annotation not enforced" error. `-O`, `--debug` and `check --mode` each have a test showing they either take effect or are rejected. (`compile_match` legitimately emits an `unreachable` fallback, so the gate does not ban `unreachable` globally.)
+|`src/ephapax-cli/tests/fail_loud.rs`: the perform/handle probes return `CodegenError` without producing a module. g5 fails with the named raw-FFI error; an `extern`-based rewrite of g5 compiles to a module whose imports are contiguous and which passes structural validation. The `@total` loop, an `@pure` function with an effect and an `@comptime` declaration are each rejected with the "annotation not enforced" error. `-O`, `--debug` and `check --mode` each have a test showing they either take effect or are rejected. (`compile_match` legitimately emits an `unreachable` fallback, so the gate does not ban `unreachable` globally.)
 |none
 |S
 
@@ -873,7 +886,7 @@ These are kept off the critical path.
 
 |E3 Driver
 |`src/ephapax-driver` used by every tool; `src/ephapax-tools` either joins the workspace or is excluded.
-|`driver_agreement.rs`: every entry point (check, compile, run, repl, lsp, query, fmt) loads each corpus file through `ephapax-driver` and agrees on parse/desugar success; check == compile on all corpus files, which holds because `check` runs the same unsupported-feature validation as codegen (so the E1 fail-loud forms, such as the `perform` probe, are rejected by both with the same named diagnostic until E17); an integer literal above `i64::MAX` is a named `ParseError` on every entry point (today the core-parser fallback turns it into 0 via `unwrap_or(0)`, `ephapax-parser/src/lib.rs:965`), with a corpus-gate fixture; `qualified-import/app.eph` and `bridge.eph` check
+|`driver_agreement.rs`: every entry point (check, compile, run, repl, lsp, query, fmt) loads each corpus file through `ephapax-driver` and agrees on parse/desugar success; check == compile on all corpus files, which holds because `check` runs the same unsupported-feature validation as codegen (so the E1 fail-loud forms, such as the `perform` probe, are rejected by both with the same named diagnostic until E17); an integer literal above `i64::MAX` is a named `ParseError` on every entry point, except that `-9223372036854775808` (unary negation applied directly to the literal `9223372036854775808`, which today parses as `UnaryOp::Neg` over an unsigned token, `ephapax.pest:331-336`) is folded into the single literal `i64::MIN` before the range check; a fixture checks that it evaluates to `i64::MIN`, and that `9223372036854775808` alone, `-9223372036854775809` and `-(9223372036854775808)` (where the literal is not the direct operand of the minus sign) are each the named `ParseError` (today the core-parser fallback turns it into 0 via `unwrap_or(0)`, `ephapax-parser/src/lib.rs:965`), with a corpus-gate fixture; `qualified-import/app.eph` and `bridge.eph` check
 |none
 |M
 
@@ -896,8 +909,8 @@ These are kept off the critical path.
 |S
 
 |E7 Grammar + generics
-|One normative grammar plus a conformance fixture test. `SurfaceDecl::Fn` type params (desugar lib.rs:323). Until E13 brings grades, unconstrained type parameters are treated as linear (today `Ty::is_linear` makes `Ty::Var`/`Ty::Unif` non-linear, `ephapax-syntax/src/lib.rs:154`), so a generic body cannot duplicate a value that is later instantiated at a linear type. Desugar monomorphises type parameters before the core, so the core, the translator and `CheckV2` only see monomorphic terms; polymorphic recursion is rejected with a named error. `M.Ctor(x)` lowers to `Construct`. Match guards are honoured by desugar (today `build_arm_body_inner` never consults `arm.guard`, `ephapax-desugar/src/lib.rs:1169`, so `Some(x) if false` is taken unconditionally), or guarded constructor arms are rejected with a named error until they are; P16 proves the lowering later. Import and extern syntax reconciled.
-|`gen_angle.eph` and `qa/app2.eph` compile and run; a guarded constructor match whose guard is false falls through to the next arm in both interpreter and wasm (or is rejected with the named error); `fn dup<a>(x: a) = (x, x)` is rejected with a named `TypeError` (and so cannot be instantiated at a region-owned `String`); `id<a>` instantiated at two types desugars to two monomorphic core functions that translate to `SyntaxV2`; 0 EBNF productions unaccounted for
+|One normative grammar plus a conformance fixture test. `SurfaceDecl::Fn` type params (desugar lib.rs:323). Until E13 brings grades, unconstrained type parameters are treated as linear (today `Ty::is_linear` makes `Ty::Var`/`Ty::Unif` non-linear, `ephapax-syntax/src/lib.rs:154`), so a generic body cannot duplicate a value that is later instantiated at a linear type. Generic functions are checked once, polymorphically, by a new elaboration step S2b between desugar and S3: it infers the type arguments of every call (or reads explicit type applications), and checks each generic body with its type variables treated as linear. Only after that check succeeds does it monomorphise: each instantiation is specialised and the generic definition erased, so the core, the translator and `CheckV2` see only monomorphic terms. Desugar itself never specialises, because it runs before inference and has no substitution for `a` in `id(3)`. Polymorphic recursion is rejected with a named error. `M.Ctor(x)` lowers to `Construct`. Match guards are honoured by desugar (today `build_arm_body_inner` never consults `arm.guard`, `ephapax-desugar/src/lib.rs:1169`, so `Some(x) if false` is taken unconditionally), or guarded constructor arms are rejected with a named error until they are; P16 proves the lowering later. Import and extern syntax reconciled.
+|`gen_angle.eph` and `qa/app2.eph` compile and run; a guarded constructor match whose guard is false falls through to the next arm in both interpreter and wasm (or is rejected with the named error); `fn dup<a>(x: a) = (x, x)` is rejected with a named `TypeError` (and so cannot be instantiated at a region-owned `String`); `id<a>` instantiated at two types desugars to two monomorphic core functions that translate to `SyntaxV2`, and each specialisation, run in both interpreter and wasm on two distinct inputs, returns a value equal to its input; 0 EBNF productions unaccounted for
 |E3, the syntax ADR (normative grammar source) ratified in the W1 T1a packet
 |M
 
@@ -1161,6 +1174,7 @@ Engineering tracks inside each wave run in parallel with the proof tracks. The o
 |D9 |W4 (T4h) |X10 / P15, E13 (W5)
 |D10 |W1 (T1a) |layout-profile note / E5 (W2), then E9, E8, E10, E18
 |D12 |W5 (T5g) |erasure notes / E16, P21 (W6)
+|D13 (added 2026-11-09) |W1 (T1a) |the 2026-11-09 classification ruling / P4 and every later P-rung
 |===
 
 A rung whose dependency has not completed (for example E8 while the typed-wasm fix is unmerged) carries over to the next wave together with every rung that depends on it (E9 completion, E10, E14, P18, the W5 gate-acceptance exit). It is never declared done against a missing dependency.
@@ -1233,14 +1247,25 @@ The legacy `Semantics.preservation` is `Admitted` by directive and is refuted by
 |P1
 |The tripwire's quarantine list starts empty after P0. Any refuted `Admitted` fails CI.
 |T0g
-|Replaced: instead of the import-closure job, a CI gate checks that no `_CoqProject` file contains `Admitted`, `Axiom` or `Parameter`, and that the named refutations and L2 results print "Closed under the global context". With no axioms in the build, a closed proof of `False` would contradict the consistency of Coq's own theory; that meta-level argument, not the enumerated checks, is what rules out every other derivation.
+|Replaced: instead of the import-closure job, a CI gate checks that no `_CoqProject` file contains `Admitted`, `Axiom` or `Parameter`, and that the named refutations and L2 results print "Closed under the global context". With no axioms in the build, a closed proof of `False` would contradict the consistency of Coq's own theory; that meta-level argument, not the enumerated checks, is what rules out every other derivation. (Hardened on 2026-11-09 in `formal/scripts/no-false-gate.sh`: a comment-aware scan of every assumption form, a census of every named result, and a `coqchk` recheck.)
 |T0f
 |The doc-correction PR also revises the 2026-05-27 fence in CLAUDE.md (DO NOT items 1, 2 and 5), PROOF-NEEDS, EXPLAINME and V1-TO-V2, and records that the legacy theorem is retired, not closed. Applied by the owner, GPG-signed.
 |Evidence
-|`evidence/SurveyCounterexamples.v` F0 becomes an expected-failure target, like F1.
+|`evidence/SurveyCounterexamples.v` F0 becomes an expected-failure target, like F1. (Applied differently on 2026-11-09: F0 and F1 were restated to take the retired statements as hypotheses, so all eight survey lemmas still compile and are closed.)
 |===
 
 Beyond this repo: the memory entry `feedback_ephapax_no_patching_legacy_preservation.md` needs the same revision.
+
+=== Ratified: proof classification (owner, 2026-11-09)
+
+Ephapax's soundness statements are *theory* under PROOF-POLICY §1: the typing judgment and step relation as a calculus, progress, preservation, the layer obligations (L1–L4) and the refutations of the retired statements. Each gets an Agda source of truth.
+
+* *Grades.* Every such result is `ungraded` until its Agda proof checks under `agda --safe --without-K --cubical-compatible` (`PWG-3`). A grade is derived from receipts, never asserted (§8.4).
+* *Coq becomes a recheck leg.* The existing Coq proofs, and the Coq P-rungs of this plan, are the Rocq leg of §2. A Coq proof counts towards `PWG-2i`/`PWG-2ii` only once the matching Agda statement exists and the correspondence is `RECONCILED` (§2.2). Until then it is target-only evidence (§3). The Lean leg is transported through Dedukti where the pinned exporter allows it, and otherwise re-proved by hand without Mathlib.
+* *First targets.* The refutations are small and closed (`preservation_false`, `step_pop_disjoint_from_type_l1_FALSE`, `preservation_l1_FALSE`). Porting them needs only the fragment of the legacy and L1 judgments their witnesses touch. They are the first Agda rows, and they test the correspondence method before the v2 core is ported.
+* *What stays engineering.* The Idris2 ABI, the Rust checker and code generator (Creusot/Pearlite and Verus, #378) and typed-wasm emission are about this repository's implementation. They keep the §1 engineering mapping and are not graded.
+* *Plan impact.* The P-ladder is written for Coq, because the executable oracle (D9a, D9) extracts from Coq. This ruling adds an Agda port obligation to every headline rung. The order of the two is a new decision, *D13*, in the W0 packet: Coq first then Agda port, Agda first with Coq as the recheck leg, or both developed together. Under the decision-branch rule, no P-rung past P4 starts until D13 is ratified with its branch table.
+* *Beyond this repo.* The PWG ledger lives in `PROOF-NEEDS.adoc`. Mathesis may catalogue the grades it derives from those receipts (PROOF-POLICY §8.5). The memory entry `feedback_ephapax_no_patching_legacy_preservation.md` should record the classification.
 
 === D1 — Where the v2 core lives
 
@@ -1509,6 +1534,31 @@ The naive `check_v2` and `step_v2_fn` from P6 need an executable form for the W2
 |Claim nothing; label the README rows as designed-not-mechanised
 |3 |5
 |Mandatory *now* regardless of which option is chosen later. The full-fiber Linear drop echo is RMR (retention), never erasure.
+|===
+
+=== D13 — Order of Coq and Agda work for the theory obligations (added 2026-11-09)
+
+Follows the owner ruling of 2026-11-09 that the soundness statements are theory, with an Agda source of truth (see "Ratified: proof classification"). It decides how the P-ladder, written for Coq, meets that ruling. It does not change what is proved.
+
+[cols="3,1,1,4",options="header"]
+|===
+|Option |(a) |(b) |Comment
+
+|*Recommended:* Coq first per rung, Agda port of each headline statement before the rung closes, correspondence recorded as the rung's last step
+|4 |5
+|Keeps the executable oracle (D9a/D9 extract from Coq) and the Coq tooling the plan is sized for; every headline still gets its Agda source before it is cited, so nothing stays `ungraded` for long. The Coq proof becomes the Rocq leg once the statements are `RECONCILED`. Departure from the most elegant option: Agda-first would make the source of truth come first, but would put the oracle and every W2 gate behind a second toolchain that the plan has not sized.
+
+|Agda first, Coq as the recheck leg
+|5 |3
+|The policy order exactly. Costs a re-plan: P4–P15 re-sized for Agda, and the oracle needs Agda extraction or a separate Coq development anyway. `--safe --without-K --cubical-compatible` rules out the axioms the Coq development does not use either, so the core theory is portable.
+
+|Both together, rung by rung, with a statement-correspondence check in CI
+|4 |4
+|Highest assurance per rung and the earliest `PWG-2i`; roughly doubles proof effort per rung and needs two proof engineers or agents per rung.
+
+|Unconventional: one shared statement in Dedukti/Lambdapi, proved in Coq and transported to Agda
+|4 |3
+|PROOF-POLICY §2 prefers transport. Coq → Dedukti → Agda is the reverse of the policy's direction and depends on exporters the estate has not pinned; worth an X-experiment before relying on it.
 |===
 
 == Risks and kill criteria

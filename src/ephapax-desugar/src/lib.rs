@@ -54,6 +54,7 @@
 //! Some(x) ⟹ inr(x)
 //! ```
 
+use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 
 use ephapax_surface::{
@@ -124,6 +125,13 @@ pub enum DesugarError {
 
     #[error("member access on a non-module expression is not supported (only `Module.member` qualified access)")]
     FieldAccessOnNonModule,
+
+    /// A `data` declaration (or `type` alias) refers to itself. The core
+    /// has no recursive types: the binary-sum encoding expands every
+    /// named type structurally, so a self-reference would expand forever
+    /// (probe `rec1` used to abort with a stack overflow).
+    #[error("recursive type `{name}` is not supported: the core type language has no recursive types (expansion cycle: {cycle})")]
+    RecursiveType { name: String, cycle: String },
 }
 
 // =========================================================================
@@ -247,6 +255,9 @@ pub struct Desugarer {
     /// module reference at desugar time. Reset per-module by
     /// [`Desugarer::desugar_module`].
     module_qualifiers: HashSet<SmolStr>,
+    /// Named types currently being expanded by `desugar_named_type`,
+    /// innermost last. Re-entering one is a recursive type.
+    expanding: RefCell<Vec<SmolStr>>,
 }
 
 impl Desugarer {
@@ -255,6 +266,7 @@ impl Desugarer {
         Self {
             registry: DataRegistry::new(),
             module_qualifiers: HashSet::new(),
+            expanding: RefCell::new(Vec::new()),
         }
     }
 
@@ -263,6 +275,7 @@ impl Desugarer {
         Self {
             registry,
             module_qualifiers: HashSet::new(),
+            expanding: RefCell::new(Vec::new()),
         }
     }
 
@@ -714,7 +727,7 @@ impl Desugarer {
                     got: args.len(),
                 });
             }
-            return self.desugar_ty(&aliased);
+            return self.with_expansion(name, args, |this| this.desugar_ty(&aliased));
         }
 
         let (params, ctors) = self.registry.get_type_ctors(name.as_str()).ok_or_else(|| {
@@ -732,10 +745,45 @@ impl Desugarer {
         }
 
         // Build substitution map: type param → concrete type
-        let subst: HashMap<&SmolStr, &SurfaceTy> = params.iter().zip(args.iter()).collect();
+        let core_args = args
+            .iter()
+            .map(|arg| self.desugar_ty(arg))
+            .collect::<Result<Vec<_>, _>>()?;
+        let subst: HashMap<&SmolStr, &Ty> = params.iter().zip(core_args.iter()).collect();
 
         // Build right-nested sum from constructor field types
-        self.build_sum_type(&ctors.clone(), &subst)
+        let ctors = ctors.clone();
+        self.with_expansion(name, args, |this| this.build_sum_type(&ctors, &subst))
+    }
+
+    /// Run `f` with the named type application `name(args)` pushed on the
+    /// expansion stack. Fails with [`DesugarError::RecursiveType`] if the
+    /// same declaration is already being expanded, including non-regular
+    /// recursion with changing arguments. Arguments are elaborated before
+    /// entering the declaration, so finite nested applications remain valid.
+    /// Errors propagate after removing this expansion from the stack.
+    fn with_expansion<T>(
+        &self,
+        name: &SmolStr,
+        _args: &[SurfaceTy],
+        f: impl FnOnce(&Self) -> Result<T, DesugarError>,
+    ) -> Result<T, DesugarError> {
+        let key = name.clone();
+        {
+            let stack = self.expanding.borrow();
+            if stack.contains(&key) {
+                let mut cycle: Vec<String> = stack.iter().map(|k| k.to_string()).collect();
+                cycle.push(key.to_string());
+                return Err(DesugarError::RecursiveType {
+                    name: name.to_string(),
+                    cycle: cycle.join(" -> "),
+                });
+            }
+        }
+        self.expanding.borrow_mut().push(key);
+        let result = f(self);
+        self.expanding.borrow_mut().pop();
+        result
     }
 
     /// Build the right-nested binary sum type for a list of constructors.
@@ -748,7 +796,7 @@ impl Desugarer {
     fn build_sum_type(
         &self,
         ctors: &[ConstructorDef],
-        subst: &HashMap<&SmolStr, &SurfaceTy>,
+        subst: &HashMap<&SmolStr, &Ty>,
     ) -> Result<Ty, DesugarError> {
         assert!(
             !ctors.is_empty(),
@@ -776,7 +824,7 @@ impl Desugarer {
     fn build_payload_type(
         &self,
         fields: &[SurfaceTy],
-        subst: &HashMap<&SmolStr, &SurfaceTy>,
+        subst: &HashMap<&SmolStr, &Ty>,
     ) -> Result<Ty, DesugarError> {
         match fields.len() {
             0 => Ok(Ty::Base(BaseTy::Unit)),
@@ -797,12 +845,12 @@ impl Desugarer {
     fn subst_and_desugar_ty(
         &self,
         ty: &SurfaceTy,
-        subst: &HashMap<&SmolStr, &SurfaceTy>,
+        subst: &HashMap<&SmolStr, &Ty>,
     ) -> Result<Ty, DesugarError> {
         match ty {
             SurfaceTy::Var(v) => {
                 if let Some(replacement) = subst.get(v) {
-                    self.desugar_ty(replacement)
+                    Ok((*replacement).clone())
                 } else {
                     Ok(Ty::Var(v.clone()))
                 }
@@ -848,7 +896,7 @@ impl Desugarer {
         let payload = self.build_payload_expr(args, span)?;
 
         // Get the full sum type for the "other side" annotations
-        let empty_subst: HashMap<&SmolStr, &SurfaceTy> = HashMap::new();
+        let empty_subst: HashMap<&SmolStr, &Ty> = HashMap::new();
         let (_, ctor_defs) = self
             .registry
             .get_type_ctors(info.data_name.as_str())
@@ -890,7 +938,7 @@ impl Desugarer {
         payload: Expr,
         index: usize,
         ctors: &[ConstructorDef],
-        subst: &HashMap<&SmolStr, &SurfaceTy>,
+        subst: &HashMap<&SmolStr, &Ty>,
         span: Span,
     ) -> Result<Expr, DesugarError> {
         let total = ctors.len();
@@ -1200,7 +1248,9 @@ impl Desugarer {
     /// Bind pattern variables from a constructor's payload.
     ///
     /// For `Some(x)` with payload `p`: `let x = p in body`
-    /// For `Pair(a, b)` with payload `p`: `let a = p.0 in let b = p.1 in body`
+    /// For `Pair(a, b)` with payload `p`: `match p { (a, b) => body }`.
+    /// Multiple irrefutable fields destructure a right-nested product in one
+    /// match; other field patterns use projections. No patterns returns `body`.
     fn bind_pattern_vars(
         &self,
         payload: &Expr,
@@ -1212,6 +1262,17 @@ impl Desugarer {
         match patterns.len() {
             0 => Ok(body),
             1 => self.bind_single_pattern(payload, &patterns[0], body, span),
+            // The payload is a right-nested product: destructure it with
+            // one core `match` on the equivalent right-nested pair
+            // pattern, so the payload is consumed once (see
+            // `bind_single_pattern`).
+            _ if patterns.iter().all(Self::is_irrefutable_pair_pattern) => {
+                let mut nested = patterns[patterns.len() - 1].clone();
+                for p in patterns[..patterns.len() - 1].iter().rev() {
+                    nested = Pattern::Pair(Box::new(p.clone()), Box::new(nested));
+                }
+                self.bind_single_pattern(payload, &nested, body, span)
+            }
             _ => {
                 // Multiple fields: payload is a right-nested product
                 // Extract with fst/snd
@@ -1249,7 +1310,11 @@ impl Desugarer {
         }
     }
 
-    /// Bind a single pattern variable.
+    /// Wrap `body` with bindings extracted from `value` by `pattern`.
+    ///
+    /// Irrefutable pair patterns use one core match; other pairs and tuples
+    /// are destructured recursively. Wildcards, unit, constructors and literals
+    /// return `body` without adding bindings or checking the pattern.
     fn bind_single_pattern(
         &self,
         value: &Expr,
@@ -1269,6 +1334,23 @@ impl Desugarer {
             )),
             Pattern::Wildcard => Ok(body),
             Pattern::Unit => Ok(body),
+            // A pair pattern built only from pairs, variables, wildcards
+            // and unit lowers to a one-arm core `match`. The core checker
+            // then consumes the scrutinee exactly once, binds each
+            // component, and rejects a wildcard over a linear component
+            // (v2 plan E0). The `fst`/`snd` lowering below reads the
+            // scrutinee twice, which a linear pair does not allow.
+            Pattern::Pair(..) if Self::is_irrefutable_pair_pattern(pattern) => Ok(Expr::new(
+                ExprKind::Match {
+                    scrutinee: Box::new(value.clone()),
+                    arms: vec![ephapax_syntax::MatchArm {
+                        pattern: Self::core_pair_pattern(pattern),
+                        guard: None,
+                        body,
+                    }],
+                },
+                span,
+            )),
             Pattern::Pair(l, r) => {
                 let fst = Expr::new(ExprKind::Fst(Box::new(value.clone())), span);
                 let snd = Expr::new(ExprKind::Snd(Box::new(value.clone())), span);
@@ -1290,6 +1372,34 @@ impl Desugarer {
                 // For ADT matching, this shouldn't arise at the constructor level.
                 Ok(body)
             }
+        }
+    }
+
+    /// Whether `pattern` is built only from pairs, variables, wildcards
+    /// and unit (so it is irrefutable and has a direct core form).
+    fn is_irrefutable_pair_pattern(pattern: &Pattern) -> bool {
+        match pattern {
+            Pattern::Var(_) | Pattern::Wildcard | Pattern::Unit => true,
+            Pattern::Pair(l, r) => {
+                Self::is_irrefutable_pair_pattern(l) && Self::is_irrefutable_pair_pattern(r)
+            }
+            Pattern::Tuple(_) | Pattern::Constructor { .. } | Pattern::Literal(_) => false,
+        }
+    }
+
+    /// Convert a pattern accepted by [`Self::is_irrefutable_pair_pattern`]
+    /// to the core pattern type.
+    fn core_pair_pattern(pattern: &Pattern) -> ephapax_syntax::Pattern {
+        use ephapax_syntax::Pattern as CorePattern;
+        match pattern {
+            Pattern::Var(v) => CorePattern::Var(v.clone()),
+            Pattern::Unit => CorePattern::Unit,
+            Pattern::Pair(l, r) => CorePattern::Pair(
+                Box::new(Self::core_pair_pattern(l)),
+                Box::new(Self::core_pair_pattern(r)),
+            ),
+            // Only reachable for `Wildcard` (the guard excludes the rest).
+            _ => CorePattern::Wildcard,
         }
     }
 
@@ -2016,5 +2126,89 @@ mod tests {
             }
             other => panic!("expected Decl::Extern, got {other:?}"),
         }
+    }
+}
+
+#[cfg(test)]
+mod expansion_regressions {
+    use super::*;
+    fn named(name: &str) -> SurfaceTy {
+        SurfaceTy::Named {
+            name: name.into(),
+            args: vec![],
+        }
+    }
+    #[test]
+    fn nested_finite_application_and_nonregular_recursion() {
+        let mut registry = DataRegistry::new();
+        registry.types.insert(
+            "Id".into(),
+            (
+                vec!["a".into()],
+                vec![ConstructorDef {
+                    name: "IdValue".into(),
+                    fields: vec![SurfaceTy::Var("a".into())],
+                }],
+            ),
+        );
+        let inner = SurfaceTy::Named {
+            name: "Id".into(),
+            args: vec![SurfaceTy::Base(BaseTy::I32)],
+        };
+        let nested = SurfaceTy::Named {
+            name: "Id".into(),
+            args: vec![inner],
+        };
+        assert_eq!(
+            Desugarer::with_registry(registry.clone())
+                .desugar_ty(&nested)
+                .unwrap(),
+            Ty::Base(BaseTy::I32)
+        );
+        registry.types.insert(
+            "Grow".into(),
+            (
+                vec!["a".into()],
+                vec![ConstructorDef {
+                    name: "More".into(),
+                    fields: vec![SurfaceTy::Named {
+                        name: "Grow".into(),
+                        args: vec![SurfaceTy::List(Box::new(SurfaceTy::Var("a".into())))],
+                    }],
+                }],
+            ),
+        );
+        let recursive = SurfaceTy::Named {
+            name: "Grow".into(),
+            args: vec![SurfaceTy::Base(BaseTy::I32)],
+        };
+        assert!(matches!(
+            Desugarer::with_registry(registry).desugar_ty(&recursive),
+            Err(DesugarError::RecursiveType { .. })
+        ));
+    }
+    #[test]
+    fn long_finite_alias_chain_and_cycle() {
+        let mut registry = DataRegistry::new();
+        for i in 0..65 {
+            registry.register_type_alias(
+                format!("A{i}").into(),
+                if i == 64 {
+                    SurfaceTy::Base(BaseTy::I32)
+                } else {
+                    named(&format!("A{}", i + 1))
+                },
+            );
+        }
+        let desugarer = Desugarer::with_registry(registry.clone());
+        assert_eq!(
+            desugarer.desugar_ty(&named("A0")).unwrap(),
+            Ty::Base(BaseTy::I32)
+        );
+        registry.register_type_alias("A64".into(), named("A0"));
+        assert!(matches!(
+            Desugarer::with_registry(registry).desugar_ty(&named("A0")),
+            Err(DesugarError::RecursiveType { .. })
+        ));
     }
 }

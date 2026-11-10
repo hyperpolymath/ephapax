@@ -71,9 +71,10 @@ enum Commands {
         #[arg(required = true)]
         files: Vec<PathBuf>,
 
-        /// Type checking mode (linear or affine)
-        #[arg(short, long, default_value = "linear")]
-        mode: String,
+        /// Rejected if given: the discipline is chosen per binding (`let`
+        /// is affine, `let!` is linear), not by a global mode.
+        #[arg(short, long)]
+        mode: Option<String>,
     },
 
     /// Compile to WebAssembly.
@@ -92,17 +93,20 @@ enum Commands {
         #[arg(short, long)]
         output: Option<PathBuf>,
 
-        /// Optimization level (0-3)
+        /// Optimization level. No optimiser exists, so only 0 (the
+        /// default) is accepted; any other level is rejected.
         #[arg(short = 'O', long, default_value = "0")]
         opt_level: u8,
 
-        /// Enable debug information generation
+        /// Emit debug information: an `ephapax.debug.mode` custom section
+        /// in the module and a `<output>.wasm.map` source map.
         #[arg(long)]
         debug: bool,
 
-        /// Compilation mode (linear or affine)
-        #[arg(short, long, default_value = "linear")]
-        mode: String,
+        /// Rejected if given: the discipline is chosen per binding (`let`
+        /// is affine, `let!` is linear), not by a global mode.
+        #[arg(short, long)]
+        mode: Option<String>,
 
         /// Run the typed-wasm L7+L10 verifier on the emitted module.
         /// Reads the `typedwasm.ownership` custom section and
@@ -192,7 +196,7 @@ fn main() -> ExitCode {
             ffi_libs,
             args: _,
         }) => run_file(&file, &ffi_libs, cli.verbose),
-        Some(Commands::Check { files, mode }) => check_files(&files, &mode, cli.verbose),
+        Some(Commands::Check { files, mode }) => check_files(&files, mode.as_deref(), cli.verbose),
         Some(Commands::Compile {
             file,
             output,
@@ -206,7 +210,7 @@ fn main() -> ExitCode {
             output,
             opt_level,
             debug,
-            &mode,
+            mode.as_deref(),
             verify_ownership,
             stdlib,
             cli.verbose,
@@ -334,9 +338,35 @@ fn run_file(path: &PathBuf, ffi_libs: &[String], verbose: bool) -> Result<(), St
     }
 }
 
-fn check_files(files: &[PathBuf], _mode_str: &str, verbose: bool) -> Result<(), String> {
-    // The dyadic property is per-binding (let vs let!), not a global mode.
-    // The mode_str parameter is accepted but ignored for backward compatibility.
+/// `--mode` used to be accepted and ignored. The discipline is chosen per
+/// binding (`let` affine, `let!` linear), so a global mode cannot take
+/// effect: the flag is rejected instead (v2 plan E1).
+fn reject_mode_flag(mode: Option<&str>) -> Result<(), String> {
+    match mode {
+        None => Ok(()),
+        Some(m) => Err(format!(
+            "--mode {m} is not supported: the discipline is chosen per binding \
+             (`let` is affine, `let!` is linear), so there is no global mode; \
+             remove the flag"
+        )),
+    }
+}
+
+/// `-O` used to be accepted and ignored. No optimiser exists, so any level
+/// above 0 is rejected (v2 plan E1).
+fn reject_opt_level(opt_level: u8) -> Result<(), String> {
+    if opt_level == 0 {
+        Ok(())
+    } else {
+        Err(format!(
+            "-O{opt_level} is not supported: no optimiser is implemented; \
+             only -O0 (the default) is accepted"
+        ))
+    }
+}
+
+fn check_files(files: &[PathBuf], mode: Option<&str>, verbose: bool) -> Result<(), String> {
+    reject_mode_flag(mode)?;
 
     let mut errors = 0;
     let mut checked = 0;
@@ -383,8 +413,18 @@ fn check_files(files: &[PathBuf], _mode_str: &str, verbose: bool) -> Result<(), 
             }
         };
 
-        // Type check
-        match type_check_module(&module) {
+        // Type check, then the same unsupported-construct validation
+        // codegen runs (effects, raw FFI), so `check` never accepts a
+        // file that `compile` must reject (v2 plan E1).
+        let outcome = type_check_module(&module).map_err(|e| {
+            report_type_error(filename, &content, &e);
+        });
+        let outcome = outcome.and_then(|()| {
+            ephapax_wasm::validate_supported(&module).map_err(|e| {
+                eprintln!("{} {}: Codegen error: {}", "✗".red(), path.display(), e);
+            })
+        });
+        match outcome {
             Ok(()) => {
                 if verbose {
                     println!(
@@ -396,8 +436,7 @@ fn check_files(files: &[PathBuf], _mode_str: &str, verbose: bool) -> Result<(), 
                 }
                 checked += 1;
             }
-            Err(e) => {
-                report_type_error(filename, &content, &e);
+            Err(()) => {
                 errors += 1;
             }
         }
@@ -425,14 +464,15 @@ fn compile_file(
     output: Option<PathBuf>,
     opt_level: u8,
     debug: bool,
-    _mode_str: &str,
+    mode: Option<&str>,
     verify_ownership: bool,
     stdlib: Option<PathBuf>,
     verbose: bool,
 ) -> Result<(), String> {
     let filename = path.to_str().unwrap_or("input").to_string();
 
-    // The mode_str parameter is accepted but ignored — dyadic property is per-binding.
+    reject_mode_flag(mode)?;
+    reject_opt_level(opt_level)?;
 
     let base_dir = path
         .parent()
@@ -584,7 +624,8 @@ fn finish_compile(
 ) -> Result<(), String> {
     // Compile to WASM (with or without debug info)
     let wasm_bytes = if debug {
-        ephapax_wasm::compile_module(&module).map_err(|e| format!("Codegen error: {}", e))?
+        ephapax_wasm::compile_module_with_debug(&module, filename)
+            .map_err(|e| format!("Codegen error: {}", e))?
     } else {
         ephapax_wasm::compile_module(&module).map_err(|e| format!("Codegen error: {}", e))?
     };
@@ -597,19 +638,10 @@ fn finish_compile(
         );
     }
 
-    // Optimize if requested
-    let wasm_bytes = if opt_level > 0 {
-        if verbose {
-            println!(
-                "{} Optimization level {} (not yet implemented)",
-                "⚠".yellow(),
-                opt_level
-            );
-        }
-        wasm_bytes
-    } else {
-        wasm_bytes
-    };
+    // No optimiser exists: `compile_file` rejects any `-O` above 0 before
+    // this point (`reject_opt_level`), so the bytes are written as
+    // generated.
+    debug_assert_eq!(opt_level, 0);
 
     // Always-on structural validation floor: never write an invalid
     // module to disk. In-process (wasmparser) twin of the `wasm-tools

@@ -95,6 +95,44 @@ pub enum TypeError {
 
     #[error("Match expression must have at least one arm")]
     EmptyMatch,
+
+    /// A closure body consumes a linear value captured from the
+    /// enclosing scope. Function types are unrestricted, so calling the
+    /// closure twice would consume the capture twice (probe `lamcap`).
+    #[error("Closure consumes captured linear variable `{0}`; a closure may be called more than once, so it may only borrow a captured linear value")]
+    LinearCaptureConsumed(Var),
+
+    /// Dereferencing a borrow of a linear value would yield an owned
+    /// copy of it while the owner keeps it too.
+    #[error("Cannot move a linear value of type {0:?} out of a borrow")]
+    CannotMoveOutOfBorrow(Ty),
+
+    /// A pattern wildcard would discard a linear component.
+    #[error("Pattern wildcard discards a linear value of type {0:?}; bind it and consume it")]
+    LinearPatternDiscard(Ty),
+
+    /// The same name is bound twice by one pattern; the second binding
+    /// would shadow (and silently discard) the first.
+    #[error("Variable `{0}` is bound more than once in the same pattern")]
+    DuplicatePatternBinder(Var),
+
+    /// Two parameters of one function share a name; the second would
+    /// shadow the first, hiding its consumption obligation.
+    #[error("Parameter `{0}` is declared more than once in the same function")]
+    DuplicateParameter(Var),
+
+    /// A projection (`t.i` or `xs[i]`) would consume the container and
+    /// return one component, discarding unselected linear components.
+    #[error(
+        "Projection from {0:?} would discard its other linear components; destructure it instead"
+    )]
+    LinearProjectionDiscard(Ty),
+
+    /// Raw variadic `__ffi("sym", ...)` has no formal-core
+    /// representation and no sound wasm lowering (v2 plan E1); typed
+    /// `extern "abi" { fn ... }` declarations are the only FFI path.
+    #[error("Raw `__ffi(\"{0}\", ...)` is not supported: declare the function in a typed `extern \"abi\" {{ fn ... }}` block and call it by name")]
+    RawFfiNotSupported(SmolStr),
 }
 
 /// A type error with source location.
@@ -141,6 +179,9 @@ struct CtxEntry {
     binding_form: BindingForm,
     /// Which region this variable was bound in (None = top-level / no region).
     region: Option<RegionName>,
+    /// Identity of this binding occurrence, so a later binding of the
+    /// same name (shadowing) is not mistaken for this one.
+    id: u64,
 }
 
 impl CtxEntry {
@@ -152,6 +193,17 @@ impl CtxEntry {
             BindingForm::Param => self.ty.is_linear(),
         }
     }
+
+    /// Whether a second use of this binding is an error.
+    ///
+    /// Routes through [`CtxEntry::demands_consumption`] (a `let!` of any
+    /// type is exactly-once, probes `dup2`/`dup4`), and additionally
+    /// forbids reuse of any linear-typed binding: an affine `let` of a
+    /// linear value is *at most* once, so it may be dropped but never
+    /// duplicated.
+    fn forbids_reuse(&self) -> bool {
+        self.demands_consumption() || self.ty.is_linear()
+    }
 }
 
 /// Typing context: tracks variables and their usage
@@ -161,6 +213,8 @@ pub struct Context {
     vars: HashMap<Var, CtxEntry>,
     /// Active regions
     regions: Vec<RegionName>,
+    /// Counter for [`CtxEntry::id`].
+    next_id: u64,
 }
 
 impl Context {
@@ -171,6 +225,8 @@ impl Context {
     /// Extend context with new binding, tagged with the current region and binding form.
     pub fn extend(&mut self, name: Var, ty: Ty, binding_form: BindingForm) {
         let region = self.regions.last().cloned();
+        let id = self.next_id;
+        self.next_id += 1;
         self.vars.insert(
             name,
             CtxEntry {
@@ -178,8 +234,44 @@ impl Context {
                 used: false,
                 binding_form,
                 region,
+                id,
             },
         );
+    }
+
+    /// Bind `name` for a lexical scope that the caller closes with
+    /// [`Context::end_scope`]. Returns the binding it shadows, if any,
+    /// which must be handed back to `end_scope` so the outer binding —
+    /// and its consumption obligation — is restored when the inner
+    /// scope ends. Without this, a shadowed `let!` would be checked
+    /// against the inner binding's entry and could leak.
+    fn bind_scoped(&mut self, name: Var, ty: Ty, binding_form: BindingForm) -> Option<CtxEntry> {
+        let shadowed = self.vars.get(&name).cloned();
+        self.extend(name, ty, binding_form);
+        shadowed
+    }
+
+    /// Close the scope opened by [`Context::bind_scoped`]: remove the
+    /// inner binding of `name` (returned, so its own consumption can be
+    /// checked) and reinstate the binding it shadowed. The outer binding
+    /// could not be named inside the inner scope, so it is restored
+    /// exactly as it was when it was shadowed.
+    fn end_scope(&mut self, name: &Var, shadowed: Option<CtxEntry>) -> Option<CtxEntry> {
+        let inner = self.vars.remove(name);
+        if let Some(outer) = shadowed {
+            self.vars.insert(name.clone(), outer);
+        }
+        inner
+    }
+
+    /// Bindings that forbid reuse and are still unused, keyed by name,
+    /// with the identity of the binding occurrence.
+    fn unused_restricted(&self) -> Vec<(Var, u64)> {
+        self.vars
+            .iter()
+            .filter(|(_, e)| e.forbids_reuse() && !e.used)
+            .map(|(n, e)| (n.clone(), e.id))
+            .collect()
     }
 
     /// Look up variable type
@@ -187,10 +279,15 @@ impl Context {
         self.vars.get(name).map(|e| &e.ty)
     }
 
-    /// Mark variable as used (for linear variables)
+    /// Record a use of the current binding of `name`.
+    ///
+    /// Returns [`TypeError::UnboundVariable`] if the name is absent, or
+    /// [`TypeError::LinearVariableReused`] on a second use of a linear-typed
+    /// binding or any binding that demands consumption (including `let!`).
+    /// Unrestricted bindings may be used repeatedly.
     pub fn mark_used(&mut self, name: &Var) -> Result<(), TypeError> {
         if let Some(entry) = self.vars.get_mut(name) {
-            if entry.ty.is_linear() && entry.used {
+            if entry.forbids_reuse() && entry.used {
                 return Err(TypeError::LinearVariableReused(name.clone()));
             }
             entry.used = true;
@@ -274,8 +371,12 @@ impl Context {
     }
 
     /// Merge two contexts after branch checking.
-    pub fn merge_branches(&mut self, _other: &Context) {
-        // After branch agreement is verified, the usage should be identical.
+    pub fn merge_branches(&mut self, other: &Context) {
+        for (name, entry) in &mut self.vars {
+            if let Some(other_entry) = other.vars.get(name) {
+                entry.used |= other_entry.used;
+            }
+        }
     }
 }
 
@@ -759,6 +860,7 @@ pub struct TypeChecker {
     ctx: Context,
     /// Next fresh unification variable ID.
     next_unif: u32,
+    wildcard_obligations: Vec<(Span, Ty)>,
     /// Solved unification variables: id -> type.
     unif_solutions: HashMap<u32, Ty>,
     /// Data declarations visible to the current module.
@@ -773,6 +875,7 @@ impl TypeChecker {
         Self {
             ctx: Context::new(),
             next_unif: 0,
+            wildcard_obligations: Vec::new(),
             unif_solutions: HashMap::new(),
             data_registry: DataCtorRegistry::new(),
         }
@@ -815,6 +918,16 @@ impl TypeChecker {
         ty.resolve(&self.unif_solutions)
     }
 
+    fn validate_wildcards(&self) -> Result<(), SpannedTypeError> {
+        for (span, ty) in &self.wildcard_obligations {
+            let resolved = self.resolve(ty);
+            if resolved.is_linear() {
+                return Err(self.at(*span, TypeError::LinearPatternDiscard(resolved)));
+            }
+        }
+        Ok(())
+    }
+
     /// Unify two types. On success, updates unification solutions.
     /// On failure, returns a TypeMismatch error at the given span.
     fn unify(&mut self, s: Span, a: &Ty, b: &Ty) -> Result<(), SpannedTypeError> {
@@ -837,7 +950,7 @@ impl TypeChecker {
                     ));
                 }
                 self.unif_solutions.insert(*id, b);
-                Ok(())
+                self.validate_wildcards()
             }
             (_, Ty::Unif(id)) => {
                 if a.contains_unif(*id) {
@@ -850,7 +963,7 @@ impl TypeChecker {
                     ));
                 }
                 self.unif_solutions.insert(*id, a);
-                Ok(())
+                self.validate_wildcards()
             }
 
             // Structural cases
@@ -1004,7 +1117,7 @@ impl TypeChecker {
             ExprKind::ListIndex { list, index } => self.check_list_index(s, list, index),
             ExprKind::TupleLit(elements) => self.check_tuple_lit(s, elements),
             ExprKind::TupleIndex { tuple, index } => self.check_tuple_index(s, tuple, *index),
-            ExprKind::FFI { args, .. } => self.check_ffi(s, args),
+            ExprKind::FFI { symbol, .. } => self.check_ffi(s, symbol),
             ExprKind::Perform { op, args } => self.check_perform(s, op, args),
             ExprKind::Handle { body, clauses } => self.check_handle(s, body, clauses),
             ExprKind::Match { scrutinee, arms } => self.check_match(s, scrutinee, arms),
@@ -1082,7 +1195,10 @@ impl TypeChecker {
         let value_ty = self.check(value)?;
 
         if let Some(declared) = ty_ann {
-            self.unify(s, declared, &value_ty).map_err(|_| {
+            self.unify(s, declared, &value_ty).map_err(|error| {
+                if matches!(error.error, TypeError::LinearPatternDiscard(_)) {
+                    return error;
+                }
                 self.at(
                     s,
                     TypeError::AnnotationMismatch {
@@ -1099,8 +1215,12 @@ impl TypeChecker {
             value_ty
         };
 
-        self.ctx.extend(name.clone(), resolved_ty, BindingForm::Let);
-        let body_ty = self.check(body)?;
+        let shadowed = self
+            .ctx
+            .bind_scoped(name.clone(), resolved_ty, BindingForm::Let);
+        let body_ty = self.check(body);
+        self.ctx.end_scope(name, shadowed);
+        let body_ty = body_ty?;
 
         // `let` is AFFINE — unconsumed bindings are allowed (implicit drop).
         Ok(body_ty)
@@ -1113,13 +1233,33 @@ impl TypeChecker {
         param_ty: &Ty,
         body: &Expr,
     ) -> Result<Ty, SpannedTypeError> {
-        self.ctx
-            .extend(param.clone(), param_ty.clone(), BindingForm::Param);
+        // Restricted (linear / `let!`) outer bindings not yet consumed.
+        // A function type is unrestricted, so the closure body must not
+        // consume any of them: each call would consume it again.
+        let captured_before = self.ctx.unused_restricted();
+
+        let shadowed = self
+            .ctx
+            .bind_scoped(param.clone(), param_ty.clone(), BindingForm::Param);
         let body_ty = self.check(body)?;
 
-        if let Some(entry) = self.ctx.vars.get(param) {
+        if let Some(entry) = self.ctx.end_scope(param, shadowed) {
             if entry.demands_consumption() && !entry.used {
                 return Err(self.at(s, TypeError::LinearVariableNotConsumed(param.clone())));
+            }
+        }
+
+        // Inner bindings of the body have been scoped out, so every
+        // captured name now resolves to its outer binding again — a
+        // capture consumed and then shadowed inside the body is caught.
+        for (name, id) in &captured_before {
+            if name == param {
+                continue;
+            }
+            if let Some(entry) = self.ctx.vars.get(name) {
+                if entry.id == *id && entry.used {
+                    return Err(self.at(s, TypeError::LinearCaptureConsumed(name.clone())));
+                }
             }
         }
 
@@ -1190,6 +1330,7 @@ impl TypeChecker {
             .map_err(|e| self.at(s, e))?;
 
         self.ctx = ctx_after_then;
+        self.ctx.merge_branches(&ctx_after_else);
 
         Ok(self.resolve(&then_ty))
     }
@@ -1341,12 +1482,16 @@ impl TypeChecker {
             }
         }
 
-        self.ctx
-            .extend(name.clone(), value_ty.clone(), BindingForm::LetBang);
+        let shadowed = self
+            .ctx
+            .bind_scoped(name.clone(), value_ty.clone(), BindingForm::LetBang);
         let body_ty = self.check(body)?;
 
-        // let! bindings MUST be consumed — regardless of type.
-        if let Some(entry) = self.ctx.vars.get(name) {
+        // let! bindings MUST be consumed — regardless of type. The entry
+        // checked is this binding's own (closing the scope also restores
+        // any binding it shadowed, whose obligation is checked at the end
+        // of that binding's own scope).
+        if let Some(entry) = self.ctx.end_scope(name, shadowed) {
             if !entry.used {
                 return Err(self.at(s, TypeError::LinearVariableNotConsumed(name.clone())));
             }
@@ -1371,9 +1516,10 @@ impl TypeChecker {
         match inner_ty {
             Ty::Prod { left, right } => {
                 if right.is_linear() {
-                    return Err(
-                        self.at(s, TypeError::LinearVariableNotConsumed("_pair_snd".into()))
-                    );
+                    return Err(self.at(
+                        s,
+                        TypeError::LinearProjectionDiscard(Ty::Prod { left, right }),
+                    ));
                 }
                 Ok(*left)
             }
@@ -1396,9 +1542,10 @@ impl TypeChecker {
         match inner_ty {
             Ty::Prod { left, right } => {
                 if left.is_linear() {
-                    return Err(
-                        self.at(s, TypeError::LinearVariableNotConsumed("_pair_fst".into()))
-                    );
+                    return Err(self.at(
+                        s,
+                        TypeError::LinearProjectionDiscard(Ty::Prod { left, right }),
+                    ));
                 }
                 Ok(*right)
             }
@@ -1448,12 +1595,16 @@ impl TypeChecker {
             Ty::Sum { left, right } => {
                 let ctx_after_scrutinee = self.ctx.snapshot();
 
-                // Check left branch
-                self.ctx
-                    .extend(left_var.clone(), *left.clone(), BindingForm::Param);
+                // Check left branch. The case binder is scoped to its arm:
+                // closing it restores any outer binding of the same name
+                // (rather than deleting it), so a shadowed linear outer
+                // binding keeps its consumption obligation.
+                let shadowed =
+                    self.ctx
+                        .bind_scoped(left_var.clone(), *left.clone(), BindingForm::Param);
                 let left_result_ty = self.check(left_body)?;
 
-                if let Some(entry) = self.ctx.vars.get(left_var) {
+                if let Some(entry) = self.ctx.end_scope(left_var, shadowed) {
                     if entry.demands_consumption() && !entry.used {
                         return Err(
                             self.at(s, TypeError::LinearVariableNotConsumed(left_var.clone()))
@@ -1461,17 +1612,17 @@ impl TypeChecker {
                     }
                 }
 
-                let mut ctx_after_left = self.ctx.snapshot();
-                ctx_after_left.vars.remove(left_var);
+                let ctx_after_left = self.ctx.snapshot();
 
                 // Check right branch
                 self.ctx = ctx_after_scrutinee;
 
-                self.ctx
-                    .extend(right_var.clone(), *right.clone(), BindingForm::Param);
+                let shadowed =
+                    self.ctx
+                        .bind_scoped(right_var.clone(), *right.clone(), BindingForm::Param);
                 let right_result_ty = self.check(right_body)?;
 
-                if let Some(entry) = self.ctx.vars.get(right_var) {
+                if let Some(entry) = self.ctx.end_scope(right_var, shadowed) {
                     if entry.demands_consumption() && !entry.used {
                         return Err(
                             self.at(s, TypeError::LinearVariableNotConsumed(right_var.clone()))
@@ -1479,8 +1630,7 @@ impl TypeChecker {
                     }
                 }
 
-                let mut ctx_after_right = self.ctx.snapshot();
-                ctx_after_right.vars.remove(right_var);
+                let ctx_after_right = self.ctx.snapshot();
 
                 self.unify(s, &left_result_ty, &right_result_ty)?;
 
@@ -1489,6 +1639,7 @@ impl TypeChecker {
                     .map_err(|e| self.at(s, e))?;
 
                 self.ctx = ctx_after_left;
+                self.ctx.merge_branches(&ctx_after_right);
 
                 Ok(self.resolve(&left_result_ty))
             }
@@ -1534,6 +1685,12 @@ impl TypeChecker {
             self.ctx = ctx_after_scrutinee.clone();
 
             let bound = self.check_pattern(s, &arm.pattern, &scrutinee_ty)?;
+            let mut seen: HashSet<&Var> = HashSet::new();
+            for name in &bound {
+                if !seen.insert(name) {
+                    return Err(self.at(s, TypeError::DuplicatePatternBinder(name.clone())));
+                }
+            }
 
             if let Some(guard) = &arm.guard {
                 let guard_ty = self.check(guard)?;
@@ -1550,9 +1707,13 @@ impl TypeChecker {
                 }
             }
 
+            // Scope the pattern binders out of the arm. A binder that
+            // shadowed an outer binding gives the outer one back (as it
+            // was after the scrutinee: it could not be named in the arm),
+            // so its consumption obligation is not lost.
             let mut ctx_after_arm = self.ctx.snapshot();
             for name in &bound {
-                ctx_after_arm.vars.remove(name);
+                ctx_after_arm.end_scope(name, ctx_after_scrutinee.vars.get(name).cloned());
             }
 
             if let Some(prev_ty) = &arm_result_ty {
@@ -1560,11 +1721,12 @@ impl TypeChecker {
             }
             arm_result_ty = Some(body_ty);
 
-            match &first_post_ctx {
+            match &mut first_post_ctx {
                 Some(first) => {
                     first
                         .check_branch_agreement(&ctx_after_arm)
                         .map_err(|e| self.at(s, e))?;
+                    first.merge_branches(&ctx_after_arm);
                 }
                 None => first_post_ctx = Some(ctx_after_arm),
             }
@@ -1589,7 +1751,15 @@ impl TypeChecker {
     ) -> Result<Vec<Var>, SpannedTypeError> {
         let expected = self.resolve(expected_ty);
         match pattern {
-            Pattern::Wildcard => Ok(Vec::new()),
+            // A wildcard binds nothing, so it would silently discard a
+            // linear component. Inferred types are rechecked after unification.
+            Pattern::Wildcard => {
+                if expected.is_linear() {
+                    return Err(self.at(s, TypeError::LinearPatternDiscard(expected)));
+                }
+                self.wildcard_obligations.push((s, expected));
+                Ok(Vec::new())
+            }
             Pattern::Var(name) => {
                 self.ctx.extend(name.clone(), expected, BindingForm::Param);
                 Ok(vec![name.clone()])
@@ -1736,7 +1906,24 @@ impl TypeChecker {
         let inner_ty = self.check(inner)?;
 
         match inner_ty {
-            Ty::Borrow { inner: boxed, .. } => Ok(*boxed),
+            // A borrow does not own its referent: dereferencing it may
+            // only copy an unrestricted value out. Borrows are not
+            // loan-tracked, so yielding an owned linear value here would
+            // let both the borrow and the owner consume it.
+            Ty::Borrow { inner: boxed, .. } => {
+                if boxed.is_linear() {
+                    return Err(self.at(s, TypeError::CannotMoveOutOfBorrow(*boxed)));
+                }
+                Ok(*boxed)
+            }
+            // An unrestricted reference may be dereferenced any number of
+            // times, so the same rule applies to it. A linear reference is
+            // itself consumed by the dereference, so it may yield its
+            // linear contents.
+            Ty::Ref {
+                linearity: ephapax_syntax::Linearity::Unrestricted,
+                inner,
+            } if inner.is_linear() => Err(self.at(s, TypeError::CannotMoveOutOfBorrow(*inner))),
             Ty::Ref { inner, .. } => Ok(*inner),
             _ => Err(self.at(
                 s,
@@ -1888,7 +2075,16 @@ impl TypeChecker {
         }
 
         match list_ty {
-            Ty::List(elem_ty) => Ok(*elem_ty),
+            // Indexing consumes the list and returns one element; every
+            // other element would be lost. A list of linear elements must
+            // be destructured instead (as `check_fst`/`check_snd` do for
+            // pairs).
+            Ty::List(elem_ty) => {
+                if elem_ty.is_linear() {
+                    return Err(self.at(s, TypeError::LinearProjectionDiscard(Ty::List(elem_ty))));
+                }
+                Ok(*elem_ty)
+            }
             _ => Err(self.at(
                 s,
                 TypeError::TypeMismatch {
@@ -1932,6 +2128,25 @@ impl TypeChecker {
     ) -> Result<Ty, SpannedTypeError> {
         let tuple_ty = self.check(tuple)?;
 
+        // Projection consumes the container and returns one component;
+        // reject it when an unselected component is linear (it would be
+        // lost), as `check_fst` / `check_snd` already do for pairs.
+        let unselected_linear = match &tuple_ty {
+            Ty::Prod { left, right } => match index {
+                0 => right.is_linear(),
+                1 => left.is_linear(),
+                _ => false,
+            },
+            Ty::Tuple(elems) if index < elems.len() => elems
+                .iter()
+                .enumerate()
+                .any(|(i, t)| i != index && t.is_linear()),
+            _ => false,
+        };
+        if unselected_linear {
+            return Err(self.at(s, TypeError::LinearProjectionDiscard(tuple_ty)));
+        }
+
         match &tuple_ty {
             Ty::Prod { left, right } => {
                 if index == 0 {
@@ -1971,23 +2186,16 @@ impl TypeChecker {
         }
     }
 
-    /// Type-check an FFI call.
+    /// Reject a raw variadic FFI call.
     ///
-    /// String literal arguments are allowed WITHOUT region allocation.
-    /// Linear variables passed to FFI are consumed.
-    /// Return type is I64 (opaque C handle).
-    fn check_ffi(&mut self, _s: Span, args: &[Expr]) -> Result<Ty, SpannedTypeError> {
-        for arg in args {
-            match &arg.kind {
-                ExprKind::Lit(Literal::String(_)) => {
-                    // OK — string literal is passed as C string pointer
-                }
-                _ => {
-                    self.check(arg)?;
-                }
-            }
-        }
-        Ok(Ty::Base(BaseTy::I64))
+    /// `__ffi("sym", args...)` has no declared signature: every argument
+    /// and the result were assumed to be `I64`, it has no formal-core
+    /// representation, and codegen indexed its import outside the import
+    /// section (probe g5 produced an invalid module). Typed
+    /// `extern "abi" { fn ... }` declarations are the only FFI path
+    /// (v2 plan rung E1).
+    fn check_ffi(&mut self, s: Span, symbol: &str) -> Result<Ty, SpannedTypeError> {
+        Err(self.at(s, TypeError::RawFfiNotSupported(SmolStr::new(symbol))))
     }
 
     /// Type check a perform expression: `perform op(args...)`.
@@ -2039,18 +2247,27 @@ impl TypeChecker {
             if clause.op.is_empty() {
                 // Return clause: return(x) => body
                 // x has the body's type
-                if let Some(param) = clause.params.first() {
-                    self.ctx
-                        .extend(param.clone(), body_ty.clone(), BindingForm::Let);
-                }
+                let scoped = clause.params.first().map(|param| {
+                    let shadowed =
+                        self.ctx
+                            .bind_scoped(param.clone(), body_ty.clone(), BindingForm::Let);
+                    (param, shadowed)
+                });
                 let clause_ty = self.check(&clause.body)?;
+                if let Some((param, shadowed)) = scoped {
+                    self.ctx.end_scope(param, shadowed);
+                }
                 result_ty = Some(clause_ty);
             } else {
                 // Operation clause: op(params..., resume?) => body
                 // Parameters get fresh unification variables
+                let mut scoped = Vec::with_capacity(clause.params.len());
                 for param in &clause.params {
                     let param_ty = self.fresh_unif();
-                    self.ctx.extend(param.clone(), param_ty, BindingForm::Let);
+                    let shadowed = self
+                        .ctx
+                        .bind_scoped(param.clone(), param_ty, BindingForm::Let);
+                    scoped.push((param, shadowed));
                 }
 
                 // If resume mode is specified, add a resume callback to scope
@@ -2071,6 +2288,11 @@ impl TypeChecker {
                 }
 
                 let clause_ty = self.check(&clause.body)?;
+                // Close the parameter scopes innermost-first, so a repeated
+                // parameter name restores the outer binding last.
+                for (param, shadowed) in scoped.into_iter().rev() {
+                    self.ctx.end_scope(param, shadowed);
+                }
 
                 // All clauses must produce the same type
                 if let Some(ref rt) = result_ty {
@@ -2401,6 +2623,19 @@ fn type_check_module_inner(tc: &mut TypeChecker, module: &Module) -> Result<(), 
                 let saved_ctx = tc.ctx.clone();
                 let saved_unif = tc.next_unif;
 
+                // A repeated parameter name would shadow the earlier
+                // parameter for the whole body, so a linear earlier
+                // parameter could never be consumed or checked.
+                let mut seen_params: HashSet<&Var> = HashSet::new();
+                for (param_name, _) in params {
+                    if !seen_params.insert(param_name) {
+                        return Err(SpannedTypeError {
+                            error: TypeError::DuplicateParameter(param_name.clone()),
+                            span: body.span,
+                        });
+                    }
+                }
+
                 for (param_name, param_ty) in params {
                     tc.ctx
                         .extend(param_name.clone(), param_ty.clone(), BindingForm::Param);
@@ -2424,6 +2659,7 @@ fn type_check_module_inner(tc: &mut TypeChecker, module: &Module) -> Result<(), 
                 tc.ctx = saved_ctx;
                 tc.next_unif = saved_unif;
                 tc.unif_solutions.clear();
+                tc.wildcard_obligations.clear();
             }
             Decl::Type { .. } => {}
             Decl::Const { .. } => {} // Constants are handled in module registration
@@ -2701,7 +2937,7 @@ mod tests {
         }))));
         assert!(matches!(
             err_kind(&tc.check(&expr)),
-            Some(TypeError::LinearVariableNotConsumed(_))
+            Some(TypeError::LinearProjectionDiscard(_))
         ));
     }
 
@@ -4600,5 +4836,98 @@ mod tests {
             }
             other => panic!("expected NonExhaustiveMatch, got {other:?}"),
         }
+    }
+}
+
+#[cfg(test)]
+mod review_regressions {
+    use super::*;
+    fn expr(kind: ExprKind) -> Expr {
+        Expr::new(kind, Span::dummy())
+    }
+    #[test]
+    fn failed_let_restores_outer_binding() {
+        let mut tc = TypeChecker::new();
+        tc.ctx
+            .extend("x".into(), Ty::Base(BaseTy::Bool), BindingForm::Let);
+        assert!(tc
+            .check_let(
+                Span::dummy(),
+                &"x".into(),
+                None,
+                &expr(ExprKind::Lit(Literal::I32(1))),
+                &expr(ExprKind::Var("missing".into()))
+            )
+            .is_err());
+        assert_eq!(
+            tc.check(&expr(ExprKind::Var("x".into()))).unwrap(),
+            Ty::Base(BaseTy::Bool)
+        );
+    }
+    #[test]
+    fn wildcard_obligation_follows_unification() {
+        let mut tc = TypeChecker::new();
+        let ty = tc.fresh_unif();
+        tc.check_pattern(Span::dummy(), &Pattern::Wildcard, &ty)
+            .unwrap();
+        assert!(matches!(
+            tc.unify(Span::dummy(), &ty, &Ty::String("r".into()))
+                .unwrap_err()
+                .error,
+            TypeError::LinearPatternDiscard(_)
+        ));
+    }
+    #[test]
+    fn match_join_reaches_closure_capture_check() {
+        let mut tc = TypeChecker::new();
+        tc.ctx.extend(
+            "x".into(),
+            Ty::Prod {
+                left: Box::new(Ty::String("r".into())),
+                right: Box::new(Ty::Base(BaseTy::Unit)),
+            },
+            BindingForm::Let,
+        );
+        let body = expr(ExprKind::Match {
+            scrutinee: Box::new(expr(ExprKind::Lit(Literal::I32(0)))),
+            arms: vec![
+                MatchArm {
+                    pattern: Pattern::Literal(Literal::I32(0)),
+                    guard: None,
+                    body: expr(ExprKind::Lit(Literal::Unit)),
+                },
+                MatchArm {
+                    pattern: Pattern::Literal(Literal::I32(1)),
+                    guard: None,
+                    body: expr(ExprKind::Drop(Box::new(expr(ExprKind::Var("x".into()))))),
+                },
+                MatchArm {
+                    pattern: Pattern::Wildcard,
+                    guard: None,
+                    body: expr(ExprKind::Lit(Literal::Unit)),
+                },
+            ],
+        });
+        let result = tc.check_lambda(Span::dummy(), &"arg".into(), &Ty::Base(BaseTy::Unit), &body);
+        assert!(matches!(
+            result.unwrap_err().error,
+            TypeError::LinearCaptureConsumed(_)
+        ));
+    }
+    #[test]
+    fn affine_branch_consumption_is_joined() {
+        let mut tc = TypeChecker::new();
+        tc.ctx
+            .extend("x".into(), Ty::String("r".into()), BindingForm::Let);
+        let branch = expr(ExprKind::If {
+            cond: Box::new(expr(ExprKind::Lit(Literal::Bool(true)))),
+            then_branch: Box::new(expr(ExprKind::Lit(Literal::Unit))),
+            else_branch: Box::new(expr(ExprKind::Drop(Box::new(expr(ExprKind::Var(
+                "x".into(),
+            )))))),
+        });
+        tc.check(&branch).unwrap();
+        assert!(tc.ctx.vars["x"].used);
+        assert!(tc.check(&expr(ExprKind::Var("x".into()))).is_err());
     }
 }

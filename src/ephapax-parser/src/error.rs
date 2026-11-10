@@ -29,6 +29,12 @@ pub enum ParseError {
         found: String,
         span: Span,
     },
+
+    /// A declaration annotation that names a property the compiler does
+    /// not check (`@total`, `@pure`, `@comptime`). Accepting it would
+    /// claim a guarantee that does not hold (v2 plan rung E1).
+    #[error("Annotation `@{name}` is not enforced: the compiler does not check it, so it is rejected rather than silently ignored")]
+    AnnotationNotEnforced { name: String, span: Span },
 }
 
 impl ParseError {
@@ -38,6 +44,7 @@ impl ParseError {
             ParseError::Syntax { span, .. } => *span,
             ParseError::UnexpectedEof { span } => *span,
             ParseError::Expected { span, .. } => *span,
+            ParseError::AnnotationNotEnforced { span, .. } => *span,
         }
     }
 
@@ -46,6 +53,24 @@ impl ParseError {
     pub fn unexpected_end(_context: &str) -> Self {
         ParseError::UnexpectedEof {
             span: Span::dummy(),
+        }
+    }
+
+    /// Annotations that name a checked property the compiler does not
+    /// enforce. Any of these on a declaration is a parse error.
+    pub const UNENFORCED_ANNOTATIONS: &'static [&'static str] = &["total", "pure", "comptime"];
+
+    /// Reject `total`, `pure` or `comptime` with
+    /// [`ParseError::AnnotationNotEnforced`] at `span`. Other names are accepted;
+    /// acceptance does not mean their properties are enforced.
+    pub fn check_annotation(name: &str, span: Span) -> Result<(), ParseError> {
+        if Self::UNENFORCED_ANNOTATIONS.contains(&name) {
+            Err(ParseError::AnnotationNotEnforced {
+                name: name.to_string(),
+                span,
+            })
+        } else {
+            Ok(())
         }
     }
 
@@ -154,6 +179,17 @@ impl Report {
                         .with_color(Color::Red),
                 )
                 .finish(),
+
+            ParseError::AnnotationNotEnforced { name, .. } => {
+                AriadneReport::build(ReportKind::Error, self.source_name.clone(), range.start)
+                    .with_message(format!("Annotation `@{}` is not enforced", name))
+                    .with_label(
+                        Label::new(location)
+                            .with_message("remove it: the compiler does not check this property")
+                            .with_color(Color::Red),
+                    )
+                    .finish()
+            }
         }
     }
 

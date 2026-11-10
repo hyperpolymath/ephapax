@@ -21,9 +21,9 @@ compliance, 16 tests)
 performance, correctness, 13 tests)
 * Benchmarks: `+src/ephapax-parser/benches/parse_bench.rs+`,
 `+src/ephapax-vram-cache/benches/cache_bench.rs+`
-* Total: *504 tests* (`+cargo test --workspace --all-targets+`);
+* Total: *554 tests* (`+cargo test --workspace --all-targets+`);
 pass/fail enforced by `+rust-ci.yml+`
-* Documented all-target tests: 504
+* Documented all-target tests: 554
 
 === CRG Testing Taxonomy — Status
 

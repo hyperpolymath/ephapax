@@ -1,0 +1,5 @@
+// SPDX-License-Identifier: MPL-2.0
+// Helper module for probe qa/app2 (X1, recreated 2026-11-09).
+module lib2
+pub data Box = MkBox(I32)
+pub fn unbox(b: Box): I32 = match b of | MkBox(v) => v end

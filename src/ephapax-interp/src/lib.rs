@@ -528,41 +528,9 @@ impl Interpreter {
                     )),
                 }
             }
-            ExprKind::FFI { symbol, args } => {
-                // Evaluate all arguments to i64 values for C ABI.
-                // CStrings are kept alive in this vec until the call completes.
-                let mut cstrings = Vec::new();
-                let mut c_args: Vec<i64> = Vec::new();
-                for arg in args {
-                    // String literals in FFI context: create Value::String
-                    // directly (bypass region requirement)
-                    let val = match &arg.kind {
-                        ExprKind::Lit(Literal::String(s)) => Value::String {
-                            data: s.clone(),
-                            region: "ffi".into(),
-                        },
-                        _ => self.eval(arg)?,
-                    };
-                    c_args.push(self.value_to_i64_with_cstrings(&val, &mut cstrings));
-                }
-
-                // Try to find the symbol in loaded FFI libraries
-                if let Some(func) = self.find_ffi_symbol(symbol) {
-                    // Pad args to 6 (max C ABI args we support)
-                    let a = |i: usize| *c_args.get(i).unwrap_or(&0);
-                    // SAFETY: `func` was resolved via find_ffi_symbol from a
-                    // loaded library to the 6-arg i64 C-ABI signature it is
-                    // called with here; args are padded to 6 so all params are
-                    // supplied. Soundness ultimately rests on the caller having
-                    // loaded a trustworthy library (see load_ffi_library).
-                    let result = unsafe { func(a(0), a(1), a(2), a(3), a(4), a(5)) };
-                    Ok(Value::I64(result))
-                } else {
-                    // No library loaded or symbol not found — stub mode
-                    eprintln!("[ffi:stub] {}({:?})", symbol, c_args);
-                    Ok(Value::I64(0))
-                }
-            }
+            ExprKind::FFI { .. } => Err(RuntimeError::Unimplemented(
+                "raw __ffi is not supported; use typed extern declarations".into(),
+            )),
 
             ExprKind::Perform { .. } => Err(RuntimeError::Unimplemented(
                 "effect perform not yet implemented in interpreter".into(),
@@ -1887,5 +1855,25 @@ mod tests {
         });
         let result = interp.eval(&expr).expect("fall-through should evaluate");
         assert!(matches!(result, Value::I32(999)), "got {:?}", result);
+    }
+}
+
+#[cfg(test)]
+mod ffi_regression {
+    use super::*;
+    use ephapax_syntax::Span;
+    #[test]
+    fn raw_ffi_is_rejected_before_arguments_are_evaluated() {
+        let call = Expr::new(
+            ExprKind::FFI {
+                symbol: "unchecked".into(),
+                args: vec![Expr::new(ExprKind::Var("missing".into()), Span::dummy())],
+            },
+            Span::dummy(),
+        );
+        assert!(matches!(
+            Interpreter::new().eval(&call),
+            Err(RuntimeError::Unimplemented(_))
+        ));
     }
 }

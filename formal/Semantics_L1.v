@@ -2099,7 +2099,8 @@ Definition val_region_no_exit (v e : expr) : Prop :=
     [region_liveness_no_exit_l1_gen] above (each [e1] is a sub-term of
     [e], so its no-exit follows from [e]'s by [destruct]), DELETE this
     false lemma + its wrapper, and thread the no-exit hypothesis up to
-    [preservation_l1] (the capstone, already Admitted, where
+    [preservation_l1] (the capstone, then Admitted, now the refuted [Prop]
+    [preservation_l1_stmt], where
     region-liveness-through-[S_Region_Exit] is the actual theorem). This
     is a signature change threaded through a ~30-case induction +
     preservation; staged as a follow-on, not a drive-by.
@@ -3187,8 +3188,9 @@ Qed.
     HISTORICAL proof decomposition (pre-counterexample; case counts and
     proposed closure route below are not current proof debt). The
     unrestricted theorem is now refuted as stated by
-    [Counterexample_PreservationL1.v]. Its [Admitted] is a transparent
-    marker for a false statement, not a proof expected to be completed.
+    [Counterexample_PreservationL1.v]. It is now the [Prop]
+    [preservation_l1_stmt] (D0, 2026-11-05), not a proof expected to be
+    completed.
     The old case-by-case diagnosis follows only as design archaeology.
 
     At the time, the proof sketch described 30 of 33 case subgoals as
@@ -3203,8 +3205,9 @@ Qed.
         STATES and partially proves that lemma; the EASY cases of
         the lemma are Qed (atomic + S_Region_Exit / Exit_Echo +
         same-type congruences). The HARD cases of the lemma (which
-        match the HARD cases of preservation_l1) remain admitted
-        and ride the same §4.8 lambda-rigidity / variable-typing
+        match the HARD cases of preservation_l1) were left admitted
+        at the time; the whole statement is now the refuted [Prop]
+        [step_pop_disjoint_from_type_l1_stmt] (D0, 2026-11-05). They rode the same §4.8 lambda-rigidity / variable-typing
         gap — see [step_pop_disjoint_from_type_l1]'s header.
 
       - S_App_Step2 / S_Pair_Step2: arbitrary value types — exposes
@@ -3274,8 +3277,8 @@ Qed.
 
     **Verdict (historical §6, superseded).** This analysis isolated a
     count-coherence obligation but did not establish it. The unrestricted
-    lemma above is now refuted by [Counterexample_StepPop.v]; its outer
-    [Admitted] is not routine proof debt. The choreography documents a
+    lemma above is now refuted by [Counterexample_StepPop.v]; its former
+    outer [Admitted] was retired to a [Prop] by D0 (2026-11-05). The choreography documents a
     redesign direction, not a proof route for the current statement. *)
 Definition step_pop_disjoint_from_type_l1_stmt : Prop :=
   forall mu R e mu' R' e' m G T R_final G',
@@ -3454,9 +3457,11 @@ Qed.
      ([preservation_l2_app_eff_beta_linear] / [_l1]) are therefore now
      axiom-free rather than depending on a false axiom.
 
-   - [preservation_l1]  Admitted → surfaces itself plus
-     any structural debt its conditional Qed-portion already
-     pulls in.
+   - [preservation_l1_stmt]  a [Prop], not a proof obligation: the
+     unrestricted statement is refuted by
+     [Counterexample_PreservationL1.preservation_l1_FALSE] and was
+     retired from [Admitted] by D0 (2026-11-05). It contributes no
+     assumption to [Print Assumptions].
 
    - [preservation_l3] / [preservation_l3_region_active_echo] /
      [preservation_l3_drop_echo]  are now UNCONDITIONALLY
@@ -3484,12 +3489,12 @@ Print Assumptions preservation_l3.
     structured. It is superseded as a closure plan: the unrestricted
     theorem is refuted by [Counterexample_StepPop.v], and a later
     value-anchored witness in [Counterexample_PreservationL1.v] also
-    defeats the proposed restriction. Its [Admitted] is a transparency
-    marker for a false statement, not an unfinished routine proof.
+    defeats the proposed restriction. It is now the [Prop]
+    [step_pop_disjoint_from_type_l1_stmt] (D0, 2026-11-05), not an
+    unfinished routine proof.
 
     The Qed cases in the body remain local proof facts; they do not
-    salvage the universal theorem. [Print Assumptions] reports the
-    admitted theorem as an axiom. Current replacement status is in
+    salvage the universal theorem. Current replacement status is in
     [PROOF-NEEDS.adoc]. *)
 
 

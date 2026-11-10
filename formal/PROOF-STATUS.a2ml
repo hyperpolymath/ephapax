@@ -21,7 +21,7 @@ counterexample = "formal/Counterexample.v"
 [current-proof-boundary]
 status-date = "2026-11-01"
 source-of-truth = "PROOF-NEEDS.adoc"
-legacy-preservation = "refuted-as-stated; durable Admitted retained; five-Qed regression pinned"
+legacy-preservation = "refuted-as-stated"
 step-pop-disjoint-from-type-l1 = "refuted-as-stated; Counterexample_StepPop.v"
 preservation-l1 = "refuted-as-stated in Linear instance; Counterexample_PreservationL1.v"
 preservation-l2 = "no unconditional theorem declared; see Counterexample_L2.v and Counterexample_L2_nested.v"
@@ -68,17 +68,14 @@ key-lemmas = [
 path = "formal/Semantics.v"
 purpose = "operational step + legacy preservation"
 status = "frozen-refuted"
-admit-count = 1
-note = "The legacy preservation statement is false as stated; its durable Admitted is pinned by the five-Qed formal/Counterexample.v regression. Do not treat as ordinary debt."
+note = "The legacy preservation statement is false as stated. Do not treat as ordinary debt."
 
 [[files]]
 path = "formal/Semantics_L1.v"
 purpose = "L1 helper lemmas, false unrestricted theorem statements, and scoped regressions"
 status = "active-with-refuted-preservation-statements"
-admit-count = 2
 axiom-count = 0
-admitted-lemma-count = 2
-note = "Current two outer Admitted lemmas are refuted as stated by Counterexample_StepPop.v and Counterexample_PreservationL1.v; replacements require redesign, not proof completion."
+note = "Replacements require redesign, not proof completion."
 landed-in = ["PR-157", "PR-158", "PR-159", "PR-160", "PR-161", "PR-162", "PR-163"]
 
 # ============================================================================
@@ -143,10 +140,9 @@ purpose = "corollary: In r R' implies In r R"
 file = "Semantics_L1.v"
 landed-in = "PR-161"
 swarm-stream = "L1.D"
-status = "Admitted; refuted-as-stated"
+status = "refuted-as-stated"
 cases-total = 33
 cases-qed = 29
-cases-admit = 4
 note = "The theorem statement is refuted by Counterexample_PreservationL1.v (Linear instance). Case counts are historical; do not treat residual admits as unfinished routine proof debt."
 
 # ============================================================================

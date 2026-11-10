@@ -140,6 +140,18 @@ pub(crate) fn parse_import(pair: pest::iterators::Pair<Rule>) -> Result<Import, 
 fn parse_declaration(pair: pest::iterators::Pair<Rule>) -> Result<Decl, ParseError> {
     // Skip leading `@identifier` annotations — they're parser-only metadata
     // today; see the `annotation` rule in ephapax.pest.
+    // `@total`, `@pure` and `@comptime` name properties the compiler
+    // does not check; reject them instead of dropping them (v2 plan E1).
+    for ann in pair.clone().into_inner() {
+        if ann.as_rule() == Rule::annotation {
+            let span = span_from_pair(&ann);
+            let identifier = ann
+                .into_inner()
+                .find(|p| p.as_rule() == Rule::identifier)
+                .ok_or_else(|| ParseError::missing("annotation identifier"))?;
+            ParseError::check_annotation(identifier.as_str(), span)?;
+        }
+    }
     let inner = pair
         .into_inner()
         .find(|p| p.as_rule() != Rule::annotation)
@@ -2620,5 +2632,29 @@ mod tests {
             }
             other => panic!("Expected Handle, got {other:?}"),
         }
+    }
+}
+
+#[cfg(test)]
+mod annotation_regressions {
+    use super::*;
+    #[test]
+    fn comments_do_not_hide_annotation_names() {
+        for name in ["total", "pure", "comptime"] {
+            for gap in [" ", "/* comment */", "// comment\n"] {
+                let source = format!("@{gap}{name} fn main(): I32 = 0");
+                for result in [
+                    parse_module(&source, "test").map(|_| ()),
+                    surface::parse_surface_module(&source, "test").map(|_| ()),
+                ] {
+                    assert!(
+                        result.unwrap_err().iter().any(|error| matches!(error,
+                        ParseError::AnnotationNotEnforced { name: found, .. } if found == name)),
+                        "{source}"
+                    );
+                }
+            }
+        }
+        assert!(parse_module("@custom fn main(): I32 = 0", "test").is_ok());
     }
 }

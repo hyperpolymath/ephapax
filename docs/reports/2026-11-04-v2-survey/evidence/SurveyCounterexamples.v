@@ -5,9 +5,11 @@
     Re-checkable witnesses for the findings in
     docs/reports/2026-11-04-v2-survey/EPHAPAX-V2-ARCHITECTURE-AND-PLAN.adoc.
     Apart from F0, every lemma here is against the CURRENT v2 judgment
-    ([has_type_l1], [step]). F0 is the single exception: it *uses* the
-    legacy [Semantics.preservation] (Admitted by owner directive) together
-    with [Counterexample.v] to witness the legacy inconsistency. Nothing
+    ([has_type_l1], [step]). F0 is the single exception: it is about the
+    legacy preservation statement. Since the D0/D0b retirement
+    (ephapax#422, 2026-11-05) the refuted statements are [Prop]
+    definitions, so F0 and F1 take them as hypotheses: the derivations
+    that used to prove [False] outright now only refute the hypothesis. Nothing
     here closes, edits or extends the legacy theorem or Semantics.v.
 
     Check (from repo root, after building formal/):
@@ -21,27 +23,32 @@ From Ephapax Require Import Syntax Typing TypingL1 Semantics Semantics_L1
 Require Import Coq.Lists.List Coq.Strings.String. Import ListNotations.
 Open Scope string_scope.
 
-(** ** F0. The legacy [Semantics.preservation] is [Admitted] (kept by
-    owner directive) and refuted by [Counterexample.v], so loading both
-    also derives [False]. This does not ask for the legacy theorem to
-    be closed or edited. It records that it must never appear in a
-    headline theorem's assumptions. *)
-Lemma legacy_inconsistent : False.
+(** ** F0. While the legacy preservation was [Admitted] and refuted by
+    [Counterexample.v], loading both derived [False] (survey run,
+    2026-11-04). It is now [Semantics.preservation_stmt : Prop]; the same
+    derivation only refutes that hypothesis, which is what
+    [Counterexample.preservation_false] states. *)
+Lemma legacy_inconsistent : Semantics.preservation_stmt -> False.
 Proof.
-  destruct (Semantics.preservation _ _ _ _ _ _ (Counterexample.bad_step nil)
+  intro Hpres.
+  destruct (Hpres _ _ _ _ _ _ (Counterexample.bad_step nil)
               _ _ _ Counterexample.bad_typable) as [G_out H].
   exact (Counterexample.bad_post_untypable _ _ H).
 Qed.
 
-(** ** F1. The global environment is inconsistent.
-    [preservation_l1] and [step_pop_disjoint_from_type_l1] are
-    [Admitted] (hence axioms) and are refuted by Qed, axiom-free
-    files that are built in the same project. *)
-Lemma env_inconsistent_preservation_l1 : False.
-Proof. exact (preservation_l1_FALSE preservation_l1). Qed.
+(** ** F1. While [preservation_l1] and [step_pop_disjoint_from_type_l1]
+    were [Admitted] (hence axioms), the global environment was
+    inconsistent: Qed, axiom-free files built in the same project refute
+    them. They are now the [Prop]s [Semantics_L1.preservation_l1_stmt] and
+    [Semantics_L1.step_pop_disjoint_from_type_l1_stmt], and the same
+    terms only refute those hypotheses. *)
+Lemma env_inconsistent_preservation_l1 :
+  Semantics_L1.preservation_l1_stmt -> False.
+Proof. exact preservation_l1_FALSE. Qed.
 
-Lemma env_inconsistent_step_pop : False.
-Proof. exact (step_pop_disjoint_from_type_l1_FALSE step_pop_disjoint_from_type_l1). Qed.
+Lemma env_inconsistent_step_pop :
+  Semantics_L1.step_pop_disjoint_from_type_l1_stmt -> False.
+Proof. exact step_pop_disjoint_from_type_l1_FALSE. Qed.
 
 (** ** F2. preservation_l1 is false with a closed context ([G = []]).
     An un-entered same-name [ERegion] exits immediately and pops the
@@ -173,8 +180,8 @@ Proof.
   apply T_Echo_L1; [constructor | now apply T_Loc_L1].
 Qed.
 
-(** Assumption audit. Expected: F0/F1 lemmas list the refuted axiom;
-    every other lemma is "Closed under the global context". *)
+(** Assumption audit. Expected since the D0/D0b retirement: every lemma,
+    F0 and F1 included, is "Closed under the global context". *)
 Print Assumptions legacy_inconsistent.
 Print Assumptions env_inconsistent_preservation_l1.
 Print Assumptions env_inconsistent_step_pop.

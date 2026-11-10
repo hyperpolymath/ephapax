@@ -168,6 +168,112 @@ impl std::fmt::Display for CodegenError {
 
 impl std::error::Error for CodegenError {}
 
+/// Message prefix of the [`CodegenError`] for a construct that has no
+/// wasm lowering (v2 plan rung E1). Codegen fails before emitting any
+/// module instead of planting an `unreachable` trap.
+pub const UNSUPPORTED_PREFIX: &str = "unsupported in codegen";
+
+/// Return the first construct in `expr` that codegen cannot lower:
+/// effect `perform` / `handle` (no lowering until E17) and raw variadic
+/// `__ffi` (no sound lowering at all; typed `extern` is the FFI path).
+pub fn first_unsupported(expr: &Expr) -> Option<CodegenError> {
+    fn unsupported(what: &str, span: ephapax_syntax::Span) -> CodegenError {
+        CodegenError(format!(
+            "{UNSUPPORTED_PREFIX}: {what} (at byte {}..{})",
+            span.start, span.end
+        ))
+    }
+    let here = match &expr.kind {
+        ExprKind::Perform { op, .. } => Some(unsupported(
+            &format!("effect operation `perform {op}` has no wasm lowering"),
+            expr.span,
+        )),
+        ExprKind::Handle { .. } => Some(unsupported(
+            "effect handler `handle ... with` has no wasm lowering",
+            expr.span,
+        )),
+        ExprKind::FFI { symbol, .. } => Some(unsupported(
+            &format!(
+                "raw `__ffi(\"{symbol}\", ...)`; declare it in a typed `extern` block instead"
+            ),
+            expr.span,
+        )),
+        _ => None,
+    };
+    if here.is_some() {
+        return here;
+    }
+    let children: Vec<&Expr> = match &expr.kind {
+        ExprKind::Lit(_) | ExprKind::Var(_) | ExprKind::StringNew { .. } => vec![],
+        ExprKind::StringConcat { left, right }
+        | ExprKind::Pair { left, right }
+        | ExprKind::BinOp { left, right, .. } => vec![left, right],
+        ExprKind::StringLen(e)
+        | ExprKind::Fst(e)
+        | ExprKind::Snd(e)
+        | ExprKind::Deref(e)
+        | ExprKind::Drop(e)
+        | ExprKind::Copy(e) => vec![e],
+        ExprKind::Let { value, body, .. } | ExprKind::LetLin { value, body, .. } => {
+            vec![value, body]
+        }
+        ExprKind::Lambda { body, .. } | ExprKind::Region { body, .. } => vec![body],
+        ExprKind::App { func, arg } => vec![func, arg],
+        ExprKind::Inl { value, .. } | ExprKind::Inr { value, .. } => vec![value],
+        ExprKind::Case {
+            scrutinee,
+            left_body,
+            right_body,
+            ..
+        } => vec![scrutinee, left_body, right_body],
+        ExprKind::Match { scrutinee, arms } => {
+            let mut v: Vec<&Expr> = vec![scrutinee];
+            for arm in arms {
+                if let Some(g) = &arm.guard {
+                    v.push(g);
+                }
+                v.push(&arm.body);
+            }
+            v
+        }
+        ExprKind::If {
+            cond,
+            then_branch,
+            else_branch,
+        } => vec![cond, then_branch, else_branch],
+        ExprKind::Borrow { inner, .. } => vec![inner],
+        ExprKind::Block(es) | ExprKind::ListLit(es) | ExprKind::TupleLit(es) => es.iter().collect(),
+        ExprKind::FFI { args, .. } | ExprKind::Perform { args, .. } => args.iter().collect(),
+        ExprKind::Handle { body, clauses } => {
+            let mut v: Vec<&Expr> = vec![body];
+            v.extend(clauses.iter().map(|c| &c.body));
+            v
+        }
+        ExprKind::UnaryOp { operand, .. } => vec![operand],
+        ExprKind::ListIndex { list, index } => vec![list, index],
+        ExprKind::TupleIndex { tuple, .. } => vec![tuple],
+    };
+    children.into_iter().find_map(first_unsupported)
+}
+
+/// Check every function body using [`first_unsupported`].
+///
+/// Returns the first unsupported-construct error in declaration order, with
+/// the function name added. Non-function declarations are ignored.
+pub fn validate_supported(module: &AstModule) -> Result<(), CodegenError> {
+    for decl in &module.decls {
+        let (name, expr, kind) = match decl {
+            Decl::Fn { name, body, .. } => (name, body, "function"),
+            Decl::Const { name, value, .. } => (name, value, "constant"),
+            _ => continue,
+        };
+        if let Some(CodegenError(msg)) = first_unsupported(expr) {
+            return Err(CodegenError(format!("{msg} in {kind} `{name}`")));
+        }
+    }
+    Ok(())
+}
+
 // ---------------------------------------------------------------------------
 // Ty → OwnershipKind mapping
 // ---------------------------------------------------------------------------
@@ -364,14 +470,6 @@ pub struct Codegen {
     /// Closure optimization enabled (minimal capture sets)
     optimize_closures: bool,
 
-    /// FFI import registry: maps symbol names to WASM function indices.
-    /// Each FFI call is imported from the "env" module.
-    ffi_imports: HashMap<String, u32>,
-
-    /// Next available function index for imports.
-    /// Starts after the built-in function indices.
-    next_import_idx: u32,
-
     /// Imports declared via `extern "abi" { ... }` blocks. Populated by
     /// `collect_extern_imports` before user-fn collection so the
     /// runtime helper and user-fn indices can be shifted past them.
@@ -474,8 +572,6 @@ impl Codegen {
             lambda_fns: Vec::new(),
             debug_info: None,
             optimize_closures: false,
-            ffi_imports: HashMap::new(),
-            next_import_idx: 100, // Start after built-in function indices
             extern_imports: Vec::new(),
             extern_fn_indices: HashMap::new(),
             extern_type_names: std::collections::HashSet::new(),
@@ -524,8 +620,9 @@ impl Codegen {
     // -----------------------------------------------------------------------
 
     /// Total number of imports the module emits: builtins + extern.
-    /// FFI imports are NOT yet included — see the phase-2C note in
-    /// `ensure_ffi_import`.
+    /// Raw `__ffi` is rejected before codegen (v2 plan E1), so every
+    /// import is a builtin or an `extern` fn and the import index space
+    /// is contiguous.
     fn import_count(&self) -> u32 {
         NUM_BUILTIN_IMPORTS + self.extern_imports.len() as u32
     }
@@ -567,30 +664,6 @@ impl Codegen {
     /// First user-defined fn index, after imports and runtime helpers.
     fn first_user_fn(&self) -> u32 {
         self.import_count() + NUM_RUNTIME_FNS
-    }
-
-    /// Register an FFI symbol as a WASM import from the "env" module.
-    /// Returns the WASM function index for the import.
-    /// If the symbol is already registered, returns the existing index.
-    ///
-    /// The import signature is: all args are i64, return is i64.
-    /// This matches Ephapax's FFI calling convention where all values
-    /// are passed as 64-bit integers at the ABI boundary.
-    fn ensure_ffi_import(&mut self, symbol: &str, arg_count: usize) -> u32 {
-        if let Some(&idx) = self.ffi_imports.get(symbol) {
-            return idx;
-        }
-
-        let idx = self.next_import_idx;
-        self.next_import_idx += 1;
-        self.ffi_imports.insert(symbol.to_string(), idx);
-
-        // Register the type: (i64, i64, ...) -> i64
-        let params: Vec<ValType> = (0..arg_count).map(|_| ValType::I64).collect();
-        let results = vec![ValType::I64];
-        self.extra_types.push((params, results));
-
-        idx
     }
 
     /// Enable closure optimization (minimal capture sets)
@@ -641,7 +714,14 @@ impl Codegen {
     }
 
     /// Compile a single standalone expression as a `main` function.
-    pub fn compile_program(&mut self, main_expr: &Expr) -> Vec<u8> {
+    ///
+    /// Fails with a [`CodegenError`] (and emits nothing) if the
+    /// expression contains a construct with no wasm lowering
+    /// ([`first_unsupported`]).
+    pub fn compile_program(&mut self, main_expr: &Expr) -> Result<Vec<u8>, CodegenError> {
+        if let Some(err) = first_unsupported(main_expr) {
+            return Err(err);
+        }
         self.emit_types();
         self.emit_imports();
 
@@ -692,7 +772,7 @@ impl Codegen {
         self.emit_ownership_section();
         self.emit_carrier_sections();
         self.emit_debug_sections();
-        self.module.clone().finish()
+        Ok(self.module.clone().finish())
     }
 
     /// Compile a module encoded as an S-expression string.
@@ -707,7 +787,14 @@ impl Codegen {
     /// 1. Collects function signatures and assigns WASM indices.
     /// 2. Emits the type, import, memory, function, and code sections.
     /// 3. If a `main` function exists, exports it.
+    ///
+    /// Returns a [`CodegenError`] for unsupported constructs before emitting
+    /// sections, and propagates errors from function compilation.
     pub fn compile_ast_module(&mut self, ast: &AstModule) -> Result<Vec<u8>, CodegenError> {
+        // ----- Phase 0: reject constructs with no wasm lowering ------------
+        // (v2 plan E1: fail loudly, before any section is emitted.)
+        validate_supported(ast)?;
+
         // ----- Phase 1: collect function metadata --------------------------
         // Extern imports MUST be collected first so the import_count
         // is correct before any runtime helper or user fn indices are
@@ -744,16 +831,33 @@ impl Codegen {
         self.emit_data_section();
         self.emit_ownership_section();
         self.emit_carrier_sections();
+        // `ephapax.debug.mode` custom section, only when `enable_debug`
+        // was called (`compile --debug`).
+        self.emit_debug_sections();
 
         Ok(self.module.clone().finish())
     }
 
-    /// Compile a module that has a `main` function with a body expression.
+    /// Try full module compilation, falling back to `main_body` as a standalone
+    /// `main` expression if compilation fails.
     /// (Legacy helper retained for backward compatibility.)
-    pub fn compile_module_with_main(&mut self, module: &AstModule, main_body: &Expr) -> Vec<u8> {
+    ///
+    /// Unsupported constructs in either `module` or `main_body` return a
+    /// [`CodegenError`] before compilation, even when `main_body` would not be
+    /// used. Other module-compilation errors are caught to select the fallback.
+    pub fn compile_module_with_main(
+        &mut self,
+        module: &AstModule,
+        main_body: &Expr,
+    ) -> Result<Vec<u8>, CodegenError> {
+        // An unsupported construct is a hard error, never a fallback.
+        validate_supported(module)?;
+        if let Some(err) = first_unsupported(main_body) {
+            return Err(err);
+        }
         // Try full module compilation first; fall back to expression mode.
         if let Ok(bytes) = self.compile_ast_module(module) {
-            return bytes;
+            return Ok(bytes);
         }
 
         // Fallback: just compile the main body as a standalone expression.
@@ -792,7 +896,7 @@ impl Codegen {
         self.module.section(&code_sec);
         self.emit_data_section();
         self.emit_debug_sections();
-        self.module.clone().finish()
+        Ok(self.module.clone().finish())
     }
 
     // -----------------------------------------------------------------------
@@ -1971,31 +2075,14 @@ impl Codegen {
             ExprKind::ListIndex { list, index } => self.compile_list_index(func, list, index),
             ExprKind::TupleLit(elements) => self.compile_tuple_lit(func, elements),
             ExprKind::TupleIndex { tuple, index } => self.compile_tuple_index(func, tuple, *index),
-            ExprKind::FFI { symbol, args } => {
-                // FFI calls in WASM become imported functions.
-                // The symbol name is registered as an import from the "env" module
-                // in the module preamble. The import index is tracked in self.ffi_imports.
-                //
-                // Register the import if not already done.
-                let import_idx = self.ensure_ffi_import(symbol, args.len());
-
-                // Compile all arguments — they become the WASM call parameters.
-                for arg in args {
-                    self.compile_expr(func, arg);
-                }
-
-                // Call the imported function by index.
-                func.instruction(&wasm_encoder::Instruction::Call(import_idx));
-            }
-
-            ExprKind::Perform { .. } => {
-                // Effect perform not yet implemented — emit WASM unreachable
-                // instead of panicking the compiler at codegen time.
-                func.instruction(&wasm_encoder::Instruction::Unreachable);
-            }
-            ExprKind::Handle { .. } => {
-                // Effect handle not yet implemented — emit WASM unreachable
-                // instead of panicking the compiler at codegen time.
+            // Raw FFI and effects have no lowering. Every public entry
+            // point rejects them up front with a `CodegenError`
+            // (`first_unsupported`, v2 plan E1), so these arms are only
+            // reached by a caller driving `compile_expr` directly; they
+            // trap instead of calling an import index that does not exist
+            // (the old raw-FFI lowering called index 100+, outside the
+            // import section, probe g5).
+            ExprKind::FFI { .. } | ExprKind::Perform { .. } | ExprKind::Handle { .. } => {
                 func.instruction(&wasm_encoder::Instruction::Unreachable);
             }
             ExprKind::Match { scrutinee, arms } => self.compile_match(func, scrutinee, arms),
@@ -2130,11 +2217,22 @@ impl Codegen {
         self.compile_expr(func, value);
 
         // Bind it to a local
+        let outer_idx = self.locals.name_to_idx.get(name).copied();
+        let outer_ty = self.locals.name_to_type.get(name).copied();
         let local_idx = self.locals.bind_typed(name, is_linear, local_ty);
         func.instruction(&Instruction::LocalSet(local_idx));
 
         // Compile the body
         self.compile_expr(func, body);
+
+        self.locals.name_to_idx.remove(name);
+        self.locals.name_to_type.remove(name);
+        if let Some(idx) = outer_idx {
+            self.locals.name_to_idx.insert(name.to_string(), idx);
+        }
+        if let Some(ty) = outer_ty {
+            self.locals.name_to_type.insert(name.to_string(), ty);
+        }
 
         // Handle unconsumed linear locals (mode-aware):
         // - Linear mode: Type checker already validated consumption, no action needed
@@ -3459,7 +3557,9 @@ mod tests {
     #[test]
     fn compile_literal_i32() {
         let mut codegen = Codegen::new();
-        let wasm = codegen.compile_program(&e(ExprKind::Lit(Literal::I32(42))));
+        let wasm = codegen
+            .compile_program(&e(ExprKind::Lit(Literal::I32(42))))
+            .unwrap();
         assert_wasm_header(&wasm);
         validate_wasm(&wasm);
     }
@@ -3467,7 +3567,9 @@ mod tests {
     #[test]
     fn compile_literal_bool_true() {
         let mut codegen = Codegen::new();
-        let wasm = codegen.compile_program(&e(ExprKind::Lit(Literal::Bool(true))));
+        let wasm = codegen
+            .compile_program(&e(ExprKind::Lit(Literal::Bool(true))))
+            .unwrap();
         assert_wasm_header(&wasm);
         validate_wasm(&wasm);
     }
@@ -3475,7 +3577,9 @@ mod tests {
     #[test]
     fn compile_literal_bool_false() {
         let mut codegen = Codegen::new();
-        let wasm = codegen.compile_program(&e(ExprKind::Lit(Literal::Bool(false))));
+        let wasm = codegen
+            .compile_program(&e(ExprKind::Lit(Literal::Bool(false))))
+            .unwrap();
         assert_wasm_header(&wasm);
         validate_wasm(&wasm);
     }
@@ -3483,7 +3587,9 @@ mod tests {
     #[test]
     fn compile_literal_unit() {
         let mut codegen = Codegen::new();
-        let wasm = codegen.compile_program(&e(ExprKind::Lit(Literal::Unit)));
+        let wasm = codegen
+            .compile_program(&e(ExprKind::Lit(Literal::Unit)))
+            .unwrap();
         assert_wasm_header(&wasm);
         validate_wasm(&wasm);
     }
@@ -3500,7 +3606,7 @@ mod tests {
             left: Box::new(e(ExprKind::Lit(Literal::I32(1)))),
             right: Box::new(e(ExprKind::Lit(Literal::I32(2)))),
         });
-        let wasm = codegen.compile_program(&expr);
+        let wasm = codegen.compile_program(&expr).unwrap();
         assert_wasm_header(&wasm);
         validate_wasm(&wasm);
     }
@@ -3513,7 +3619,7 @@ mod tests {
             left: Box::new(e(ExprKind::Lit(Literal::I32(10)))),
             right: Box::new(e(ExprKind::Lit(Literal::I32(3)))),
         });
-        let wasm = codegen.compile_program(&expr);
+        let wasm = codegen.compile_program(&expr).unwrap();
         assert_wasm_header(&wasm);
         validate_wasm(&wasm);
     }
@@ -3526,7 +3632,7 @@ mod tests {
             left: Box::new(e(ExprKind::Lit(Literal::I32(6)))),
             right: Box::new(e(ExprKind::Lit(Literal::I32(7)))),
         });
-        let wasm = codegen.compile_program(&expr);
+        let wasm = codegen.compile_program(&expr).unwrap();
         assert_wasm_header(&wasm);
         validate_wasm(&wasm);
     }
@@ -3539,7 +3645,7 @@ mod tests {
             left: Box::new(e(ExprKind::Lit(Literal::I32(100)))),
             right: Box::new(e(ExprKind::Lit(Literal::I32(5)))),
         });
-        let wasm = codegen.compile_program(&expr);
+        let wasm = codegen.compile_program(&expr).unwrap();
         assert_wasm_header(&wasm);
         validate_wasm(&wasm);
     }
@@ -3552,7 +3658,7 @@ mod tests {
             left: Box::new(e(ExprKind::Lit(Literal::I32(17)))),
             right: Box::new(e(ExprKind::Lit(Literal::I32(5)))),
         });
-        let wasm = codegen.compile_program(&expr);
+        let wasm = codegen.compile_program(&expr).unwrap();
         assert_wasm_header(&wasm);
         validate_wasm(&wasm);
     }
@@ -3565,7 +3671,7 @@ mod tests {
             left: Box::new(e(ExprKind::Lit(Literal::I32(1)))),
             right: Box::new(e(ExprKind::Lit(Literal::I32(2)))),
         });
-        let wasm = codegen.compile_program(&expr);
+        let wasm = codegen.compile_program(&expr).unwrap();
         assert_wasm_header(&wasm);
         validate_wasm(&wasm);
     }
@@ -3578,7 +3684,7 @@ mod tests {
             left: Box::new(e(ExprKind::Lit(Literal::I32(5)))),
             right: Box::new(e(ExprKind::Lit(Literal::I32(5)))),
         });
-        let wasm = codegen.compile_program(&expr);
+        let wasm = codegen.compile_program(&expr).unwrap();
         assert_wasm_header(&wasm);
         validate_wasm(&wasm);
     }
@@ -3591,7 +3697,7 @@ mod tests {
             left: Box::new(e(ExprKind::Lit(Literal::Bool(true)))),
             right: Box::new(e(ExprKind::Lit(Literal::Bool(false)))),
         });
-        let wasm = codegen.compile_program(&expr);
+        let wasm = codegen.compile_program(&expr).unwrap();
         assert_wasm_header(&wasm);
         validate_wasm(&wasm);
     }
@@ -3604,7 +3710,7 @@ mod tests {
             left: Box::new(e(ExprKind::Lit(Literal::Bool(false)))),
             right: Box::new(e(ExprKind::Lit(Literal::Bool(true)))),
         });
-        let wasm = codegen.compile_program(&expr);
+        let wasm = codegen.compile_program(&expr).unwrap();
         assert_wasm_header(&wasm);
         validate_wasm(&wasm);
     }
@@ -3620,7 +3726,7 @@ mod tests {
             op: UnaryOp::Not,
             operand: Box::new(e(ExprKind::Lit(Literal::Bool(true)))),
         });
-        let wasm = codegen.compile_program(&expr);
+        let wasm = codegen.compile_program(&expr).unwrap();
         assert_wasm_header(&wasm);
         validate_wasm(&wasm);
     }
@@ -3632,7 +3738,7 @@ mod tests {
             op: UnaryOp::Neg,
             operand: Box::new(e(ExprKind::Lit(Literal::I32(42)))),
         });
-        let wasm = codegen.compile_program(&expr);
+        let wasm = codegen.compile_program(&expr).unwrap();
         assert_wasm_header(&wasm);
         validate_wasm(&wasm);
     }
@@ -3649,7 +3755,7 @@ mod tests {
             then_branch: Box::new(e(ExprKind::Lit(Literal::I32(1)))),
             else_branch: Box::new(e(ExprKind::Lit(Literal::I32(2)))),
         });
-        let wasm = codegen.compile_program(&expr);
+        let wasm = codegen.compile_program(&expr).unwrap();
         assert_wasm_header(&wasm);
         validate_wasm(&wasm);
     }
@@ -3667,7 +3773,7 @@ mod tests {
             })),
             else_branch: Box::new(e(ExprKind::Lit(Literal::I32(30)))),
         });
-        let wasm = codegen.compile_program(&expr);
+        let wasm = codegen.compile_program(&expr).unwrap();
         assert_wasm_header(&wasm);
         validate_wasm(&wasm);
     }
@@ -3693,7 +3799,7 @@ mod tests {
                 right: Box::new(e(ExprKind::Lit(Literal::I32(50)))),
             })),
         });
-        let wasm = codegen.compile_program(&expr);
+        let wasm = codegen.compile_program(&expr).unwrap();
         assert_wasm_header(&wasm);
         validate_wasm(&wasm);
     }
@@ -3701,6 +3807,33 @@ mod tests {
     // -----------------------------------------------------------------------
     // Let bindings
     // -----------------------------------------------------------------------
+
+    #[test]
+    fn let_restores_shadowed_local_maps() {
+        let mut codegen = Codegen::new();
+        let outer = codegen.locals.bind_typed("x", false, ValType::I64);
+        let mut func = Function::new([]);
+        codegen.compile_let(
+            &mut func,
+            "x",
+            None,
+            &e(ExprKind::Lit(Literal::I32(1))),
+            &e(ExprKind::Var("x".into())),
+            false,
+        );
+        assert_eq!(codegen.locals.get("x"), Some(outer));
+        assert_eq!(codegen.locals.get_type("x"), Some(ValType::I64));
+        codegen.compile_let(
+            &mut func,
+            "y",
+            None,
+            &e(ExprKind::Lit(Literal::I32(1))),
+            &e(ExprKind::Var("y".into())),
+            false,
+        );
+        assert_eq!(codegen.locals.get("y"), None);
+        assert_eq!(codegen.locals.get_type("y"), None);
+    }
 
     #[test]
     fn compile_let_x_42_in_x() {
@@ -3711,7 +3844,7 @@ mod tests {
             value: Box::new(e(ExprKind::Lit(Literal::I32(42)))),
             body: Box::new(e(ExprKind::Var("x".into()))),
         });
-        let wasm = codegen.compile_program(&expr);
+        let wasm = codegen.compile_program(&expr).unwrap();
         assert_wasm_header(&wasm);
         validate_wasm(&wasm);
     }
@@ -3735,7 +3868,7 @@ mod tests {
                 })),
             })),
         });
-        let wasm = codegen.compile_program(&expr);
+        let wasm = codegen.compile_program(&expr).unwrap();
         assert_wasm_header(&wasm);
         validate_wasm(&wasm);
     }
@@ -3758,7 +3891,7 @@ mod tests {
                 else_branch: Box::new(e(ExprKind::Lit(Literal::I32(0)))),
             })),
         });
-        let wasm = codegen.compile_program(&expr);
+        let wasm = codegen.compile_program(&expr).unwrap();
         assert_wasm_header(&wasm);
         validate_wasm(&wasm);
     }
@@ -3774,7 +3907,7 @@ mod tests {
             left: Box::new(e(ExprKind::Lit(Literal::I32(1)))),
             right: Box::new(e(ExprKind::Lit(Literal::I32(2)))),
         });
-        let wasm = codegen.compile_program(&expr);
+        let wasm = codegen.compile_program(&expr).unwrap();
         assert_wasm_header(&wasm);
         validate_wasm(&wasm);
     }
@@ -3787,7 +3920,7 @@ mod tests {
             left: Box::new(e(ExprKind::Lit(Literal::I32(10)))),
             right: Box::new(e(ExprKind::Lit(Literal::I32(20)))),
         }))));
-        let wasm = codegen.compile_program(&expr);
+        let wasm = codegen.compile_program(&expr).unwrap();
         assert_wasm_header(&wasm);
         validate_wasm(&wasm);
     }
@@ -3800,7 +3933,7 @@ mod tests {
             left: Box::new(e(ExprKind::Lit(Literal::I32(10)))),
             right: Box::new(e(ExprKind::Lit(Literal::I32(20)))),
         }))));
-        let wasm = codegen.compile_program(&expr);
+        let wasm = codegen.compile_program(&expr).unwrap();
         assert_wasm_header(&wasm);
         validate_wasm(&wasm);
     }
@@ -3816,7 +3949,7 @@ mod tests {
             ty: Ty::Base(BaseTy::Bool),
             value: Box::new(e(ExprKind::Lit(Literal::I32(42)))),
         });
-        let wasm = codegen.compile_program(&expr);
+        let wasm = codegen.compile_program(&expr).unwrap();
         assert_wasm_header(&wasm);
         validate_wasm(&wasm);
     }
@@ -3828,7 +3961,7 @@ mod tests {
             ty: Ty::Base(BaseTy::I32),
             value: Box::new(e(ExprKind::Lit(Literal::Bool(true)))),
         });
-        let wasm = codegen.compile_program(&expr);
+        let wasm = codegen.compile_program(&expr).unwrap();
         assert_wasm_header(&wasm);
         validate_wasm(&wasm);
     }
@@ -3847,7 +3980,7 @@ mod tests {
             right_var: "y".into(),
             right_body: Box::new(e(ExprKind::Lit(Literal::I32(0)))),
         });
-        let wasm = codegen.compile_program(&expr);
+        let wasm = codegen.compile_program(&expr).unwrap();
         assert_wasm_header(&wasm);
         validate_wasm(&wasm);
     }
@@ -3861,7 +3994,7 @@ mod tests {
         let mut codegen = Codegen::new();
         // copy(42)
         let expr = e(ExprKind::Copy(Box::new(e(ExprKind::Lit(Literal::I32(42))))));
-        let wasm = codegen.compile_program(&expr);
+        let wasm = codegen.compile_program(&expr).unwrap();
         assert_wasm_header(&wasm);
         validate_wasm(&wasm);
     }
@@ -3874,7 +4007,7 @@ mod tests {
     fn compile_empty_block() {
         let mut codegen = Codegen::new();
         let expr = e(ExprKind::Block(vec![]));
-        let wasm = codegen.compile_program(&expr);
+        let wasm = codegen.compile_program(&expr).unwrap();
         assert_wasm_header(&wasm);
         validate_wasm(&wasm);
     }
@@ -3888,7 +4021,7 @@ mod tests {
             e(ExprKind::Lit(Literal::I32(2))),
             e(ExprKind::Lit(Literal::I32(3))),
         ]));
-        let wasm = codegen.compile_program(&expr);
+        let wasm = codegen.compile_program(&expr).unwrap();
         assert_wasm_header(&wasm);
         validate_wasm(&wasm);
     }
@@ -3905,7 +4038,7 @@ mod tests {
             name: "r".into(),
             body: Box::new(e(ExprKind::Lit(Literal::I32(42)))),
         });
-        let wasm = codegen.compile_program(&expr);
+        let wasm = codegen.compile_program(&expr).unwrap();
         assert_wasm_header(&wasm);
         validate_wasm(&wasm);
     }
@@ -3922,7 +4055,7 @@ mod tests {
             inner: Box::new(e(ExprKind::Lit(Literal::I32(42)))),
             mutable: false,
         }))));
-        let wasm = codegen.compile_program(&expr);
+        let wasm = codegen.compile_program(&expr).unwrap();
         assert_wasm_header(&wasm);
         validate_wasm(&wasm);
     }
@@ -4186,7 +4319,7 @@ mod tests {
             value: Box::new(e(ExprKind::Lit(Literal::I32(42)))),
             body: Box::new(e(ExprKind::Drop(Box::new(e(ExprKind::Var("x".into())))))),
         });
-        let wasm = codegen.compile_program(&expr);
+        let wasm = codegen.compile_program(&expr).unwrap();
         assert_wasm_header(&wasm);
         validate_wasm(&wasm);
     }
@@ -4201,7 +4334,7 @@ mod tests {
             value: Box::new(e(ExprKind::Lit(Literal::I32(42)))),
             body: Box::new(e(ExprKind::Var("x".into()))),
         });
-        let wasm = codegen.compile_program(&expr);
+        let wasm = codegen.compile_program(&expr).unwrap();
         assert_wasm_header(&wasm);
         validate_wasm(&wasm);
     }
@@ -4249,7 +4382,7 @@ mod tests {
                 })),
             })),
         });
-        let wasm = codegen.compile_program(&expr);
+        let wasm = codegen.compile_program(&expr).unwrap();
         assert_wasm_header(&wasm);
         validate_wasm(&wasm);
     }
@@ -4276,7 +4409,7 @@ mod tests {
                 })),
             }),
         ]));
-        let wasm = codegen.compile_program(&expr);
+        let wasm = codegen.compile_program(&expr).unwrap();
         assert_wasm_header(&wasm);
         validate_wasm(&wasm);
     }
@@ -4292,7 +4425,7 @@ mod tests {
             region: "r".into(),
             value: "hello".to_string(),
         });
-        let wasm = codegen.compile_program(&expr);
+        let wasm = codegen.compile_program(&expr).unwrap();
         assert_wasm_header(&wasm);
         validate_wasm(&wasm);
     }
@@ -4310,7 +4443,7 @@ mod tests {
                 value: "world".to_string(),
             })),
         });
-        let wasm = codegen.compile_program(&expr);
+        let wasm = codegen.compile_program(&expr).unwrap();
         assert_wasm_header(&wasm);
         validate_wasm(&wasm);
     }
@@ -4326,7 +4459,7 @@ mod tests {
                 value: "test".to_string(),
             })),
         });
-        let wasm = codegen.compile_program(&expr);
+        let wasm = codegen.compile_program(&expr).unwrap();
         assert_wasm_header(&wasm);
         validate_wasm(&wasm);
     }
@@ -4360,7 +4493,7 @@ mod tests {
             },
             span: Span::dummy(),
         };
-        let wasm = codegen.compile_program(&expr);
+        let wasm = codegen.compile_program(&expr).unwrap();
         assert_wasm_header(&wasm);
         validate_wasm(&wasm);
 

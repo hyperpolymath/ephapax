@@ -86,36 +86,48 @@ side conditions and state exact replacement preservation theorems. These
 are new obligations; the refuted legacy and L1 statements remain pinned.
 |===
 
-==== Estate proofing policy and Grade 3 target
+==== Estate proofing policy and Proof Witness Grades
 
-Follow the estate's canonical references for proof method and grade:
+Follow the estate's canonical policy:
+link:https://github.com/hyperpolymath/standards/blob/main/3-practice/PROOF-POLICY.adoc[`hyperpolymath/standards/3-practice/PROOF-POLICY.adoc`].
+It assigns implementation-specific engineering obligations to Idris2 and
+implementation-independent theory to Agda, rechecked in Rocq and Lean. Its
+deciding test is whether a claim names a repository-specific type, function
+or wire format. Its §8 (owner ruling 2026-11-04) defines the *Proof Witness
+Grades* `PWG-3`, `PWG-2i`, `PWG-2ii` and `PWG-1`, and supersedes the grades
+in the mathesis brief (`docs/proposals/estate-mathematical-architecture.adoc`).
+The
+link:https://github.com/hyperpolymath/standards/blob/main/docs/README-EXPLAINME-STANDARD.adoc[proof-ledger standard]
+also requires every claimed proof (including open and refuted claims) to
+appear in `+EXPLAINME.adoc+` with status, checker, location and trust
+boundary.
 
-* link:https://github.com/hyperpolymath/mathesis/blob/main/estate-mathematical-architecture[`hyperpolymath/mathesis/estate-mathematical-architecture`]
-  defines Grade 3 as an Agda proof that type-checks locally and has not been
-  independently translated. Grade 2/1 claims require their separate
-  translation/API evidence.
-* link:https://github.com/hyperpolymath/standards/blob/main/3-practice/PROOF-POLICY.adoc[`hyperpolymath/standards/3-practice/PROOF-POLICY.adoc`]
-  assigns implementation-specific engineering obligations to Idris2 and
-  implementation-independent theory to Agda, rechecked in Rocq and Lean.
-  Its deciding test is whether a claim names a repository-specific type,
-  function, or wire format. The
-  link:https://github.com/hyperpolymath/standards/blob/main/docs/README-EXPLAINME-STANDARD.adoc[proof-ledger standard]
-  also requires every claimed proof (including open/refuted claims) to
-  appear in `+EXPLAINME.adoc+` with status, checker, location, and trust
-  boundary.
+*No result in this repository carries a PWG.* PWG applies only to theory
+obligations whose source of truth is an Agda proof (§8.1). No Ephapax result
+has an Agda source, so any result classed as theory is `ungraded`, and any
+result classed as engineering is not on the PWG ladder at all (§8.1: it
+uses the §5 tokens only). The Coq results are Coq evidence: a Coq `+Qed+`
+is not `PWG-3`, and it can count as a Rocq recheck leg only after an Agda
+source exists and the two statements are `RECONCILED` (§2.2, §3).
 
-*Grade 3 is the requested target, not a status to apply retroactively.* The
-current regression witnesses are Coq scripts (`+Qed+`), so they are not
-Mathesis Grade 3 receipts. The Ephapax-specific `+has_type_l1+`/`+step+`
-claims also appear engineering-specific under the current standards mapping;
-that mapping does not automatically make them Agda theory. Until an
-owner-approved formulation resolves this boundary, record current Coq
-results as Coq evidence, retain `+COUNTEREXAMPLE+` for refuted statements,
-and do not label them Grade 3. A future Agda Grade 3 receipt must include
-the exact proposition, assumptions, source commit, pinned Agda/toolchain,
-canonical invocation, and evidence that it is the same Ephapax statement;
-it must not be inferred from shared vocabulary or another repository's
-proof. No Grade 2/1 claim is made here.
+*Classification: theory (owner ruling, 2026-11-09).* The soundness
+statements (the typing judgment and step relation as a calculus, progress,
+preservation, the L1–L4 obligations, and the refutations of the retired
+statements) are theory under §1, and each gets an Agda source of truth.
+Until an Agda proof checks, each is `ungraded`. The Coq proofs are the Rocq
+recheck leg (§2): target-only evidence (§3) until the matching Agda
+statement exists and the correspondence is `RECONCILED`. Keep
+`+COUNTEREXAMPLE+` for refuted statements. The first Agda targets are the
+three refutations; the order of Coq and Agda work for the v2 core is
+decision D13 in the v2 plan
+(`+docs/reports/2026-11-04-v2-survey/EPHAPAX-V2-ARCHITECTURE-AND-PLAN.adoc+`,
+"Ratified: proof classification"). The Idris2 ABI, the Rust implementation
+and typed-wasm emission stay engineering and are not graded.
+A future `PWG-3` receipt must record the exact proposition, assumptions,
+source commit, pinned Agda and standard library, the canonical invocation
+`agda --safe --without-K --cubical-compatible`, the import cone, and evidence
+that it states the same Ephapax proposition. It must not be inferred from
+shared vocabulary or from another repository's proof.
 
 The audit is split by sublanguage:
 
@@ -147,7 +159,7 @@ link:formal/PRESERVATION-DESIGN.adoc[`+formal/PRESERVATION-DESIGN.adoc+`].
 |`+formal/Modality.v+` |1 Qed, zero axioms
 
 |L3 calculus (echo / residue fiber + degrade + no-section proof)
-|`+formal/Echo.v+` |12 Qed, 0 admits
+|`+formal/Echo.v+` |19 Qed, 0 admits (counted 2026-11-09)
 
 |Linear-mode forward progress lemmas |`+formal/Semantics_L1.v+` |37 Qed;
 0 `+Admitted.+` since D0 (2026-11-05). Historical note: *2* outer `+Admitted.+` markers (`+step_pop_disjoint_from_type_l1+` /
@@ -181,9 +193,20 @@ Definitions only — no theorems, zero axioms.
 |5 + 5 Qed pinning the Phase 4c (fresh-region scope crossing) and Phase
 3b (nested TFunEff) soundness-gap classes
 
+|P2 survey regression families (2026-11-09)
+|`+formal/regress/+` (`+SurveyFamilies.v+`, `+EscapeCex.v+`, `+L2Comp.v+`,
+`+LetCheck.v+`)
+|Against the current judgment, all Qed and closed: ClosedCex (closed-context
+preservation failure), EchoCex (echo cross-path failure and stuck
+`+EObserve+`), PairDup and EchoCopy (compound-linearity holes), EscapeCex
+(a typed configuration whose closure carries an `+ELoc+` out of its region
+is stuck: a progress failure), L2Comp (`+has_type_l2+` is not closed under
+pairing) and LetCheck (a completeness gap: every `+ELet+` with a non-linear
+bound type is untypable). Regressions only; v2 rung P5 restates them.
+
 |Pinned legacy counterexample + L1 positive regression
-|`+formal/Counterexample.v+` |5 Qed in total: three lemmas establish the
-legacy counterexample; `+t_loc_l1_R_preserving+` supports the L1 argument;
+|`+formal/Counterexample.v+` |6 Qed in total: three lemmas establish the
+legacy counterexample; `+preservation_false+` refutes `+preservation_stmt+`; `+t_loc_l1_R_preserving+` supports the L1 argument;
 `+bad_input_untypable_l1+` rejects this one input in both modes. This is
 not a proof of L1 preservation.
 
@@ -965,8 +988,8 @@ map.
 — canonical four-layer design doctrine.
 * link:CLAUDE.md[`+CLAUDE.md+`] — agent guidance; owner directive
 2026-05-27.
-* link:formal/Counterexample.v[`+formal/Counterexample.v+`] — the 5 Qed
-lemmas that pin the soundness gap.
+* link:formal/Counterexample.v[`+formal/Counterexample.v+`] — the 6 Qed
+lemmas, including `preservation_false`, that pin the soundness gap.
 * https://github.com/hyperpolymath/echo-types[`+https://github.com/hyperpolymath/echo-types+`]
 — upstream Agda foundation for L3.
 * https://github.com/hyperpolymath/nextgen-languages/blob/main/docs/disambiguation/ephapax-vs-affinescript.md[Disambiguation:

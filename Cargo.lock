@@ -769,6 +769,7 @@ dependencies = [
  "ephapax-wasm",
  "proptest",
  "serde_json",
+ "sha2",
  "smol_str",
  "tempfile",
  "typed-wasm-verify",

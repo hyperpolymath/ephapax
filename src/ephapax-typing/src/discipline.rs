@@ -54,13 +54,42 @@
 //!
 //! | Discipline | Rule | Enforced at |
 //! |------------|------|-------------|
-//! | **Affine** (scrutinee was `let`) | Wildcard = implicit drop (OK) | Case vars use `Param` — linear types still demand consumption, but affine scrutinee's components follow type discipline |
-//! | **Linear** (scrutinee was `let!`) | Wildcard on linear component = error | Case vars use `Param` — linear types demand consumption via `demands_consumption()` |
+//! | **Affine** (scrutinee was `let`) | Wildcard over an unrestricted component = implicit drop (OK); over a linear component = error | `check_pattern` — `LinearPatternDiscard` (v2 plan E0) |
+//! | **Linear** (scrutinee was `let!`) | Wildcard on linear component = error | `check_pattern` — `LinearPatternDiscard`; case vars use `Param`, so linear types demand consumption via `demands_consumption()` |
+//!
+//! A duplicate binder in one pattern is rejected (`DuplicatePatternBinder`),
+//! and so is a projection (`t.i`, `xs[i]`, `fst`, `snd`) whose unselected
+//! components are linear (`LinearProjectionDiscard`): such containers must
+//! be destructured.
 //!
 //! Note: The desugarer generates case variables with `BindingForm::Param`.
 //! The discipline check depends on the component TYPE, not the scrutinee's
 //! binding form. This is correct: `let` lets you drop the container, but
 //! destructured linear components still follow their type's discipline.
+//!
+//! ## 4b. Reuse, closures and borrows (v2 plan E0)
+//!
+//! | Rule | Enforced at |
+//! |------|-------------|
+//! | A second use is an error when `demands_consumption()` holds (any `let!`) or the type is linear (an affine `let` of a linear value is at most once) | `Context::mark_used` via `CtxEntry::forbids_reuse` |
+//! | A closure body may not consume a restricted binding it captures (function types are unrestricted, so the closure could run twice) | `check_lambda` — `LinearCaptureConsumed` |
+//! | Dereferencing a borrow (or an unrestricted ref) of a linear value is an error (borrows are not loan-tracked) | `check_deref` — `CannotMoveOutOfBorrow` |
+//! | Products, sums, tuples and lists are linear when any component is (conservative join; D5 may relax it) | `Ty::is_linear` |
+//!
+//! ## 4c. Scoping and shadowing (W0 follow-up)
+//!
+//! Every binder (`let`, `let!`, lambda parameter, `case` binder, pattern
+//! binder, handler-clause parameter) is scoped: `Context::bind_scoped`
+//! saves the binding it shadows and `Context::end_scope` removes the inner
+//! binding and reinstates the outer one. A shadowed `let!` therefore keeps
+//! its consumption obligation, and each scope-exit check (`check_let_lin`,
+//! `check_lambda`, `check_case`, `check_match`) inspects its own binding
+//! rather than whatever entry now has the same name. Two parameters of one
+//! function may not share a name (`DuplicateParameter`).
+//!
+//! Because a `let!` scope always closes before the enclosing region does,
+//! an unconsumed `let!` in a region is reported at its own scope exit as
+//! `LinearVariableNotConsumed`; the region-exit check (§3) is a backstop.
 //!
 //! ## 5. Effect Resume (future — not yet implemented)
 //!

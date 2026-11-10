@@ -23,3 +23,7 @@ TypingL2.v
 Counterexample_L2.v
 Counterexample_L2_nested.v
 L4.v
+regress/SurveyFamilies.v
+regress/EscapeCex.v
+regress/L2Comp.v
+regress/LetCheck.v

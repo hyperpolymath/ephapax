@@ -39,12 +39,14 @@ For the project framing, read link:V1-TO-V2.adoc[`V1-TO-V2.adoc`]; this
 document is the *operational* map underneath it.
 
 On 2026-05-26 a verified Coq counterexample (`formal/Counterexample.v`,
-5 Qed lemmas) *proved* that preservation as stated in the legacy
+now 6 Qed lemmas including `preservation_false`) *proved* that preservation as stated in the legacy
 single-judgment design (`formal/Semantics.v`) is unsound. Proving your
 own first draft's limit, before anyone depends on it, is the rare correct
 move — and it named exactly the invariant the redesign needed. The work
-since is **not** to close that theorem (no closure exists; the
-`Admitted` is deliberate). The redesign is a separate line of work, not
+since is **not** to close that theorem (no closure exists). Since
+2026-11-05 (D0/D0b) the false statement is `preservation_stmt : Prop`,
+refuted by `Counterexample.preservation_false`; there is no `Admitted`
+and the no-False gate rejects one. The redesign is a separate line of work, not
 an already sound replacement: the unrestricted L1 preservation statement
 is also refuted by `formal/Counterexample_StepPop.v` and
 `formal/Counterexample_PreservationL1.v`, while no unconditional L2
@@ -76,8 +78,9 @@ v2 layers below are where forward work goes).
 | `formal/Semantics.v` — `Theorem preservation`
 | The legacy preservation theorem. The judgment lacks the structural
   invariant the counterexample demands.
-| **Provably false.** Marked `Admitted`. Any "closure" is impossible
-  by construction.
+| **Provably false.** Retired to `preservation_stmt : Prop`, refuted by
+  `Counterexample.preservation_false` (D0/D0b, 2026-11-05). Any "closure"
+  is impossible by construction.
 
 | `formal/Semantics.v` — Lemma B variants
   (`step_preserves_type`, `step_output_context_eq`,
@@ -139,7 +142,7 @@ and its assumptions explicitly.
 | `formal/TypingL1.v` + `formal/Semantics_L1.v`
 | Judgment and some helper lemmas are mechanised; unrestricted preservation
   is refuted, not merely unfinished
-| `TypingL1.v`: **2 / 0**. `Semantics_L1.v`: current proof markers are inventoried in `PROOF-NEEDS.adoc`; the two remaining outer admits (`step_pop_disjoint_from_type_l1`, `preservation_l1`) have refuted unrestricted statements, pinned by `Counterexample_StepPop.v` and `Counterexample_PreservationL1.v`. The L1 judgment and helper lemmas are not a preservation proof.
+| `TypingL1.v`: **2 / 0**. `Semantics_L1.v`: current proof markers are inventoried in `PROOF-NEEDS.adoc`; the two former outer admits were retired to `Prop` statements (`step_pop_disjoint_from_type_l1_stmt`, `preservation_l1_stmt`; D0, 2026-11-05): both unrestricted statements are refuted, pinned by `Counterexample_StepPop.v` and `Counterexample_PreservationL1.v`. The L1 judgment and helper lemmas are not a preservation proof.
 
 | L2
 | Structural modality (Linear vs Affine)
@@ -155,7 +158,7 @@ and its assumptions explicitly.
   `preservation_l3_region_active_echo`, `preservation_l3_drop_echo`,
   and `preservation_l3` are Qed for the matching echo rule pairs. This
   scoped result is not general L1/L2 preservation.
-| `Echo.v`: **12 / 0** (plus 3 new Qed in `Semantics_L1.v` for the wiring).
+| `Echo.v`: **19 / 0** (counted 2026-11-09) (plus 3 new Qed in `Semantics_L1.v` for the wiring).
 
 | L4
 | Dyadic interaction semantics (mother–child distinction)
@@ -312,8 +315,8 @@ field closed.
   counterexamples, scoped results, ledger, and replacement obligations.
 * **Agent guidance**: `CLAUDE.md` (root) — the 2026-05-27 owner
   directive, anti-pattern detector, escalation rule.
-* **Counterexample**: `formal/Counterexample.v` — the 5 Qed lemmas
-  that pin the soundness gap.
+* **Counterexample**: `formal/Counterexample.v` — the 6 Qed lemmas,
+  including `preservation_false`, that pin the soundness gap.
 * **Upstream Echo foundation**: https://github.com/hyperpolymath/echo-types
   — the Agda fiber/degrade/no-section calculus this repo's L3 builds on.
 

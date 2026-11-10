@@ -1,13 +1,23 @@
 // SPDX-License-Identifier: MPL-2.0
 // Owner: Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk>
-// Conformance test: FFI intrinsic with zero, single, and multi arguments.
-// Expected: type-checks successfully in both affine and linear modes.
+// Conformance test: typed FFI with zero, single, and multi arguments.
+// Expected: type-checks successfully.
+//
+// Since v2 plan rung E1 raw variadic `__ffi("sym", ...)` is rejected
+// (`RawFfiNotSupported`); a typed `extern` declaration is the only FFI
+// path. This fixture was migrated from the raw form to `extern`.
+
+extern "c" {
+  fn clock_gettime(): I64
+  fn abs(x: I32): I64
+  fn write(fd: I32, buf: I64, len: I32): I64
+}
 
 fn get_time(): I64 =
-    __ffi("clock_gettime")
+    clock_gettime()
 
 fn compute(x: I32): I64 =
-    __ffi("abs", x)
+    abs(x)
 
 fn send_data(fd: I32, buf: I64, len: I32): I64 =
-    __ffi("write", fd, buf, len)
+    write(fd, buf, len)

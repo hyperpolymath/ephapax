@@ -45,18 +45,18 @@ Both compile to [typed-wasm](https://github.com/hyperpolymath/typed-wasm). The c
 
 ## Current formal proof status (2026-06-05)
 
-> 🔄 **Foundational redesign in progress.** On 2026-05-26, a verified Coq counterexample ([`formal/Counterexample.v`](https://github.com/hyperpolymath/ephapax/blob/main/formal/Counterexample.v), 5 Qed lemmas) showed that preservation as stated in the legacy typing judgment is **provably false**. The old `Theorem preservation` in `Semantics.v` stays `Admitted` — this is correct. The work is the **four-layer principled redesign**.
+> 🔄 **Foundational redesign in progress.** On 2026-05-26, a verified Coq counterexample ([`formal/Counterexample.v`](https://github.com/hyperpolymath/ephapax/blob/main/formal/Counterexample.v), now 6 Qed lemmas) showed that preservation as stated in the legacy typing judgment is **provably false**. Since 2026-11-05 (D0/D0b) the legacy statement in `Semantics.v` is `preservation_stmt : Prop`, refuted by `Counterexample.preservation_false`; `formal/` has no `Admitted` and no `Axiom`. The work is the **four-layer principled redesign**.
 
 The four layers and their current state:
 
 | Layer | Description | Status |
 |---|---|---|
 | **L1** — Region capabilities | `R_in`, `R_out`, `In r R` threading | Judgment/helpers mechanised; unrestricted `preservation_l1` refuted by pinned counterexample; replacement redesign open |
-| **L2** — Structural modality | `m : Modality` in `has_type_l1`; `linear_to_affine` | Core landed (PRs #176+#177); `linear_to_affine` Qed, zero axioms; 6 supporting lemmas regressed to Admitted pending Phase D Stages 2–4 |
-| **L3** — Echo residue | What was lost at an irreversible step | `preservation_l3` + two companions Qed (conditional); wired into L1 |
+| **L2** — Structural modality | `m : Modality` in `has_type_l1`; `linear_to_affine` | Core landed (PRs #176+#177); `linear_to_affine` Qed, zero axioms; no unconditional `preservation_l2`: the β-case lemmas are conditional, and `preservation_l2_via_l1` takes the refuted L1 statement as a hypothesis |
+| **L3** — Echo residue | What was lost at an irreversible step | `preservation_l3` + two companions Qed, scoped to matching echo-emitting rule pairs; not general L1/L2 preservation |
 | **L4** — Dyadic mode | Project-level mode declaration | Phase A scaffold landed (`formal/L4.v`): `PModeLinear`/`PModeAffine`/`PModeBoundaryMix` + round-trip; definitions only by design |
 
-**Do not** attempt to close `Theorem preservation` in `formal/Semantics.v`. It is provably false. The authoritative do/do-not list is in [`CLAUDE.md`](https://github.com/hyperpolymath/ephapax/blob/main/CLAUDE.md) under "Owner directive 2026-05-27".
+**Do not** attempt to prove the legacy preservation in `formal/Semantics.v`. It is provably false: it is retired to `preservation_stmt : Prop` and refuted by `Counterexample.preservation_false`. The authoritative do/do-not list is in [`CLAUDE.md`](https://github.com/hyperpolymath/ephapax/blob/main/CLAUDE.md) under "Owner directive snapshot (2026-05-27, revised 2026-11-05)".
 
 ## Component map
 

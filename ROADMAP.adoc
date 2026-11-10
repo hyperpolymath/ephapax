@@ -48,9 +48,10 @@ statements and proofs remain the live soundness milestone.
   region-capability environment) through every compound rule.
 - Land in `formal/TypingL1.v` + `formal/Semantics_L1.v` against
   `Counterexample.v` as a regression oracle.
-- Status: judgment landed and `m`-indexed. Two outer L1 `Admitted.`
-  markers remain, but both unrestricted statements are refuted by pinned
-  counterexamples; they are not routine integration debt. Several helpers
+- Status: judgment landed and `m`-indexed. The two former outer L1
+  `Admitted.` markers were retired to `Prop` statements (D0, 2026-11-05):
+  both unrestricted statements are refuted by pinned counterexamples and
+  are not integration debt. Several helpers
   are conditional and do not establish general preservation.
 
 . *L2 — Modality parameter*
@@ -124,14 +125,15 @@ substitution semantics:
 | Closing a region scope preserves typing of the body's value form.
 
 | **`preservation`** (legacy)
-| 🔴 Admitted — **provably false**, do not attempt to close
-| `formal/Counterexample.v` pins five `Qed` lemmas, including the three core legacy witness lemmas (`bad_typable`, `bad_step`, `bad_post_untypable`) and the separate L1 regression. The 11-goals story (PRs #92/#102/#104/#106/#114/#116/#117/#121/#146) is pre-discovery archaeology. The four-layer architecture in `formal/PRESERVATION-DESIGN.adoc` is a design program, not a proof result: later pinned regressions refute unrestricted L1 preservation, and no unconditional L2 theorem is established. Do not describe preservation as re-derived per layer. See `CLAUDE.md` and `PROOF-NEEDS.adoc` for current boundaries.
+| 🔴 Refuted — **provably false**; retired to `preservation_stmt : Prop` (D0/D0b, 2026-11-05). Do not restore an `Admitted`: the no-False gate rejects it.
+| `formal/Counterexample.v` pins six `Qed` lemmas: the three core legacy witness lemmas (`bad_typable`, `bad_step`, `bad_post_untypable`), `preservation_false` (the refutation of `preservation_stmt`), and the two-lemma L1 regression. The 11-goals story (PRs #92/#102/#104/#106/#114/#116/#117/#121/#146) is pre-discovery archaeology. The four-layer architecture in `formal/PRESERVATION-DESIGN.adoc` is a design program, not a proof result: later pinned regressions refute unrestricted L1 preservation, and no unconditional L2 theorem is established. Do not describe preservation as re-derived per layer. See `CLAUDE.md` and `PROOF-NEEDS.adoc` for current boundaries.
 |===
 
 **Historical note**: an earlier in-file comment claimed `preservation`
 was Qed-closed on 2026-04-27. That claim was unsubstantiated; `coqc`
 8.18.0 rejected the proof script. PR #92 (2026-05-20) corrected the
-status to `Admitted.` with honest framing. The "92%" `progress`
+status to `Admitted.` with honest framing; on 2026-11-05 (D0/D0b) that
+`Admitted` was in turn retired to `preservation_stmt : Prop`. The "92%" `progress`
 proof referenced in older docs was deleted in the substitution-
 semantics rewrite and is not currently formalised in this tree.
 
@@ -222,7 +224,8 @@ All four headline theorems complete with **zero `believe_me` /
 * [x] Coq: `subst_preserves_typing` (Qed)
 * [ ] **Coq: specify and prove sound replacement preservation theorems.**
       The legacy `Theorem preservation` is refuted by `Counterexample.v`
-      and must remain `Admitted.` The current unrestricted L1
+      and is retired to `preservation_stmt : Prop` (D0/D0b); no `Admitted`
+      may be restored. The current unrestricted L1
       `preservation_l1` is refuted by `Counterexample_PreservationL1.v`,
       with its supporting `step_pop_disjoint_from_type_l1` separately
       refuted by `Counterexample_StepPop.v`; do not treat either as
@@ -302,7 +305,8 @@ audio buffer management:
       results are scoped to matching echo rule pairs.
 
 NOTE: The legacy `Theorem preservation` in `formal/Semantics.v` is
-provably false (`formal/Counterexample.v`) and its `Admitted.` is durable.
+provably false: it is retired to `preservation_stmt : Prop` and refuted by
+`Counterexample.preservation_false` (D0/D0b, 2026-11-05).
 It is archaeological, not ordinary proof debt, and any replacement must
 be a separately stated theorem.
 * [ ] Idris2 `Parse/Parser.idr` upgraded from `%default covering` to

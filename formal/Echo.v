@@ -7,7 +7,7 @@
   *********************************************************************
   ***  ✅ ACTIVE -- L3 echo / residue. ONE type former, fiber-shaped. ***
   ***                                                                ***
-  ***  12 Qed, 0 admits at last count. K-free.                       ***
+  ***  19 Qed, 0 admits (counted 2026-11-09). K-free.               ***
   ***                                                                ***
   ***  Mirrors upstream Agda development at                          ***
   ***    https://github.com/hyperpolymath/echo-types                 ***

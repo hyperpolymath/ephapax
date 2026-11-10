@@ -1,0 +1,7 @@
+// SPDX-License-Identifier: MPL-2.0
+// Survey probe qa/app2 (X1, recreated 2026-11-09 from the survey scratch
+// copy). Imports a user data type and its constructor from a sibling module
+// (qa/lib2.eph). Target (E7): compiles and runs, main returns 9.
+module app2
+import lib2
+fn main(): I32 = lib2.unbox(lib2.MkBox(9))

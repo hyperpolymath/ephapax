@@ -57,11 +57,11 @@ ephapax-meta = { path = "src/ephapax-meta" }
 ephapax-vram-cache = { path = "src/ephapax-vram-cache" }
 
 # Sibling-repo crates.
-# NOTE: rev pin is the post-merge SHA of typed-wasm#65 on
-# `hyperpolymath/typed-wasm:origin/main` (renames the custom section
-# `affinescript.ownership` → `typedwasm.ownership`). This is the
-# canonical C7 pin (cf. CHANGELOG.md "Added" / "C7 (#72)"). Re-bump
-# only if a newer `typed-wasm-verify` API change is needed.
+# NOTE: rev pin is the merge commit of typed-wasm#203 (2026-07-07,
+# per-module split + `tw link`, #140), checked 2026-11-09. It postdates
+# typed-wasm#65, which renamed the custom section `affinescript.ownership`
+# → `typedwasm.ownership`. Re-bump only when a newer `typed-wasm-verify`
+# API change is needed, and update this comment with the new PR.
 typed-wasm-verify = { git = "https://github.com/hyperpolymath/typed-wasm", rev = "5d67603852098561d5f4e967f6d0bdf3d3e10a16", features = ["unstable-l2"] }
 
 # External dependencies

@@ -1,0 +1,7 @@
+// SPDX-License-Identifier: MPL-2.0
+// Survey probe t3 (X1, recreated 2026-11-09 from the survey scratch copy).
+// A 3-tuple (n-ary tuples are lowered untyped today; plan: "3-tuples
+// produce invalid wasm"). Target (E5): valid wasm, main returns 0.
+fn main(): I32 =
+  let t = (1, 2, 3)
+  0

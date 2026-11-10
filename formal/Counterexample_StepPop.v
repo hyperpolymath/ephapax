@@ -6,16 +6,17 @@
     (Experiment 3 of the choreographic series; regression witness in the
     tradition of [Counterexample.v] / [Counterexample_RegionShrink.v].)
 
-    The Admitted lemma [step_pop_disjoint_from_type_l1]
-    ([Semantics_L1.v]) claims:
+    The statement [step_pop_disjoint_from_type_l1] ([Semantics_L1.v]),
+    formerly an Admitted lemma and since D0 (2026-11-05) the refuted
+    [Prop] [step_pop_disjoint_from_type_l1_stmt], claims:
 
       step (mu,R,e) (mu',R',e') ->
       has_type_l1 m R G e T R_final G' ->
       In r (free_regions T) -> In r R -> In r R'.
 
     This file exhibits a configuration that satisfies every premise and
-    falsifies the conclusion, [Qed], zero axioms. The Admitted marker was
-    therefore hiding a FALSEHOOD, not an unfinished proof — the same
+    falsifies the conclusion, [Qed], zero axioms. The former Admitted marker
+    was therefore hiding a FALSEHOOD, not an unfinished proof — the same
     class as the removed [region_liveness_at_split_l1] (2026-06-26).
     No proof effort can close the lemma as stated; the honest move is
     reformulation (see "What this forces", below).
@@ -75,8 +76,9 @@
         now with a machine-checked forcing argument.
 
     Owner escalation, not patching: this file only ADDS a regression
-    witness. [Semantics_L1.v] is untouched; its Admitted markers stand
-    until the owner ratifies a reformulation. *)
+    witness. (2026-11-05: the refuted statement is now the [Prop]
+    [step_pop_disjoint_from_type_l1_stmt]; see the D0 retirement note in
+    [Semantics_L1.v].) *)
 
 Require Import Coq.Lists.List.
 Import ListNotations.

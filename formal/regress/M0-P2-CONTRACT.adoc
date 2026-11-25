@@ -1,0 +1,48 @@
+= M0 / P2 regression contract
+:toc:
+// SPDX-License-Identifier: CC-BY-SA-4.0
+// SPDX-FileCopyrightText: 2026 Jonathan D.A. Jewell
+
+Status: diagnostic contract, not a proof of v2 soundness.
+Baseline: 61b893652a02ca3690554fd36ffaaa1ba2bf7662.
+Last actual baseline build: https://github.com/hyperpolymath/ephapax/actions/runs/42740749104 (22 modules; 446/446 named results closed under the global context, 2026-11-10).
+The populated-store extension on this branch requires its own checker receipt.
+
+== Regression families
+
+The P2 witnesses already reside in the current _CoqProject. Preserve them unchanged. The M0 identifiers below separate failure mechanisms; P5 must translate the applicable witnesses to v2, rather than prove the refuted statements.
+
+[cols="1,3,4,2",options="header"]
+|===
+|ID |Existing witness |Required successor disposition |First model
+|M0.01 |Counterexample.v: preservation_false |No unowned region exit invalidating sibling |M3
+|M0.02 |Counterexample_StepPop.v |No exit invalidating required live region |M3
+|M0.03 |Counterexample_PreservationL1.v |Preserve retained location across sibling evaluation |M3
+|M0.04 |regress/SurveyFamilies.v: ClosedCex |Closed-context counterexample rejected or preserved |M3
+|M0.04a |regress/PopulatedStoreCex.v |Same as M0.04 with two valid initial reads, both freed by historical step |M3
+|M0.05 |Counterexample_RegionShrink.v |Distinct runtime instances; no unrestricted shrink claim |M2
+|M0.06 |regress/EscapeCex.v |Reject escaping captured live reference before evaluation, or provide sound ownership semantics |M4
+|M0.07 |Counterexample_L2.v |Safe fresh-region substitution at a fixed function type |M4
+|M0.08 |Counterexample_L2_nested.v |Safe substitution under nested latent effects |M4
+|M0.09 |regress/L2Comp.v |Well-typed compatible applications compose |M4
+|M0.10 |regress/SurveyFamilies.v: echo cross-path |Ordinary and echo-emitting steps distinguished |M7
+|M0.11 |regress/SurveyFamilies.v: observe_stuck |Well-typed observation progresses |M7
+|M0.12 |regress/SurveyFamilies.v: PairDup |No duplication of compound linear resource |M5
+|M0.13 |regress/SurveyFamilies.v: EchoCopy |No illicit copying of linear residue |M7
+|M0.14 |regress/LetCheck.v |Ordinary unrestricted let accepted |M5
+|===
+
+== Positive controls
+
+* M1: unit-valued region enters/exits; allocate and consume internally.
+* M2: nested same-name scopes have distinct identities; inner exit preserves outer cells.
+* M3: retain valid outer-region references while evaluating sibling; reject actual escape.
+* M4: closed function crosses unrelated fresh region; compatible effectful applications compose.
+* M5: unrestricted let and exactly-once linear consumption.
+* M7: permitted observation of residue; forbidden illicit copy.
+
+For each model, record explicit fragment boundaries. An unsupported constructor is not a successful regression rejection. Distinguish a typing rejection, configuration rejection, valid preserved transition, and completeness acceptance. Store-populated ClosedCex proves valid initial reads, not full source reachability or all configuration invariants.
+
+== Next work
+
+M1 is a scratch experiment under the existing X3/D2 plan, not ratification of D1-D4 or D13. No edits to frozen historical syntax, typing, semantics or counterexamples. Agda counterparts to the retired refutations remain open; classification is theory, existing Coq results are target-only evidence and ungraded until statement correspondence is reconciled. Follow estate proof policy. No new proof grade is claimed.

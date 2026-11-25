@@ -27,3 +27,4 @@ regress/SurveyFamilies.v
 regress/EscapeCex.v
 regress/L2Comp.v
 regress/LetCheck.v
+regress/PopulatedStoreCex.v

@@ -397,6 +397,13 @@ lemmas; it is not a full L2 preservation theorem.
 |Exact nested-lambda witness only. Its conditions distinguish this gap
 from the fresh-region case; it is not full L2 preservation.
 
+|Populated-store ClosedCex (M0.04a) |open
+|Coq 8.18.0 project build and no-False gate required; receipt pending
+|`+formal/regress/PopulatedStoreCex.v+`: `+populated_store_counterexample+`
+|Candidate witness: two valid initial reads, both freed by one historical step,
+with residual locations untypable. No source reachability or v2 soundness claim.
+Theory, ungraded; Agda correspondence pending.
+
 |Sound replacement for unrestricted L1 preservation |open
 |—
 |`+PROOF-NEEDS.adoc+`; no replacement theorem is yet stated

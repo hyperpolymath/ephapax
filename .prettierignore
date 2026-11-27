@@ -1,6 +1,6 @@
 # package.json is JCS-canonical (LANGUAGE-POLICY §1.4).
 # Prettier must not reformat it.
-package.json
+/package.json
 # tests/alib_vectors/ holds byte-pinned conformance vectors that alib_conformance.rs hash-checks.
 tests/alib_vectors/
 pnpm-lock.yaml

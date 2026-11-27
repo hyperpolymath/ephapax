@@ -3,3 +3,4 @@
 package.json
 # tests/alib_vectors/ holds byte-pinned conformance vectors that alib_conformance.rs hash-checks.
 tests/alib_vectors/
+pnpm-lock.yaml

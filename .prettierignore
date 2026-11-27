@@ -2,3 +2,5 @@
 # Prettier must not reformat them.
 package.json
 pnpm-lock.yaml
+# tests/alib_vectors/ holds byte-pinned conformance vectors that alib_conformance.rs hash-checks.
+tests/alib_vectors/
